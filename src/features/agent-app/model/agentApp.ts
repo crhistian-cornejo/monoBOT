@@ -65,9 +65,13 @@ import {
   checkHabitsNow,
   habitRunningSince,
   habitSchedule,
-  habitScheduleLabel,
+  habitWhenLabel,
   newHabit,
+  newWake,
   nextHabitRunAt,
+  WAKE_MAX_AHEAD_MS,
+  WAKE_MIN_AHEAD_MS,
+  WAKES_MAX,
   type Habit,
 } from "../../monos/model/monoHabits";
 import {
@@ -240,6 +244,7 @@ const FIELDS = new Map<string, readonly string[]>([
   ["group.ask", ["member", "message"]],
   ["agents.list", []],
   ["agents.message", ["to", "message"]],
+  ["wakes.add", ["in", "at", "note"]],
   ["chat.card", [...CARD_FIELDS]],
 ]);
 
@@ -716,12 +721,34 @@ async function handleMemory(
   throw new Error(`Unknown app action: ${action}`);
 }
 
+/** When a wake runs: "in" minutes from now, or at an "at" date and time. */
+export function wakeTime(input: Record<string, unknown>, now: number): number {
+  let at: number;
+  if (input.in !== undefined) {
+    if (typeof input.in !== "number" || !Number.isFinite(input.in))
+      throw new Error("in must be a number of minutes");
+    at = now + input.in * 60_000;
+  } else if (typeof input.at === "string" && input.at.trim()) {
+    at = new Date(input.at).getTime();
+    if (Number.isNaN(at))
+      throw new Error('at must be a date and time like "2026-11-05T09:30"');
+  } else {
+    throw new Error('Give "in" (minutes) or "at" (date and time)');
+  }
+  if (at - now < WAKE_MIN_AHEAD_MS)
+    throw new Error("A wake must be at least 5 minutes ahead");
+  if (at - now > WAKE_MAX_AHEAD_MS)
+    throw new Error("A wake can be at most 7 days ahead; use a habit instead");
+  return at;
+}
+
 function habitView(habit: Habit) {
   return {
     id: habit.id,
     name: habit.name,
     instructions: habit.instructions,
-    schedule: habitScheduleLabel(habit.schedule),
+    schedule: habitWhenLabel(habit),
+    ...(habit.once ? { wake: true } : {}),
     enabled: habit.enabled,
     nextRun: habit.enabled ? new Date(habit.nextRunAt).toLocaleString() : null,
     ...(habitRunningSince(habit.id) != null ? { running: true } : {}),
@@ -897,6 +924,22 @@ async function handleHabits(
     return habit;
   };
   switch (action) {
+    case "wakes.add": {
+      const note = requiredString(input.note, "note", 2_000);
+      const at = wakeTime(input, now.getTime());
+      const wake = await habits.update(monoId, (list) => {
+        if (list.filter((entry) => entry.once && entry.enabled).length >= WAKES_MAX)
+          throw new Error(
+            `At most ${WAKES_MAX} wakes can wait; run habits.list and remove one`,
+          );
+        if (list.length >= HABITS_MAX)
+          throw new Error(`A Mono can have at most ${HABITS_MAX} habits`);
+        const created = newWake(note, at, now.getTime());
+        return { habits: [...list, created], result: created };
+      });
+      checkHabitsNow();
+      return { wake: habitView(wake) };
+    }
     case "habits.list":
       return { habits: (await habits.load(monoId)).map(habitView) };
     case "habits.add": {
@@ -1116,7 +1159,7 @@ export async function handleAgentApp(
     return handleSoul(source, action, input, host);
   if (action.startsWith("memory."))
     return handleMemory(source, action, input, host);
-  if (action.startsWith("habits."))
+  if (action.startsWith("habits.") || action === "wakes.add")
     return handleHabits(source, action, input, host);
   if (action.startsWith("bots.")) return handleBots(source, action, input);
   if (action.startsWith("group."))

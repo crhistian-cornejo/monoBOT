@@ -73,3 +73,13 @@ it("keeps a run's status and gives the next run the last report", () => {
   expect(prompt).toContain("Last time it told the user: Spent S/ 320");
   expect(prompt).toContain("[needs_attention]");
 });
+
+it("runs a wake once and does not reschedule it", async () => {
+  const { newWake } = await import("./monoHabits");
+  const wake = newWake("Check the refund", 1_000_000, 0);
+  expect(wake.once).toBe(true);
+  expect(wake.nextRunAt).toBe(1_000_000);
+  expect(afterRun(wake, 1_000_001).enabled).toBe(false);
+  const stored = parseHabits(serializeHabits([wake]))[0]!;
+  expect(stored.once).toBe(true);
+});

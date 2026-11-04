@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 38] = [
+const APP_ACTIONS: [&str; 39] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -120,6 +120,7 @@ const APP_ACTIONS: [&str; 38] = [
     "group.ask",
     "agents.list",
     "agents.message",
+    "wakes.add",
     "chat.card",
 ];
 const APP_USAGE: &str = r#"MonoBOT app access — use in a thread enabled by /operator.
@@ -272,6 +273,10 @@ Actions:
   agents.message {"to":"Finance","message":"..."}  Ask another agent for
                   something that is its job. Its answer comes back to your
                   chat; not while you are answering another agent.
+  wakes.add      {"in":120,"note":"Check whether the refund arrived"} or
+                  {"at":"2026-11-05T09:30","note":"..."}  Mono only. Run once
+                  later, like a habit; 5 minutes to 7 days ahead, at most 3
+                  waiting. Not from a habit run.
   chat.card      Mono or habit only. Post a card to the Mono's chat:
                   {"type":"pr","repo":"owner/repo","number":123,"note":"..."}
                   {"type":"session","sessionId":"...","note":"..."}

@@ -5,7 +5,7 @@ import type { MonoState } from "../model/mono";
 import { subscribeMonoFiles } from "../model/monoFiles";
 import {
   checkHabitsNow,
-  habitScheduleLabel,
+  habitWhenLabel,
   habitsToday,
   habitStarting,
   loadHabits,
@@ -145,9 +145,9 @@ export function HabitRow({
             ) : starting ? (
               "Starting…"
             ) : habit.enabled ? (
-              habitScheduleLabel(habit.schedule)
+              habitWhenLabel(habit)
             ) : (
-              `Paused · ${habitScheduleLabel(habit.schedule)}`
+              `Paused · ${habitWhenLabel(habit)}`
             )}
           </span>
         </span>

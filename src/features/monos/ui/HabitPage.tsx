@@ -11,7 +11,7 @@ import { PageHeader } from "./monoPanelParts";
 import { AgentMarkdown } from "../../sessions/ui/AgentMarkdown";
 import {
   habitRunningSince,
-  habitScheduleLabel,
+  habitWhenLabel,
   habitStarting,
   subscribeHabitsRunning,
   type Habit,
@@ -114,7 +114,7 @@ export function HabitPage({
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-none">
         <dl className="flex flex-col gap-0.5 px-4 py-3 text-[12px]">
           <Row label="Runs">
-            {habit.enabled ? habitScheduleLabel(habit.schedule) : "Paused"}
+            {habit.enabled ? habitWhenLabel(habit) : "Paused"}
           </Row>
           {starting ? (
             <Row label="Next">Starting…</Row>

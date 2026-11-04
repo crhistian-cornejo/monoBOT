@@ -49,7 +49,49 @@ export type Habit = {
   runRequested?: boolean;
   /** The suggestion card in the chat it was started from. */
   fromCard?: string;
+  /**
+   * A wake the agent set for itself (Noodle's --wake-in): it runs once at
+   * nextRunAt and is then removed.
+   */
+  once?: true;
 };
+
+/** Wakes an agent may have waiting, and how far ahead they may be. */
+export const WAKES_MAX = 3;
+export const WAKE_MIN_AHEAD_MS = 5 * 60 * 1000;
+export const WAKE_MAX_AHEAD_MS = 7 * 24 * 60 * 60 * 1000;
+
+/** When a habit runs, as its row says it. */
+export function habitWhenLabel(habit: Habit): string {
+  if (habit.once)
+    return `Once, ${new Date(habit.nextRunAt).toLocaleString([], {
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    })}`;
+  return habitScheduleLabel(habit.schedule);
+}
+
+/** A wake: the agent's note to itself, run once at `at`. */
+export function newWake(note: string, at: number, now: number): Habit {
+  const time = new Date(at);
+  return {
+    id: crypto.randomUUID(),
+    name: `Wake: ${note.length > 60 ? `${note.slice(0, 59)}…` : note}`,
+    instructions: note,
+    // Unused for a wake, but a valid schedule keeps habits.json uniform.
+    schedule: {
+      scheduleKind: "daily",
+      minute: time.getMinutes(),
+      time: `${String(time.getHours()).padStart(2, "0")}:${String(time.getMinutes()).padStart(2, "0")}`,
+      dayOfWeek: time.getDay(),
+    },
+    enabled: true,
+    createdAt: now,
+    nextRunAt: at,
+    once: true,
+  };
+}
 
 export type HabitOutcome = "posted" | "quiet" | "failed";
 
@@ -175,6 +217,7 @@ export function parseHabits(text: string | null | undefined): Habit[] {
       ...(Array.isArray(value.runs) ? { runs: parseRuns(value.runs) } : {}),
       ...(value.runRequested === true ? { runRequested: true } : {}),
       ...(isString(value.fromCard) ? { fromCard: value.fromCard } : {}),
+      ...(value.once === true ? { once: true as const } : {}),
     });
   }
   return habits;
@@ -320,6 +363,9 @@ export function afterRun(
       runRequested && habit.nextRunAt > now
         ? habit.nextRunAt
         : nextHabitRunAt(habit.schedule, now),
+    // A wake that has run (or was missed) never comes due again; the runner
+    // removes it once its run is recorded.
+    ...(habit.once && !runRequested ? { enabled: false } : {}),
   };
   if (!outcome) return next;
   const { lastError: _previous, ...rest } = next;

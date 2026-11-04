@@ -257,9 +257,13 @@ export function useMonoHabits(host: MonoHabitHost, enabled = true) {
               })
             : entry,
         );
+        const ran = next.find((entry) => entry.id === habit.id);
         return {
-          habits: next,
-          result: next.find((entry) => entry.id === habit.id),
+          // A wake runs once; its report is already in the chat.
+          habits: habit.once
+            ? next.filter((entry) => entry.id !== habit.id)
+            : next,
+          result: ran,
         };
       });
       // A failure says so once, when it starts, and again when the habit
