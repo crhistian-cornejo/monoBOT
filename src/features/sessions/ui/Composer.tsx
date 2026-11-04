@@ -98,6 +98,9 @@ import {
 } from "../../skills/model/skills";
 import { AccessPicker } from "./AccessPicker";
 import { ComposerRunner } from "./ComposerRunner";
+import { useDictation } from "../../dictation/ui/useDictation";
+import { DictationBar, DictationButton } from "../../dictation/ui/Dictation";
+import { insertDictated } from "../../dictation/model/dictation";
 import { ContextMeter } from "./ContextMeter";
 import { AttachmentChip } from "./AttachmentChip";
 import { BranchPicker } from "../../source-control/ui/BranchPicker";
@@ -655,6 +658,25 @@ export function Composer({
     orchestrationSelected || leadingMode?.name === ORCHESTRATOR_COMMAND.name;
   const draftActive = draftSelected || leadingMode?.name === DRAFT_COMMAND.name;
   const planActive = planSelected || leadingMode?.name === PLAN_COMMAND.name;
+
+  // Dictated text goes in at the cursor, the way any edit reaches the draft.
+  const dictation = useDictation((text) => {
+    const el = ref.current;
+    if (!el) return;
+    const { value, cursor } = insertDictated(
+      el.value,
+      el.selectionStart ?? el.value.length,
+      el.selectionEnd ?? el.value.length,
+      text,
+    );
+    el.value = value;
+    resizeComposer(el);
+    el.focus();
+    el.setSelectionRange(cursor, cursor);
+    setDraft(value);
+    onDraftChange?.(value);
+    syncHasValue(value, attachmentsRef.current);
+  });
 
   /** Turning a mode off also drops its leading command from the text. */
   const clearLeadingMode = (name: string) => {
@@ -2447,6 +2469,7 @@ export function Composer({
               </button>
             ) : null}
             <div className="flex shrink-0 items-center gap-1">
+              {disabled ? null : <DictationButton dictation={dictation} />}
               <ComposerAction
                 busy={busy}
                 disabled={disabled}
@@ -2458,6 +2481,7 @@ export function Composer({
               />
             </div>
           </div>
+          <DictationBar dictation={dictation} />
         </div>
         {workspaceBarOutside ? workspaceBar : null}
         {runnerLive && runnerEnabled && !remote ? (

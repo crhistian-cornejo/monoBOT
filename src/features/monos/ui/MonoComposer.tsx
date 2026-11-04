@@ -9,6 +9,9 @@ import {
 } from "react";
 import { isImeComposition } from "../../../shared/lib/keyboard";
 import { ArrowUp, Plus, SmilePlus } from "../../../shared/ui/icons";
+import { useDictation } from "../../dictation/ui/useDictation";
+import { DictationBar, DictationButton } from "../../dictation/ui/Dictation";
+import { insertDictated } from "../../dictation/model/dictation";
 import { AttachmentChip } from "../../sessions/ui/AttachmentChip";
 import type { Attachment } from "../../sessions/model/session";
 import {
@@ -165,6 +168,22 @@ export function MonoComposer({
     setComposerDraft(sessionId, next);
     onDraftChange?.(next);
   };
+  // Dictated text goes in at the cursor.
+  const dictation = useDictation((spoken) => {
+    const el = field.current;
+    const current = textRef.current;
+    const { value, cursor } = insertDictated(
+      current,
+      el?.selectionStart ?? current.length,
+      el?.selectionEnd ?? current.length,
+      spoken,
+    );
+    update(value);
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(cursor, cursor);
+    });
+  });
   const emojiButton = useRef<HTMLButtonElement>(null);
   const [emojiOpen, setEmojiOpen] = useState(false);
   // Where the pick goes: the field's selection when the picker opened.
@@ -440,9 +459,11 @@ export function MonoComposer({
           // bottom as the text grows.
           <div className="flex items-end gap-1.5 p-1.25">
             {input("flex-1 self-center px-1.5")}
+            {enabled ? <DictationButton dictation={dictation} /> : null}
             {sendButton("shrink-0")}
           </div>
         )}
+        <DictationBar dictation={dictation} />
       </div>
       {inline ? null : (
         // The right inset matches the box's border and padding, so the last

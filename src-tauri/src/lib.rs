@@ -13,6 +13,7 @@ pub mod control_cli;
 mod cursor_store;
 mod devin_config;
 mod devin_usage;
+mod dictation;
 mod external_editor;
 mod fs;
 mod gitlab;
@@ -484,6 +485,11 @@ pub fn run() {
             fs::write_text_file,
             skills::list_skills,
             plugins::install_plugin,
+            dictation::dictation_status,
+            dictation::dictation_install,
+            dictation::dictation_start,
+            dictation::dictation_stop,
+            dictation::dictation_cancel,
             search::search_project,
             search::cancel_project_search,
             cursor_store::cursor_tool_calls,
