@@ -50,6 +50,8 @@ import {
   type Mono,
 } from "../../monos/model/mono";
 import { BOT_ROLES, botRole, isBotRole } from "../../bots/model/bots";
+import { groupMessage } from "../../groups/model/group";
+import { groupMembers, memberRole } from "../../groups/model/groupBrief";
 import { sessionConversationPage, type SessionReadOptions } from "./sessionConversation";
 import {
   CARD_FIELDS,
@@ -152,6 +154,8 @@ export type AgentAppHost = {
   } | undefined;
   /** A hidden run of one of a Mono's habits: it may remember, not schedule. */
   isHabitRun?(sessionId: string): boolean;
+  /** A Mono's own conversation, made if it was never opened, for groups. */
+  monoSession?(monoId: string): Promise<string | undefined>;
   /** Puts a card in the Mono's chat, or holds it for a habit run's report. */
   postCard?(sourceSessionId: string, card: MonoCard): void;
   habits?: {
@@ -230,6 +234,8 @@ const FIELDS = new Map<string, readonly string[]>([
   ["habits.remove", ["id"]],
   ["bots.list", []],
   ["bots.create", ["name", "role", "instructions"]],
+  ["group.members", []],
+  ["group.ask", ["member", "message"]],
   ["chat.card", [...CARD_FIELDS]],
 ]);
 
@@ -725,6 +731,57 @@ function habitView(habit: Habit) {
   };
 }
 
+/**
+ * A group's chat leads it: it lists its members and brings one in. The
+ * member answers from its own conversation and the answer comes back to the
+ * group with the other completions of the same turn.
+ */
+async function handleGroup(
+  source: { id: string },
+  requestId: string,
+  action: string,
+  input: Record<string, unknown>,
+  host: AgentAppHost,
+): Promise<unknown> {
+  const group = monoForSession(source.id);
+  if (group?.kind !== "group" || !group.group)
+    throw new Error("Only a group's own chat can talk to its members");
+  const members = groupMembers(group.group);
+  if (action === "group.members")
+    return {
+      members: members.map((mono) => ({
+        id: mono.id,
+        name: monoLook(mono).name,
+        role: memberRole(mono),
+      })),
+    };
+  const wanted = requiredString(input.member, "member", 128).toLowerCase();
+  const member = members.find(
+    (mono) =>
+      mono.id.toLowerCase() === wanted ||
+      monoLook(mono).name.toLowerCase() === wanted,
+  );
+  if (!member)
+    throw new Error("No member by that name or id; run group.members");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
+    throw new Error("Invalid request ID");
+  const sessionId = await host.monoSession?.(member.id);
+  if (!sessionId) throw new Error("That member's conversation is not available");
+  const message = requiredString(input.message, "message", 30_000);
+  const result = await host.send(
+    sessionId,
+    groupMessage(monoLook(group).name, group.group.goal, message),
+    `app-${source.id}-${requestId}`,
+    source.id,
+  );
+  return {
+    member: monoLook(member).name,
+    submitted: true,
+    notifyOnComplete: true,
+    ...result,
+  };
+}
+
 /** The Principal bot creates and lists the user's personal bots. */
 function handleBots(
   source: { id: string },
@@ -999,6 +1056,8 @@ export async function handleAgentApp(
   if (action.startsWith("habits."))
     return handleHabits(source, action, input, host);
   if (action.startsWith("bots.")) return handleBots(source, action, input);
+  if (action.startsWith("group."))
+    return handleGroup(source, requestId, action, input, host);
   if (action === "chat.card") {
     if (
       !host.postCard ||

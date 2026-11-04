@@ -52,7 +52,8 @@ export type MonoOverviewTab =
   | "subagents"
   | "news"
   | "prs"
-  | "files";
+  | "files"
+  | "members";
 
 // Activity sits apart, beside the panel toggle, since it follows the chat.
 const TABS: {
@@ -68,6 +69,7 @@ const TABS: {
   { id: "news", label: "News", icon: Bell },
   { id: "prs", label: "PRs", icon: GitPullRequest },
   { id: "files", label: "Files", icon: Folder },
+  { id: "members", label: "Members", icon: Users },
 ];
 
 // A personal bot does not work in projects: no sessions to list and no code
@@ -80,6 +82,8 @@ const PRINCIPAL_TABS = new Set(["news", "habits", "documents", "subagents"]);
 // A workstream's orchestrator: its agents, their pull requests, and the
 // shared folder.
 const WORKSTREAM_TABS = new Set(["sessions", "prs", "files"]);
+// A group: who is in it, and what it wrote.
+const GROUP_TABS = new Set(["members", "documents"]);
 
 /** The conversation's recorded changes, reviewed and committed on their tab. */
 export type MonoOverviewChanges = {
@@ -134,6 +138,9 @@ type Props = {
   news?: ReactNode;
   /** A workstream's pull requests and shared folder. */
   workstream?: { prs: ReactNode; files: ReactNode };
+  /** A group's members, with adding and removing. */
+  members?: ReactNode;
+  memberCount?: number;
 };
 
 /**
@@ -159,6 +166,8 @@ export function MonoOverview({
   subagentCount,
   news,
   workstream,
+  members,
+  memberCount,
   onOpenSession,
   shownSession,
   onBackFromSession = () => {},
@@ -171,8 +180,10 @@ export function MonoOverview({
   windowControls,
 }: Props) {
   const lock = useLockOverscroll<HTMLDivElement>();
-  const shownTabs = workstream
-    ? WORKSTREAM_TABS
+  const shownTabs = members
+    ? GROUP_TABS
+    : workstream
+      ? WORKSTREAM_TABS
     : news
       ? PRINCIPAL_TABS
       : bot
@@ -284,6 +295,7 @@ export function MonoOverview({
     news: undefined,
     prs: undefined,
     files: undefined,
+    members: memberCount,
   };
 
   return (
@@ -410,6 +422,8 @@ export function MonoOverview({
             )
           ) : tab === "news" ? (
             news
+          ) : tab === "members" ? (
+            members
           ) : tab === "prs" ? (
             workstream?.prs
           ) : tab === "files" ? (

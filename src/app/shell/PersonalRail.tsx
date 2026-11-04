@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { Bell, Code, Users } from "../../shared/ui/icons";
+import { Bell, Users } from "../../shared/ui/icons";
 import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
 import {
   listMonos,
@@ -75,13 +75,7 @@ const IDLE: MonoState = { status: "idle" };
 
 /** The Personal zone: the Principal bot on top, the news the bots posted,
  * then every personal bot. */
-export function PersonalRail({
-  monos,
-  onOpenCode,
-}: {
-  monos: MonoRailProps;
-  onOpenCode: () => void;
-}) {
+export function PersonalRail({ monos }: { monos: MonoRailProps }) {
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const news = useSyncExternalStore(subscribeBotNews, botNewsSnapshot);
   const newsUnseen = news.some((item) => !item.seen);
@@ -96,7 +90,9 @@ export function PersonalRail({
   const look = principal ? monoLook(principal) : undefined;
   const state = principal ? (monos.states.get(principal.id) ?? IDLE) : IDLE;
   const unseen = principal ? (monos.unseenCounts?.get(principal.id) ?? 0) : 0;
-  const active = !!principal && monos.activeId === principal.id;
+  // News opens on the Principal's overview, but only one row is the current
+  // one: News while the feed shows, the Principal otherwise.
+  const active = !!principal && monos.activeId === principal.id && !newsActive;
 
   return (
     <>
@@ -109,10 +105,11 @@ export function PersonalRail({
               ? monos.onOpen(principal.id)
               : monos.onCreateBot?.("principal")
           }
-          className={`flex h-8 items-center gap-2 px-2 text-left text-sm ${
+          // The same row as every bot's below, so it reads as one of them.
+          className={`flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm ${
             active
               ? "bg-selection-strong text-content"
-              : "text-content/80 hover:bg-content/6"
+              : "opacity-65 hover:bg-content/6 hover:opacity-100"
           }`}
         >
           {look ? (
@@ -143,9 +140,7 @@ export function PersonalRail({
         />
       </div>
       <MonoRailSection {...monos} kind="bot" />
-      <div className="mt-auto px-2 pt-2">
-        <RailAction label="Back to code" icon={Code} onClick={onOpenCode} />
-      </div>
+      <MonoRailSection {...monos} kind="group" />
     </>
   );
 }

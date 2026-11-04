@@ -619,9 +619,12 @@ import {
   operatorEnabledInThread,
 } from "../features/sessions/model/operatorCommand";
 import {
+  createGroupMono,
   createMono,
   findMono,
   isBot,
+  isPersonal,
+  saveGroupMembers,
   monoWorksOn,
   isMonoSession,
   listMonos,
@@ -652,6 +655,8 @@ import { NewWorkstreamDialog } from "../features/workstreams/ui/NewWorkstreamDia
 import { WorkstreamFiles } from "../features/workstreams/ui/WorkstreamFiles";
 import { WorkstreamIntro } from "../features/workstreams/ui/WorkstreamIntro";
 import { WorkstreamPrs } from "../features/workstreams/ui/WorkstreamPrs";
+import { NewGroupDialog } from "../features/groups/ui/NewGroupDialog";
+import { GroupMembers } from "../features/groups/ui/GroupMembers";
 import {
   BLANK_BOT_SOUL,
   botRole,
@@ -5119,7 +5124,7 @@ function Workspace({
       // A bot belongs to the Personal zone and opens on what a person checks
       // first: the Principal on its news, any other bot on its habits.
       const opened = findMono(monoId);
-      const personal = !!opened && isBot(opened);
+      const personal = !!opened && isPersonal(opened);
       if (personal) lastBotIdRef.current = monoId;
       applyRailZone(personal ? "personal" : "code");
       if (personal && monoViewIdRef.current !== session.id) {
@@ -5152,7 +5157,7 @@ function Workspace({
   /** The bot Personal opens on: the last one used, else the Principal. */
   const openPersonalBot = useCallback(() => {
     const last = lastBotIdRef.current && findMono(lastBotIdRef.current);
-    if (last && isBot(last)) return void onOpenMono(last.id);
+    if (last && isPersonal(last)) return void onOpenMono(last.id);
     const principal = listMonos().find(
       (mono) => isBot(mono) && mono.botRole === "principal",
     );
@@ -5173,7 +5178,7 @@ function Workspace({
       const open = monoViewIdRef.current
         ? monoForSession(monoViewIdRef.current)
         : undefined;
-      if (open && isBot(open)) closeMonoView();
+      if (open && isPersonal(open)) closeMonoView();
     },
     [applyRailZone, openPersonalBot, closeMonoView],
   );
@@ -5231,6 +5236,22 @@ function Workspace({
       // A blank bot opens on its settings, where the user writes who it is.
       if (options?.blank) setMonoSettingsFor(monoId);
       void onOpenMono(monoId);
+    },
+    [onOpenMono],
+  );
+
+  // A group is named, given its goal and members, then opened on its chat.
+  const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const onCreateGroup = useCallback(() => setGroupDialogOpen(true), []);
+  const onStartGroup = useCallback(
+    (input: { name: string; goal: string; members: string[] }) => {
+      const mono = createGroupMono(input.name, {
+        members: input.members,
+        ...(input.goal ? { goal: input.goal } : {}),
+      });
+      setMonoOverviewTab("members");
+      setMonoOverviewOpen(true);
+      void onOpenMono(mono.id);
     },
     [onOpenMono],
   );
@@ -11805,6 +11826,16 @@ function Workspace({
             },
             isMono: (id) => isMonoSession(id),
             isHabitRun: (id) => isHabitRun(id),
+            monoSession: (monoId) =>
+              ensureMonoSession(monoId, {
+                home: homeDir,
+                load: ensureOpenSession,
+                create: (path) => newDefaultSession(path),
+                add: (created) => {
+                  sessionsRef.current = [...sessionsRef.current, created];
+                  setSessions(sessionsRef.current);
+                },
+              }).then((session) => session?.id),
             monoOf: (id) => {
               const mono =
                 monoForSession(id) ?? findMono(habitRunMono(id) ?? "");
@@ -13873,6 +13904,17 @@ function Workspace({
               }
         }
         bot={monoViewIsBot}
+        members={
+          monoViewMono.group ? (
+            <GroupMembers
+              members={monoViewMono.group.members}
+              onChange={(members) =>
+                saveGroupMembers(monoViewMono.id, members)
+              }
+            />
+          ) : undefined
+        }
+        memberCount={monoViewMono.group?.members.length || undefined}
         workstream={
           monoViewMono.workstream
             ? {
@@ -13978,7 +14020,11 @@ function Workspace({
     ),
   );
   const onOpenRailMono = useCallback(
-    (monoId: string) => void onOpenMono(monoId),
+    (monoId: string) => {
+      // The Principal's row opens its chat; leaving the News for it.
+      if (monoOverviewTabRef.current === "news") setMonoOverviewTab("habits");
+      void onOpenMono(monoId);
+    },
     [onOpenMono],
   );
   const onDeleteRailMono = useCallback(
@@ -14005,12 +14051,14 @@ function Workspace({
             zone: railZone,
             onZoneChange: onRailZoneChange,
             onCreateWorkstream,
+            onCreateGroup,
           }
         : undefined,
     [
       railZone,
       onRailZoneChange,
       onCreateWorkstream,
+      onCreateGroup,
       monosEnabled,
       monoViewMono?.id,
       monoViewMono?.botRole,
@@ -14732,6 +14780,11 @@ function Workspace({
                             markWorkstreamIntroSeen();
                             setWorkstreamDialog(null);
                           }}
+                        />
+                      ) : groupDialogOpen ? (
+                        <NewGroupDialog
+                          onCreate={onStartGroup}
+                          onClose={() => setGroupDialogOpen(false)}
                         />
                       ) : workstreamDialog === "new" ? (
                         <NewWorkstreamDialog

@@ -20,6 +20,7 @@ import {
 } from "../../projects/model/projectMascots";
 import { removeMonoBackground } from "./monoBackground";
 import { isBotRole, type BotRole } from "../../bots/model/bots";
+import { parseGroup, type Group } from "../../groups/model/group";
 import {
   parseWorkstream,
   type Workstream,
@@ -56,9 +57,10 @@ export type Mono = {
    * A productivity bot, or a workstream's orchestrator, rather than a coding
    * Mono: each kind has its own sidebar section and overview tabs.
    */
-  kind?: "bot" | "workstream";
+  kind?: "bot" | "workstream" | "group";
   botRole?: BotRole;
   workstream?: Workstream;
+  group?: Group;
   /**
    * From when each project had its own Mono: the project whose agent folder
    * it inherits. The folder moves under its id the first time it is read.
@@ -197,11 +199,26 @@ function parseMono(value: unknown): Mono | undefined {
           workstream: parseWorkstream(entry.workstream),
         }
       : {}),
+    ...(entry.kind === "group"
+      ? {
+          kind: "group" as const,
+          group: parseGroup(entry.group) ?? { members: [] },
+        }
+      : {}),
   };
 }
 
 export function isBot(mono: Mono): boolean {
   return mono.kind === "bot";
+}
+
+export function isGroup(mono: Mono): boolean {
+  return mono.kind === "group";
+}
+
+/** Bots and groups live in the Personal zone; the rest in Code. */
+export function isPersonal(mono: Mono): boolean {
+  return mono.kind === "bot" || mono.kind === "group";
 }
 
 export function isWorkstream(mono: Mono): boolean {
@@ -299,6 +316,28 @@ export function createWorkstreamMono(
   };
   saveRoster([...roster, mono]);
   return mono;
+}
+
+/** A group of agents, led by its own chat. */
+export function createGroupMono(name: string, group: Group): Mono {
+  const roster = listMonos();
+  const mono: Mono = {
+    id: newMonoId(),
+    ...nextMonoLook(roster),
+    name,
+    projects: [],
+    kind: "group",
+    group,
+  };
+  saveRoster([...roster, mono]);
+  return mono;
+}
+
+export function saveGroupMembers(monoId: string, members: string[]): void {
+  updateMono(monoId, (mono) => ({
+    ...mono,
+    group: { ...(mono.group ?? { members: [] }), members },
+  }));
 }
 
 /** A new Mono id, for a workstream whose folder is made before it is. */
@@ -447,6 +486,8 @@ export type MonoLook = {
   bot?: boolean;
   /** A workstream's orchestrator. */
   workstream?: Workstream;
+  /** A group of agents, led by this chat. */
+  group?: Group;
 };
 
 /** How a Mono looks, and the projects it works on by their rail labels. */
@@ -458,6 +499,7 @@ export function monoLook(mono: Mono): MonoLook {
     color: mono.color,
     ...(isBot(mono) ? { bot: true } : {}),
     ...(mono.workstream ? { workstream: mono.workstream } : {}),
+    ...(mono.group ? { group: mono.group } : {}),
     projects: mono.projects.map((path) => ({
       path,
       name: resolveTabGroupLabel(projectKey(path), labels, projectName(path)),

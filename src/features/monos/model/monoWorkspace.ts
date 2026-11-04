@@ -58,7 +58,7 @@ async function loadMonoSession(
   // chat starts there whatever the default agent is. A workstream's
   // orchestrator works in its repository's checkout.
   const base =
-    mono.kind === "bot"
+    mono.kind === "bot" || mono.kind === "group"
       ? newSession("claude", home)
       : host.create(mono.workstream?.cwd ?? home);
   const session: Session = { ...base, runtimeMode: "auto" };

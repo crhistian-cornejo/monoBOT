@@ -3608,7 +3608,8 @@ function CompactProjectRail({
     if (!monos) return [];
     return listMonos().map((mono) => ({
       id: mono.id,
-      bot: mono.kind === "bot",
+      // Bots and groups are the Personal zone's.
+      bot: mono.kind === "bot" || mono.kind === "group",
       principal: mono.botRole === "principal",
       ...monoLook(mono),
       status: monos.states.get(mono.id)?.status ?? "idle",

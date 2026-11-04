@@ -418,7 +418,7 @@ export function ProjectRail({
             ref={lockOverscroll}
             className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
           >
-            <PersonalRail monos={monos} onOpenCode={() => setZone("code")} />
+            <PersonalRail monos={monos} />
           </div>
           <div className="flex shrink-0 flex-col gap-px p-2">
             <RailAction

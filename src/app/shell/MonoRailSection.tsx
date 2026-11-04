@@ -60,6 +60,8 @@ export type MonoRailProps = {
   onZoneChange?: (zone: RailZone) => void;
   /** Starts a new workstream (its tour first, the first time). */
   onCreateWorkstream?: () => void;
+  /** Opens the dialog that makes a group. */
+  onCreateGroup?: () => void;
 };
 
 const IDLE: MonoState = { status: "idle" };
@@ -86,6 +88,7 @@ export function MonoRailSection({
   onCreate,
   onCreateBot,
   onCreateWorkstream,
+  onCreateGroup,
   onDelete,
   project,
   kind,
@@ -96,7 +99,7 @@ export function MonoRailSection({
    */
   project?: string;
   /** Lists the productivity bots or the workstreams instead of the Monos. */
-  kind?: "bot" | "workstream";
+  kind?: "bot" | "workstream" | "group";
 }) {
   const bots = kind === "bot";
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
@@ -119,15 +122,25 @@ export function MonoRailSection({
   const [background, setBackground] = useState<string>();
   const backgroundMono = background ? findMono(background) : undefined;
   const workstreams = kind === "workstream";
-  const label = bots ? "Bots" : workstreams ? "Workstreams" : "Monos";
+  const groups = kind === "group";
+  const label = bots
+    ? "Bots"
+    : workstreams
+      ? "Workstreams"
+      : groups
+        ? "Groups"
+        : "Monos";
   const newLabel = bots
     ? "New bot"
     : workstreams
       ? "New workstream"
-      : "New mono";
+      : groups
+        ? "New group"
+        : "New mono";
   const create = (anchor: HTMLElement) => {
     if (bots) setRoles(anchor);
     else if (workstreams) onCreateWorkstream?.();
+    else if (groups) onCreateGroup?.();
     else onCreate(project ? [project] : undefined);
   };
 
