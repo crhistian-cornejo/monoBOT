@@ -655,7 +655,10 @@ import {
   markWorkstreamIntroSeen,
   workstreamIntroSeen,
 } from "../features/workstreams/model/workstreams";
-import { NewWorkstreamDialog } from "../features/workstreams/ui/NewWorkstreamDialog";
+import {
+  NewWorkstreamDialog,
+  type NewWorkstream,
+} from "../features/workstreams/ui/NewWorkstreamDialog";
 import { WorkstreamFiles } from "../features/workstreams/ui/WorkstreamFiles";
 import { WorkstreamIntro } from "../features/workstreams/ui/WorkstreamIntro";
 import { WorkstreamPrs } from "../features/workstreams/ui/WorkstreamPrs";
@@ -5268,13 +5271,25 @@ function Workspace({
     setWorkstreamDialog(workstreamIntroSeen() ? "new" : "intro");
   }, []);
   const onStartWorkstream = useCallback(
-    async (input: { name: string; project: string; worktree: boolean }) => {
+    async (input: NewWorkstream) => {
       const mono = await createWorkstream(input);
       setMonoOverviewTab("sessions");
       setMonoOverviewOpen(true);
       await onOpenMono(mono.id);
+      if (!input.goal) return;
+      // The goal is the orchestrator's first message, so it starts planning.
+      const session = await ensureMonoSession(mono.id, {
+        home: homeDir,
+        load: ensureOpenSession,
+        create: (path) => newDefaultSession(path),
+        add: (created) => {
+          sessionsRef.current = [...sessionsRef.current, created];
+          setSessions(sessionsRef.current);
+        },
+      });
+      if (session) await submitSessionRef.current(session.id, input.goal, []);
     },
-    [onOpenMono],
+    [onOpenMono, ensureOpenSession],
   );
 
   // The news feed lives on the Principal bot, made the first time it is needed.

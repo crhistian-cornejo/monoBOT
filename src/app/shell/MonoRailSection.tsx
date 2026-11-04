@@ -38,6 +38,7 @@ import {
 } from "../../features/monos/model/mono";
 import { BOT_ROLES, type BotRole } from "../../features/bots/model/bots";
 import type { RailZone } from "./PersonalRail";
+import { BetaBadge } from "../../shared/ui/BetaBadge";
 
 export type MonoRailProps = {
   /** The Mono open in the main area, if any. */
@@ -179,6 +180,7 @@ export function MonoRailSection({
           }`}
         >
           {label}
+          {workstreams ? <BetaBadge className="ml-1.5 align-middle" /> : null}
         </span>
         {monos.length ? (
           <button

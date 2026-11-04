@@ -53,7 +53,7 @@ export function MemberPicker({
     );
   const full = selected.length >= GROUP_MAX_MEMBERS;
   return (
-    <div className="flex max-h-64 flex-col overflow-y-auto border border-stroke">
+    <div className="flex max-h-64 flex-col overflow-y-auto rounded-md border border-content/10 bg-background-base">
       {candidates.map((mono) => {
         const on = selected.includes(mono.id);
         return (
