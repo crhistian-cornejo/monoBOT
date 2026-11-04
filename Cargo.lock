@@ -2995,10 +2995,14 @@ dependencies = [
 name = "monobot-dictation"
 version = "0.16.0"
 dependencies = [
+ "bzip2 0.4.4",
  "cpal",
+ "rustls",
+ "rustls-platform-verifier",
  "serde",
  "sha2 0.10.9",
  "sherpa-onnx",
+ "tar",
  "thiserror 2.0.20",
  "ureq",
 ]
