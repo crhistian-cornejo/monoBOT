@@ -189,6 +189,7 @@ import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
 import { SessionCardPreview } from "../../features/sessions/ui/SessionCardPreview";
 import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview";
 import { ProjectRail } from "./ProjectRail";
+import { PersonalRail, RailZoneSwitch } from "./PersonalRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
 import { RailAction, RailSearch } from "./RailAction";
 import { TerminalSpinner } from "../../features/sessions/ui/TerminalSpinner";
@@ -990,6 +991,9 @@ function SidebarComponent({
   const railMonos = monos
     ? { ...monos, activeId: otherViewActive ? undefined : monos.activeId }
     : undefined;
+  // The focused layout switches zones in this sidebar, as the classic one
+  // does in its project rail: Personal holds the bots instead of a project.
+  const insetPersonal = inset && railMonos?.zone === "personal";
   // Likewise the session they cover stays current but isn't shown selected.
   const highlightedSessionId =
     otherViewActive || monoViewActive ? undefined : activeListedSessionId;
@@ -2390,7 +2394,10 @@ function SidebarComponent({
       data-tauri-drag-region="deep"
     >
       <div className="flex min-w-0 flex-1 items-center">
-        {(headerProject || !remoteProject) && cwd && cwd !== "~" ? (
+        {!insetPersonal &&
+        (headerProject || !remoteProject) &&
+        cwd &&
+        cwd !== "~" ? (
           <SidebarWorktreeSwitcher
             worktrees={!remoteProject}
             cwd={cwd}
@@ -2402,13 +2409,13 @@ function SidebarComponent({
           />
         ) : (
           <span className="min-w-0 truncate text-sm font-medium leading-tight">
-            Workspace
+            {insetPersonal ? "Personal" : "Workspace"}
           </span>
         )}
       </div>
       {/* Inset, a new session is the + at the end of the title bar's tabs. */}
       <WorkspaceTitleActions
-        onSearch={onGoToFile}
+        onSearch={insetPersonal ? undefined : onGoToFile}
         onNew={inset ? undefined : onNew}
       />
       {headerProjectMenu.element}
@@ -2566,6 +2573,13 @@ function SidebarComponent({
       {railVisible || inset ? (
         <>
           {workspaceHeader}
+          {inset && railMonos?.onZoneChange ? (
+            <RailZoneSwitch
+              zone={railMonos.zone ?? "code"}
+              onChange={railMonos.onZoneChange}
+              className="mx-2 mb-1"
+            />
+          ) : null}
           {/* The inset sidebar has no tabs: the project tools live in the
               right panel. */}
           {inset ? null : (
@@ -2671,12 +2685,29 @@ function SidebarComponent({
               : undefined
           }
         >
-          {navList}
-          {/* The project's Monos, above its folders. */}
-          {inset && railMonos && inProject ? (
-            <MonoRailSection {...railMonos} project={cwd} />
+          {insetPersonal && railMonos ? (
+            <div className="pt-1">
+              <PersonalRail monos={railMonos} inset />
+            </div>
+          ) : (
+            navList
+          )}
+          {/* The project's Monos, above its folders, then the workstreams:
+              the project's, or all of them before one is open. */}
+          {inset && railMonos && !insetPersonal ? (
+            <>
+              {inProject ? (
+                <MonoRailSection {...railMonos} project={cwd} />
+              ) : null}
+              <MonoRailSection
+                {...railMonos}
+                kind="workstream"
+                inset
+                project={inProject ? cwd : undefined}
+              />
+            </>
           ) : null}
-          {!cwd || cwd === "~" ? (
+          {insetPersonal ? null : !cwd || cwd === "~" ? (
             <div className="px-3 py-2 text-[12px] text-content/50">
               <p>No project folder</p>
               {inset && onOpenProject ? (
@@ -3097,7 +3128,9 @@ function SidebarComponent({
             <div className="flex shrink-0 flex-col gap-px p-2 empty:hidden">
               <GithubStarPrompt />
               {/* Without a project, the inset header has no Settings menu. */}
-              {(inset ? !inProject : !compactProjectRail) ? (
+              {(
+                inset ? !inProject || insetPersonal : !compactProjectRail
+              ) ? (
                 <RailAction
                   label="Settings"
                   icon={Settings}
@@ -3109,7 +3142,7 @@ function SidebarComponent({
             </div>
           </>
         ) : null}
-        {inset && onSelectProject ? (
+        {inset && onSelectProject && !insetPersonal ? (
           <ProjectSpacesBar
             projects={spaceProjects}
             cwd={cwd}

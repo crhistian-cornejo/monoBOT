@@ -99,6 +99,7 @@ export function MonoRailSection({
   onDelete,
   project,
   kind,
+  inset = false,
 }: MonoRailProps & {
   /**
    * Lists only the Monos working on this project, as the inset sidebar does;
@@ -107,7 +108,11 @@ export function MonoRailSection({
   project?: string;
   /** Lists the productivity bots or the workstreams instead of the Monos. */
   kind?: "bot" | "workstream" | "group";
+  /** The focused layout's look without narrowing to a project. */
+  inset?: boolean;
 }) {
+  // A project's section is always the focused sidebar's.
+  const insetLook = inset || !!project;
   const bots = kind === "bot";
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const monos = useMemo(
@@ -173,7 +178,7 @@ export function MonoRailSection({
   return (
     <div
       ref={section}
-      className={`shrink-0 ${project ? "px-2 pb-3" : "mb-2"}`}
+      className={`shrink-0 ${insetLook ? "px-2 pb-3" : "mb-2"}`}
       data-mono-rail
       data-mono-project={project}
       data-mono-kind={kind}
@@ -181,14 +186,14 @@ export function MonoRailSection({
       <div
         className={
           // The inset sidebar's section labels.
-          project
+          insetLook
             ? "flex h-7 items-center gap-1 px-2 text-[12px] font-medium text-content/50"
             : "flex items-center gap-1 px-3 pb-1.5 pt-1"
         }
       >
         <span
           className={`min-w-0 flex-1 truncate${
-            project ? "" : " px-1 text-xs leading-5 text-content/50"
+            insetLook ? "" : " px-1 text-xs leading-5 text-content/50"
           }`}
         >
           {label}
@@ -202,14 +207,14 @@ export function MonoRailSection({
             aria-haspopup={bots ? "menu" : undefined}
             onClick={(event) => create(event.currentTarget)}
             className={`grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content${
-              project ? " -mr-0.5" : ""
+              insetLook ? " -mr-0.5" : ""
             }`}
           >
             <Plus className="size-3.5" strokeWidth={1.75} />
           </button>
         ) : null}
       </div>
-      <div className={`flex flex-col gap-px${project ? "" : " px-2"}`}>
+      <div className={`flex flex-col gap-px${insetLook ? "" : " px-2"}`}>
         {monos.length === 0 ? (
           <RailAction
             label={newLabel}
@@ -328,7 +333,8 @@ export function MonoRailSection({
         })}
       </div>
       {showBotIntro ? (
-        <div className="mt-2">
+        // The card brings its own side margin; the inset section has one too.
+        <div className={insetLook ? "-mx-2 mt-2" : "mt-2"}>
           <MonoIntroCard
             look={nextMonoLook(listMonos())}
             title="A bot of your own"
