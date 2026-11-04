@@ -53,6 +53,28 @@ export type Habit = {
 
 export type HabitOutcome = "posted" | "quiet" | "failed";
 
+/**
+ * Where a posted report stands, after OpenClaw's run outcomes: the run says
+ * so with a leading tag, and plain reports are progress. Attention and
+ * blocked reach the user at once; the rest are gathered into fewer alerts.
+ */
+export type ReportStatus = "progress" | "done" | "needs_attention" | "blocked";
+
+const STATUS_TAG = /^\s*\[(progress|done|needs_attention|blocked)\]\s*/i;
+
+/** A report's status tag, taken off its text. */
+export function reportStatus(report: string): {
+  status: ReportStatus;
+  text: string;
+} {
+  const match = STATUS_TAG.exec(report);
+  if (!match) return { status: "progress", text: report.trim() };
+  return {
+    status: match[1]!.toLowerCase() as ReportStatus,
+    text: report.slice(match[0].length).trim(),
+  };
+}
+
 /** One run as the habit remembers it: when, how long, and what came of it. */
 export type HabitRun = {
   at: number;
@@ -60,8 +82,22 @@ export type HabitRun = {
   outcome: HabitOutcome;
   /** What it told the user, when it did. */
   report?: string;
+  status?: ReportStatus;
   error?: string;
 };
+
+/** Failed runs in a row after which a habit pauses itself (OpenBot's fatigue). */
+export const HABIT_FAILURES_TO_PAUSE = 5;
+
+/** How many of the habit's latest runs failed in a row. */
+export function failedInARow(habit: Pick<Habit, "runs">): number {
+  let count = 0;
+  for (const run of habit.runs ?? []) {
+    if (run.outcome !== "failed") break;
+    count += 1;
+  }
+  return count;
+}
 
 /** Runs kept per habit. */
 export const HABIT_RUNS_KEPT = 20;
@@ -160,6 +196,12 @@ function parseRuns(value: unknown[]): HabitRun[] {
       durationMs: isNumber(run.durationMs) ? run.durationMs : 0,
       outcome,
       ...(isString(run.report) ? { report: run.report } : {}),
+      ...(run.status === "progress" ||
+      run.status === "done" ||
+      run.status === "needs_attention" ||
+      run.status === "blocked"
+        ? { status: run.status }
+        : {}),
       ...(isString(run.error) ? { error: run.error } : {}),
     });
   }
@@ -266,6 +308,7 @@ export function afterRun(
     kind: HabitOutcome;
     error?: string;
     report?: string;
+    status?: ReportStatus;
     startedAt?: number;
   },
 ): Habit {
@@ -287,14 +330,20 @@ export function afterRun(
     ...(outcome.report
       ? { report: outcome.report.slice(0, REPORT_KEPT_CHARS) }
       : {}),
+    ...(outcome.status ? { status: outcome.status } : {}),
     ...(outcome.error ? { error: outcome.error } : {}),
   };
+  const runs = [run, ...(habit.runs ?? [])].slice(0, HABIT_RUNS_KEPT);
   return {
     ...rest,
     lastRunAt: now,
     lastOutcome: outcome.kind,
     ...(outcome.error ? { lastError: outcome.error } : {}),
-    runs: [run, ...(habit.runs ?? [])].slice(0, HABIT_RUNS_KEPT),
+    runs,
+    // A habit that keeps failing stops itself rather than fail on schedule.
+    ...(failedInARow({ runs }) >= HABIT_FAILURES_TO_PAUSE
+      ? { enabled: false }
+      : {}),
   };
 }
 
@@ -350,15 +399,22 @@ export function habitRunPrompt(
             : ""
       }.`
     : " This is its first run.";
+  // The last thing it told the user, so this run builds on it (OpenClaw).
+  const lastReport = habit.runs?.find((run) => run.report)?.report;
+  const previous = lastReport
+    ? `\nLast time it told the user: ${
+        lastReport.length > 600 ? `${lastReport.slice(0, 599)}…` : lastReport
+      }\nDo not repeat it; report only what changed since.`
+    : "";
   return `${monoContext(look, files, { soul: true, memory: true })}
 
 <habit_run>
-You are running one of your habits on your own; the user did not just message you, and they will not see this run. It is ${new Date(now).toLocaleString()}.${lastRun}
+You are running one of your habits on your own; the user did not just message you, and they will not see this run. It is ${new Date(now).toLocaleString()}.${lastRun}${previous}
 
 Habit: ${habit.name}
 ${habit.instructions.trim()}
 
-Do the work now with your tools and the app CLI. Then reply with exactly the message you would send the user in your chat: short, in your own voice, only what they would want to know, with no preamble about running a habit. If there is nothing worth telling them, reply with exactly ${QUIET_MARKER} and nothing else; silence is the right answer more often than not. Save anything worth remembering with the memory actions before you reply.
+Do the work now with your tools and the app CLI. Then reply with exactly the message you would send the user in your chat: short, in your own voice, only what they would want to know, with no preamble about running a habit. Start it with [needs_attention] when the user should act soon, [blocked] when you could not do the work (say what is missing), or [done] when the habit's goal is reached; otherwise start it plainly. If there is nothing worth telling them, reply with exactly ${QUIET_MARKER} and nothing else; silence is the right answer more often than not. Save anything worth remembering with the memory actions before you reply.
 </habit_run>`;
 }
 

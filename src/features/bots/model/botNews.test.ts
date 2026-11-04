@@ -5,7 +5,9 @@ import {
   hasUnseenBotNews,
   listBotNews,
   markBotNewsSeen,
+  NEWS_ALERT_INTERVAL_MS,
   removeBotNewsFor,
+  shouldAlertNews,
 } from "./botNews";
 
 describe("bot news", () => {
@@ -22,6 +24,37 @@ describe("bot news", () => {
     expect(hasUnseenBotNews()).toBe(true);
     markBotNewsSeen();
     expect(hasUnseenBotNews()).toBe(false);
+  });
+
+  it("keeps a repeat of a recent post out of the feed", () => {
+    expect(
+      addBotNews({ monoId: "a", botName: "F", source: "Bank", text: "Same  thing", at: 1 }),
+    ).not.toBeNull();
+    expect(
+      addBotNews({ monoId: "a", botName: "F", source: "Bank", text: "same thing", at: 2 }),
+    ).toBeNull();
+    // Another bot may say it, and so may this one a day later.
+    expect(
+      addBotNews({ monoId: "b", botName: "R", source: "Digest", text: "same thing", at: 3 }),
+    ).not.toBeNull();
+    expect(
+      addBotNews({
+        monoId: "a",
+        botName: "F",
+        source: "Bank",
+        text: "same thing",
+        at: 1 + 25 * 60 * 60 * 1000,
+      }),
+    ).not.toBeNull();
+  });
+
+  it("alerts at once for attention, otherwise at most once an hour", () => {
+    const now = 10 * NEWS_ALERT_INTERVAL_MS;
+    expect(shouldAlertNews("progress", now)).toBe(true);
+    expect(shouldAlertNews("progress", now + 1_000)).toBe(false);
+    expect(shouldAlertNews("needs_attention", now + 2_000)).toBe(true);
+    expect(shouldAlertNews("blocked", now + 3_000)).toBe(true);
+    expect(shouldAlertNews("done", now + NEWS_ALERT_INTERVAL_MS)).toBe(true);
   });
 
   it("drops a deleted bot's posts", () => {

@@ -1,3 +1,5 @@
+import type { ReportStatus } from "../../monos/model/monoHabits";
+
 /** What personal bots post on their own (a habit's report, a digest, an
  * alert), gathered into one feed so the user reads the news in one place. */
 export type BotNewsItem = {
@@ -9,7 +11,16 @@ export type BotNewsItem = {
   text: string;
   at: number;
   seen: boolean;
+  status?: ReportStatus;
 };
+
+/** The same bot saying the same thing within a day is not news again. */
+const DUPLICATE_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Routine posts alert at most this often; attention and blocked always do. */
+export const NEWS_ALERT_INTERVAL_MS = 60 * 60 * 1000;
+const ALERT_KEY = "monocode.botNews.lastAlert";
+
+const normalized = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
 const KEY = "monocode.botNews";
 const EVENT = "monocode:bot-news";
@@ -53,20 +64,56 @@ export function listBotNews(): BotNewsItem[] {
   return read();
 }
 
+/** Adds a post to the feed; a repeat of a recent one is dropped (null). */
 export function addBotNews(
   item: Omit<BotNewsItem, "id" | "at" | "seen"> & { at?: number },
-): BotNewsItem {
+): BotNewsItem | null {
+  const at = item.at ?? Date.now();
+  const text = item.text.slice(0, MAX_TEXT);
+  const key = normalized(text);
+  const repeat = read().some(
+    (entry) =>
+      entry.monoId === item.monoId &&
+      at - entry.at < DUPLICATE_WINDOW_MS &&
+      normalized(entry.text) === key,
+  );
+  if (repeat) return null;
   const entry: BotNewsItem = {
     id: crypto.randomUUID(),
     monoId: item.monoId,
     botName: item.botName,
     source: item.source,
-    text: item.text.slice(0, MAX_TEXT),
-    at: item.at ?? Date.now(),
+    text,
+    at,
     seen: false,
+    ...(item.status ? { status: item.status } : {}),
   };
   write([entry, ...read()].slice(0, MAX_ITEMS));
   return entry;
+}
+
+/**
+ * Whether a post should raise an OS alert now. Attention and blocked always
+ * do; the rest at most once an hour, the feed holding what came between.
+ */
+export function shouldAlertNews(
+  status: ReportStatus | undefined,
+  now = Date.now(),
+): boolean {
+  if (status === "needs_attention" || status === "blocked") return true;
+  let last = 0;
+  try {
+    last = Number(localStorage.getItem(ALERT_KEY)) || 0;
+  } catch {
+    // no storage: alert
+  }
+  if (now - last < NEWS_ALERT_INTERVAL_MS) return false;
+  try {
+    localStorage.setItem(ALERT_KEY, String(now));
+  } catch {
+    // alerts again next time
+  }
+  return true;
 }
 
 export function markBotNewsSeen() {

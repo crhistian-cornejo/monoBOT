@@ -351,7 +351,12 @@ it("stops and records a habit that is still running after one hour", async () =>
       await vi.advanceTimersByTimeAsync(2_000);
     });
     expect(host.remove).toHaveBeenCalledTimes(1);
-    expect(host.post).not.toHaveBeenCalled();
+    // The first failure in a row tells the user once, as blocked.
+    expect(host.post).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(host.post).mock.calls[0]?.[2]).toContain(
+      "It took too long and was stopped.",
+    );
+    expect(vi.mocked(host.post).mock.calls[0]?.[6]).toBe("blocked");
     expect(stored[0]).toMatchObject({
       lastOutcome: "failed",
       lastError: "It took too long and was stopped.",

@@ -644,7 +644,11 @@ import {
   saveRailZone,
   type RailZone,
 } from "./shell/PersonalRail";
-import { addBotNews, removeBotNewsFor } from "../features/bots/model/botNews";
+import {
+  addBotNews,
+  removeBotNewsFor,
+  shouldAlertNews,
+} from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
 import { createWorkstream } from "../features/workstreams/model/workstreamApi";
 import {
@@ -8878,7 +8882,7 @@ function Workspace({
       );
       setSessions(sessionsRef.current);
     },
-    post: (monoId, habit, text, name, artifacts, launches) =>
+    post: (monoId, habit, text, name, artifacts, launches, status) =>
       appendToMono(
         monoId,
         {
@@ -8893,17 +8897,24 @@ function Workspace({
           monoReplies.noteReply(monoId);
           const bot = monoForSession(monoId);
           if (bot && isBot(bot)) {
-            // A bot's habit is news: it joins the feed and always notifies,
-            // since its chat has no project to take settings from.
+            // A bot's habit is news. A repeat of a recent post stays out of
+            // the feed, and routine posts alert at most once an hour.
             const botName = monoLook(bot).name;
-            addBotNews({ monoId: bot.id, botName, source: habit.name, text });
-            void announceBotPost(
-              monoId,
+            const added = addBotNews({
+              monoId: bot.id,
               botName,
-              habit.name,
+              source: habit.name,
               text,
-              monoId === activeSessionIdRef.current,
-            );
+              ...(status ? { status } : {}),
+            });
+            if (added && shouldAlertNews(status))
+              void announceBotPost(
+                monoId,
+                botName,
+                habit.name,
+                text,
+                monoId === activeSessionIdRef.current,
+              );
             return;
           }
           void announceSessionFinished(

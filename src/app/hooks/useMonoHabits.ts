@@ -21,9 +21,13 @@ import {
   claimHabit,
   clearHabitRun,
   dueHabits,
+  failedInARow,
   HABIT_APPROVAL_WAIT_MS,
+  HABIT_FAILURES_TO_PAUSE,
   HABIT_RUN_TIMEOUT_MS,
   habitReport,
+  reportStatus,
+  type ReportStatus,
   habitRunLaunches,
   isRelayed,
   habitRunPrompt,
@@ -63,6 +67,8 @@ export type MonoHabitHost = {
     title: string,
     artifacts?: ArtifactCard[],
     launches?: MonoSpawnedSession[],
+    /** Where the report stands; attention and blocked alert at once. */
+    status?: ReportStatus,
   ): void;
   /** Puts an approval the run is waiting on to the user, in the Mono's chat. */
   askApproval(
@@ -218,8 +224,10 @@ export function useMonoHabits(host: MonoHabitHost, enabled = true) {
       clearHabitRun(run.id);
       setHabitRunning(habit.id);
 
-      const report =
+      const raw =
         outcome.status === "completed" ? habitReport(reply) : undefined;
+      const tagged = raw ? reportStatus(raw) : undefined;
+      const report = tagged?.text || undefined;
       // Sessions it started are listed only through the Mono's chat, so a
       // run that started one posts even when it has nothing else to say.
       if (report || launches.length)
@@ -233,27 +241,42 @@ export function useMonoHabits(host: MonoHabitHost, enabled = true) {
           look.name,
           artifacts,
           launches,
+          // Plain reports are progress, the default.
+          ...(tagged && tagged.status !== "progress" ? [tagged.status] : []),
         );
-      await updateHabits(monoId, (habits) => ({
-        habits: habits.map((entry) =>
+      const failed = outcome.status !== "completed";
+      const error = outcome.error ?? "The run did not finish.";
+      const updated = await updateHabits(monoId, (habits) => {
+        const next = habits.map((entry) =>
           entry.id === habit.id
             ? afterRun(entry, Date.now(), {
-                kind:
-                  outcome.status !== "completed"
-                    ? "failed"
-                    : report
-                      ? "posted"
-                      : "quiet",
-                ...(outcome.status !== "completed"
-                  ? { error: outcome.error ?? "The run did not finish." }
-                  : {}),
-                ...(report ? { report } : {}),
+                kind: failed ? "failed" : report ? "posted" : "quiet",
+                ...(failed ? { error } : {}),
+                ...(report ? { report, status: tagged?.status } : {}),
                 startedAt: now,
               })
             : entry,
-        ),
-        result: undefined,
-      }));
+        );
+        return {
+          habits: next,
+          result: next.find((entry) => entry.id === habit.id),
+        };
+      });
+      // A failure says so once, when it starts, and again when the habit
+      // gives up; the failures in between stay in its run history.
+      const streak = updated ? failedInARow(updated) : 0;
+      if (failed && (streak === 1 || streak === HABIT_FAILURES_TO_PAUSE))
+        host.post(
+          monoSessionId,
+          habit,
+          streak === 1
+            ? `Couldn't run "${habit.name}": ${error}`
+            : `Paused "${habit.name}" after ${HABIT_FAILURES_TO_PAUSE} failed runs in a row. Last error: ${error}`,
+          look.name,
+          undefined,
+          undefined,
+          "blocked",
+        );
     };
 
     const tick = async () => {

@@ -7,6 +7,12 @@ import {
   subscribeBotNews,
 } from "../model/botNews";
 
+const STATUS_LABEL = {
+  done: "Done",
+  blocked: "Blocked",
+  needs_attention: "Needs you",
+} as const;
+
 function when(at: number): string {
   const date = new Date(at);
   const today = new Date();
@@ -51,6 +57,19 @@ export function BotNewsList({
               <span className="min-w-0 truncate">
                 {item.botName} · {item.source}
               </span>
+              {item.status && item.status !== "progress" ? (
+                <span
+                  className={`shrink-0 border px-1 ${
+                    item.status === "done"
+                      ? "border-emerald-500/40 text-emerald-500"
+                      : item.status === "blocked"
+                        ? "border-red-400/50 text-red-400"
+                        : "border-accent/50 text-accent"
+                  }`}
+                >
+                  {STATUS_LABEL[item.status]}
+                </span>
+              ) : null}
               <span className="ml-auto shrink-0">{when(item.at)}</span>
             </span>
             <span className="line-clamp-4 whitespace-pre-line text-[13px] text-content/85">
