@@ -11,7 +11,7 @@ export function TaskListPreview({ items, explanation }: Props) {
   return (
     <section
       aria-label="Task progress"
-      className="mb-2 overflow-hidden rounded-[10px] border border-content/10 bg-content/[0.035]"
+      className="mb-2 overflow-hidden rounded-xl border border-content/10 bg-content/[0.035]"
     >
       <div className="flex items-start gap-2 border-b border-stroke px-2.5 py-2">
         <ListEnd

@@ -181,7 +181,7 @@
   display: grid;
   place-items: center;
   width: var(--diff-number-width);
-  border-radius: 3px;
+  border-radius: 0;
   color: var(--color-content);
   pointer-events: none;
 }
@@ -220,7 +220,7 @@
 .diff-review-card-header {
   border: 1px solid var(--color-stroke);
   border-bottom: 0;
-  border-radius: 6px 6px 0 0;
+  border-radius: 0;
   overflow: hidden;
 }
 .diff-review-card-row {

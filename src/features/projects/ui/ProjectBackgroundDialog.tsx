@@ -284,7 +284,7 @@ export function ProjectBackgroundDialog({
                     role="radio"
                     aria-checked={scope === option.value}
                     onClick={() => updateScope(option.value)}
-                    className={`rounded-[5px] px-1.5 py-1 ${
+                    className={`rounded-sm px-1.5 py-1 ${
                       scope === option.value
                         ? "bg-selection text-content"
                         : "text-content/50 hover:text-content"

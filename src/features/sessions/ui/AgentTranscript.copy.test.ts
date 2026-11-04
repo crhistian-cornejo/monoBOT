@@ -141,13 +141,13 @@ it("remeasures prompt corners when a pooled tab is shown at a new width", () => 
   const bubble = () => container.querySelector(".user-message-bubble")!;
 
   show(true);
-  expect(bubble().classList).toContain("rounded-full");
+  expect(bubble().classList).toContain("rounded-2xl");
 
   textWidth = 0;
   textHeight = 0;
   show(false);
   // Keep the last measured shape while hidden; activation remeasures it.
-  expect(bubble().classList).toContain("rounded-full");
+  expect(bubble().classList).toContain("rounded-2xl");
 
   // Reattached in a narrower pane, so the same prompt wraps onto two lines.
   textWidth = 260;
@@ -161,7 +161,7 @@ it("remeasures prompt corners when a pooled tab is shown at a new width", () => 
   textWidth = 260;
   textHeight = 20;
   show(true);
-  expect(bubble().classList).toContain("rounded-full");
+  expect(bubble().classList).toContain("rounded-2xl");
 });
 
 it("shows a copy error instead of success and allows retry", async () => {

@@ -46,7 +46,7 @@ export function UsageLimitNotice({
         className={
           variant === "mono"
             ? "flex items-center gap-2"
-            : "relative z-0 flex h-8 items-center gap-2 rounded-t-[10px] border border-b-0 border-amber-400/25 bg-amber-400/10 px-2 text-[12px]"
+            : "relative z-0 flex h-8 items-center gap-2 rounded-t-xl border border-b-0 border-amber-400/25 bg-amber-400/10 px-2 text-[12px]"
         }
       >
         <Gauge className="size-3.5 shrink-0 text-amber-400" />

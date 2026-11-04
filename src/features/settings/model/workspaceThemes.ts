@@ -67,7 +67,7 @@ export const WORKSPACE_THEMES: readonly WorkspaceTheme[] = [
       panel: "#060606",
       panelSolid: "#141414",
       content: "#ebebeb",
-      accent: "#4da3f5",
+      accent: "#ef6f2e",
       link: "#7dd3fc",
       heading: "#f9a8c9",
       syntax: {
@@ -88,7 +88,7 @@ export const WORKSPACE_THEMES: readonly WorkspaceTheme[] = [
       panel: "#ffffff",
       panelSolid: "#ffffff",
       content: "#2e2e2e",
-      accent: "#4da3f5",
+      accent: "#ef6f2e",
       link: "#0866c6",
       heading: "#be185d",
       syntax: {

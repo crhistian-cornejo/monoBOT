@@ -92,7 +92,7 @@ export function FilePreview({
     <div
       className={
         variant === "card"
-          ? "overflow-hidden rounded-[10px] border border-content/10 bg-content/6"
+          ? "overflow-hidden rounded-xl border border-content/10 bg-content/6"
           : "min-w-0"
       }
     >

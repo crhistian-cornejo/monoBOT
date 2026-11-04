@@ -261,8 +261,8 @@ function GithubWorkItemPreview({
         <span
           className={` inline-flex shrink-0 items-center font-medium ${
             compact
-              ? "h-[18px] gap-0.5 rounded-[6px] px-1.5"
-              : "h-5 gap-1 rounded-[5px] px-1.5"
+              ? "h-[18px] gap-0.5 rounded-md px-1.5"
+              : "h-5 gap-1 rounded-sm px-1.5"
           } ${
             workItem.kind === "pr"
               ? "bg-violet-400/10 text-violet-400/90"

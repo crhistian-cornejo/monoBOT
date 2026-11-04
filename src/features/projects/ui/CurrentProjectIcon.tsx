@@ -43,13 +43,13 @@ export function CurrentProjectIcon({
     return (
       <ProjectLogoIcon
         path={logoPath}
-        className={`${className} shrink-0 rounded-[5px]`}
+        className={`${className} shrink-0 rounded-sm`}
         imageClassName={className}
       />
     );
   return (
     <span
-      className={`${className} grid shrink-0 place-items-center rounded-[5px] bg-content/8`}
+      className={`${className} grid shrink-0 place-items-center rounded-sm bg-content/8`}
     >
       <ProjectMascot
         project={seed}

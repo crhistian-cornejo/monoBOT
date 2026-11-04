@@ -708,7 +708,7 @@ const findTheme = EditorView.theme(
         margin: "0",
         padding: "0",
         border: "0",
-        borderRadius: "6px",
+        borderRadius: "var(--radius-md)",
         background: "transparent",
         color: "color-mix(in srgb, var(--color-content) 62%, transparent)",
         cursor: "pointer",
@@ -758,7 +758,7 @@ const findTheme = EditorView.theme(
       padding: "0 8px",
       border:
         "1px solid color-mix(in srgb, var(--color-content) 12%, transparent)",
-      borderRadius: "6px",
+      borderRadius: "var(--radius-md)",
       backgroundColor:
         "color-mix(in srgb, var(--color-content) 6%, transparent)",
     },

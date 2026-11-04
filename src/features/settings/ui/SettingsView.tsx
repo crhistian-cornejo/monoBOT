@@ -3920,14 +3920,14 @@ function ProviderAccountEditor({
           type="button"
           disabled={working}
           onClick={onCancel}
-          className="flex h-6 shrink-0 items-center rounded-[4.5px] bg-content/[0.05] px-2.5 text-[11px] text-content/45 transition-transform duration-150 hover:bg-content/10 hover:text-content active:scale-[0.97] disabled:opacity-40"
+          className="flex h-6 shrink-0 items-center rounded-sm bg-content/[0.05] px-2.5 text-[11px] text-content/45 transition-transform duration-150 hover:bg-content/10 hover:text-content active:scale-[0.97] disabled:opacity-40"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={working || !editor.label.trim()}
-          className="ml-1 flex h-6 shrink-0 items-center gap-1.5 rounded-[4.5px] bg-content px-2.5 text-[11px] font-medium text-background-base transition-transform duration-150 hover:bg-content/85 active:scale-[0.97] disabled:cursor-default disabled:opacity-40"
+          className="ml-1 flex h-6 shrink-0 items-center gap-1.5 rounded-sm bg-content px-2.5 text-[11px] font-medium text-background-base transition-transform duration-150 hover:bg-content/85 active:scale-[0.97] disabled:cursor-default disabled:opacity-40"
         >
           {working ? <Loader className="size-3 animate-spin" /> : null}
           {adding
@@ -4510,7 +4510,7 @@ function Segmented<T extends string>({
           role="radio"
           aria-checked={value === option.value}
           onClick={() => onChange(option.value)}
-          className={`min-w-0 rounded-[5px] px-2.5 py-1 ${
+          className={`min-w-0 rounded-sm px-2.5 py-1 ${
             value === option.value
               ? "bg-selection text-content"
               : "text-content/50 hover:text-content"
@@ -4572,11 +4572,11 @@ function WorkspaceThemeSwatch({ palette }: { palette: WorkspacePalette }) {
   return (
     <span
       aria-hidden
-      className="relative block size-4 overflow-hidden rounded-[4px] border border-content/15"
+      className="relative block size-4 overflow-hidden rounded-sm border border-content/15"
       style={{ background: palette.surface }}
     >
       <span
-        className="absolute inset-y-[3px] right-0 left-[5px] rounded-l-[2px]"
+        className="absolute inset-y-[3px] right-0 left-[5px] rounded-l-xs"
         style={{ background: palette.panelSolid }}
       />
       <span

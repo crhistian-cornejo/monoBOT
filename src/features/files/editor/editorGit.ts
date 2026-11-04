@@ -1323,7 +1323,7 @@ const gitTheme = EditorView.theme({
     left: "3px",
     right: "2px",
     boxSizing: "border-box",
-    borderRadius: "1px",
+    borderRadius: "var(--radius-xs)",
     pointerEvents: "auto",
   },
   ".cm-gitOverview-add": {
@@ -1345,7 +1345,7 @@ const gitTheme = EditorView.theme({
     flexDirection: "column",
     overflow: "hidden",
     userSelect: "none",
-    borderRadius: "4px",
+    borderRadius: "var(--radius-sm)",
     color: "var(--color-content)",
     background:
       "color-mix(in srgb, var(--color-background-base) 92%, transparent)",

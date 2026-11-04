@@ -14195,7 +14195,7 @@ function Workspace({
               <div
                 className={
                   insetLayout
-                    ? "inset-card mr-1.5 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-[10px] border border-stroke"
+                    ? "inset-card mr-1.5 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-stroke"
                     : "contents"
                 }
               >

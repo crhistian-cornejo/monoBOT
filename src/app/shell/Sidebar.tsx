@@ -2556,7 +2556,7 @@ function SidebarComponent({
       className={`relative flex h-full min-h-0 shrink-0 flex-col${
         inset
           ? " inset-sidebar overflow-x-clip"
-          : " body-glass border-r border-stroke"
+          : " body-glass sidebar-surface border-r border-stroke"
       }`}
     >
       {/* The inset layout keeps the open-rail header either way: its menu
@@ -3342,7 +3342,7 @@ function SidebarComponent({
                 ref={peekRef}
                 data-sidebar-peek={peekClosing ? "closing" : "open"}
                 inert={peekClosing || undefined}
-                className={`sidebar-peek fixed bottom-1.5 left-1.5 top-10 flex overflow-hidden rounded-[10px] border text-content ${
+                className={`sidebar-peek fixed bottom-1.5 left-1.5 top-10 flex overflow-hidden rounded-xl border text-content ${
                   peekClosing ? "pointer-events-none" : ""
                 }`}
                 style={{ zIndex: LAYER.peek }}

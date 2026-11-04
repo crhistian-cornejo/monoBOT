@@ -2523,7 +2523,7 @@ function MonoReactionBadge({ emoji, live }: { emoji: string; live: boolean }) {
       role="img"
       aria-label={`Reacted ${emoji}`}
       data-mono-reaction={emoji}
-      className={`${live ? "mono-reaction-in " : ""}mono-reaction-badge absolute -top-2.5 -left-2.5 z-[1] grid h-[22px] place-items-center rounded-[8px] px-[7px] font-sans text-[11px] leading-none`}
+      className={`${live ? "mono-reaction-in " : ""}mono-reaction-badge absolute -top-2.5 -left-2.5 z-[1] grid h-[22px] place-items-center rounded-lg px-[7px] font-sans text-[11px] leading-none`}
     >
       {emoji}
     </span>
@@ -2776,7 +2776,7 @@ function UserMessageBlock({
                   : "bg-content/10"
               } ${editing ? "edit-last-turn-bubble" : ""} ${
                 chat
-                  ? `w-fit max-w-[min(100%,36rem)] ${singleLine ? "rounded-full" : "rounded-xl"}`
+                  ? `w-fit max-w-[min(100%,36rem)] border border-content/10 ${singleLine ? "rounded-2xl" : "rounded-xl"}`
                   : "rounded-lg border border-content/10"
               }`}
               style={{ zIndex: stickyIndex }}

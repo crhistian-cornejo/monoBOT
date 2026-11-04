@@ -753,7 +753,7 @@ export function OrchestrationPreview({
                           },
                         })
                       }
-                      className={`grid size-5 place-items-center rounded-[5px] text-[11px] leading-none tabular-nums ${
+                      className={`grid size-5 place-items-center rounded-sm text-[11px] leading-none tabular-nums ${
                         proposal.settings.maxWorkers === number
                           ? "bg-selection-hover font-medium text-content"
                           : "text-content/45 hover:bg-content/8 hover:text-content"

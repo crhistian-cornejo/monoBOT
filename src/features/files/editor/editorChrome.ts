@@ -95,7 +95,7 @@ function editorThemeStyles(dark: boolean) {
     ".cm-tooltip": {
       border:
         "1px solid color-mix(in srgb, var(--color-content) 12%, transparent)",
-      borderRadius: "6px",
+      borderRadius: "var(--radius-md)",
       overflow: "hidden",
     },
     ".cm-tooltip.cm-tooltip-autocomplete": {

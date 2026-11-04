@@ -505,7 +505,7 @@ function McpConnections({
             type="button"
             aria-pressed={filter === provider}
             onClick={() => setFilter(provider)}
-            className={`inline-flex min-w-0 items-center gap-1.5 rounded-[5px] px-2.5 py-1 ${filter === provider ? "bg-selection text-content" : "text-content/50 hover:text-content"}`}
+            className={`inline-flex min-w-0 items-center gap-1.5 rounded-sm px-2.5 py-1 ${filter === provider ? "bg-selection text-content" : "text-content/50 hover:text-content"}`}
           >
             {provider === "all" ? (
               <Globe className="size-3.5" />

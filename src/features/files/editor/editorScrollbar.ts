@@ -313,7 +313,7 @@ const scrollbarTheme = EditorView.theme({
     left: "3px",
     right: "3px",
     minHeight: `${MIN_THUMB_HEIGHT}px`,
-    borderRadius: "2px",
+    borderRadius: "var(--radius-xs)",
     backgroundColor:
       "color-mix(in srgb, var(--color-content) 30%, transparent)",
     opacity: "0.72",
@@ -333,7 +333,7 @@ const scrollbarTheme = EditorView.theme({
     right: "2px",
     height: "3px",
     minHeight: "3px",
-    borderRadius: "1px 0 0 1px",
+    borderRadius: "var(--radius-xs) 0 0 var(--radius-xs)",
     pointerEvents: "auto",
   },
   ".cm-editorScrollbar-error": {

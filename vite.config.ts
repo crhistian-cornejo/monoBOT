@@ -58,7 +58,9 @@ export default defineConfig(async ({ mode }) => {
             }
           : undefined,
       watch: {
-        ignored: stable ? ["**/*"] : ["**/src-tauri/**"],
+        // Cargo writes to target/ at the repo root; on Windows the linker locks
+        // its DLLs, and watching them makes Vite's watcher crash with EBUSY.
+        ignored: stable ? ["**/*"] : ["**/src-tauri/**", "**/target/**"],
       },
     },
   };

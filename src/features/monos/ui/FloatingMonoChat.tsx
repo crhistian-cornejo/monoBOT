@@ -48,7 +48,7 @@ const SURFACE =
  * everything around it instead: the rail and the gaps, never the chat.
  */
 const CARD =
-  "body-glass relative my-1.5 mr-1.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-[10px] shadow-[0_0_0_100vmax_rgb(0_0_0/0.28)] [html.theme-light_&]:shadow-[0_0_0_100vmax_rgb(0_0_0/0.05)]";
+  "body-glass relative my-1.5 mr-1.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl shadow-[0_0_0_100vmax_rgb(0_0_0/0.28)] [html.theme-light_&]:shadow-[0_0_0_100vmax_rgb(0_0_0/0.05)]";
 
 export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
   const [view, setView] = useState(EMPTY);
@@ -568,7 +568,7 @@ function ArtifactSheet({
         role="dialog"
         aria-modal="true"
         aria-label={artifact?.title ?? label}
-        className={`absolute inset-x-0 top-10 bottom-0 flex flex-col rounded-t-[10px] border-t border-content/10 bg-content/5 shadow-[0_-12px_32px_rgb(0_0_0/0.18)] backdrop-blur-3xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
+        className={`absolute inset-x-0 top-10 bottom-0 flex flex-col rounded-t-xl border-t border-content/10 bg-content/5 shadow-[0_-12px_32px_rgb(0_0_0/0.18)] backdrop-blur-3xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
           open ? "translate-y-0" : "translate-y-full"
         }`}
       >

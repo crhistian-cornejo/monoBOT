@@ -321,7 +321,7 @@ function QuestionFields({
                   <span
                     aria-hidden
                     className={`mt-0.5 grid size-3.5 shrink-0 place-items-center border ${
-                      question.multiSelect ? "rounded-[3px]" : "rounded-full"
+                      question.multiSelect ? "rounded-xs" : "rounded-full"
                     } ${
                       active
                         ? "border-content bg-content text-background-base"
