@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 36] = [
+const APP_ACTIONS: [&str; 38] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -118,6 +118,8 @@ const APP_ACTIONS: [&str; 36] = [
     "bots.create",
     "group.members",
     "group.ask",
+    "agents.list",
+    "agents.message",
     "chat.card",
 ];
 const APP_USAGE: &str = r#"MonoBOT app access — use in a thread enabled by /operator.
@@ -266,6 +268,10 @@ Actions:
   group.ask      {"member":"Finance","message":"..."}  Group only. Bring a
                   member in; its answer comes back to you with the others
                   asked in the same turn.
+  agents.list    {}  The user's other Monos and bots: id, name and role.
+  agents.message {"to":"Finance","message":"..."}  Ask another agent for
+                  something that is its job. Its answer comes back to your
+                  chat; not while you are answering another agent.
   chat.card      Mono or habit only. Post a card to the Mono's chat:
                   {"type":"pr","repo":"owner/repo","number":123,"note":"..."}
                   {"type":"session","sessionId":"...","note":"..."}

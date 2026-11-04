@@ -43,6 +43,7 @@ import type { SplitDir } from "../../workspace/model/layout";
 import { consumeOperatorCommand } from "../../sessions/model/operatorCommand";
 import {
   createMono,
+  findMono,
   isBot,
   listMonos,
   monoForSession,
@@ -52,6 +53,7 @@ import {
 import { BOT_ROLES, botRole, isBotRole } from "../../bots/model/bots";
 import { groupMessage } from "../../groups/model/group";
 import { groupMembers, memberRole } from "../../groups/model/groupBrief";
+import { agentMessage, isAnswering, markAnswering } from "./agentMessages";
 import { sessionConversationPage, type SessionReadOptions } from "./sessionConversation";
 import {
   CARD_FIELDS,
@@ -236,6 +238,8 @@ const FIELDS = new Map<string, readonly string[]>([
   ["bots.create", ["name", "role", "instructions"]],
   ["group.members", []],
   ["group.ask", ["member", "message"]],
+  ["agents.list", []],
+  ["agents.message", ["to", "message"]],
   ["chat.card", [...CARD_FIELDS]],
 ]);
 
@@ -782,6 +786,65 @@ async function handleGroup(
   };
 }
 
+/**
+ * Any Mono or bot, from its chat or a habit run, lists the user's other
+ * agents and writes to one. The answer comes back to a chat as a completion;
+ * a habit run's message is fire-and-forget.
+ */
+async function handleAgents(
+  source: { id: string },
+  requestId: string,
+  action: string,
+  input: Record<string, unknown>,
+  host: AgentAppHost,
+): Promise<unknown> {
+  const senderId = host.monoOf?.(source.id)?.id;
+  const sender = senderId ? findMono(senderId) : undefined;
+  if (!sender) throw new Error("Only a Mono or a bot can message other agents");
+  const others = listMonos().filter(
+    (mono) => mono.id !== sender.id && mono.kind !== "group",
+  );
+  if (action === "agents.list")
+    return {
+      agents: others.map((mono) => ({
+        id: mono.id,
+        name: monoLook(mono).name,
+        role: memberRole(mono),
+      })),
+    };
+  if (isAnswering(source.id))
+    throw new Error(
+      "You are answering another agent: reply to it instead of messaging others",
+    );
+  const wanted = requiredString(input.to, "to", 128).toLowerCase();
+  const target = others.find(
+    (mono) =>
+      mono.id.toLowerCase() === wanted ||
+      monoLook(mono).name.toLowerCase() === wanted,
+  );
+  if (!target) throw new Error("No agent by that name or id; run agents.list");
+  if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
+    throw new Error("Invalid request ID");
+  const sessionId = await host.monoSession?.(target.id);
+  if (!sessionId) throw new Error("That agent's conversation is not available");
+  const message = requiredString(input.message, "message", 30_000);
+  markAnswering(sessionId);
+  // Only a chat can take the answer back; a habit run is fire-and-forget.
+  const notify = host.isMono(source.id) ? source.id : undefined;
+  const result = await host.send(
+    sessionId,
+    agentMessage(monoLook(sender).name, memberRole(sender), message),
+    `app-${source.id}-${requestId}`,
+    ...(notify ? [notify] : []),
+  );
+  return {
+    to: monoLook(target).name,
+    submitted: true,
+    replyComesBack: !!notify,
+    ...result,
+  };
+}
+
 /** The Principal bot creates and lists the user's personal bots. */
 function handleBots(
   source: { id: string },
@@ -1058,6 +1121,8 @@ export async function handleAgentApp(
   if (action.startsWith("bots.")) return handleBots(source, action, input);
   if (action.startsWith("group."))
     return handleGroup(source, requestId, action, input, host);
+  if (action.startsWith("agents."))
+    return handleAgents(source, requestId, action, input, host);
   if (action === "chat.card") {
     if (
       !host.postCard ||
