@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatModelSize, insertDictated } from "./dictation";
+import { formatModelSize, insertDictated, modelOffer } from "./dictation";
 
 describe("insertDictated", () => {
   it("adds the spoken text at the cursor with one space around it", () => {
@@ -31,5 +31,22 @@ describe("insertDictated", () => {
 
   it("names the model size in megabytes", () => {
     expect(formatModelSize(671_122_626)).toBe("671 MB");
+  });
+});
+
+describe("modelOffer", () => {
+  it("offers the download when no other app has the model", () => {
+    const offer = modelOffer(671_122_626, null);
+    expect(offer.text).toContain("Download the speech model (671 MB");
+    expect(offer.action).toBe("Download");
+    expect(offer.busy).toBe("Downloading the speech model…");
+  });
+
+  it("offers Echo's copy, with nothing to download", () => {
+    const offer = modelOffer(671_122_626, "Echo");
+    expect(offer.text).toContain("Echo already has the speech model");
+    expect(offer.text).not.toContain("MB");
+    expect(offer.action).toBe("Use it");
+    expect(offer.busy).toBe("Setting up the speech model from Echo…");
   });
 });

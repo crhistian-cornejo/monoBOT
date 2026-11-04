@@ -44,15 +44,19 @@ pub struct DictationStatus {
     installing: bool,
     /// The model's download size, for the install prompt.
     bytes: u64,
+    /// Another app on this computer that already has the model ("Echo"),
+    /// so installing takes it from there instead of downloading.
+    shared_from: Option<&'static str>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn dictation_status(app: AppHandle) -> Result<DictationStatus, String> {
     let state = state(&app)?;
     Ok(DictationStatus {
         installed: state.engine.installed(),
         installing: state.installing.load(Ordering::Acquire),
         bytes: monobot_dictation::model::total_bytes(),
+        shared_from: state.engine.shared_from(),
     })
 }
 
@@ -62,7 +66,8 @@ struct Progress {
     total: u64,
 }
 
-/// Downloads and verifies the model, reporting `dictation-install` progress,
+/// Gets the model, from another app on this computer when one has it, else
+/// by downloading it; verifies it, reporting `dictation-install` progress,
 /// then loads it so the first dictation starts at once.
 #[tauri::command]
 pub async fn dictation_install(app: AppHandle) -> Result<(), String> {

@@ -1,5 +1,5 @@
 import { Mic, Square } from "../../../shared/ui/icons";
-import { formatModelSize } from "../model/dictation";
+import { modelOffer } from "../model/dictation";
 import type { Dictation } from "./useDictation";
 
 /** The composer's mic: starts listening, and stops to put the text in. */
@@ -57,6 +57,7 @@ export function DictationWave({ levels }: { levels: readonly number[] }) {
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
   const { phase, error } = dictation;
+  const offer = modelOffer(dictation.modelBytes, dictation.sharedFrom);
   if (error)
     return (
       <div className="flex items-center gap-2 border-t border-stroke px-3 py-1.5 text-xs">
@@ -73,11 +74,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
   if (phase === "needs-model")
     return (
       <div className="flex items-center gap-2 border-t border-stroke px-3 py-1.5 text-xs">
-        <span className="min-w-0 flex-1 text-content/70">
-          Dictation runs on this computer. Download the speech model (
-          {formatModelSize(dictation.modelBytes)}, Spanish and English) once to
-          start.
-        </span>
+        <span className="min-w-0 flex-1 text-content/70">{offer.text}</span>
         <button
           type="button"
           onClick={dictation.dismiss}
@@ -90,14 +87,14 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
           onClick={dictation.install}
           className="bg-accent px-2 py-0.5 font-medium text-white"
         >
-          Download
+          {offer.action}
         </button>
       </div>
     );
   if (phase === "installing")
     return (
       <div className="flex items-center gap-3 border-t border-stroke px-3 py-1.5 text-xs text-content/70">
-        <span className="shrink-0">Downloading the speech model…</span>
+        <span className="shrink-0">{offer.busy}</span>
         <span className="relative h-1 min-w-0 flex-1 bg-content/10">
           <span
             className="absolute inset-y-0 left-0 bg-accent"

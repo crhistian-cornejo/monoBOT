@@ -33,6 +33,8 @@ export type Dictation = {
   /** Download progress, 0 to 1, while the model installs. */
   progress: number;
   modelBytes: number;
+  /** Another app on this computer that has the model, to take it from. */
+  sharedFrom?: string;
   error?: string;
   toggle: () => void;
   install: () => void;
@@ -51,6 +53,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
   const [speaking, setSpeaking] = useState(false);
   const [progress, setProgress] = useState(0);
   const [modelBytes, setModelBytes] = useState(0);
+  const [sharedFrom, setSharedFrom] = useState<string>();
   const [error, setError] = useState<string>();
   const listeners = useRef<UnlistenFn[]>([]);
   const onTextRef = useRef(onText);
@@ -111,6 +114,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
     void dictationStatus()
       .then((status) => {
         setModelBytes(status.bytes);
+        setSharedFrom(status.sharedFrom ?? undefined);
         if (status.installing) return setPhase("installing");
         if (!status.installed) return setPhase("needs-model");
         return start();
@@ -172,6 +176,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
     speaking,
     progress,
     modelBytes,
+    sharedFrom,
     error,
     toggle,
     install,
