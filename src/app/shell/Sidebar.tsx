@@ -39,8 +39,15 @@ import {
   Settings,
   StickyNote,
   Zap,
+  Bot,
+  Bell,
+  Code,
   type IconComponent,
 } from "../../shared/ui/icons";
+import {
+  botNewsSnapshot,
+  subscribeBotNews,
+} from "../../features/bots/model/botNews";
 import { createPortal } from "react-dom";
 import { useProjectSwipe } from "./useProjectSwipe";
 import {
@@ -3592,16 +3599,33 @@ function CompactProjectRail({
   monoViewActive?: boolean;
 }) {
   const monosSnap = useSyncExternalStore(subscribeMonos, monosSnapshot);
+  const news = useSyncExternalStore(subscribeBotNews, botNewsSnapshot);
   const monosPinned = useRailMonosPinned();
-  const monoItems = useMemo(() => {
+  // Each zone keeps its own shortcuts: Code lists the coding Monos, Personal
+  // the Principal and the bots.
+  const personal = monos?.zone === "personal";
+  const allItems = useMemo(() => {
     if (!monos) return [];
     return listMonos().map((mono) => ({
       id: mono.id,
+      bot: mono.kind === "bot",
+      principal: mono.botRole === "principal",
       ...monoLook(mono),
       status: monos.states.get(mono.id)?.status ?? "idle",
     }));
     // The roster is read through its snapshot.
   }, [monos, monosSnap]);
+  const monoItems = useMemo(
+    () => allItems.filter((item) => !item.bot),
+    [allItems],
+  );
+  const botItems = useMemo(
+    () =>
+      allItems
+        .filter((item) => item.bot)
+        .sort((a, b) => Number(b.principal) - Number(a.principal)),
+    [allItems],
+  );
   const pickerMonos = useMemo((): PickerMonos | undefined => {
     if (!monos) return undefined;
     return {
@@ -3660,7 +3684,50 @@ function CompactProjectRail({
           icon={PanelLeft}
           onClick={onTogglePanel}
         />
-        {monos && monosPinned && monoItems.length ? (
+        {monos?.onZoneChange ? (
+          <CompactRailAction
+            label={personal ? "Switch to Code" : "Switch to Personal"}
+            icon={personal ? Code : Bot}
+            onClick={() =>
+              monos.onZoneChange?.(personal ? "code" : "personal")
+            }
+          />
+        ) : null}
+        {personal && monos ? (
+          <>
+            <span aria-hidden className="h-px w-6 shrink-0 bg-stroke" />
+            <CompactRailAction
+              label={news.some((item) => !item.seen) ? "News, new posts" : "News"}
+              icon={Bell}
+              active={!!monos.newsActive}
+              dot={news.some((item) => !item.seen)}
+              onClick={() => monos.onOpenNews?.()}
+            />
+            <div
+              role="group"
+              aria-label="Bots"
+              className="flex flex-col items-center gap-1.5"
+            >
+              {botItems.map((bot) => (
+                <CompactRailMono
+                  key={bot.id}
+                  name={bot.name}
+                  mascot={bot.mascot}
+                  color={bot.color}
+                  status={bot.status}
+                  active={bot.id === monos.activeId}
+                  unseen={
+                    bot.id === monos.activeId
+                      ? 0
+                      : (monos.unseenCounts?.get(bot.id) ?? 0)
+                  }
+                  onClick={() => monos.onOpen(bot.id)}
+                />
+              ))}
+            </div>
+          </>
+        ) : null}
+        {!personal && monos && monosPinned && monoItems.length ? (
           <>
             <div
               role="group"
@@ -3692,6 +3759,8 @@ function CompactProjectRail({
             />
           </>
         ) : null}
+        {personal ? null : (
+          <>
         {onSelectProject ? (
           <SearchableProjectPickerWithMenu
             cwd={cwd}
@@ -3774,6 +3843,8 @@ function CompactProjectRail({
           active={automationsActive}
           onClick={action(automationsActive, onOpenAutomations)}
         />
+          </>
+        )}
       </div>
       <div className="min-h-2 flex-1" />
       <div className="flex w-full flex-col items-center gap-1 py-1.5">

@@ -636,6 +636,11 @@ import {
   type MonoState,
 } from "../features/monos/model/mono";
 import { SubagentStack } from "../features/sessions/ui/AgentTranscript";
+import {
+  loadRailZone,
+  saveRailZone,
+  type RailZone,
+} from "./shell/PersonalRail";
 import { addBotNews, removeBotNewsFor } from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
 import {
@@ -1270,6 +1275,16 @@ function Workspace({
     setMonoViewId(null);
     setMonoActivity(null);
   }, []);
+  // Code holds projects and Monos; Personal holds the bots and always shows
+  // one of them, never a coding workspace.
+  const [railZone, setRailZone] = useState<RailZone>(loadRailZone);
+  const railZoneRef = useRef(railZone);
+  const applyRailZone = useCallback((zone: RailZone) => {
+    railZoneRef.current = zone;
+    saveRailZone(zone);
+    setRailZone(zone);
+  }, []);
+  const lastBotIdRef = useRef<string | undefined>(undefined);
   const [composerFocused, setComposerFocused] = useState(() => {
     if (windowTransfer) return true;
     if (!resumed) return false;
@@ -5092,6 +5107,18 @@ function Workspace({
         setMonoShownSessionFocused(false);
         setMonoOverviewDocument(null);
       }
+      // A bot belongs to the Personal zone and opens on what a person checks
+      // first: the Principal on its news, any other bot on its habits.
+      const opened = findMono(monoId);
+      const personal = !!opened && isBot(opened);
+      if (personal) lastBotIdRef.current = monoId;
+      applyRailZone(personal ? "personal" : "code");
+      if (personal && monoViewIdRef.current !== session.id) {
+        setMonoOverviewTab(
+          opened?.botRole === "principal" ? "news" : "habits",
+        );
+        setMonoOverviewOpen(true);
+      }
       monoViewIdRef.current = session.id;
       saveOpenMono(monoId);
       // App views close with the Mono's arrival, not before the await, so
@@ -5110,8 +5137,44 @@ function Workspace({
       setComposerFocused(true);
       setComposerFocusToken((token) => token + 1);
     },
-    [ensureOpenSession, workspaceNavigation.cancel],
+    [ensureOpenSession, workspaceNavigation.cancel, applyRailZone],
   );
+
+  /** The bot Personal opens on: the last one used, else the Principal. */
+  const openPersonalBot = useCallback(() => {
+    const last = lastBotIdRef.current && findMono(lastBotIdRef.current);
+    if (last && isBot(last)) return void onOpenMono(last.id);
+    const principal = listMonos().find(
+      (mono) => isBot(mono) && mono.botRole === "principal",
+    );
+    const monoId =
+      principal?.id ??
+      createMono([], {
+        role: "principal",
+        name: botRole("principal").name,
+        instructions: botRole("principal").instructions,
+      }).id;
+    void onOpenMono(monoId);
+  }, [onOpenMono]);
+
+  const onRailZoneChange = useCallback(
+    (zone: RailZone) => {
+      applyRailZone(zone);
+      if (zone === "personal") return openPersonalBot();
+      const open = monoViewIdRef.current
+        ? monoForSession(monoViewIdRef.current)
+        : undefined;
+      if (open && isBot(open)) closeMonoView();
+    },
+    [applyRailZone, openPersonalBot, closeMonoView],
+  );
+
+  // Personal never falls back to the coding workspace: with no bot open
+  // (the app just started, or the open one was closed), it opens one.
+  useEffect(() => {
+    if (railZone !== "personal" || monoViewId || !monosEnabled) return;
+    openPersonalBot();
+  }, [railZone, monoViewId, monosEnabled, openPersonalBot]);
 
   // A Mono open when the app last closed opens again; a moved window keeps
   // what it carried.
@@ -13900,9 +13963,13 @@ function Workspace({
               monoViewMono?.botRole === "principal" &&
               monoOverviewOpen &&
               monoOverviewTab === "news",
+            zone: railZone,
+            onZoneChange: onRailZoneChange,
           }
         : undefined,
     [
+      railZone,
+      onRailZoneChange,
       monosEnabled,
       monoViewMono?.id,
       monoViewMono?.botRole,

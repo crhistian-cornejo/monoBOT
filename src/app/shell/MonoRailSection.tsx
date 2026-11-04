@@ -22,7 +22,6 @@ import {
 import {
   defaultMonoName,
   findMono,
-  isBot,
   listMonos,
   MONO_STATUS_LABEL,
   nextMonoLook,
@@ -38,6 +37,7 @@ import {
   type MonoState,
 } from "../../features/monos/model/mono";
 import { BOT_ROLES, type BotRole } from "../../features/bots/model/bots";
+import type { RailZone } from "./PersonalRail";
 
 export type MonoRailProps = {
   /** The Mono open in the main area, if any. */
@@ -55,6 +55,9 @@ export type MonoRailProps = {
   /** Opens the bots' news feed, on the Principal bot. */
   onOpenNews?: () => void;
   newsActive?: boolean;
+  /** Which sidebar zone shows: Code (projects, Monos) or Personal (bots). */
+  zone?: RailZone;
+  onZoneChange?: (zone: RailZone) => void;
 };
 
 const IDLE: MonoState = { status: "idle" };
@@ -89,8 +92,8 @@ export function MonoRailSection({
    * a Mono on several projects shows in each of them.
    */
   project?: string;
-  /** Lists the productivity bots instead of the coding Monos. */
-  kind?: "bot";
+  /** Lists the productivity bots or the workstreams instead of the Monos. */
+  kind?: "bot" | "workstream";
 }) {
   const bots = kind === "bot";
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
@@ -98,7 +101,7 @@ export function MonoRailSection({
     () =>
       listMonos().filter(
         (mono) =>
-          isBot(mono) === bots &&
+          (mono.kind ?? "mono") === (kind ?? "mono") &&
           // The Principal bot has its own row above the bots.
           mono.botRole !== "principal" &&
           (!project || monoWorksOn(mono, project)),

@@ -96,13 +96,7 @@ import {
 import { remoteProjectFor } from "../../features/connections/model/remoteProjects";
 import { useProjectMenu } from "./useProjectMenu";
 import { MonoRailSection, type MonoRailProps } from "./MonoRailSection";
-import {
-  loadRailZone,
-  PersonalRail,
-  RailZoneSwitch,
-  saveRailZone,
-  type RailZone,
-} from "./PersonalRail";
+import { PersonalRail, RailZoneSwitch, type RailZone } from "./PersonalRail";
 
 type Props = {
   visible?: boolean;
@@ -195,11 +189,8 @@ export function ProjectRail({
   monos,
 }: Props) {
   const trafficLightsVisible = useTrafficLightsVisible();
-  const [zone, setZoneState] = useState<RailZone>(loadRailZone);
-  const setZone = (next: RailZone) => {
-    setZoneState(next);
-    saveRailZone(next);
-  };
+  const zone: RailZone = monos?.zone ?? "code";
+  const setZone = (next: RailZone) => monos?.onZoneChange?.(next);
   const personal = zone === "personal" && !!monos;
   const resize = useDragResize({
     min: sharedWidth?.min ?? PROJECT_RAIL_WIDTH_MIN,

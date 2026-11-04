@@ -67,9 +67,10 @@ const TABS: {
 // A personal bot does not work in projects: no sessions to list and no code
 // changes to commit, but the subagents it runs in parallel.
 const MONO_TABS = new Set(["sessions", "documents", "habits", "changes"]);
-const BOT_TABS = new Set(["documents", "habits", "subagents"]);
+// Listed in the order they show: what the bot does on its own comes first.
+const BOT_TABS = new Set(["habits", "documents", "subagents"]);
 // The Principal bot also reads every bot's news.
-const PRINCIPAL_TABS = new Set(["news", "documents", "habits", "subagents"]);
+const PRINCIPAL_TABS = new Set(["news", "habits", "documents", "subagents"]);
 
 /** The conversation's recorded changes, reviewed and committed on their tab. */
 export type MonoOverviewChanges = {
@@ -163,7 +164,7 @@ export function MonoOverview({
   const tab: MonoOverviewTab =
     requestedTab === "activity" || shownTabs.has(requestedTab)
       ? requestedTab
-      : "documents";
+      : ([...shownTabs][0] as MonoOverviewTab);
   const habits = useHabits(monoId, state.status);
   const actions = habitActions(monoId);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -177,7 +178,7 @@ export function MonoOverview({
   if (tab === "changes" && !changesVisited) setChangesVisited(true);
   // The activity button toggles back to the tab it was opened from.
   const lastTab = useRef<MonoOverviewTab>(
-    tab === "activity" ? "sessions" : tab,
+    tab === "activity" ? ([...shownTabs][0] as MonoOverviewTab) : tab,
   );
   if (tab !== "activity") lastTab.current = tab;
   // Another Mono starts at its own front page, with all its sessions.
@@ -521,7 +522,7 @@ function OverviewTabs({
       aria-label="Overview"
       className="-ml-2 flex items-center gap-0.5"
     >
-      {TABS.filter(({ id }) => tabs.has(id)).map(({ id, label, icon }) => {
+      {[...tabs].flatMap((id) => TABS.filter((entry) => entry.id === id)).map(({ id, label, icon }) => {
         const selected = id === tab;
         return (
           <TabButton
