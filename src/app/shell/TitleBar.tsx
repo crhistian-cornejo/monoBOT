@@ -632,6 +632,7 @@ export function TabVisitNav({
   onTogglePanel,
   panelActive = false,
   panelLabel = "Toggle Projects",
+  history = true,
 }: {
   canGoBack?: boolean;
   canGoForward?: boolean;
@@ -640,23 +641,29 @@ export function TabVisitNav({
   onTogglePanel?: () => void;
   panelActive?: boolean;
   panelLabel?: string;
+  /** Back and forward walk the coding workspace's tabs; Personal has none. */
+  history?: boolean;
 }) {
   return (
     <div className="flex shrink-0 items-center">
-      <IconButton
-        label={`Back (${MOD}[)`}
-        disabled={!canGoBack}
-        onClick={onGoBack}
-      >
-        <ChevronLeft className="size-3.5" strokeWidth={1.75} />
-      </IconButton>
-      <IconButton
-        label={`Forward (${MOD}])`}
-        disabled={!canGoForward}
-        onClick={onGoForward}
-      >
-        <ChevronRight className="size-3.5" strokeWidth={1.75} />
-      </IconButton>
+      {history ? (
+        <>
+          <IconButton
+            label={`Back (${MOD}[)`}
+            disabled={!canGoBack}
+            onClick={onGoBack}
+          >
+            <ChevronLeft className="size-3.5" strokeWidth={1.75} />
+          </IconButton>
+          <IconButton
+            label={`Forward (${MOD}])`}
+            disabled={!canGoForward}
+            onClick={onGoForward}
+          >
+            <ChevronRight className="size-3.5" strokeWidth={1.75} />
+          </IconButton>
+        </>
+      ) : null}
       {onTogglePanel ? (
         <IconButton
           label={panelLabel}

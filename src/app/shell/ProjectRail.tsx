@@ -400,6 +400,7 @@ export function ProjectRail({
             onGoForward={onGoForward}
             onTogglePanel={settingsOpen ? undefined : onTogglePanel}
             panelActive
+            history={!personal}
           />
         </div>
       )}

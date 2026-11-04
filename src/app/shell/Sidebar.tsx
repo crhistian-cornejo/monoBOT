@@ -3653,6 +3653,18 @@ function CompactProjectRail({
     onTabChange(nextTab);
   };
   const railTooltip = useRailTooltip();
+  // The title bar row holds the macOS window buttons. Elsewhere it would be
+  // an empty strip, so the expand button sits in it instead.
+  const trafficLights = useTrafficLightsVisible();
+  const expandInTitleRow = !titleBarAbove && !trafficLights;
+  const expand = (
+    <CompactRailAction
+      label="Expand projects"
+      tooltip={false}
+      icon={PanelLeft}
+      onClick={onTogglePanel}
+    />
+  );
 
   return (
     <nav
@@ -3663,9 +3675,11 @@ function CompactProjectRail({
     >
       {titleBarAbove ? null : (
         <div
-          className="h-10 w-full shrink-0 border-b border-stroke"
+          className="flex h-10 w-full shrink-0 items-center justify-center border-b border-stroke"
           data-tauri-drag-region="deep"
-        />
+        >
+          {expandInTitleRow ? expand : null}
+        </div>
       )}
       <span
         aria-hidden
@@ -3678,12 +3692,7 @@ function CompactProjectRail({
         data-compact-rail-actions
         className="flex w-full shrink-0 flex-col items-center gap-1.5 py-1.5"
       >
-        <CompactRailAction
-          label="Expand projects"
-          tooltip={false}
-          icon={PanelLeft}
-          onClick={onTogglePanel}
-        />
+        {expandInTitleRow ? null : expand}
         {monos?.onZoneChange ? (
           <CompactRailAction
             label={personal ? "Switch to Code" : "Switch to Personal"}
