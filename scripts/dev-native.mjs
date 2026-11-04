@@ -174,7 +174,7 @@ export function parseDevArgs(argv) {
       break;
     }
     if (["--watch", "--bundle"].includes(arg)) {
-      throw new Error(`${arg} is not supported. Use npm run native:dev, then type r and Enter to rebuild and restart.`);
+      throw new Error(`${arg} is not supported. Use pnpm native:dev, then type r and Enter to rebuild and restart.`);
     } else {
       options.args.push(arg);
       // Preserve values even when an app path happens to match a runner flag.

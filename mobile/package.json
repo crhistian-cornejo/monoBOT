@@ -2,6 +2,7 @@
   "name": "monocode-mobile",
   "main": "expo-router/entry",
   "version": "1.0.0",
+  "packageManager": "pnpm@12.6.0",
   "dependencies": {
     "@expo/ui": "~57.0.25",
     "@hugeicons/core-free-icons": "^4.3.5",
@@ -54,14 +55,14 @@
   },
   "scripts": {
     "start": "expo start",
-    "android": "npm run native:android && expo run:android",
-    "ios": "npm run native:ios && expo run:ios",
+    "android": "pnpm native:android && expo run:android",
+    "ios": "pnpm native:ios && expo run:ios",
     "web": "expo start --web",
     "lint": "expo lint",
     "eas-build-pre-install": "node scripts/eas-build-pre-install.mjs",
-    "build:ios": "npx eas-cli@latest build --platform ios --profile production",
-    "submit:ios": "npx eas-cli@latest submit --platform ios --profile production",
-    "update:beta": "npx eas-cli@latest update --platform ios --channel beta --environment production",
+    "build:ios": "pnpm dlx eas-cli@latest build --platform ios --profile production",
+    "submit:ios": "pnpm dlx eas-cli@latest submit --platform ios --profile production",
+    "update:beta": "pnpm dlx eas-cli@latest update --platform ios --channel beta --environment production",
     "native:ios": "node scripts/build-native-link.mjs ios",
     "native:android": "node scripts/build-native-link.mjs android"
   },

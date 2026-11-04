@@ -1,0 +1,14 @@
+# Standalone pnpm project (not part of the root workspace).
+
+# Flat node_modules like npm: Expo/React Native tooling and the build scripts
+# here read package folders directly from node_modules.
+nodeLinker: hoisted
+
+# Only these dependencies may run install scripts. Anything new must be
+# reviewed and added here explicitly.
+allowBuilds:
+  esbuild: true
+
+# Do not install versions published less than 3 days ago, so compromised
+# releases are usually caught and pulled from the registry first.
+minimumReleaseAge: 4320

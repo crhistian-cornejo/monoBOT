@@ -13,8 +13,8 @@ On Windows, the packaging script uses `stable-x86_64-pc-windows-msvc`. The insta
 From the repository root:
 
 ```bash
-npm install
-npm run tauri dev
+pnpm install
+pnpm tauri dev
 ```
 
 ## Ubuntu / Debian packages
@@ -22,9 +22,9 @@ npm run tauri dev
 On an Ubuntu/Debian workstation, the repository can install the native Tauri prerequisites and build distributable Linux packages directly:
 
 ```bash
-npm run setup:linux:deb
-npm ci
-npm run build:linux
+pnpm setup:linux:deb
+pnpm install
+pnpm build:linux
 ```
 
 The Linux build emits `.deb` and AppImage bundles under `target/release/bundle/`, in the `deb/` and `appimage/` directories. `build:linux` repacks the AppImage so it uses the host WebKitGTK 4.1 stack instead of bundled Ubuntu libraries. See [Linux installation](install.md) for runtime dependencies and package instructions.
@@ -34,9 +34,9 @@ The Linux build emits `.deb` and AppImage bundles under `target/release/bundle/`
 On Fedora or Enterprise Linux 10 (registered RHEL, Rocky, Alma, CentOS Stream, Oracle):
 
 ```bash
-npm run setup:linux:fedora
-npm ci
-npm run build:fedora
+pnpm setup:linux:fedora
+pnpm install
+pnpm build:fedora
 ```
 
 On EL 10, the setup helper enables EPEL 10 and CRB automatically, since the development packages need CRB. On Oracle Linux it enables `ol10_codeready_builder` and `ol10_developer_EPEL`. Fedora does not need these extra repositories.
@@ -52,8 +52,8 @@ EL 9 and older are unsupported (`webkit2gtk4.1-devel` only exists in EPEL 10). T
 ## Windows packages
 
 ```bash
-npm ci
-npm run build:windows
+pnpm install
+pnpm build:windows
 ```
 
 The Windows build emits an NSIS installer under `target/release/bundle/nsis/`.
@@ -80,12 +80,12 @@ The experimental GPUI app uses a separate Cargo workspace. The production
 commands above continue to build React/Tauri.
 
 Requires Node.js 22+, stable Rust, and Xcode with macOS components on macOS.
-Native commands do not need npm dependencies installed.
+Native commands do not need JavaScript dependencies installed.
 
 ```sh
-npm run native:dev     # launch with a separate development database
-npm run native:build   # create an optimized app using installed MonoCode data
-npm run native:check   # run native checks
+pnpm native:dev     # launch with a separate development database
+pnpm native:build   # create an optimized app using installed MonoCode data
+pnpm native:check   # run native checks
 ```
 
 Type `r` then Enter in the development terminal to rebuild and restart. There is

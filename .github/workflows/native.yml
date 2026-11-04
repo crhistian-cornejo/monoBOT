@@ -34,6 +34,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -45,7 +46,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libdbus-1-dev pkg-config
-      - run: npm run native:test:dev
+      - run: pnpm native:test:dev
       - run: cargo clippy --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core --all-targets --profile native-dev -- -D warnings
       - run: cargo test --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core --profile native-dev
 

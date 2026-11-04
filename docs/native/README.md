@@ -11,7 +11,7 @@ uses React/Tauri. Native builds have their own Cargo workspace and lockfile.
   `pkg-config` on Debian/Ubuntu).
 - At least one installed, signed-in agent CLI. See [provider setup](../providers.md).
 
-The native commands do not require `npm install` or a frontend build.
+The native commands do not require `pnpm install` or a frontend build.
 macOS is the primary preview target. A Linux ARM64 source build has been
 smoke-tested in a VM; Linux x64 packages and Windows GUI interaction still need
 runtime testing. See [preview limitations](parity.md).
@@ -58,13 +58,13 @@ see [verification](verification.md).
 From the repository root:
 
 ```sh
-npm run native:dev
+pnpm native:dev
 ```
 
 Development uses a separate database. To open a particular project:
 
 ```sh
-npm run native:dev -- --cwd /path/to/project
+pnpm native:dev --cwd /path/to/project
 ```
 
 Type `r` then Enter in the terminal to rebuild and restart. The current app stays
@@ -77,7 +77,7 @@ platforms launch the executable directly.
 ## Build
 
 ```sh
-npm run native:build
+pnpm native:build
 ```
 
 This creates an optimized build without launching it. **The release app uses the
@@ -147,7 +147,7 @@ continues to use each provider's existing sign-in.
 ## Checks and fixtures
 
 ```sh
-npm run native:check
+pnpm native:check
 ```
 
 This runs the script tests, Rust formatting, strict Clippy and native tests.
@@ -158,7 +158,7 @@ A synthetic long-history fixture uses development data and makes no provider
 request:
 
 ```sh
-MONOCODE_NATIVE_DATA_DIR=/tmp/monocode-native-lab npm run native:dev -- --fixture
+MONOCODE_NATIVE_DATA_DIR=/tmp/monocode-native-lab pnpm native:dev --fixture
 ```
 
 Fixtures are refused with production data. Use a fresh temporary directory when

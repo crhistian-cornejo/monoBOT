@@ -2,6 +2,7 @@
   "name": "monocode-native-editor-analysis",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@12.6.0",
   "scripts": {
     "build": "node build.mjs"
   },

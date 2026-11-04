@@ -16,13 +16,13 @@ Before starting a larger change, open an issue so we can agree on the scope and 
 
 ## Get it running
 
-You need Node.js 20+, a current stable Rust toolchain, and at least one provider CLI installed and logged in. See [provider setup](docs/providers.md) for installation and login instructions.
+You need Node.js 20+, [pnpm](https://pnpm.io/installation) (`corepack enable` picks the pinned version), a current stable Rust toolchain, and at least one provider CLI installed and logged in. See [provider setup](docs/providers.md) for installation and login instructions.
 
 macOS, Linux, and Windows are supported targets. See [building from source](docs/building.md) for platform prerequisites and packaging commands.
 
 ```bash
-npm install
-npm run tauri dev
+pnpm install
+pnpm tauri dev
 ```
 
 ## Where things live
@@ -40,25 +40,25 @@ npm run tauri dev
 
 The production React/Tauri app continues to use the commands above. GPUI work
 lives in `crates/monocode-core` and `crates/monocode-gpui`, with an independent
-Cargo workspace and lockfile. Use `npm run native:dev` to develop,
-`npm run native:build` to package an optimized build, and
-`npm run native:check` for its checks. Keep production UI behavior, dependencies,
+Cargo workspace and lockfile. Use `pnpm native:dev` to develop,
+`pnpm native:build` to package an optimized build, and
+`pnpm native:check` for its checks. Keep production UI behavior, dependencies,
 CI and release/update distribution intact while the native port is tested.
 See the [native guide](docs/native/README.md) and [architecture](docs/native/migration.md).
 
 ## Before you push
 
 ```bash
-npm run check
+pnpm check
 ```
 
-That runs what CI runs: vitest, `tsc --noEmit`, `cargo fmt`, `cargo clippy`, and `cargo test`. If it’s green locally it should be green on GitHub. `npm run check:web` and `npm run check:rust` run the two halves separately when you only touched one side.
+That runs what CI runs: vitest, `tsc --noEmit`, `cargo fmt`, `cargo clippy`, and `cargo test`. If it’s green locally it should be green on GitHub. `pnpm check:web` and `pnpm check:rust` run the two halves separately when you only touched one side.
 
 For transcript layout and scrolling changes, also run the real-browser tests:
 
 ```bash
-npx playwright install chromium webkit
-npm run test:browser
+pnpm exec playwright install chromium webkit
+pnpm test:browser
 ```
 
 These render the actual transcript and stylesheet in Chromium and WebKit, checking scroll geometry that the DOM-mocked unit tests cannot exercise. They start an isolated Vite server on port 1435 and need no provider or Tauri app.

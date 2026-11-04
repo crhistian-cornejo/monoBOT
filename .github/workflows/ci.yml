@@ -33,21 +33,22 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
+          cache: pnpm
           cache-dependency-path: |
-            package-lock.json
-            mobile/package-lock.json
-      - run: npm ci
-      - run: npm ci
+            pnpm-lock.yaml
+            mobile/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile
         working-directory: mobile
-      - run: npm run lint
+      - run: pnpm lint
         working-directory: mobile
-      - run: npx tsc --noEmit
+      - run: pnpm exec tsc --noEmit
         working-directory: mobile
-      - run: npx vitest run --config mobile/vitest.config.ts
+      - run: pnpm exec vitest run --config mobile/vitest.config.ts
 
   browser:
     runs-on: ubuntu-latest
@@ -57,13 +58,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npx playwright install --with-deps chromium webkit
-      - run: npm run test:browser
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium webkit
+      - run: pnpm test:browser
       - name: Upload browser failure traces
         if: failure()
         uses: actions/upload-artifact@v4
@@ -81,19 +83,20 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-      - run: npm ci
-      - run: npm run test:host
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:host
       - run: node --test host/runtime-download.test.mjs
       - name: Cache pinned host runtimes
         uses: actions/cache@v4
         with:
           path: build/host-runtime-cache
           key: host-runtime-v1-${{ runner.os }}-${{ runner.arch }}-native-${{ hashFiles('host/package.mjs') }}
-      - run: npm run host:package
+      - run: pnpm host:package
 
   check:
     strategy:
@@ -108,18 +111,19 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/install-linux-deps-debian.sh --sources /etc/apt/sources.list.d/ubuntu.sources
 
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
 
-      - run: npm ci
-      - run: npm test
-      - run: npx tsc --noEmit
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+      - run: pnpm exec tsc --noEmit
       - run: cargo fmt --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo check
@@ -142,7 +146,7 @@ jobs:
         id: packaging
         run: |
           set -euo pipefail
-          pattern='^(scripts/repack-appimage\.sh|scripts/assert-appimage-host-libs\.sh|scripts/install-linux-deps-debian\.sh|package\.json|package-lock\.json|Cargo\.lock|src-tauri/tauri\.conf\.json|src-tauri/tauri\.linux\.conf\.json|src-tauri/Cargo\.toml|\.github/workflows/(ci|release)\.yml)$'
+          pattern='^(scripts/repack-appimage\.sh|scripts/assert-appimage-host-libs\.sh|scripts/install-linux-deps-debian\.sh|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|Cargo\.lock|src-tauri/tauri\.conf\.json|src-tauri/tauri\.linux\.conf\.json|src-tauri/Cargo\.toml|\.github/workflows/(ci|release)\.yml)$'
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             base="${{ github.event.pull_request.base.sha }}"
           else
@@ -166,11 +170,13 @@ jobs:
             echo "Packaging files unchanged; skipping AppImage build."
           fi
 
+      - uses: pnpm/action-setup@v4
+        if: steps.packaging.outputs.run == 'true'
       - uses: actions/setup-node@v4
         if: steps.packaging.outputs.run == 'true'
         with:
           node-version: 20
-          cache: npm
+          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
         if: steps.packaging.outputs.run == 'true'
@@ -179,12 +185,12 @@ jobs:
         if: steps.packaging.outputs.run == 'true'
         run: bash scripts/install-linux-deps-debian.sh
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
         if: steps.packaging.outputs.run == 'true'
 
       - name: Build Linux packages
         if: steps.packaging.outputs.run == 'true'
-        run: npm run build:linux
+        run: pnpm build:linux
 
       - name: Assert AppImage uses host libraries
         if: steps.packaging.outputs.run == 'true'
@@ -214,15 +220,16 @@ jobs:
       - name: Install system dependencies
         run: bash scripts/install-linux-deps-fedora.sh
 
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+          cache: pnpm
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - run: npm ci
-      - run: npm run build:fedora
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:fedora
 
       - name: Install the generated rpm
         run: |

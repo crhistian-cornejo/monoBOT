@@ -1,0 +1,12 @@
+# pnpm settings for the desktop app. mobile/ and scripts/native-editor/ are
+# separate pnpm projects with their own pnpm-workspace.yaml and lockfile; all
+# three share pnpm's content-addressable store on this drive.
+
+# Only these dependencies may run install scripts. Anything new must be
+# reviewed and added here explicitly.
+allowBuilds:
+  esbuild: true
+
+# Do not install versions published less than 3 days ago, so compromised
+# releases are usually caught and pulled from the registry first.
+minimumReleaseAge: 4320

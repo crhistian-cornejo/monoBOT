@@ -48,13 +48,13 @@ MonoCode is still early. If something breaks, [report a bug](https://github.com/
 
 ## Build from source
 
-You’ll need Node.js 20+ and a stable Rust toolchain. See [build setup](docs/building.md) for platform dependencies and packaging.
+You’ll need Node.js 20+, [pnpm](https://pnpm.io/installation) (`corepack enable` picks the pinned version) and a stable Rust toolchain. See [build setup](docs/building.md) for platform dependencies and packaging.
 
-The mobile app is a separate Expo project in [`mobile/`](mobile/README.md). Run it with `cd mobile && npm install && npm start`.
+The mobile app is a separate Expo project in [`mobile/`](mobile/README.md). Run it with `cd mobile && pnpm install && pnpm start`.
 
 ```bash
-npm install
-npm run tauri dev
+pnpm install
+pnpm tauri dev
 ```
 
 Small, focused contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
@@ -76,8 +76,8 @@ at once.
 To try GPUI from this checkout with Node.js 22+, Rust and Xcode on macOS:
 
 ```sh
-npm run native:dev     # launch with a separate development database
-npm run native:build   # create an optimized app using installed MonoCode data
+pnpm native:dev     # launch with a separate development database
+pnpm native:build   # create an optimized app using installed MonoCode data
 ```
 
 Type `r` then Enter in the development terminal to rebuild and restart; there is

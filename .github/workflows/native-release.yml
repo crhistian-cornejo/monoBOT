@@ -46,10 +46,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+          cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -111,7 +112,7 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/native-notary.p8" >> "$GITHUB_ENV"
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
       - run: node --test scripts/native-release.test.mjs scripts/package-native.test.mjs
       - name: Test native update backend
         run: cargo test --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-core --profile native-dev app_update
@@ -242,11 +243,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
-      - run: npm ci
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
