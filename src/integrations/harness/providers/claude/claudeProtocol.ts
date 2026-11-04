@@ -250,6 +250,10 @@ export function buildClaudeSpawnArgs(input: {
   includePartialMessages?: boolean;
   maxTurns?: number;
   isolated?: boolean;
+  /** Extra MCP servers for this turn, loaded beside the user's own. */
+  mcpConfig?: { mcpServers: Record<string, unknown> } | null;
+  /** Tools the turn may call without asking (`mcp__<server>__<tool>`). */
+  allowedTools?: readonly string[];
 }): string[] {
   const args = [
     "--output-format",
@@ -279,6 +283,12 @@ export function buildClaudeSpawnArgs(input: {
   } else {
     args.push(`--setting-sources=${CLAUDE_SETTING_SOURCES}`);
     args.push("--settings", JSON.stringify(settings));
+    if (input.mcpConfig) {
+      args.push("--mcp-config", JSON.stringify(input.mcpConfig));
+    }
+    if (input.allowedTools?.length) {
+      args.push("--allowedTools", input.allowedTools.join(","));
+    }
   }
   if (input.model) args.push("--model", input.model);
   if (input.effort) args.push("--effort", input.effort);

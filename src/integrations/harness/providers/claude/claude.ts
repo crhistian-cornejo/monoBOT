@@ -8,6 +8,11 @@ import type {
 } from "../../../../features/sessions/model/session";
 import { loadClaudeHooks } from "../../../../features/settings/model/settings";
 import {
+  connectorAllowedTools,
+  connectorMcpConfig,
+  enabledConnectors,
+} from "../../../../features/settings/model/connectors";
+import {
   killChild,
   resolveClaudeBinary,
   spawnChild,
@@ -1783,8 +1788,11 @@ function launchOptions(
   resume?: string;
   sessionId?: string;
   settings?: ClaudeCliSettings;
+  mcpConfig?: ReturnType<typeof connectorMcpConfig>;
+  allowedTools?: string[];
 } {
   const native = nativeModelId(input.model);
+  const connectors = enabledConnectors();
   const effortRaw = input.modelSettings?.effort;
   const context = input.modelSettings?.context;
   const settings: ClaudeCliSettings = {};
@@ -1810,6 +1818,8 @@ function launchOptions(
     resume,
     sessionId: resume ? undefined : sessionId,
     settings: Object.keys(settings).length > 0 ? settings : undefined,
+    mcpConfig: connectorMcpConfig(connectors),
+    allowedTools: connectorAllowedTools(connectors),
   };
 }
 

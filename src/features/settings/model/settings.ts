@@ -188,6 +188,13 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "ssh remote connect host server environment",
   },
   {
+    id: "connectors",
+    section: "mcp",
+    label: "Connectors",
+    keywords:
+      "mcp remote http context7 microsoft learn deepwiki x twitter docs built-in",
+  },
+  {
     id: "mcp-servers",
     section: "mcp",
     label: "MCP servers",

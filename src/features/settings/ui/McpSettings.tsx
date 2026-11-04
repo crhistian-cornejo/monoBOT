@@ -26,6 +26,12 @@ import {
 } from "../../../shared/ui/icons";
 import { MCP_PROVIDER_LABELS, type McpConnection } from "../model/mcp";
 import {
+  CONNECTORS,
+  enabledConnectors,
+  setConnectorEnabled,
+  type ConnectorId,
+} from "../model/connectors";
+import {
   getCachedMcpSettings,
   loadMcpSettings,
   subscribeMcpSettings,
@@ -304,22 +310,99 @@ export function McpSettings({
   const [selection, setSelection] = useState({ initialCwd: cwd, project: cwd });
   const project = selection.initialCwd === cwd ? selection.project : cwd;
   return (
-    <McpConnections
-      key={project}
-      cwd={project}
-      projectPicker={
-        <SearchableProjectPicker
-          cwd={project}
-          railCwd={cwd}
-          recents={recents}
-          className="w-fit max-w-full shrink-0"
-          buttonClassName="h-7.5 max-w-full gap-2 bg-content/5 px-2.5 text-[13px] hover:bg-content/12 active:scale-[0.98]"
-          onSelectProject={(path) =>
-            setSelection({ initialCwd: cwd, project: path })
-          }
-        />
-      }
-    />
+    <div className="space-y-10">
+      <BuiltInConnectors />
+      <McpConnections
+        key={project}
+        cwd={project}
+        projectPicker={
+          <SearchableProjectPicker
+            cwd={project}
+            railCwd={cwd}
+            recents={recents}
+            className="w-fit max-w-full shrink-0"
+            buttonClassName="h-7.5 max-w-full gap-2 bg-content/5 px-2.5 text-[13px] hover:bg-content/12 active:scale-[0.98]"
+            onSelectProject={(path) =>
+              setSelection({ initialCwd: cwd, project: path })
+            }
+          />
+        }
+      />
+    </div>
+  );
+}
+
+/** MonoBOT's own remote MCP servers. They load on every Claude turn beside the
+ * user's servers, without touching any CLI configuration. */
+function BuiltInConnectors() {
+  const [enabled, setEnabled] = useState(
+    () => new Set(enabledConnectors().map((connector) => connector.id)),
+  );
+  const toggle = (id: ConnectorId, on: boolean) => {
+    setConnectorEnabled(id, on);
+    setEnabled((current) => {
+      const next = new Set(current);
+      if (on) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+  return (
+    <section
+      id="setting-connectors"
+      data-setting-id="connectors"
+      className="space-y-3"
+    >
+      <div>
+        <h2 className="text-sm font-semibold">Connectors</h2>
+        <p className="mt-1 text-xs text-content/55">
+          Remote MCP servers MonoBOT adds to each Claude turn. Nothing is
+          installed and your Claude Code configuration stays untouched. Their
+          read-only tools run without asking.
+        </p>
+      </div>
+      <ul className="divide-y divide-stroke border border-stroke">
+        {CONNECTORS.map((connector) => {
+          const on = enabled.has(connector.id);
+          return (
+            <li
+              key={connector.id}
+              className="flex items-center justify-between gap-4 px-3 py-2.5"
+            >
+              <div className="min-w-0">
+                <a
+                  href={connector.site}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-[13px] font-medium hover:underline"
+                >
+                  {connector.name}
+                </a>
+                <p className="truncate text-xs text-content/55">
+                  {connector.description}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-label={`${connector.name} connector`}
+                aria-checked={on}
+                onClick={() => toggle(connector.id, !on)}
+                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                  on ? "bg-accent" : "bg-content/20"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 size-4 rounded-full bg-white transition-[left] ${
+                    on ? "left-4.5" : "left-0.5"
+                  }`}
+                />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 
