@@ -293,7 +293,7 @@ async fn connect(
     .ok()
     .flatten();
     attempts.abort_all();
-    winner.ok_or_else(|| "Cannot reach your desktop. Check that MonoCode is running and its remote address is reachable.".into())
+    winner.ok_or_else(|| "Cannot reach your desktop. Check that MonoBOT is running and its remote address is reachable.".into())
 }
 
 /// A connection to the desktop held open between requests, so the next one

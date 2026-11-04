@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 use std::path::Path;
 
 const UNAVAILABLE: &str = "This isn’t available for projects on another machine yet.";
-const OUTDATED: &str = "Update MonoCode Host in Connections settings to use this project’s files.";
+const OUTDATED: &str = "Update MonoBOT Host in Connections settings to use this project’s files.";
 
 pub fn is_remote(path: &Path) -> bool {
     path.to_str()

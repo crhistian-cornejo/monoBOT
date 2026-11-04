@@ -488,7 +488,7 @@ mod tests {
         let mut key = b"_https://tauri.localhost\x00".to_vec();
         key.extend(b"\x01monocode.workspaceTheme");
         db.put(&key, b"\x01tidepool").unwrap();
-        // An origin with no Monocode settings must not shadow the populated one.
+        // An origin with no MonoBOT settings must not shadow the populated one.
         db.put(b"_tauri://localhost\x00\x01unrelated", b"\x01value")
             .unwrap();
         db.flush().unwrap();

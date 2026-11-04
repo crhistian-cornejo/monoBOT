@@ -17,23 +17,23 @@ On Fedora, or on an Enterprise Linux 10 system (registered RHEL, Rocky, Alma, Ce
 Fedora needs no extra repository step:
 
 ```bash
-sudo dnf install ./MonoCode-*.rpm
+sudo dnf install ./MonoBOT-*.rpm
 ```
 
-Enterprise Linux 10 needs EPEL first, because `webkit2gtk4.1` is an EPEL package there. CRB is not needed to run MonoCode.
+Enterprise Linux 10 needs EPEL first, because `webkit2gtk4.1` is an EPEL package there. CRB is not needed to run MonoBOT.
 
 On Rocky, Alma, or CentOS Stream 10:
 
 ```bash
 sudo dnf install -y epel-release
-sudo dnf install ./MonoCode-*.rpm
+sudo dnf install ./MonoBOT-*.rpm
 ```
 
 On registered RHEL 10:
 
 ```bash
 sudo dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-10.noarch.rpm
-sudo dnf install ./MonoCode-*.rpm
+sudo dnf install ./MonoBOT-*.rpm
 ```
 
 On Oracle Linux 10, `epel-release` does not enable `ol10_developer_EPEL`, which is the repository that provides WebKitGTK. Enable it before installing the rpm:
@@ -41,7 +41,7 @@ On Oracle Linux 10, `epel-release` does not enable `ol10_developer_EPEL`, which 
 ```bash
 sudo dnf install -y oracle-epel-release-el10 dnf-plugins-core
 sudo dnf config-manager --set-enabled ol10_developer_EPEL
-sudo dnf install ./MonoCode-*.rpm
+sudo dnf install ./MonoBOT-*.rpm
 ```
 
 GitHub Releases builds the `.rpm` on Enterprise Linux 10 so it loads on Fedora and EL 10. EL 9 and older are unsupported (`webkit2gtk4.1-devel` only exists in EPEL 10).

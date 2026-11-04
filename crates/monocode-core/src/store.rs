@@ -1,4 +1,4 @@
-//! Session storage. Desktop launches use Monocode's existing schema directly.
+//! Session storage. Desktop launches use MonoBOT's existing schema directly.
 mod app_access;
 mod contributions;
 mod managed_sessions;

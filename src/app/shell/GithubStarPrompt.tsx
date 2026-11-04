@@ -121,7 +121,7 @@ export function GithubStarPrompt() {
     <div data-github-star-prompt className="relative mb-1 h-8 w-full">
       <button
         type="button"
-        aria-label="Star MonoCode on GitHub"
+        aria-label="Star MonoBOT on GitHub"
         aria-busy={busy}
         disabled={busy}
         onClick={() => void starFromPrompt()}

@@ -14,7 +14,7 @@ use std::{
     time::Duration,
 };
 
-pub const HELP: &str = r#"MonoCode app access
+pub const HELP: &str = r#"MonoBOT app access
 Usage: monocode-gpui app ACTION --json '{...}' [--request-id ID]
 Pass --input FILE or --input - to read a JSON object instead.
 Actions:
@@ -337,7 +337,7 @@ pub fn configure_codex(
 pub fn tool_definitions() -> Vec<Value> {
     vec![json!({
         "name": "app",
-        "description": format!("Run a MonoCode app action: sessions, worktrees, folders, notes, artifacts, soul, memory, habits and chat cards. Pass the action name and its JSON input. Retry an uncertain mutation with the same requestId and identical input.\n\n{HELP}"),
+        "description": format!("Run a MonoBOT app action: sessions, worktrees, folders, notes, artifacts, soul, memory, habits and chat cards. Pass the action name and its JSON input. Retry an uncertain mutation with the same requestId and identical input.\n\n{HELP}"),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -365,7 +365,7 @@ fn mcp_response(request: Value) -> Option<Value> {
         "tools/call" => {
             let arguments = &request["params"]["arguments"];
             let result = if request["params"]["name"].as_str() != Some("app") {
-                Err("Unknown MonoCode app tool".to_string())
+                Err("Unknown MonoBOT app tool".to_string())
             } else if let Some(action) = arguments["action"].as_str() {
                 let input = match &arguments["input"] {
                     Value::Null => json!({}),

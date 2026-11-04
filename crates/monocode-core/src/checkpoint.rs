@@ -944,9 +944,9 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
         checked_output(
             git_command(root, args)
                 .env("GIT_INDEX_FILE", &index.0)
-                .env("GIT_AUTHOR_NAME", "MonoCode")
+                .env("GIT_AUTHOR_NAME", "MonoBOT")
                 .env("GIT_AUTHOR_EMAIL", "checkpoint@monocode.local")
-                .env("GIT_COMMITTER_NAME", "MonoCode")
+                .env("GIT_COMMITTER_NAME", "MonoBOT")
                 .env("GIT_COMMITTER_EMAIL", "checkpoint@monocode.local"),
         )
     };
@@ -970,7 +970,7 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
             "commit-tree",
             tree.trim(),
             "-m",
-            "MonoCode workspace checkpoint",
+            "MonoBOT workspace checkpoint",
         ],
     ]
     .concat())?)
@@ -1005,9 +1005,9 @@ fn overlay_baseline(
         checked_output(
             git_command(root, args)
                 .env("GIT_INDEX_FILE", &index.0)
-                .env("GIT_AUTHOR_NAME", "MonoCode")
+                .env("GIT_AUTHOR_NAME", "MonoBOT")
                 .env("GIT_AUTHOR_EMAIL", "checkpoint@monocode.local")
-                .env("GIT_COMMITTER_NAME", "MonoCode")
+                .env("GIT_COMMITTER_NAME", "MonoBOT")
                 .env("GIT_COMMITTER_EMAIL", "checkpoint@monocode.local"),
         )
     };
@@ -1037,7 +1037,7 @@ fn overlay_baseline(
             "commit-tree",
             tree.trim(),
             "-m",
-            "MonoCode workspace checkpoint",
+            "MonoBOT workspace checkpoint",
         ],
     ]
     .concat())?)

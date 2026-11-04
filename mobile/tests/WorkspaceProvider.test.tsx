@@ -231,8 +231,8 @@ describe("starting mobile sessions", () => {
     render();
     await act(async () => { await workspace.startSession("project", "Hello"); });
     await act(async () => { render("session"); });
-    await frame([{ error: "Update Monocode on both devices" }]);
-    expect(conversation.error).toBe("Update Monocode on both devices");
+    await frame([{ error: "Update MonoBOT on both devices" }]);
+    expect(conversation.error).toBe("Update MonoBOT on both devices");
   });
 
   it("shows a conversation's cached turns at once and keeps the latest for next time", async () => {

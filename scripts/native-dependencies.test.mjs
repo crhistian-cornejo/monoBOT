@@ -90,5 +90,5 @@ test("GPUI refuses to enable screen capture before compiling its implementation"
   ], { encoding: "utf8", timeout: 60_000 });
   assert.ifError(result.error);
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
-  assert.match(result.stderr, /Screen capture is disabled in Monocode/);
+  assert.match(result.stderr, /Screen capture is disabled in MonoBOT/);
 });

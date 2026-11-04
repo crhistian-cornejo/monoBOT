@@ -77,7 +77,7 @@ describe("AgentTranscript collapsed work", () => {
     expect(legacy).not.toContain("/monocode");
   });
 
-  it("shows MonoCode CLI actions instead of their long shell commands", () => {
+  it("shows MonoBOT CLI actions instead of their long shell commands", () => {
     const command =
       "/repo/target/debug/MonoCode.app/Contents/MacOS/monocode";
     const markup = render(
@@ -98,7 +98,7 @@ describe("AgentTranscript collapsed work", () => {
       ],
       true,
     );
-    expect(markup).toContain("Using MonoCode");
+    expect(markup).toContain("Using MonoBOT");
     expect(markup).toContain('data-monocode-tool-call="--help"');
     expect(markup).toContain('data-monocode-tool-call="notes.list"');
     expect(markup).toContain("monocode app --help");
@@ -106,10 +106,10 @@ describe("AgentTranscript collapsed work", () => {
     expect(markup).toContain("Ran");
     expect(markup).toContain("Running");
     expect(markup).not.toContain("Contents/MacOS/monocode");
-    expect(markup).not.toContain("Show error details for MonoCode");
+    expect(markup).not.toContain("Show error details for MonoBOT");
   });
 
-  it("shows the full command before approving a MonoCode CLI call", () => {
+  it("shows the full command before approving a MonoBOT CLI call", () => {
     const command = "monocode app sessions.send --json '{\"prompt\":\"private-marker\"}'";
     const markup = renderToStaticMarkup(
       createElement(AgentTranscript, {
@@ -152,7 +152,7 @@ describe("AgentTranscript collapsed work", () => {
     expect(compound).toContain("Allow</button>");
   });
 
-  it("keeps a failed MonoCode call compact until its error is opened", () => {
+  it("keeps a failed MonoBOT call compact until its error is opened", () => {
     const markup = render([
       { id: "user", role: "user", text: "/monocode list notes" },
       {
@@ -165,7 +165,7 @@ describe("AgentTranscript collapsed work", () => {
     expect(markup).toContain('data-monocode-tool-call="notes.list"');
     expect(markup).toContain("Ran");
     expect(markup).toContain("monocode app notes.list");
-    expect(markup).toContain("Show error details for MonoCode: List notes");
+    expect(markup).toContain("Show error details for MonoBOT: List notes");
     expect(markup).not.toContain("Connection refused");
   });
 
@@ -1006,7 +1006,7 @@ describe("worker assignment prompts", () => {
             id: "u1",
             role: "user",
             internal: true,
-            text: "Review the current branch against main.\n\n<monocode_assignment>\nYou are a worker managed by a MonoCode lead. Your assigned write scope is: src/App.tsx.\n</monocode_assignment>",
+            text: "Review the current branch against main.\n\n<monocode_assignment>\nYou are a worker managed by a MonoBOT lead. Your assigned write scope is: src/App.tsx.\n</monocode_assignment>",
           },
           { id: "a1", role: "assistant", text: "Looking now" },
         ],
@@ -1015,6 +1015,6 @@ describe("worker assignment prompts", () => {
     expect(markup).toContain("Review the current branch against main.");
     expect(markup).toContain("Looking now");
     expect(markup).not.toContain("monocode_assignment");
-    expect(markup).not.toContain("You are a worker managed by a MonoCode lead");
+    expect(markup).not.toContain("You are a worker managed by a MonoBOT lead");
   });
 });

@@ -1,4 +1,4 @@
-//! MonoCode Host v1 session sync. Values retain provider-specific block fields.
+//! MonoBOT Host v1 session sync. Values retain provider-specific block fields.
 use super::Connections;
 use serde_json::{json, Value};
 use std::collections::HashMap;

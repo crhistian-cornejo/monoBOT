@@ -1217,17 +1217,17 @@ describe("local orchestration", () => {
     expect(
       shellPath("/Applications/MonoCode.app/Contents/MacOS/monocode"),
     ).toBe("/Applications/MonoCode.app/Contents/MacOS/monocode");
-    expect(shellPath("/Users/a b/MonoCode")).toBe("'/Users/a b/MonoCode'");
-    expect(shellPath("C:/Program Files/MonoCode/monocode.exe")).toBe(
-      '"C:/Program Files/MonoCode/monocode.exe"',
+    expect(shellPath("/Users/a b/MonoBOT")).toBe("'/Users/a b/MonoBOT'");
+    expect(shellPath("C:/Program Files/MonoBOT/monocode.exe")).toBe(
+      '"C:/Program Files/MonoBOT/monocode.exe"',
     );
     expect(shellPath("C:\\Tools\\monocode.exe")).toBe(
       "C:\\Tools\\monocode.exe",
     );
     // A backslash escapes in a POSIX shell, so bare would rewrite the path.
-    expect(shellPath("/Users/a\\b/MonoCode")).toBe("'/Users/a\\b/MonoCode'");
-    expect(shellPath("/Users/it's/MonoCode")).toBe(
-      "'/Users/it'\\''s/MonoCode'",
+    expect(shellPath("/Users/a\\b/MonoBOT")).toBe("'/Users/a\\b/MonoBOT'");
+    expect(shellPath("/Users/it's/MonoBOT")).toBe(
+      "'/Users/it'\\''s/MonoBOT'",
     );
   });
   it("treats an action named after an Object member as unknown", async () => {

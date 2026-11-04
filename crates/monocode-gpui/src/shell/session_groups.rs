@@ -447,7 +447,7 @@ impl Shell {
                     .submenu(vec![
                         MenuAction::new("copy-harness-session-id", "Harness session ID")
                             .disabled(summary.provider_id.is_none()),
-                        MenuAction::new("copy-monocode-session-id", "MonoCode session ID"),
+                        MenuAction::new("copy-monocode-session-id", "MonoBOT session ID"),
                     ])
                     .into(),
                 MenuAction::new(

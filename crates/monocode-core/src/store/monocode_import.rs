@@ -87,7 +87,7 @@ fn import_sessions(
     ] {
         if !columns.contains(required) {
             return Err(invalid(format!(
-                "Not a Monocode session database (missing {required})"
+                "Not a MonoBOT session database (missing {required})"
             )));
         }
     }
@@ -574,7 +574,7 @@ mod tests {
         let error = store
             .import_monocode(&dir.path().join("native.sqlite3"))
             .unwrap_err();
-        assert!(error.contains("Not a Monocode session database"));
+        assert!(error.contains("Not a MonoBOT session database"));
     }
 
     #[test]

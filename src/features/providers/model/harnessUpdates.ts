@@ -7,7 +7,7 @@ import {
 } from "../../../integrations/harness/providers/opencode/opencodeProtocol";
 
 /**
- * Harnesses with an npm version feed and a self-updater MonoCode can run.
+ * Harnesses with an npm version feed and a self-updater MonoBOT can run.
  */
 export const UPDATABLE_HARNESSES: ReadonlySet<HarnessId> = new Set([
   "claude",

@@ -4,7 +4,7 @@ import { Image, StyleSheet, View } from "react-native";
 import { MONOCODE_MARK, MONOCODE_MARK_INVERSE } from "@/ui/brand";
 
 /**
- * The Monocode mark cut into the background image, lit from above: a darker
+ * The MonoBOT mark cut into the background image, lit from above: a darker
  * floor where it is cut, a shadow under its top edges, and a faint light along
  * its bottom edges. The mark's own translucency sets how deep each part goes.
  */

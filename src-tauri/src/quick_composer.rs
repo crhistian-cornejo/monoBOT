@@ -3,8 +3,8 @@
 //! window without bringing that window forward.
 //!
 //! The panel is a WKWebView window re-classed as a non-activating `NSPanel`.
-//! A plain `NSWindow` would have to activate MonoCode to take keys, which pulls
-//! the workspace window over the browser and leaves focus with MonoCode after
+//! A plain `NSWindow` would have to activate MonoBOT to take keys, which pulls
+//! the workspace window over the browser and leaves focus with MonoBOT after
 //! the panel hides. A non-activating panel takes keys while the other app
 //! stays active, and it can join a full-screen Space.
 
@@ -525,7 +525,7 @@ fn build(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         QUICK_COMPOSER_LABEL,
         WebviewUrl::App("quick-composer.html".into()),
     )
-    .title("MonoCode")
+    .title("MonoBOT")
     .inner_size(WIDTH, INITIAL_HEIGHT)
     .resizable(false)
     .maximizable(false)
@@ -576,7 +576,7 @@ pub(crate) fn present(panel: &WebviewWindow) {
             ns_window.makeKeyWindow();
         }
         // Could not become a panel: an ordinary window still works, it just
-        // brings MonoCode forward with it.
+        // brings MonoBOT forward with it.
         _ => {
             let _ = panel.show();
             let _ = panel.set_focus();

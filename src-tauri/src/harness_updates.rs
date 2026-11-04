@@ -22,7 +22,7 @@ fn npm_package(provider: &str) -> Option<&'static str> {
 }
 
 /// Each CLI's own updater, which knows how it was installed (native, npm,
-/// Homebrew) better than MonoCode could guess from the binary path.
+/// Homebrew) better than MonoBOT could guess from the binary path.
 fn update_args(provider: &str) -> Option<&'static [&'static str]> {
     match provider {
         "claude" => Some(&["update"]),
@@ -67,7 +67,7 @@ pub async fn harness_latest_version(provider: String) -> Result<String, String> 
     .map_err(|e| e.to_string())?
 }
 
-/// Runs the harness's self-update against the binary MonoCode resolved for
+/// Runs the harness's self-update against the binary MonoBOT resolved for
 /// it. stdin is closed, so an updater that stops to ask fails instead of
 /// hanging.
 #[tauri::command]

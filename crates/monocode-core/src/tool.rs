@@ -68,7 +68,7 @@ impl ToolCall {
             self.output = format!("… earlier output omitted …\n{}", &self.output[at..]);
         }
     }
-    /// One of Monocode's own visual tools, under any provider's naming.
+    /// One of MonoBOT's own visual tools, under any provider's naming.
     pub fn visual_step(&self) -> Option<VisualStep> {
         visual_tool(&self.name)
     }

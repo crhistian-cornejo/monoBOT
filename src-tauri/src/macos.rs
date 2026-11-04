@@ -1148,8 +1148,8 @@ mod tests {
     #[test]
     fn sanitized_dev_bundle_name_accepts_single_component() {
         assert_eq!(
-            sanitized_dev_bundle_name("  MonoCode Dev  "),
-            Some("MonoCode Dev".into())
+            sanitized_dev_bundle_name("  MonoBOT Dev  "),
+            Some("MonoBOT Dev".into())
         );
     }
 
@@ -1164,7 +1164,7 @@ mod tests {
     fn bundle_name_from_app_path_reads_existing_bundle_name() {
         assert_eq!(
             bundle_name_from_app_path(Path::new("/tmp/MonoCode Dev.app")),
-            Some("MonoCode Dev".into())
+            Some("MonoBOT Dev".into())
         );
     }
 
@@ -1177,8 +1177,8 @@ mod tests {
 
     #[test]
     fn dev_bundle_plist_uses_the_provided_app_name() {
-        let plist = String::from_utf8(dev_bundle_plist("MonoCode Dev", "1.2.3", "1.2.3")).unwrap();
-        assert!(plist.contains("<string>MonoCode Dev</string>"));
-        assert!(!plist.contains("<string>MonoCode</string>"));
+        let plist = String::from_utf8(dev_bundle_plist("MonoBOT Dev", "1.2.3", "1.2.3")).unwrap();
+        assert!(plist.contains("<string>MonoBOT Dev</string>"));
+        assert!(!plist.contains("<string>MonoBOT</string>"));
     }
 }

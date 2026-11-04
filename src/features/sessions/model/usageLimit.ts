@@ -123,7 +123,7 @@ export function mobileUsageLimit(
           ? `Resets ${formatUsageLimitReset(limit.resetsAt, now)}`
           : "Limit has reset",
     limitation: supported
-      ? "Automatic continuation requires Monocode running with this session loaded. This preference is kept only until the session closes or the app restarts."
+      ? "Automatic continuation requires MonoBOT running with this session loaded. This preference is kept only until the session closes or the app restarts."
       : session.worktreeRemoved
         ? "This session’s working copy was removed. Open it on desktop to recover."
         : "Continue this session on its remote desktop. Mobile usage-limit recovery is unavailable for this session.",

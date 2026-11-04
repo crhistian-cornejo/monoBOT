@@ -61,11 +61,11 @@ async function renderPrompt(status: "starred" | "notStarred" | "unavailable") {
   await act(async () => root.render(createElement(GithubStarPrompt)));
 }
 
-it("stars MonoCode directly when the active account has not starred it", async () => {
+it("stars MonoBOT directly when the active account has not starred it", async () => {
   await renderPrompt("notStarred");
 
   const button = container.querySelector<HTMLButtonElement>(
-    '[aria-label="Star MonoCode on GitHub"]',
+    '[aria-label="Star MonoBOT on GitHub"]',
   );
   expect(button?.textContent).toContain("Star on GitHub");
 
@@ -82,7 +82,7 @@ it("falls back to GitHub when the authenticated API action fails", async () => {
   await act(async () =>
     container
       .querySelector<HTMLButtonElement>(
-        '[aria-label="Star MonoCode on GitHub"]',
+        '[aria-label="Star MonoBOT on GitHub"]',
       )
       ?.click(),
   );
@@ -103,7 +103,7 @@ it("shows progress and ignores duplicate clicks while the star is pending", asyn
   );
   await renderPrompt("notStarred");
   const button = container.querySelector<HTMLButtonElement>(
-    '[aria-label="Star MonoCode on GitHub"]',
+    '[aria-label="Star MonoBOT on GitHub"]',
   )!;
 
   act(() => {

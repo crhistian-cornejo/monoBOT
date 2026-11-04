@@ -42,7 +42,7 @@ import { useWorkspace } from "./WorkspaceProvider";
 const FOOTER_HEIGHT = 50;
 /** How far past the header and footer the blur keeps fading. */
 const FADE = 16;
-/** The Monocode mark in the header. */
+/** The MonoBOT mark in the header. */
 const MARK = 38;
 /** A Mono row's mascot, as a chat list's avatar. */
 const AVATAR = 40;
@@ -58,7 +58,7 @@ type Show = "both" | "monos" | "projects";
 
 /**
  * The phone's counterpart of the desktop's rail, laid out as a messaging
- * app's chat list: the Monocode mark, the filter and a new Mono up top, level
+ * app's chat list: the MonoBOT mark, the filter and a new Mono up top, level
  * with a screen's header; the Monos with their latest line and when; and at
  * Projects under their own label, and at the foot settings and search, level
  * with a screen's composer. Picking one switches the screen under it as the
@@ -490,7 +490,7 @@ const useStyles = themedStyles((colors) => ({
     alignItems: "center",
     gap: 10,
   },
-  // The Monocode mark, centred on a row's figure below it.
+  // The MonoBOT mark, centred on a row's figure below it.
   mark: {
     width: MARK,
     height: MARK,

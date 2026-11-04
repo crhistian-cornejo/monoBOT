@@ -74,13 +74,13 @@ Thanks to @Juns-g, @nwoolls, @404khai, @knot2006, @visualfusion, @keyCat, and @o
 
 ## Installation and testing
 
-Choose the download for your platform: macOS Apple Silicon or Intel, Windows x64, or Linux x64 (AppImage, Debian/Ubuntu `.deb`, or Fedora/Enterprise Linux `.rpm`). Install it alongside your existing Monocode application.
+Choose the download for your platform: macOS Apple Silicon or Intel, Windows x64, or Linux x64 (AppImage, Debian/Ubuntu `.deb`, or Fedora/Enterprise Linux `.rpm`). Install it alongside your existing MonoBOT application.
 
 **Testing status:** macOS is the primary tested platform. A Linux ARM64 source build was exercised in an Ubuntu VM with a graphics workaround, and a Windows 10 source build passed manual title-bar checks. The downloadable Linux x64 and Windows packages still need broader runtime testing. Native system notifications currently support macOS only. HTML panels and media support remain limited on Linux and Windows.
 
 Local automated checks, the native dependency audit, and the long-history CPU comparison are recorded in [verification](https://github.com/hardbeat920/monocode/blob/native-v0.16.0-preview.13/docs/native/verification.md).
 
-**Data:** this preview uses your existing Monocode database and saves changes there. Back up your Monocode data with the app closed before testing. Native preferences are stored separately. Avoid editing the same conversations in both apps at once.
+**Data:** this preview uses your existing MonoBOT database and saves changes there. Back up your MonoBOT data with the app closed before testing. Native preferences are stored separately. Avoid editing the same conversations in both apps at once.
 
 **Updates:** use Settings → General → About to check for updates and install the next native preview. Packaged upgrades still need runtime testing; if updating fails, download the new installer manually. Linux `.deb`/`.rpm` installs use the system authentication prompt (`pkexec`) to install the downloaded package. Cancelling authentication leaves the current version installed. Native previews receive native preview updates; production Tauri releases use their own feed.
 

@@ -1,5 +1,5 @@
 // ResourcePressureNotice.tsx: a footer chip while the machine is under
-// pressure, opening the running work MonoCode owns so it can be stopped.
+// pressure, opening the running work MonoBOT owns so it can be stopped.
 use crate::{popover::AnchorSlot, right_panel::spinner, theme::*};
 use gpui::{
     AnyElement, Context, EventEmitter, FocusHandle, FontWeight, Role, ScrollHandle, SharedString,
@@ -398,9 +398,9 @@ impl ResourceMonitor {
                                     .line_height(px(19.5))
                                     .text_color(content(0.5))
                                     .child(if active {
-                                        "No running work found in MonoCode. Other apps may be using these resources."
+                                        "No running work found in MonoBOT. Other apps may be using these resources."
                                     } else {
-                                        "No running work found in MonoCode."
+                                        "No running work found in MonoBOT."
                                     }),
                             )
                         },

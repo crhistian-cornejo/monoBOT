@@ -1,5 +1,5 @@
 //! FloatingMonoChat.tsx: the menu bar's chat panel. It floats over other
-//! apps without activating MonoCode, and its rail moves between Monos without
+//! apps without activating MonoBOT, and its rail moves between Monos without
 //! touching the workspace window's selection.
 use super::*;
 use gpui::{Bounds, WindowBounds, WindowKind, WindowOptions, point, size};
@@ -277,7 +277,7 @@ impl Floating {
                 )
             })
             .child(
-                header_button("floating-reveal", "Open in MonoCode", "external-link").on_click(
+                header_button("floating-reveal", "Open in MonoBOT", "external-link").on_click(
                     cx.listener(|this, _, window, cx| {
                         let id = this.selected.clone();
                         let owner = this.owner.clone();

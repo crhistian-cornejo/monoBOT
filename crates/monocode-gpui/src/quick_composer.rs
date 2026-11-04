@@ -1,5 +1,5 @@
 //! QuickComposer.tsx: the Spotlight-style panel opened by the global shortcut
-//! and the menu bar. It floats over other apps without activating MonoCode,
+//! and the menu bar. It floats over other apps without activating MonoBOT,
 //! keeps its draft across a dismiss, and opens its pickers below the toolbar
 //! so the prompt never moves.
 use crate::{
@@ -42,7 +42,7 @@ const COMMANDS: [(Command, &str); 4] = [
     ),
     (
         Command::Operator,
-        "Give this thread access to MonoCode sessions, folders, and notes.",
+        "Give this thread access to MonoBOT sessions, folders, and notes.",
     ),
     (Command::Orchestrator, "Plan and coordinate agent work."),
     (
@@ -337,7 +337,7 @@ impl QuickComposer {
     }
     fn update_placeholder(&mut self, cx: &mut Context<Self>) {
         let text = if self.cwd.is_empty() {
-            "Open a project in MonoCode first".to_owned()
+            "Open a project in MonoBOT first".to_owned()
         } else {
             format!(
                 "Start a {} session in {}…",

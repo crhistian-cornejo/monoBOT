@@ -210,8 +210,8 @@ export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
           ) : null}
           <button
             type="button"
-            aria-label="Open in MonoCode"
-            title="Open in MonoCode"
+            aria-label="Open in MonoBOT"
+            title="Open in MonoBOT"
             disabled={loading}
             className={BUTTON}
             onClick={() => void action({ kind: "reveal" })}
@@ -479,7 +479,7 @@ function FloatingConversation({
             className="text-accent hover:underline"
             onClick={() => void action({ kind: "reveal" })}
           >
-            Change model in MonoCode
+            Change model in MonoBOT
           </button>
         </div>
       ) : null}
@@ -597,8 +597,8 @@ function ArtifactSheet({
           ) : null}
           <button
             type="button"
-            aria-label="Open in MonoCode"
-            title="Open in MonoCode"
+            aria-label="Open in MonoBOT"
+            title="Open in MonoBOT"
             className={BUTTON}
             onClick={() => void action({ kind: "openArtifact", id })}
           >

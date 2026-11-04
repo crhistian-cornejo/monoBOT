@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "MonoCode",
+    "name": "MonoBOT",
     "slug": "monocode-mobile",
     "owner": "hardbeat920",
     "version": "1.0.0",
@@ -15,8 +15,8 @@
       "icon": "./assets/app.icon",
       "bundleIdentifier": "com.hardbeat920.monocode-mobile",
       "infoPlist": {
-        "CFBundleDisplayName": "Monocode",
-        "NSLocalNetworkUsageDescription": "Connect securely to your paired Monocode desktop.",
+        "CFBundleDisplayName": "MonoBOT",
+        "NSLocalNetworkUsageDescription": "Connect securely to your paired MonoBOT desktop.",
         "ITSAppUsesNonExemptEncryption": false
       }
     },
@@ -73,7 +73,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Scan the pairing code from your Monocode desktop.",
+          "cameraPermission": "Scan the pairing code from your MonoBOT desktop.",
           "recordAudioAndroid": false,
           "barcodeScannerEnabled": true
         }
@@ -82,13 +82,13 @@
         "expo-image-picker",
         {
           "photosPermission": "Choose photos to attach to messages, or as the background of new sessions.",
-          "cameraPermission": "Scan the pairing code from your Monocode desktop."
+          "cameraPermission": "Scan the pairing code from your MonoBOT desktop."
         }
       ],
       [
         "expo-audio",
         {
-          "microphonePermission": "Dictate messages to your Monocode sessions.",
+          "microphonePermission": "Dictate messages to your MonoBOT sessions.",
           "recordAudioAndroid": false,
           "enableBackgroundRecording": false,
           "enableBackgroundPlayback": false

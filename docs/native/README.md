@@ -81,7 +81,7 @@ pnpm native:build
 ```
 
 This creates an optimized build without launching it. **The release app uses the
-installed MonoCode database, and changes save there.** No extra flags are needed.
+installed MonoBOT database, and changes save there.** No extra flags are needed.
 
 On macOS, open:
 
@@ -90,7 +90,7 @@ open "crates/monocode-gpui/target/release/Monocode Native.app"
 ```
 
 The app has a separate name and application ID (`dev.usemono.gpui`) so it can be
-installed alongside MonoCode. Local source builds are signed locally, without
+installed alongside MonoBOT. Local source builds are signed locally, without
 Apple notarization or configured automatic updates. Linux and Windows builds
 produce a standalone executable
 under `crates/monocode-gpui/target/release/`. `CARGO_TARGET_DIR` and
@@ -105,9 +105,9 @@ Development stores `monocode.db` under:
 
 | Platform | Development directory |
 | --- | --- |
-| macOS | `~/Library/Application Support/Monocode Development/` |
-| Linux | `$XDG_DATA_HOME/Monocode Development/`, or `~/.local/share/Monocode Development/` |
-| Windows | `%LOCALAPPDATA%\Monocode Development\` |
+| macOS | `~/Library/Application Support/MonoBOT Development/` |
+| Linux | `$XDG_DATA_HOME/MonoBOT Development/`, or `~/.local/share/MonoBOT Development/` |
+| Windows | `%LOCALAPPDATA%\MonoBOT Development\` |
 
 `MONOCODE_NATIVE_DATA_DIR` overrides this development directory.
 

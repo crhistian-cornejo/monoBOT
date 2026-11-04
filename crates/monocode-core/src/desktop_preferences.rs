@@ -541,7 +541,7 @@ mod tests {
     fn reads_webkit_utf16_and_excludes_development_origins() {
         let root = tempfile::tempdir().unwrap();
         for (name, scheme, label) in [
-            ("production", "tauri", "Monocode 🦀"),
+            ("production", "tauri", "MonoBOT 🦀"),
             ("development", "http", "Stale name"),
         ] {
             let path = root.path().join(name).join(name);
@@ -558,7 +558,7 @@ mod tests {
             .unwrap();
         }
         let preferences = DesktopPreferences::load_webkit(root.path());
-        assert_eq!(preferences.get("monocode.test"), Some("Monocode 🦀"));
+        assert_eq!(preferences.get("monocode.test"), Some("MonoBOT 🦀"));
         assert!(!desktop_origin(&origin("http", "localhost")));
         assert!(desktop_origin(&origin("https", "tauri.localhost")));
         assert!(!desktop_origin(b"tauri localhost"));
@@ -586,7 +586,7 @@ mod tests {
             ),
             (
                 "monocode:tab-group:labels",
-                json!({"/code/agent-terminal":"Monocode"}),
+                json!({"/code/agent-terminal":"MonoBOT"}),
             ),
             (
                 "monocode:tab-group:logos",
@@ -604,7 +604,7 @@ mod tests {
         assert!(workspace["active"].is_null());
         assert_eq!(
             workspace["project_appearance"]["/code/agent-terminal"]["name"],
-            "Monocode"
+            "MonoBOT"
         );
         assert_eq!(
             workspace["project_appearance"]["/code/agent-terminal"]["logo"],

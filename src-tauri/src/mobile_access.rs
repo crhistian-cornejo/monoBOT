@@ -407,7 +407,7 @@ fn watch(
     sink: monocode_mobile_link::WatchSink,
 ) -> Result<(), String> {
     if request["version"] != VERSION {
-        return Err("Update MonoCode on both devices".into());
+        return Err("Update MonoBOT on both devices".into());
     }
     if request["method"] != "conversation.watch" {
         return Err("Unsupported mobile operation".into());
@@ -692,7 +692,7 @@ async fn handle(
     request: Value,
 ) -> Result<Value, String> {
     if request["version"] != VERSION {
-        return Err("Update MonoCode on both devices".into());
+        return Err("Update MonoBOT on both devices".into());
     }
     let method = request["method"].as_str().ok_or("Invalid mobile method")?;
     let mut params = request["params"].clone();

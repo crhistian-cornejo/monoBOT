@@ -49,7 +49,7 @@ const PREVIEW_HEIGHT = 260;
 
 /**
  * The Monos-only layout's first screen, as a messaging app's chat list:
- * the Monocode mark and a new Mono in the native header, the Monos heard
+ * the MonoBOT mark and a new Mono in the native header, the Monos heard
  * from last first, and settings and search in glass at the foot, level with a chat's
  * composer. A Mono's chat pushes over it.
  */
@@ -269,7 +269,7 @@ export function MonoHome() {
         )}
       </ScrollView>
 
-      {/* The stack's native header: the Monocode mark and a new Mono as
+      {/* The stack's native header: the MonoBOT mark and a new Mono as
           native items, so they morph into a chat's back and ⋯ as one is
           pushed. */}
       <Stack.Screen options={{ headerTitle: "" }} />
@@ -279,7 +279,7 @@ export function MonoHome() {
             <Image
               source={MONOCODE_MARK}
               style={[styles.mark, { tintColor: colors.content }]}
-              accessibilityLabel="Monocode"
+              accessibilityLabel="MonoBOT"
               accessibilityIgnoresInvertColors
             />
           </View>
@@ -538,7 +538,7 @@ const useStyles = themedStyles((colors) => ({
     alignItems: "center",
     gap: 10,
     minHeight: 70,
-    // The mascot's left edge level with the Monocode mark's: iOS insets
+    // The mascot's left edge level with the MonoBOT mark's: iOS insets
     // the bar's items 16pt, and the mark sits 3pt into its 44pt box.
     paddingLeft: 19,
     paddingRight: 20,
@@ -593,7 +593,7 @@ const useStyles = themedStyles((colors) => ({
     color: colors.muted,
     fontSize: 15,
   },
-  // The Monocode mark, centred over the rows' mascots below it.
+  // The MonoBOT mark, centred over the rows' mascots below it.
   markBox: {
     width: AVATAR,
     height: AVATAR,

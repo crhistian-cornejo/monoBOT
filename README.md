@@ -1,17 +1,17 @@
-<h1 align="center">Monocode</h1>
+<h1 align="center">MonoBOT</h1>
 
 <p align="center">
   <strong>A GUI for your coding agents.</strong>
 </p>
 
 <p align="center">
-  <img width="1680" height="1050" alt="MonoCode with agent sessions open side by side" src="https://github.com/user-attachments/assets/89e04066-69de-473d-9aab-88b9ca3e3b7b" />
+  <img width="1680" height="1050" alt="MonoBOT with agent sessions open side by side" src="https://github.com/user-attachments/assets/89e04066-69de-473d-9aab-88b9ca3e3b7b" />
 </p>
 
 > [!NOTE]
 > **Try the new [Monocode Native preview](https://github.com/hardbeat920/monocode/releases)**, our experimental Rust + GPUI app for macOS, Linux and Windows. Read the [preview details](#monocode-native-preview) before installing.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin. If they’re installed and logged in, MonoCode can run them. Tabs are sessions. The composer is the input. MonoCode does not sell tokens.
+Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin. If they’re installed and logged in, MonoBOT can run them. Tabs are sessions. The composer is the input. MonoBOT does not sell tokens.
 
 ## Install
 
@@ -19,12 +19,12 @@ Install and sign in to at least one supported agent first. See [provider setup](
 
 | Platform | Native | Tauri |
 | --- | --- | --- |
-| macOS, Apple Silicon | [MonocodeNative_aarch64.dmg](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_aarch64.dmg) | [MonoCode.dmg](https://dl.usemono.dev/MonoCode.dmg) |
+| macOS, Apple Silicon | [MonocodeNative_aarch64.dmg](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_aarch64.dmg) | [MonoBOT.dmg](https://dl.usemono.dev/MonoBOT.dmg) |
 | macOS, Intel | [MonocodeNative_x64.dmg](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_x64.dmg) | [MonoCode_x64.dmg](https://dl.usemono.dev/MonoCode_x64.dmg) |
 | Linux, x86_64 | [.deb, .rpm, or AppImage](https://github.com/hardbeat920/monocode/releases/tag/native-v0.16.0-preview.13) | [.deb, .rpm, or AppImage](https://github.com/hardbeat920/monocode/releases/latest) |
 | Windows, x86_64 | [Installer](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_x64-setup.exe) | [Installer](https://github.com/hardbeat920/monocode/releases/latest) |
 
-On macOS, open the DMG and drag MonoCode to Applications. On Windows, run the installer. See [Linux setup](docs/install.md) for dependencies and package instructions.
+On macOS, open the DMG and drag MonoBOT to Applications. On Windows, run the installer. See [Linux setup](docs/install.md) for dependencies and package instructions.
 
 ## Get started
 
@@ -37,7 +37,7 @@ Open a project folder, choose an agent, and send a message. Each tab is a sessio
 
 Monos are experimental agents that work across your projects. They keep a memory and can run scheduled tasks you set up with them.
 
-MonoCode is still early. If something breaks, [report a bug](https://github.com/hardbeat920/monocode/issues).
+MonoBOT is still early. If something breaks, [report a bug](https://github.com/hardbeat920/monocode/issues).
 
 ## Guides
 
@@ -68,8 +68,8 @@ Download a packaged preview for macOS, Linux or Windows from the
 [releases page](https://github.com/hardbeat920/monocode/releases). See
 [known limitations](docs/native/parity.md) before testing.
 
-You can install it alongside MonoCode, but **the preview uses your existing
-MonoCode database and saves changes there**. Back up your data with the app
+You can install it alongside MonoBOT, but **the preview uses your existing
+MonoBOT database and saves changes there**. Back up your data with the app
 closed before testing, and avoid editing the same conversations in both apps
 at once.
 
@@ -77,19 +77,19 @@ To try GPUI from this checkout with Node.js 22+, Rust and Xcode on macOS:
 
 ```sh
 pnpm native:dev     # launch with a separate development database
-pnpm native:build   # create an optimized app using installed MonoCode data
+pnpm native:build   # create an optimized app using installed MonoBOT data
 ```
 
 Type `r` then Enter in the development terminal to rebuild and restart; there is
-no hot reload. The release app saves changes to your installed MonoCode data.
+no hot reload. The release app saves changes to your installed MonoBOT data.
 See the [native guide](docs/native/README.md) for prerequisites, build output,
 checks and preview limitations.
 
 ## Contributors
 
-Thanks to everyone who contributes to MonoCode!
+Thanks to everyone who contributes to MonoBOT!
 
-[![MonoCode contributors](https://contrib.rocks/image?repo=hardbeat920/monocode)](https://github.com/hardbeat920/monocode/graphs/contributors)
+[![MonoBOT contributors](https://contrib.rocks/image?repo=hardbeat920/monocode)](https://github.com/hardbeat920/monocode/graphs/contributors)
 
 Contributor image by [contrib.rocks](https://contrib.rocks).
 

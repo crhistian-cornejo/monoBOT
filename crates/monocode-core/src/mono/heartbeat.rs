@@ -370,7 +370,7 @@ pub fn digest(sessions: Vec<SessionLead>, notes: Vec<NoteLead>, inbox: Vec<Strin
     }
 }
 
-const GUIDANCE: &str = "[Heartbeat] An inactivity wake-up from MonoCode, not a user message. You run in a side session; the user sees nothing unless you report.
+const GUIDANCE: &str = "[Heartbeat] An inactivity wake-up from MonoBOT, not a user message. You run in a side session; the user sees nothing unless you report.
 
 Do one round:
 1. Reread your soul's standing instructions. Do the next round of any recurring check they describe, within the access you were given.

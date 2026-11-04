@@ -1,6 +1,6 @@
 # Build from source
 
-MonoCode supports macOS, Linux, and Windows. You need Node.js 20+ and a current stable Rust toolchain. Install and sign in to at least one agent CLI using [provider setup](providers.md).
+MonoBOT supports macOS, Linux, and Windows. You need Node.js 20+ and a current stable Rust toolchain. Install and sign in to at least one agent CLI using [provider setup](providers.md).
 
 ## Platform prerequisites
 
@@ -44,7 +44,7 @@ On EL 10, the setup helper enables EPEL 10 and CRB automatically, since the deve
 The build emits a `.rpm` under `target/release/bundle/rpm/`, installable with:
 
 ```bash
-sudo dnf install ./target/release/bundle/rpm/MonoCode-*.rpm
+sudo dnf install ./target/release/bundle/rpm/MonoBOT-*.rpm
 ```
 
 EL 9 and older are unsupported (`webkit2gtk4.1-devel` only exists in EPEL 10). The published release `.rpm` is built on Enterprise Linux 10 so it loads on Fedora and EL 10. See [Linux installation](install.md#fedora--enterprise-linux-packages) for release package installation and runtime repository setup.
@@ -84,7 +84,7 @@ Native commands do not need JavaScript dependencies installed.
 
 ```sh
 pnpm native:dev     # launch with a separate development database
-pnpm native:build   # create an optimized app using installed MonoCode data
+pnpm native:build   # create an optimized app using installed MonoBOT data
 pnpm native:check   # run native checks
 ```
 
@@ -97,7 +97,7 @@ The build command does not launch the app. On macOS, open the result with:
 open "crates/monocode-gpui/target/release/Monocode Native.app"
 ```
 
-The release app reads and writes your installed MonoCode data. It is locally
+The release app reads and writes your installed MonoBOT data. It is locally
 signed, without notarization or automatic updates. Linux/Windows GUI builds
 remain unverified.
 

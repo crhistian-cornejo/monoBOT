@@ -422,7 +422,7 @@ impl SettingsView {
                             ),
                     )
                     .child(paragraph(
-                        "Check on projects and conversations from the MonoCode mobile app. Your phone connects straight to this desktop.",
+                        "Check on projects and conversations from the MonoBOT mobile app. Your phone connects straight to this desktop.",
                     ))
                     .child(
                         paragraph("The iPhone app is in beta on TestFlight.")
@@ -829,7 +829,7 @@ impl SettingsView {
         let max_height = (viewport.height.as_f32() - 32.).max(0.);
         // Keep the QR square on narrow windows, without growing past size-96.
         let qr_side = QR_SIDE.min((width - 50.).max(0.));
-        let lead = "Open MonoCode on your phone, tap ";
+        let lead = "Open MonoBOT on your phone, tap ";
         let action = "Connect to desktop";
         let instructions = format!("{lead}{action}, and scan the code.");
         let bold = lead.len()..lead.len() + action.len();
@@ -838,7 +838,7 @@ impl SettingsView {
             .id("mobile-pair-code")
             .debug_selector(|| "mobile-pair-code".into())
             .role(Role::Image)
-            .aria_label("Scan this one-use pairing code in the MonoCode mobile app")
+            .aria_label("Scan this one-use pairing code in the MonoBOT mobile app")
             .relative()
             .size(px(qr_side))
             .flex_shrink_0()

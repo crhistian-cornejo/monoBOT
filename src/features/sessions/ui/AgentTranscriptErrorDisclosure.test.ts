@@ -73,7 +73,7 @@ describe("tool error disclosure", () => {
   });
 });
 
-describe("MonoCode CLI disclosure", () => {
+describe("MonoBOT CLI disclosure", () => {
   it("shows a compact row without a disclosure for a successful call", () => {
     const command =
       "/repo/target/debug/MonoCode.app/Contents/MacOS/monocode app notes.list";
@@ -121,7 +121,7 @@ describe("MonoCode CLI disclosure", () => {
     );
 
     const trigger = container.querySelector<HTMLButtonElement>(
-      'button[aria-label="Show error details for MonoCode: List notes"]',
+      'button[aria-label="Show error details for MonoBOT: List notes"]',
     );
     expect(trigger?.getAttribute("aria-expanded")).toBe("false");
     expect(container.textContent).not.toContain("Connection refused");

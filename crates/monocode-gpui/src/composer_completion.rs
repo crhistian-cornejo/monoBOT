@@ -288,7 +288,7 @@ impl Completion {
         cx.notify();
     }
     /// A skill or provider command already named `/{name}`, which wins over
-    /// MonoCode's own command of the same name.
+    /// MonoBOT's own command of the same name.
     pub(crate) fn has_user_command(&self, name: &str) -> bool {
         self.skills
             .iter()
@@ -675,7 +675,7 @@ impl Completion {
                 (
                     "operator",
                     "Operator",
-                    "Give this thread access to MonoCode",
+                    "Give this thread access to MonoBOT",
                 ),
                 ("plan", "Plan mode", "Review a plan before building"),
                 (

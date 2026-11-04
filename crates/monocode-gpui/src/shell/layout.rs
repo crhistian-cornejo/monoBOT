@@ -753,7 +753,7 @@ impl Shell {
                         .min_h_0()
                         .min_w_0()
                         // Every project lands on a blank session, as in
-                        // Monocode; this is empty only while one is created.
+                        // MonoBOT; this is empty only while one is created.
                         .child({
                             if let Some(monos) =
                                 self.monos.clone().filter(|m| m.read(cx).active.is_some())

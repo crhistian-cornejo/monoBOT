@@ -792,7 +792,7 @@ impl Service {
             if run.status == "running" {
                 run.status = "cancelled".into();
                 run.completed_at = Some(now);
-                run.error = Some("Interrupted when MonoCode last stopped.".into());
+                run.error = Some("Interrupted when MonoBOT last stopped.".into());
                 apply_run_summary(&mut automation, &run);
                 write_run(&tx, &run)?;
                 write_automation(&tx, &automation)?;

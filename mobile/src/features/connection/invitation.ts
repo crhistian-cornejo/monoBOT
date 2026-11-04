@@ -9,7 +9,7 @@ export function parseInvitation(text: string): Invitation {
   const url = new URL(text.trim());
   if (url.protocol !== "monocode:" || url.hostname !== "pair")
     throw new Error(
-      "Scan a Monocode pairing code from desktop Settings → Connections",
+      "Scan a MonoBOT pairing code from desktop Settings → Connections",
     );
   const code = url.searchParams.get("i");
   if (!code || !/^[A-Za-z0-9_-]+$/.test(code))

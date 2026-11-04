@@ -88,7 +88,7 @@ rm -rf "$appdir/usr/lib" "$appdir/apprun-hooks" "$appdir/AppRun.wrapped" "$appdi
 
 cat > "$appdir/AppRun" <<'APPRUN'
 #!/bin/sh
-# MonoCode AppImage entry point. The AppImage uses the host's WebKitGTK stack.
+# MonoBOT AppImage entry point. The AppImage uses the host's WebKitGTK stack.
 HERE="$(dirname "$(readlink -f "$0")")"
 
 webkit_ok=
@@ -107,7 +107,7 @@ if [ -z "$webkit_ok" ]; then
   # WebKit lives in the Nix store instead of /usr/lib. The dynamic linker
   # still finds it when the package is installed.
   cat >&2 <<'EOF'
-MonoCode needs WebKitGTK 4.1 on the host. If startup fails, install it:
+MonoBOT needs WebKitGTK 4.1 on the host. If startup fails, install it:
   Debian/Ubuntu: sudo apt install libwebkit2gtk-4.1-0
   Fedora:        sudo dnf install webkit2gtk4.1
   Arch:          sudo pacman -S webkit2gtk-4.1

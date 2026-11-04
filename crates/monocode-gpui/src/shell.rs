@@ -11711,7 +11711,7 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         // Pin → Rename → Copy session ID, open it, then skip the harness ID
-        // (this session has none) for the MonoCode one.
+        // (this session has none) for the MonoBOT one.
         cx.simulate_keystrokes(window.into(), "down down right down enter");
         cx.run_until_parked();
         window
@@ -11839,7 +11839,7 @@ mod tests {
                 let id = shell.workspace.active.unwrap();
                 let anchor = Anchor::Point(gpui::point(px(400.), px(30.)));
                 shell.open_menu(MenuTarget::Tab(id), anchor, w, cx);
-                // Closing every tab preserves one fresh blank tab, as in Monocode.
+                // Closing every tab preserves one fresh blank tab, as in MonoBOT.
                 for id in shell.workspace.tabs.clone() {
                     shell.close(id, w, cx);
                 }

@@ -46,7 +46,7 @@ fn search_pill() -> Div {
 
 impl TranscriptView {
     /// `tiled`: the row leads with its own tile, so the line drops the
-    /// inline logo a Monocode tool would otherwise carry.
+    /// inline logo a MonoBOT tool would otherwise carry.
     pub(super) fn tool(
         &mut self,
         tool: ToolCall,
@@ -243,7 +243,7 @@ impl TranscriptView {
             .py_1()
             .line_height(px(20.))
             // React's activity rows are always bare: no status glyph, only
-            // a failure stays marked. Monocode's own tools carry its logo.
+            // a failure stays marked. MonoBOT's own tools carry its logo.
             .when(visual && !tiled, |d| {
                 d.child(crate::activity::glyph("monocode", 14.))
             })

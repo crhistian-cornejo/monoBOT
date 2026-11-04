@@ -78,7 +78,7 @@ pub(crate) struct Preferences {
     pub mask_emails: bool,
     pub idle_agents: u32,
     pub claude_hooks: bool,
-    /// Experimental: report Monocode instead of `sdk-cli` as Claude's entrypoint.
+    /// Experimental: report MonoBOT instead of `sdk-cli` as Claude's entrypoint.
     pub claude_entrypoint: bool,
     pub binary_paths: HashMap<String, String>,
     pub disabled_skill_paths: Vec<String>,

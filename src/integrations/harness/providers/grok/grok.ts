@@ -539,7 +539,7 @@ async function handleRequest(
     if (plan) live.onEvent({ type: "plan", text: plan });
     await live.acp
       // End the provider-owned plan turn without approving implementation.
-      // MonoCode's separate Build turn is the only approval boundary.
+      // MonoBOT's separate Build turn is the only approval boundary.
       .respond(id, { outcome: "abandoned" })
       .catch(() => undefined);
     return;
