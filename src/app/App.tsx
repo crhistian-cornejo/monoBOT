@@ -633,6 +633,7 @@ import {
   subscribeMonos,
   type MonoState,
 } from "../features/monos/model/mono";
+import { botRole, type BotRole } from "../features/bots/model/bots";
 import {
   loadMonoFiles,
   MONO_PROMPT_VERSION,
@@ -5135,6 +5136,21 @@ function Workspace({
     setMonoSettingsFor(monoId);
     void onOpenMono(monoId);
   }, [onOpenMono]);
+
+  // A bot starts from its role's name and instructions, so it opens straight
+  // into its conversation instead of the settings a new Mono shows first.
+  const onCreateBot = useCallback(
+    (role: BotRole) => {
+      const info = botRole(role);
+      const monoId = createMono([], {
+        role,
+        name: info.name,
+        instructions: info.instructions,
+      }).id;
+      void onOpenMono(monoId);
+    },
+    [onOpenMono],
+  );
 
   const onResetMono = useCallback(
     async (sessionId: string): Promise<void> => {
@@ -13802,6 +13818,7 @@ function Workspace({
             unseenCounts: monoRail.unseen,
             onOpen: onOpenRailMono,
             onCreate: onCreateMono,
+            onCreateBot,
             onDelete: onDeleteRailMono,
           }
         : undefined,
@@ -13811,6 +13828,7 @@ function Workspace({
       monoRail,
       onOpenRailMono,
       onCreateMono,
+      onCreateBot,
       onDeleteRailMono,
     ],
   );

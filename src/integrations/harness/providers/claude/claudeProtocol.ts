@@ -256,6 +256,8 @@ export function buildClaudeSpawnArgs(input: {
   allowedTools?: readonly string[];
   /** Plugin folders loaded for this session only (MonoBOT's bundled skills). */
   pluginDirs?: readonly string[];
+  /** Tools or whole servers the session may never use. */
+  disallowedTools?: readonly string[];
 }): string[] {
   const args = [
     "--output-format",
@@ -290,6 +292,9 @@ export function buildClaudeSpawnArgs(input: {
     }
     if (input.allowedTools?.length) {
       args.push("--allowedTools", input.allowedTools.join(","));
+    }
+    if (input.disallowedTools?.length) {
+      args.push("--disallowedTools", input.disallowedTools.join(","));
     }
     for (const dir of input.pluginDirs ?? []) {
       args.push("--plugin-dir", dir);

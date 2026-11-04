@@ -13,6 +13,7 @@ import {
   enabledConnectors,
 } from "../../../../features/settings/model/connectors";
 import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
+import { botLaunchForSession } from "../../../../features/bots/model/botSession";
 import {
   killChild,
   resolveClaudeBinary,
@@ -545,12 +546,15 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     },
   );
 
+  const bot = botLaunchForSession(input.sessionId);
   await spawnChild(
     input.sessionId,
     path,
     buildClaudeSpawnArgs({
       ...launch,
-      pluginDirs: await bundledPluginDirs(["monobot"]),
+      allowedTools: [...(launch.allowedTools ?? []), ...(bot?.allowedTools ?? [])],
+      disallowedTools: bot?.disallowedTools,
+      pluginDirs: await bundledPluginDirs(["monobot", ...(bot?.plugins ?? [])]),
     }),
     input.cwd,
     { provider: "claude", id: input.providerAccountId ?? "default" },

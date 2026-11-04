@@ -22,6 +22,7 @@ import {
 import {
   defaultMonoName,
   findMono,
+  isBot,
   listMonos,
   MONO_STATUS_LABEL,
   nextMonoLook,
@@ -36,6 +37,7 @@ import {
   updateMono,
   type MonoState,
 } from "../../features/monos/model/mono";
+import { BOT_ROLES, type BotRole } from "../../features/bots/model/bots";
 
 export type MonoRailProps = {
   /** The Mono open in the main area, if any. */
@@ -47,6 +49,8 @@ export type MonoRailProps = {
   onOpen: (monoId: string) => void;
   /** Creates a Mono, given these projects to start with. */
   onCreate: (projects?: readonly string[]) => void;
+  /** Creates a productivity bot with this role. */
+  onCreateBot?: (role: BotRole) => void;
   onDelete: (monoId: string) => void;
 };
 
@@ -72,29 +76,45 @@ export function MonoRailSection({
   unseenCounts,
   onOpen,
   onCreate,
+  onCreateBot,
   onDelete,
   project,
+  kind,
 }: MonoRailProps & {
   /**
    * Lists only the Monos working on this project, as the inset sidebar does;
    * a Mono on several projects shows in each of them.
    */
   project?: string;
+  /** Lists the productivity bots instead of the coding Monos. */
+  kind?: "bot";
 }) {
+  const bots = kind === "bot";
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const monos = useMemo(
-    () => listMonos().filter((mono) => !project || monoWorksOn(mono, project)),
-    [snapshot, project],
+    () =>
+      listMonos().filter(
+        (mono) =>
+          isBot(mono) === bots && (!project || monoWorksOn(mono, project)),
+      ),
+    [snapshot, project, bots],
   );
   const ids = monos.map((mono) => mono.id);
   const sortable = useAnimatedReorder(ids, reorderMonos, "y");
   const [menu, setMenu] = useState<{ id: string; anchor: PopoverAnchor }>();
+  const [roles, setRoles] = useState<PopoverAnchor>();
+  const section = useRef<HTMLDivElement>(null);
   const [background, setBackground] = useState<string>();
   const backgroundMono = background ? findMono(background) : undefined;
+  const label = bots ? "Bots" : "Monos";
+  const create = (anchor: HTMLElement) => {
+    if (bots) setRoles(anchor);
+    else onCreate(project ? [project] : undefined);
+  };
 
   // With no Mono yet, the card stands in for the rail's section. A project
   // with none of its own offers one under the label instead.
-  if (monos.length === 0 && !project)
+  if (monos.length === 0 && !project && !bots)
     return (
       <div className="mb-2 shrink-0" data-mono-rail>
         <MonoIntroCard
@@ -107,9 +127,11 @@ export function MonoRailSection({
 
   return (
     <div
+      ref={section}
       className={`shrink-0 ${project ? "px-2 pb-3" : "mb-2"}`}
       data-mono-rail
       data-mono-project={project}
+      data-mono-kind={kind}
     >
       <div
         className={
@@ -124,14 +146,15 @@ export function MonoRailSection({
             project ? "" : " px-1 text-xs leading-5 text-content/50"
           }`}
         >
-          Monos
+          {label}
         </span>
         {monos.length ? (
           <button
             type="button"
-            title="New mono"
-            aria-label="New mono"
-            onClick={() => onCreate(project ? [project] : undefined)}
+            title={bots ? "New bot" : "New mono"}
+            aria-label={bots ? "New bot" : "New mono"}
+            aria-haspopup={bots ? "menu" : undefined}
+            onClick={(event) => create(event.currentTarget)}
             className={`grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content${
               project ? " -mr-0.5" : ""
             }`}
@@ -143,9 +166,9 @@ export function MonoRailSection({
       <div className={`flex flex-col gap-px${project ? "" : " px-2"}`}>
         {monos.length === 0 ? (
           <RailAction
-            label="New mono"
+            label={bots ? "New bot" : "New mono"}
             icon={Plus}
-            onClick={() => onCreate(project ? [project] : undefined)}
+            onClick={() => section.current && create(section.current)}
           />
         ) : null}
         {monos.map((mono) => {
@@ -273,6 +296,36 @@ export function MonoRailSection({
           }}
           onClose={() => setMenu(undefined)}
         />
+      ) : null}
+      {roles ? (
+        <Popover
+          anchor={roles}
+          side="right"
+          align="start"
+          width={260}
+          onDismiss={() => setRoles(undefined)}
+          role="menu"
+          aria-label="New bot"
+          className="p-1"
+        >
+          {BOT_ROLES.map((info) => (
+            <button
+              key={info.role}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setRoles(undefined);
+                onCreateBot?.(info.role);
+              }}
+              className="flex w-full flex-col items-start px-2.5 py-1.5 text-left hover:bg-content/8"
+            >
+              <span className="text-[13px] font-medium">{info.name}</span>
+              <span className="text-xs text-content/55">
+                {info.description}
+              </span>
+            </button>
+          ))}
+        </Popover>
       ) : null}
       {backgroundMono ? (
         <ProjectBackgroundDialog

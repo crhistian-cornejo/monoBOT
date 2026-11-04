@@ -19,6 +19,7 @@ import {
   projectMascot,
 } from "../../projects/model/projectMascots";
 import { removeMonoBackground } from "./monoBackground";
+import { isBotRole, type BotRole } from "../../bots/model/bots";
 
 /** The project palette's colors, plus indigo for a Mono's ninth preset. */
 export const MONO_COLORS = [
@@ -47,6 +48,9 @@ export type Mono = {
   useSidebarFolders?: boolean;
   /** Superseded by SOUL.md; only read once, to seed it. */
   instructions?: string;
+  /** A productivity bot rather than a coding Mono: its own sidebar section. */
+  kind?: "bot";
+  botRole?: BotRole;
   /**
    * From when each project had its own Mono: the project whose agent folder
    * it inherits. The folder moves under its id the first time it is read.
@@ -173,7 +177,17 @@ function parseMono(value: unknown): Mono | undefined {
     ...(entry.useSidebarFolders === true ? { useSidebarFolders: true } : {}),
     ...(instructions ? { instructions } : {}),
     ...(legacyProject ? { legacyProject } : {}),
+    ...(entry.kind === "bot"
+      ? {
+          kind: "bot" as const,
+          botRole: isBotRole(entry.botRole) ? entry.botRole : "assistant",
+        }
+      : {}),
   };
+}
+
+export function isBot(mono: Mono): boolean {
+  return mono.kind === "bot";
 }
 
 /** Every Mono, in the order the rail shows them. */
@@ -228,12 +242,23 @@ export function nextMonoLook(
 }
 
 /** A new Mono with the next look, starting with the projects given, if any. */
-export function createMono(projects: readonly string[] = []): Mono {
+export function createMono(
+  projects: readonly string[] = [],
+  bot?: { role: BotRole; name: string; instructions: string },
+): Mono {
   const roster = listMonos();
   const mono: Mono = {
     id: newMonoId(),
     ...nextMonoLook(roster),
     projects: uniqueProjects(projects),
+    ...(bot
+      ? {
+          kind: "bot" as const,
+          botRole: bot.role,
+          name: bot.name,
+          instructions: bot.instructions,
+        }
+      : {}),
   };
   saveRoster([...roster, mono]);
   return mono;
