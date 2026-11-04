@@ -13991,7 +13991,11 @@ function Workspace({
         onBackFromDocument={() => setMonoOverviewDocument(null)}
         onOpenFile={onOpenFile}
         onClose={() => setMonoOverviewOpen(false)}
-        windowControls={monoCovers && !IS_MAC ? <WindowControls /> : undefined}
+        // Classic, the overview runs the window's full height, so it carries
+        // the window controls; focused, it sits under the title bar that has them.
+        windowControls={
+          monoCovers && !IS_MAC && !insetLayout ? <WindowControls /> : undefined
+        }
       />
     ) : null;
   const monoSettingsDialog =
@@ -14237,7 +14241,9 @@ function Workspace({
       onOpenMonoSettings={
         monoCovers && !insetLayout ? onOpenMonoViewSettings : undefined
       }
-      hideWindowControls={monoCovers && monoOverviewOpen && !!monoOverviewPanel}
+      hideWindowControls={
+        !insetLayout && monoCovers && monoOverviewOpen && !!monoOverviewPanel
+      }
       activeId={
         monoViewSession
           ? insetLayout
@@ -14707,18 +14713,25 @@ function Workspace({
                                         {insetLayout &&
                                         visible &&
                                         monoViewMono ? (
-                                          <MonoViewActions
-                                            name={monoLook(monoViewMono).name}
-                                            overviewOpen={monoOverviewOpen}
-                                            onToggleOverview={
-                                              onToggleMonoOverview
-                                            }
-                                            onOpenSettings={
-                                              onOpenMonoViewSettings
-                                            }
-                                            // The overview header's row, so both share a centre line.
-                                            className="absolute right-2.5 top-0 z-10 h-10"
-                                          />
+                                          // A row of its own, the height of the
+                                          // overview's header so both share a
+                                          // centre line; over the chat, messages
+                                          // scrolled under the buttons.
+                                          <div
+                                            className="flex h-10 shrink-0 items-center justify-end px-2.5"
+                                            data-tauri-drag-region="deep"
+                                          >
+                                            <MonoViewActions
+                                              name={monoLook(monoViewMono).name}
+                                              overviewOpen={monoOverviewOpen}
+                                              onToggleOverview={
+                                                onToggleMonoOverview
+                                              }
+                                              onOpenSettings={
+                                                onOpenMonoViewSettings
+                                              }
+                                            />
+                                          </div>
                                         ) : null}
                                         <SessionPane
                                           {...sessionPaneProps}
