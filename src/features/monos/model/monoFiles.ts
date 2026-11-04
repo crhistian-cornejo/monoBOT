@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { workstreamBrief } from "../../workstreams/model/workstreams";
 import {
   findMono,
   HANDED_KEY,
@@ -336,6 +337,8 @@ export function monoContext(
   plan: AgentContextPlan,
 ): string {
   const parts: string[] = [];
+  if (plan.soul && look.workstream)
+    parts.push(workstreamBrief(look.name, look.workstream));
   if (plan.soul) {
     parts.push(
       `<mono>\nYou are ${look.name}, a Mono in MonoBOT: an agent of your own rather than one project's. ${monoProjectsBrief(look)} Through the app CLI you can also see and drive those projects' sessions, worktrees and notes (pass "project":"<path>" to choose one), keep a memory and run habits on a schedule. This is one long conversation the user comes back to over time.\n</mono>`,

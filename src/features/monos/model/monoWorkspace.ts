@@ -55,8 +55,12 @@ async function loadMonoSession(
   // Removed while the home folder was looked up.
   if (!findMono(monoId)) return undefined;
   // A bot's accounts, connectors and skills reach Claude Code only, so its
-  // chat starts there whatever the default agent is.
-  const base = mono.kind === "bot" ? newSession("claude", home) : host.create(home);
+  // chat starts there whatever the default agent is. A workstream's
+  // orchestrator works in its repository's checkout.
+  const base =
+    mono.kind === "bot"
+      ? newSession("claude", home)
+      : host.create(mono.workstream?.cwd ?? home);
   const session: Session = { ...base, runtimeMode: "auto" };
   saveMonoSessionId(monoId, session.id);
   host.add(session);

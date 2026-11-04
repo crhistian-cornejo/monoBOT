@@ -1182,6 +1182,57 @@ pub async fn git_pr_status(cwd: String) -> Result<Option<GitPr>, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// A pull request opened from one of a workstream's branches.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBranchPr {
+    pub number: i64,
+    pub title: String,
+    pub url: String,
+    pub state: String,
+    pub is_draft: bool,
+    pub head_ref_name: String,
+}
+
+/// The repository's pull requests whose head branch starts with `prefix`
+/// (a workstream's `ws/<slug>/`), newest first.
+#[tauri::command]
+pub async fn git_branch_prs(cwd: String, prefix: String) -> Result<Vec<GitBranchPr>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        git_branch_prs_for(&expand_home(&cwd), &prefix)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn git_branch_prs_for(root: &Path, prefix: &str) -> Result<Vec<GitBranchPr>, String> {
+    if prefix.trim().is_empty() {
+        return Err("A branch prefix is required".into());
+    }
+    let json = gh_checked(
+        root,
+        &[
+            "pr",
+            "list",
+            "--state",
+            "all",
+            "--limit",
+            "100",
+            "--json",
+            "number,title,url,state,isDraft,headRefName",
+        ],
+    )?;
+    Ok(branch_prs_with_prefix(&json, prefix))
+}
+
+fn branch_prs_with_prefix(json: &str, prefix: &str) -> Vec<GitBranchPr> {
+    serde_json::from_str::<Vec<GitBranchPr>>(json)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|pr| pr.head_ref_name.starts_with(prefix))
+        .collect()
+}
+
 #[derive(Deserialize)]
 struct GitPrCreateInput {
     title: String,
@@ -6356,6 +6407,19 @@ pub async fn open_path_with_default_app(path: String) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn workstream_prs_are_matched_by_branch_prefix() {
+        let json = r#"[
+            {"number":3,"title":"API","url":"u3","state":"OPEN","isDraft":true,"headRefName":"ws/migrate/api"},
+            {"number":2,"title":"Other","url":"u2","state":"MERGED","isDraft":false,"headRefName":"feature/x"},
+            {"number":1,"title":"Web","url":"u1","state":"MERGED","isDraft":false,"headRefName":"ws/migrate/web"}
+        ]"#;
+        let prs = branch_prs_with_prefix(json, "ws/migrate/");
+        assert_eq!(prs.iter().map(|pr| pr.number).collect::<Vec<_>>(), vec![3, 1]);
+        assert!(prs[0].is_draft);
+        assert!(branch_prs_with_prefix("not json", "ws/").is_empty());
+    }
 
     #[test]
     fn only_video_containers_can_join_the_stream_scope() {

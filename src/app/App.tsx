@@ -643,6 +643,15 @@ import {
 } from "./shell/PersonalRail";
 import { addBotNews, removeBotNewsFor } from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
+import { createWorkstream } from "../features/workstreams/model/workstreamApi";
+import {
+  markWorkstreamIntroSeen,
+  workstreamIntroSeen,
+} from "../features/workstreams/model/workstreams";
+import { NewWorkstreamDialog } from "../features/workstreams/ui/NewWorkstreamDialog";
+import { WorkstreamFiles } from "../features/workstreams/ui/WorkstreamFiles";
+import { WorkstreamIntro } from "../features/workstreams/ui/WorkstreamIntro";
+import { WorkstreamPrs } from "../features/workstreams/ui/WorkstreamPrs";
 import {
   BLANK_BOT_SOUL,
   botRole,
@@ -5222,6 +5231,23 @@ function Workspace({
       // A blank bot opens on its settings, where the user writes who it is.
       if (options?.blank) setMonoSettingsFor(monoId);
       void onOpenMono(monoId);
+    },
+    [onOpenMono],
+  );
+
+  // A new workstream shows its tour once, then the dialog that names it.
+  const [workstreamDialog, setWorkstreamDialog] = useState<
+    "intro" | "new" | null
+  >(null);
+  const onCreateWorkstream = useCallback(() => {
+    setWorkstreamDialog(workstreamIntroSeen() ? "new" : "intro");
+  }, []);
+  const onStartWorkstream = useCallback(
+    async (input: { name: string; project: string; worktree: boolean }) => {
+      const mono = await createWorkstream(input);
+      setMonoOverviewTab("sessions");
+      setMonoOverviewOpen(true);
+      await onOpenMono(mono.id);
     },
     [onOpenMono],
   );
@@ -13847,6 +13873,19 @@ function Workspace({
               }
         }
         bot={monoViewIsBot}
+        workstream={
+          monoViewMono.workstream
+            ? {
+                prs: <WorkstreamPrs workstream={monoViewMono.workstream} />,
+                files: (
+                  <WorkstreamFiles
+                    workstream={monoViewMono.workstream}
+                    onOpenFile={onOpenFile}
+                  />
+                ),
+              }
+            : undefined
+        }
         news={
           monoViewMono.botRole === "principal" ? (
             <BotNewsList onOpenBot={(monoId) => void onOpenMono(monoId)} />
@@ -13965,11 +14004,13 @@ function Workspace({
               monoOverviewTab === "news",
             zone: railZone,
             onZoneChange: onRailZoneChange,
+            onCreateWorkstream,
           }
         : undefined,
     [
       railZone,
       onRailZoneChange,
+      onCreateWorkstream,
       monosEnabled,
       monoViewMono?.id,
       monoViewMono?.botRole,
@@ -14681,6 +14722,25 @@ function Workspace({
                       </div>
                       {monoCovers ? monoOverviewPanel : null}
                       {monoSettingsDialog}
+                      {workstreamDialog === "intro" ? (
+                        <WorkstreamIntro
+                          onStart={() => {
+                            markWorkstreamIntroSeen();
+                            setWorkstreamDialog("new");
+                          }}
+                          onClose={() => {
+                            markWorkstreamIntroSeen();
+                            setWorkstreamDialog(null);
+                          }}
+                        />
+                      ) : workstreamDialog === "new" ? (
+                        <NewWorkstreamDialog
+                          cwd={sidebarCwd}
+                          recents={recents}
+                          onCreate={onStartWorkstream}
+                          onClose={() => setWorkstreamDialog(null)}
+                        />
+                      ) : null}
                     </div>
                   </div>
                   {searchViewOpen ||

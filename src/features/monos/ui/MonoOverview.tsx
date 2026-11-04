@@ -11,6 +11,8 @@ import {
   Search,
   Users,
   Bell,
+  Folder,
+  GitPullRequest,
 } from "../../../shared/ui/icons";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { artifactLabel, type ArtifactCard } from "../../artifacts/artifacts";
@@ -48,7 +50,9 @@ export type MonoOverviewTab =
   | "documents"
   | "changes"
   | "subagents"
-  | "news";
+  | "news"
+  | "prs"
+  | "files";
 
 // Activity sits apart, beside the panel toggle, since it follows the chat.
 const TABS: {
@@ -62,6 +66,8 @@ const TABS: {
   { id: "changes", label: "Changes", icon: FileDiff },
   { id: "subagents", label: "Sub-agents", icon: Users },
   { id: "news", label: "News", icon: Bell },
+  { id: "prs", label: "PRs", icon: GitPullRequest },
+  { id: "files", label: "Files", icon: Folder },
 ];
 
 // A personal bot does not work in projects: no sessions to list and no code
@@ -71,6 +77,9 @@ const MONO_TABS = new Set(["sessions", "documents", "habits", "changes"]);
 const BOT_TABS = new Set(["habits", "documents", "subagents"]);
 // The Principal bot also reads every bot's news.
 const PRINCIPAL_TABS = new Set(["news", "habits", "documents", "subagents"]);
+// A workstream's orchestrator: its agents, their pull requests, and the
+// shared folder.
+const WORKSTREAM_TABS = new Set(["sessions", "prs", "files"]);
 
 /** The conversation's recorded changes, reviewed and committed on their tab. */
 export type MonoOverviewChanges = {
@@ -123,6 +132,8 @@ type Props = {
   subagentCount?: number;
   /** Every bot's news, for the Principal bot. */
   news?: ReactNode;
+  /** A workstream's pull requests and shared folder. */
+  workstream?: { prs: ReactNode; files: ReactNode };
 };
 
 /**
@@ -147,6 +158,7 @@ export function MonoOverview({
   subagents,
   subagentCount,
   news,
+  workstream,
   onOpenSession,
   shownSession,
   onBackFromSession = () => {},
@@ -159,7 +171,13 @@ export function MonoOverview({
   windowControls,
 }: Props) {
   const lock = useLockOverscroll<HTMLDivElement>();
-  const shownTabs = news ? PRINCIPAL_TABS : bot ? BOT_TABS : MONO_TABS;
+  const shownTabs = workstream
+    ? WORKSTREAM_TABS
+    : news
+      ? PRINCIPAL_TABS
+      : bot
+        ? BOT_TABS
+        : MONO_TABS;
   // A tab the other kind of agent was left on falls back to Documents.
   const tab: MonoOverviewTab =
     requestedTab === "activity" || shownTabs.has(requestedTab)
@@ -264,6 +282,8 @@ export function MonoOverview({
     changes: changes?.totals?.files,
     subagents: subagentCount,
     news: undefined,
+    prs: undefined,
+    files: undefined,
   };
 
   return (
@@ -378,16 +398,22 @@ export function MonoOverview({
                   query={query}
                   filters={filters}
                   onOpenSession={onOpenSession}
+                  grouped={!!workstream}
                 />
               </div>
             ) : (
               <EmptyState icon={MessageMultiple}>
-                Ask {agent.name} to start a session on one of your projects,
-                like a bug fix or a review, and it shows up here.
+                {workstream
+                  ? "Tell the orchestrator the goal. Each agent it starts shows up here; open one to answer it or follow its work."
+                  : `Ask ${agent.name} to start a session on one of your projects, like a bug fix or a review, and it shows up here.`}
               </EmptyState>
             )
           ) : tab === "news" ? (
             news
+          ) : tab === "prs" ? (
+            workstream?.prs
+          ) : tab === "files" ? (
+            workstream?.files
           ) : tab === "subagents" ? (
             (subagents ?? (
               <EmptyState icon={Users}>
@@ -522,25 +548,30 @@ function OverviewTabs({
       aria-label="Overview"
       className="-ml-2 flex items-center gap-0.5"
     >
-      {[...tabs].flatMap((id) => TABS.filter((entry) => entry.id === id)).map(({ id, label, icon }) => {
-        const selected = id === tab;
-        return (
-          <TabButton
-            key={id}
-            label={label}
-            icon={icon}
-            selected={selected}
-            count={counts[id]}
-            // Folded tabs dot their icon, as the rail does, when they hold
-            // something new.
-            dot={id === "changes" && !selected && !!counts[id]}
-            role="tab"
-            aria-selected={selected}
-            aria-label={label}
-            onClick={() => onChange(id)}
-          />
-        );
-      })}
+      {[...tabs]
+        .flatMap((id) => TABS.filter((entry) => entry.id === id))
+        .map(({ id, label: tabLabel, icon }) => {
+          const selected = id === tab;
+          // A workstream's sessions are its agents.
+          const label =
+            id === "sessions" && tabs.has("prs") ? "Agents" : tabLabel;
+          return (
+            <TabButton
+              key={id}
+              label={label}
+              icon={icon}
+              selected={selected}
+              count={counts[id]}
+              // Folded tabs dot their icon, as the rail does, when they hold
+              // something new.
+              dot={id === "changes" && !selected && !!counts[id]}
+              role="tab"
+              aria-selected={selected}
+              aria-label={label}
+              onClick={() => onChange(id)}
+            />
+          );
+        })}
     </div>
   );
 }

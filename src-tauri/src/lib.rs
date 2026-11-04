@@ -64,6 +64,7 @@ mod window_transfer;
 #[cfg(windows)]
 mod windows;
 mod worktree_lifecycle;
+mod workstreams;
 mod worktrees;
 
 // Phase 1 seam: spawn / kill harness children per MonoBOT thread.
@@ -391,6 +392,8 @@ pub fn run() {
             fs::git_sync,
             fs::git_range_context,
             fs::git_pr_status,
+            fs::git_branch_prs,
+            workstreams::workstream_folder,
             fs::git_pr_create,
             fs::git_github_status,
             fs::github_monocode_star_status,

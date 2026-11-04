@@ -59,6 +59,7 @@ export function MonoSessionList({
   query = "",
   filters = DEFAULT_SESSION_SIDEBAR_FILTERS,
   onOpenSession,
+  grouped = false,
 }: {
   agent: MonoLook;
   launches: readonly MonoSpawnedSession[];
@@ -68,6 +69,11 @@ export function MonoSessionList({
   query?: string;
   filters?: SessionSidebarFilters;
   onOpenSession: (sessionId: string) => void | Promise<void>;
+  /**
+   * A workstream's agents: grouped as waiting on the user, working, and
+   * idle, so what needs an answer is on top.
+   */
+  grouped?: boolean;
 }) {
   const launchesKey = JSON.stringify(
     launches.map((entry) => [entry.sessionId, entry.cwd]),
@@ -250,7 +256,12 @@ export function MonoSessionList({
     const scroller = scrollParent(list.current);
     if (scroller) scroller.scrollTop = 0;
   }, [listKey]);
-  const shown = matching.slice(0, listWindowSize(matching.length, limit));
+  const groupOf = (id: string) =>
+    approvalIds.has(id) ? 0 : busyIds.has(id) ? 1 : 2;
+  const ordered = grouped
+    ? [...matching].sort((a, b) => groupOf(a.sessionId) - groupOf(b.sessionId))
+    : matching;
+  const shown = ordered.slice(0, listWindowSize(ordered.length, limit));
   const hasMore = shown.length < matching.length;
   useEffect(() => {
     const sentinel = loadMore.current;
@@ -281,102 +292,20 @@ export function MonoSessionList({
   return (
     <div ref={list}>
       <div className="flex flex-col gap-1">
-        {shown.map((launch) => {
-          const live = sessions.find((entry) => entry.id === launch.sessionId);
-          const saved =
-            history.find((entry) => entry.id === launch.sessionId) ??
-            stored.byId.get(launch.sessionId);
-          // Once it is known, it gets the sidebar's own card: model, status,
-          // title, branch or worktree, and any linked PR or issue.
-          const summary: SessionSummary | undefined = live
-            ? {
-                ...saved,
-                ...summaryFromSession(live, saved),
-                updatedAt: saved?.updatedAt ?? Date.now(),
-              }
-            : saved;
-          if (summary)
-            return (
-              <div key={launch.sessionId} data-mono-session={launch.sessionId}>
-                <SessionCard
-                  session={summary}
-                  modelInFooter
-                  isActive={false}
-                  isSelected={false}
-                  busy={!!live?.busy}
-                  done={false}
-                  linkedUpdate={false}
-                  needsApproval={
-                    !!live &&
-                    (hasPendingApproval(live.blocks) || !!live.pendingQuestion)
-                  }
-                  project={
-                    agent.projects.find(
-                      (project) => project.path === summary.cwd,
-                    )?.name ?? projectName(summary.cwd)
-                  }
-                  now={Date.now()}
-                  onSelect={(id) => {
-                    if (!opening) void open(id);
-                  }}
-                />
+        {shown.map((launch, index) => {
+          const group = groupOf(launch.sessionId);
+          const header =
+            grouped &&
+            (index === 0 || groupOf(shown[index - 1]!.sessionId) !== group) ? (
+              <div
+                key={`group:${group}`}
+                className="px-1 pt-2 pb-0.5 font-mono text-[11px] uppercase tracking-wide text-content/50"
+              >
+                {AGENT_GROUPS[group]}
               </div>
-            );
-          // Not known, either deleted or not looked up: the sidebar's card
-          // still, from what the launch recorded.
-          const unavailable = unavailableIds.has(launch.sessionId);
-          const failed = !unavailable && stored.failed.has(launch.cwd);
-          const loading = !unavailable && !failed;
-          return (
-            <div
-              key={launch.sessionId}
-              data-mono-session={loading ? undefined : launch.sessionId}
-              data-mono-session-loading={loading ? launch.sessionId : undefined}
-              data-mono-session-unavailable={unavailable ? "" : undefined}
-              // Until it is known, hold its place without a card of another
-              // look that the real one would replace a moment later.
-              aria-hidden={loading || undefined}
-              aria-disabled={unavailable || undefined}
-              inert={loading || unavailable}
-              className={
-                loading ? "invisible" : unavailable ? "opacity-50" : ""
-              }
-            >
-              <SessionCard
-                session={{
-                  id: launch.sessionId,
-                  cwd: launch.cwd,
-                  harness: launch.harness,
-                  model: launch.model,
-                  runtimeMode: "auto",
-                  title: launch.title,
-                  createdAt: 0,
-                  updatedAt: 0,
-                }}
-                modelInFooter
-                statusLabel={
-                  unavailable
-                    ? "Unavailable"
-                    : opening === launch.sessionId
-                      ? "Opening…"
-                      : failed
-                        ? "Status unavailable"
-                        : ""
-                }
-                isActive={false}
-                isSelected={false}
-                busy={false}
-                done={false}
-                linkedUpdate={false}
-                needsApproval={false}
-                project={projectLabel(launch.cwd)}
-                now={0}
-                onSelect={(id) => {
-                  if (failed && !opening) void open(id);
-                }}
-              />
-            </div>
-          );
+            ) : null;
+          const card = renderCard(launch);
+          return header ? [header, card] : card;
         })}
       </div>
       {hasMore ? <div ref={loadMore} aria-hidden className="h-px" /> : null}
@@ -387,7 +316,104 @@ export function MonoSessionList({
       ) : null}
     </div>
   );
+
+  function renderCard(launch: MonoSpawnedSession) {
+    const live = sessions.find((entry) => entry.id === launch.sessionId);
+    const saved =
+      history.find((entry) => entry.id === launch.sessionId) ??
+      stored.byId.get(launch.sessionId);
+    // Once it is known, it gets the sidebar's own card: model, status,
+    // title, branch or worktree, and any linked PR or issue.
+    const summary: SessionSummary | undefined = live
+      ? {
+          ...saved,
+          ...summaryFromSession(live, saved),
+          updatedAt: saved?.updatedAt ?? Date.now(),
+        }
+      : saved;
+    if (summary)
+      return (
+        <div key={launch.sessionId} data-mono-session={launch.sessionId}>
+          <SessionCard
+            session={summary}
+            modelInFooter
+            isActive={false}
+            isSelected={false}
+            busy={!!live?.busy}
+            done={false}
+            linkedUpdate={false}
+            needsApproval={
+              !!live &&
+              (hasPendingApproval(live.blocks) || !!live.pendingQuestion)
+            }
+            project={
+              agent.projects.find((project) => project.path === summary.cwd)
+                ?.name ?? projectName(summary.cwd)
+            }
+            now={Date.now()}
+            onSelect={(id) => {
+              if (!opening) void open(id);
+            }}
+          />
+        </div>
+      );
+    // Not known, either deleted or not looked up: the sidebar's card
+    // still, from what the launch recorded.
+    const unavailable = unavailableIds.has(launch.sessionId);
+    const failed = !unavailable && stored.failed.has(launch.cwd);
+    const loading = !unavailable && !failed;
+    return (
+      <div
+        key={launch.sessionId}
+        data-mono-session={loading ? undefined : launch.sessionId}
+        data-mono-session-loading={loading ? launch.sessionId : undefined}
+        data-mono-session-unavailable={unavailable ? "" : undefined}
+        // Until it is known, hold its place without a card of another
+        // look that the real one would replace a moment later.
+        aria-hidden={loading || undefined}
+        aria-disabled={unavailable || undefined}
+        inert={loading || unavailable}
+        className={loading ? "invisible" : unavailable ? "opacity-50" : ""}
+      >
+        <SessionCard
+          session={{
+            id: launch.sessionId,
+            cwd: launch.cwd,
+            harness: launch.harness,
+            model: launch.model,
+            runtimeMode: "auto",
+            title: launch.title,
+            createdAt: 0,
+            updatedAt: 0,
+          }}
+          modelInFooter
+          statusLabel={
+            unavailable
+              ? "Unavailable"
+              : opening === launch.sessionId
+                ? "Opening…"
+                : failed
+                  ? "Status unavailable"
+                  : ""
+          }
+          isActive={false}
+          isSelected={false}
+          busy={false}
+          done={false}
+          linkedUpdate={false}
+          needsApproval={false}
+          project={projectLabel(launch.cwd)}
+          now={0}
+          onSelect={(id) => {
+            if (failed && !opening) void open(id);
+          }}
+        />
+      </div>
+    );
+  }
 }
+
+const AGENT_GROUPS = ["Waiting on you", "Working", "Idle"] as const;
 
 /** The nearest ancestor that scrolls, which the list pages against. */
 function scrollParent(node: HTMLElement | null): HTMLElement | null {

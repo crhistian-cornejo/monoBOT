@@ -58,6 +58,8 @@ export type MonoRailProps = {
   /** Which sidebar zone shows: Code (projects, Monos) or Personal (bots). */
   zone?: RailZone;
   onZoneChange?: (zone: RailZone) => void;
+  /** Starts a new workstream (its tour first, the first time). */
+  onCreateWorkstream?: () => void;
 };
 
 const IDLE: MonoState = { status: "idle" };
@@ -83,6 +85,7 @@ export function MonoRailSection({
   onOpen,
   onCreate,
   onCreateBot,
+  onCreateWorkstream,
   onDelete,
   project,
   kind,
@@ -115,15 +118,22 @@ export function MonoRailSection({
   const section = useRef<HTMLDivElement>(null);
   const [background, setBackground] = useState<string>();
   const backgroundMono = background ? findMono(background) : undefined;
-  const label = bots ? "Bots" : "Monos";
+  const workstreams = kind === "workstream";
+  const label = bots ? "Bots" : workstreams ? "Workstreams" : "Monos";
+  const newLabel = bots
+    ? "New bot"
+    : workstreams
+      ? "New workstream"
+      : "New mono";
   const create = (anchor: HTMLElement) => {
     if (bots) setRoles(anchor);
+    else if (workstreams) onCreateWorkstream?.();
     else onCreate(project ? [project] : undefined);
   };
 
   // With no Mono yet, the card stands in for the rail's section. A project
   // with none of its own offers one under the label instead.
-  if (monos.length === 0 && !project && !bots)
+  if (monos.length === 0 && !project && !kind)
     return (
       <div className="mb-2 shrink-0" data-mono-rail>
         <MonoIntroCard
@@ -160,8 +170,8 @@ export function MonoRailSection({
         {monos.length ? (
           <button
             type="button"
-            title={bots ? "New bot" : "New mono"}
-            aria-label={bots ? "New bot" : "New mono"}
+            title={newLabel}
+            aria-label={newLabel}
             aria-haspopup={bots ? "menu" : undefined}
             onClick={(event) => create(event.currentTarget)}
             className={`grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content${
@@ -175,7 +185,7 @@ export function MonoRailSection({
       <div className={`flex flex-col gap-px${project ? "" : " px-2"}`}>
         {monos.length === 0 ? (
           <RailAction
-            label={bots ? "New bot" : "New mono"}
+            label={newLabel}
             icon={Plus}
             onClick={() => section.current && create(section.current)}
           />

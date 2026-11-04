@@ -20,6 +20,10 @@ import {
 } from "../../projects/model/projectMascots";
 import { removeMonoBackground } from "./monoBackground";
 import { isBotRole, type BotRole } from "../../bots/model/bots";
+import {
+  parseWorkstream,
+  type Workstream,
+} from "../../workstreams/model/workstreams";
 
 /** The project palette's colors, plus indigo for a Mono's ninth preset. */
 export const MONO_COLORS = [
@@ -48,9 +52,13 @@ export type Mono = {
   useSidebarFolders?: boolean;
   /** Superseded by SOUL.md; only read once, to seed it. */
   instructions?: string;
-  /** A productivity bot rather than a coding Mono: its own sidebar section. */
-  kind?: "bot";
+  /**
+   * A productivity bot, or a workstream's orchestrator, rather than a coding
+   * Mono: each kind has its own sidebar section and overview tabs.
+   */
+  kind?: "bot" | "workstream";
   botRole?: BotRole;
+  workstream?: Workstream;
   /**
    * From when each project had its own Mono: the project whose agent folder
    * it inherits. The folder moves under its id the first time it is read.
@@ -183,11 +191,21 @@ function parseMono(value: unknown): Mono | undefined {
           botRole: isBotRole(entry.botRole) ? entry.botRole : "assistant",
         }
       : {}),
+    ...(entry.kind === "workstream" && parseWorkstream(entry.workstream)
+      ? {
+          kind: "workstream" as const,
+          workstream: parseWorkstream(entry.workstream),
+        }
+      : {}),
   };
 }
 
 export function isBot(mono: Mono): boolean {
   return mono.kind === "bot";
+}
+
+export function isWorkstream(mono: Mono): boolean {
+  return mono.kind === "workstream";
 }
 
 /** Every Mono, in the order the rail shows them. */
@@ -262,6 +280,30 @@ export function createMono(
   };
   saveRoster([...roster, mono]);
   return mono;
+}
+
+/** A workstream's orchestrator, working on the project its checkout is in. */
+export function createWorkstreamMono(
+  id: string,
+  name: string,
+  workstream: Workstream,
+): Mono {
+  const roster = listMonos();
+  const mono: Mono = {
+    id,
+    ...nextMonoLook(roster),
+    name,
+    projects: uniqueProjects([workstream.project]),
+    kind: "workstream",
+    workstream,
+  };
+  saveRoster([...roster, mono]);
+  return mono;
+}
+
+/** A new Mono id, for a workstream whose folder is made before it is. */
+export function newWorkstreamId(): string {
+  return newMonoId();
 }
 
 const OPEN_MONO_KEY = "monocode:open-mono";
@@ -403,6 +445,8 @@ export type MonoLook = {
   projects: MonoProject[];
   /** A personal bot rather than a coding Mono. */
   bot?: boolean;
+  /** A workstream's orchestrator. */
+  workstream?: Workstream;
 };
 
 /** How a Mono looks, and the projects it works on by their rail labels. */
@@ -413,6 +457,7 @@ export function monoLook(mono: Mono): MonoLook {
     mascot: mono.mascot,
     color: mono.color,
     ...(isBot(mono) ? { bot: true } : {}),
+    ...(mono.workstream ? { workstream: mono.workstream } : {}),
     projects: mono.projects.map((path) => ({
       path,
       name: resolveTabGroupLabel(projectKey(path), labels, projectName(path)),
