@@ -25,7 +25,7 @@ export type UpdaterSnapshot = {
 
 let pendingUpdate: Update | null = null;
 
-const RELEASES_URL = "https://github.com/hardbeat920/monocode/releases/latest";
+const RELEASES_URL = "https://github.com/crhistian-cornejo/monoBOT/releases/latest";
 
 /**
  * Linux `.deb` and `.rpm` installs belong to apt/dnf. The release feed only
@@ -49,7 +49,7 @@ export async function packageManagedInstall(): Promise<PackageManagedInstall | n
 
 export function packageManagerHint(kind: PackageManagedInstall): string {
   return kind === "deb"
-    ? `Download one .deb from ${RELEASES_URL} and run: sudo apt install ./MonoCode_X.Y.Z_amd64.deb\nReplace the file name with the one you downloaded.`
+    ? `Download one .deb from ${RELEASES_URL} and run: sudo apt install ./MonoBOT_X.Y.Z_amd64.deb\nReplace the file name with the one you downloaded.`
     : `Download one .rpm from ${RELEASES_URL} and run: sudo dnf install ./MonoBOT-X.Y.Z-1.x86_64.rpm\nReplace the file name with the one you downloaded.`;
 }
 

@@ -1312,7 +1312,7 @@ pub enum GitHubStarStatus {
     Unavailable,
 }
 
-const MONOCODE_STAR_ENDPOINT: &str = "/user/starred/hardbeat920/monocode";
+const MONOCODE_STAR_ENDPOINT: &str = "/user/starred/crhistian-cornejo/monoBOT";
 
 /// Whether the GitHub CLI is installed and has an active authenticated account.
 #[tauri::command]
@@ -3023,8 +3023,28 @@ fn git_github_repo_for(root: &Path) -> Result<String, String> {
 }
 
 fn git_github_repositories_for(root: &Path) -> Result<Vec<String>, String> {
-    let json = gh_checked(root, &["repo", "view", "--json", "nameWithOwner,parent"])?;
+    let mut args = vec!["repo", "view"];
+    let own = inbox_github_repo(root);
+    if let Some(repo) = own.as_deref() {
+        args.push(repo);
+    }
+    args.extend(["--json", "nameWithOwner,parent"]);
+    let json = gh_checked(root, &args)?;
     parse_github_repositories(&json)
+}
+
+/// The repository the Inbox lists for a project. `gh` prefers a remote named
+/// `upstream` over `origin`, so a clone of someone else's project would show
+/// theirs; unless the user picked one with `gh repo set-default`, the project's
+/// own `origin` wins (and a fork still brings its parent).
+fn inbox_github_repo(root: &Path) -> Option<String> {
+    if gh_resolved_remote(root).is_some() {
+        return None;
+    }
+    let url = git_stdout(root, &["remote", "get-url", "origin"])?;
+    let normalized = normalize_github_remote_url(&url);
+    let (owner, name) = split_github_repo(normalized.strip_prefix("github.com/")?).ok()?;
+    Some(format!("{owner}/{name}"))
 }
 
 fn parse_github_repositories(json: &str) -> Result<Vec<String>, String> {
@@ -9426,6 +9446,29 @@ mod tests {
             err.to_lowercase().contains("merge base"),
             "expected merge-base error, got {err}"
         );
+    }
+
+    #[test]
+    fn inbox_follows_origin_unless_gh_has_a_default() {
+        let local = tmp("inbox-origin-remote");
+        if !init_git_commit(&local.0, &[("a.txt", "a
+")]) {
+            return;
+        }
+        if !git(
+            &local.0,
+            &["remote", "add", "origin", "https://github.com/me/monoBOT.git"],
+        ) || !git(
+            &local.0,
+            &["remote", "add", "upstream", "git@github.com:them/monocode.git"],
+        ) {
+            return;
+        }
+        assert_eq!(inbox_github_repo(&local.0).as_deref(), Some("me/monobot"));
+        if !git(&local.0, &["config", "remote.upstream.gh-resolved", "base"]) {
+            return;
+        }
+        assert_eq!(inbox_github_repo(&local.0), None);
     }
 
     #[test]

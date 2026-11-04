@@ -638,8 +638,8 @@ mod tests {
     #[test]
     fn quotes_the_control_path_only_when_the_shell_needs_it() {
         assert_eq!(
-            quoted("/Applications/MonoCode.app/Contents/MacOS/monocode"),
-            "/Applications/MonoCode.app/Contents/MacOS/monocode"
+            quoted("/Applications/MonoBOT.app/Contents/MacOS/monocode"),
+            "/Applications/MonoBOT.app/Contents/MacOS/monocode"
         );
         assert_eq!(quoted("/Users/a b/MonoBOT"), "'/Users/a b/MonoBOT'");
         assert_eq!(quoted("C:\\Tools\\monocode.exe"), "C:\\Tools\\monocode.exe");

@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 description = "MonoBOT — one UI for every agent harness"
 authors = ["Nick"]
-repository = "https://github.com/hardbeat920/monocode"
-homepage = "https://usemono.dev"
+repository = "https://github.com/crhistian-cornejo/monoBOT"
+homepage = "https://github.com/crhistian-cornejo/monoBOT"
 license.workspace = true
 
 [lib]
