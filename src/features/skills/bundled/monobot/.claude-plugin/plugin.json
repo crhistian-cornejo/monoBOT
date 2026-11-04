@@ -1,0 +1,5 @@
+{
+  "name": "monobot",
+  "version": "1.0.0",
+  "description": "Skills MonoBOT loads into its Claude sessions: working with files, research reports and three.js graphics."
+}

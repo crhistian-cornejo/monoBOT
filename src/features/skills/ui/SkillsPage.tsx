@@ -16,6 +16,7 @@ import {
 } from "../../sessions/ui/MarkdownModeToggle";
 import { MarkdownSource } from "../../sessions/ui/AgentMarkdown";
 import { SkillDocumentPreview } from "./SkillDocumentPreview";
+import { DocumentSkillsCard } from "./DocumentSkillsCard";
 import { copyText } from "../../../platform/tauri/clipboard";
 import { listSkills, readTextFile, type DiscoveredSkill } from "../../../platform/tauri/fs";
 import {
@@ -216,6 +217,7 @@ export function SkillsPage({
             className={`mx-auto w-full max-w-5xl py-8 ${previewOpen ? "px-4" : "px-8"}`}
           >
             {header}
+            <DocumentSkillsCard />
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3">
               <div className="flex min-w-0 flex-1 items-center gap-3">
                 <span className="shrink-0 text-[12px] text-content/40 tabular-nums">

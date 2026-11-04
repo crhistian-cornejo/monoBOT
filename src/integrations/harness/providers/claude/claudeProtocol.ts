@@ -254,6 +254,8 @@ export function buildClaudeSpawnArgs(input: {
   mcpConfig?: { mcpServers: Record<string, unknown> } | null;
   /** Tools the turn may call without asking (`mcp__<server>__<tool>`). */
   allowedTools?: readonly string[];
+  /** Plugin folders loaded for this session only (MonoBOT's bundled skills). */
+  pluginDirs?: readonly string[];
 }): string[] {
   const args = [
     "--output-format",
@@ -288,6 +290,9 @@ export function buildClaudeSpawnArgs(input: {
     }
     if (input.allowedTools?.length) {
       args.push("--allowedTools", input.allowedTools.join(","));
+    }
+    for (const dir of input.pluginDirs ?? []) {
+      args.push("--plugin-dir", dir);
     }
   }
   if (input.model) args.push("--model", input.model);

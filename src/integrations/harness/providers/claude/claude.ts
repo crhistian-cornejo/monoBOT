@@ -12,6 +12,7 @@ import {
   connectorMcpConfig,
   enabledConnectors,
 } from "../../../../features/settings/model/connectors";
+import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
 import {
   killChild,
   resolveClaudeBinary,
@@ -547,7 +548,10 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   await spawnChild(
     input.sessionId,
     path,
-    buildClaudeSpawnArgs(launch),
+    buildClaudeSpawnArgs({
+      ...launch,
+      pluginDirs: await bundledPluginDirs(["monobot"]),
+    }),
     input.cwd,
     { provider: "claude", id: input.providerAccountId ?? "default" },
     "claude",

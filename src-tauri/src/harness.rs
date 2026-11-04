@@ -481,6 +481,35 @@ fn mcp_command(
     Err(format!("{} {}", stderr.trim(), stdout).trim().to_string())
 }
 
+/// Anthropic's document skills (docx, xlsx, pptx and pdf) come from its own
+/// plugin marketplace: their license does not allow bundling them in MonoBOT.
+/// Claude Code adds the marketplace if needed and installs for the user.
+#[tauri::command]
+pub async fn install_document_skills(host: State<'_, HarnessHost>) -> Result<String, String> {
+    let binary_path = host.runtime_binary_path("claude");
+    tauri::async_runtime::spawn_blocking(move || {
+        let binary = resolve_mcp_binary("claude", binary_path.as_deref())?;
+        let home = dirs_home().ok_or("Home directory not found")?;
+        mcp_command(
+            binary,
+            [
+                "plugin",
+                "install",
+                "document-skills",
+                "--marketplace",
+                "anthropics/skills",
+                "--json",
+            ]
+            .map(String::from)
+            .to_vec(),
+            home,
+            Duration::from_secs(300),
+        )
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 pub async fn claude_mcp_list(host: State<'_, HarnessHost>, cwd: String) -> Result<String, String> {
     let binary_path = host.runtime_binary_path("claude");

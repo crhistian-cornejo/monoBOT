@@ -39,6 +39,7 @@ mod notes;
 mod notifications;
 mod pasteboard;
 mod pi_usage;
+mod plugins;
 mod project_logo;
 mod provider_session_transfer;
 mod pty;
@@ -479,6 +480,7 @@ pub fn run() {
             fs::claude_shell_commands,
             fs::write_text_file,
             skills::list_skills,
+            plugins::install_plugin,
             search::search_project,
             search::cancel_project_search,
             cursor_store::cursor_tool_calls,
@@ -490,6 +492,7 @@ pub fn run() {
             harness::harness_runtime_binary_paths,
             harness::harness_resolve_claude,
             harness::claude_mcp_list,
+            harness::install_document_skills,
             mcp::mcp_discover,
             mcp::mcp_add,
             harness::claude_mcp_add,
