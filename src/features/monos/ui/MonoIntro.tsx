@@ -3,6 +3,7 @@ import { PROJECT_MASCOTS } from "../../projects/model/projectMascots";
 import { PixelMascot } from "../../projects/ui/PixelMascot";
 import { TAB_GROUP_COLORS } from "../../workspace/model/tabGroups";
 import { playCue } from "../../settings/model/sounds";
+import { X } from "../../../shared/ui/icons";
 type Look = { mascot: string; color: string };
 
 type Props = {
@@ -12,6 +13,12 @@ type Props = {
   onCreate: () => void;
   /** Turns Monos off, as Settings › Monos › Show monos does. */
   onHide: () => void;
+  /** The same card for another kind of agent, such as personal bots. */
+  title?: string;
+  body?: string;
+  createLabel?: string;
+  /** A switch turns the kind off; a close button only dismisses the card. */
+  hideAs?: "switch" | "close";
 };
 
 /** Gap between the mascots lining up at the back. */
@@ -31,34 +38,54 @@ export function monoIntroCrowd(look: Look) {
  * Stands in for the rail's Monos while the user has none, inviting them to
  * make their first. The switch hides Monos altogether.
  */
-export function MonoIntroCard({ look, onCreate, onHide }: Props) {
+export function MonoIntroCard({
+  look,
+  onCreate,
+  onHide,
+  title = "Meet Monos",
+  body = "Agents of your own that work across your projects and run habits on their own.",
+  createLabel = "Create mono",
+  hideAs = "switch",
+}: Props) {
   const crowd = monoIntroCrowd(look);
   const middle = (crowd.length - 1) / 2;
 
   return (
     <section
-      aria-label="Meet Monos"
+      aria-label={title}
       data-mono-intro
       className="mx-2 overflow-hidden rounded-lg bg-content/[0.03]"
     >
       <div className="flex items-center gap-2 pl-2.5 pr-2 pt-2">
         <h3 className="min-w-0 flex-1 truncate text-[13px] font-medium text-content">
-          Meet Monos
+          {title}
         </h3>
-        <button
-          type="button"
-          role="switch"
-          aria-checked
-          aria-label="Show monos"
-          title="Hide monos from the rail. Turn them back on in Settings › Monos."
-          onClick={() => {
-            onHide();
-            playCue("switch");
-          }}
-          className="relative h-4 w-7 shrink-0 rounded-full bg-accent transition-colors"
-        >
-          <span className="absolute left-3.5 top-0.5 size-3 rounded-full bg-white" />
-        </button>
+        {hideAs === "close" ? (
+          <button
+            type="button"
+            aria-label="Dismiss"
+            title="Dismiss"
+            onClick={onHide}
+            className="grid size-5 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/8 hover:text-content"
+          >
+            <X className="size-3" strokeWidth={1.75} />
+          </button>
+        ) : (
+          <button
+            type="button"
+            role="switch"
+            aria-checked
+            aria-label="Show monos"
+            title="Hide monos from the rail. Turn them back on in Settings › Monos."
+            onClick={() => {
+              onHide();
+              playCue("switch");
+            }}
+            className="relative h-4 w-7 shrink-0 rounded-full bg-accent transition-colors"
+          >
+            <span className="absolute left-3.5 top-0.5 size-3 rounded-full bg-white" />
+          </button>
+        )}
       </div>
 
       <div
@@ -107,8 +134,7 @@ export function MonoIntroCard({ look, onCreate, onHide }: Props) {
       </div>
 
       <p className="px-2.5 pt-1.5 text-[11px] leading-snug text-content/55">
-        Agents of your own that work across your projects and run habits on
-        their own.
+        {body}
       </p>
 
       <div className="p-2">
@@ -117,7 +143,7 @@ export function MonoIntroCard({ look, onCreate, onHide }: Props) {
           onClick={onCreate}
           className="h-7 w-full cursor-default rounded-md bg-content text-[12px] font-medium text-background-base hover:bg-content/85 active:scale-[0.98]"
         >
-          Create mono
+          {createLabel}
         </button>
       </div>
     </section>

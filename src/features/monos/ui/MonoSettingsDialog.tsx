@@ -16,8 +16,16 @@ import { AccessPicker } from "../../sessions/ui/AccessPicker";
 import { ModelPicker, ModelSettingRows } from "../../sessions/ui/ModelPicker";
 import { PixelMascot } from "../../projects/ui/PixelMascot";
 import {
+  BOT_SERVICES,
+  BOT_SKILLS,
+  botTools,
+  type BotTools,
+} from "../../bots/model/bots";
+import {
   defaultMonoName,
   findMono,
+  isBot,
+  saveBotTools,
   saveMonoMascot,
   saveMonoName,
   subscribeMonos,
@@ -206,6 +214,8 @@ function GeneralSection({
           />
         </SettingRow>
       </SettingGroup>
+
+      <BotToolsGroup monoId={monoId} />
 
       <GroupHeading
         title="Projects"
@@ -433,5 +443,57 @@ function NameField({ monoId, fallback }: { monoId: string; fallback: string }) {
       }}
       className="mt-3 h-8 w-full max-w-64 rounded-md bg-transparent px-2 text-center text-[15px] font-medium text-content outline-none placeholder:text-content/60 hover:bg-content/5 focus:bg-content/5"
     />
+  );
+}
+
+/** A bot's services and skills; sending, sharing and deleting stay blocked. */
+function BotToolsGroup({ monoId }: { monoId: string }) {
+  // A string snapshot, so the store compares by value.
+  const snapshot = useSyncExternalStore(subscribeMonos, () => {
+    const mono = findMono(monoId);
+    return mono && isBot(mono)
+      ? JSON.stringify(botTools(mono.botRole ?? "assistant", mono.botTools))
+      : "";
+  });
+  if (!snapshot) return null;
+  const tools = JSON.parse(snapshot) as BotTools;
+  const toggle = <K extends keyof BotTools>(
+    key: K,
+    item: BotTools[K][number],
+    on: boolean,
+  ) =>
+    saveBotTools(monoId, {
+      ...tools,
+      [key]: on
+        ? [...tools[key], item]
+        : tools[key].filter((entry) => entry !== item),
+    });
+  return (
+    <>
+      <GroupHeading
+        title="Tools"
+        description="What it can use. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat."
+      />
+      <SettingGroup>
+        {BOT_SERVICES.map((info) => (
+          <SwitchRow
+            key={info.service}
+            label={info.name}
+            description={info.note}
+            on={tools.services.includes(info.service)}
+            onChange={(on) => toggle("services", info.service, on)}
+          />
+        ))}
+        {BOT_SKILLS.map((info) => (
+          <SwitchRow
+            key={info.plugin}
+            label={`${info.name} skill`}
+            description={info.note}
+            on={tools.plugins.includes(info.plugin)}
+            onChange={(on) => toggle("plugins", info.plugin, on)}
+          />
+        ))}
+      </SettingGroup>
+    </>
   );
 }

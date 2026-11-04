@@ -5,5 +5,7 @@ import { botLaunch } from "./bots";
  * nothing for any other session. */
 export function botLaunchForSession(sessionId: string) {
   const mono = monoForSession(sessionId);
-  return mono?.kind === "bot" ? botLaunch(mono.botRole ?? "assistant") : null;
+  return mono?.kind === "bot"
+    ? botLaunch(mono.botRole ?? "assistant", mono.botTools)
+    : null;
 }

@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 39] = [
+const APP_ACTIONS: [&str; 41] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -116,6 +116,8 @@ const APP_ACTIONS: [&str; 39] = [
     "habits.remove",
     "bots.list",
     "bots.create",
+    "tools.read",
+    "tools.update",
     "group.members",
     "group.ask",
     "agents.list",
@@ -262,9 +264,15 @@ Actions:
   habits.run     {"id":"..."}  Run one within a minute, to try it out.
   habits.remove  {"id":"..."}
   bots.list      {}  Principal bot only. The user's personal bots.
-  bots.create    {"name":"Daily digest","role":"research","instructions":"..."}
-                  Principal bot only. role is assistant, finance, documents
-                  or research; instructions seed its soul (optional).
+  bots.create    {"name":"Daily digest","role":"research","instructions":"...",
+                  "services":["notion"],"skills":[]}  Principal bot only. role
+                  is assistant, finance, documents, research or custom;
+                  instructions seed its soul; services and skills pick its
+                  tools (all optional).
+  tools.read     {}  Bot only. Your services and skills, on or off.
+  tools.update   {"services":["gmail","notion"],"skills":["monobot-finance"]}
+                  Bot only. The complete list you keep; applies from your next
+                  turn. Sending, sharing and deleting stay blocked.
   group.members  {}  Group only. Its members: id, name and role.
   group.ask      {"member":"Finance","message":"..."}  Group only. Bring a
                   member in; its answer comes back to you with the others

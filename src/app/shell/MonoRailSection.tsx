@@ -22,6 +22,7 @@ import {
 import {
   defaultMonoName,
   findMono,
+  isBot,
   listMonos,
   MONO_STATUS_LABEL,
   nextMonoLook,
@@ -36,7 +37,12 @@ import {
   updateMono,
   type MonoState,
 } from "../../features/monos/model/mono";
-import { BOT_ROLES, type BotRole } from "../../features/bots/model/bots";
+import {
+  BOT_ROLES,
+  botIntroDismissed,
+  dismissBotIntro,
+  type BotRole,
+} from "../../features/bots/model/bots";
 import type { RailZone } from "./PersonalRail";
 import { BetaBadge } from "../../shared/ui/BetaBadge";
 
@@ -121,6 +127,12 @@ export function MonoRailSection({
   const [roles, setRoles] = useState<PopoverAnchor>();
   const section = useRef<HTMLDivElement>(null);
   const [background, setBackground] = useState<string>();
+  // Invites a bot made from scratch until there is one or the card is closed.
+  const [botIntroHidden, setBotIntroHidden] = useState(botIntroDismissed);
+  const showBotIntro =
+    bots &&
+    !botIntroHidden &&
+    !listMonos().some((mono) => isBot(mono) && mono.botRole === "custom");
   const backgroundMono = background ? findMono(background) : undefined;
   const workstreams = kind === "workstream";
   const groups = kind === "group";
@@ -315,6 +327,22 @@ export function MonoRailSection({
           );
         })}
       </div>
+      {showBotIntro ? (
+        <div className="mt-2">
+          <MonoIntroCard
+            look={nextMonoLook(listMonos())}
+            title="A bot of your own"
+            body="Beyond Assistant, Finance, Documents and Research: give it a name, write its soul and pick its tools."
+            createLabel="Create bot"
+            hideAs="close"
+            onCreate={() => onCreateBot?.("custom", { blank: true })}
+            onHide={() => {
+              dismissBotIntro();
+              setBotIntroHidden(true);
+            }}
+          />
+        </div>
+      ) : null}
       {menu ? (
         <MonoMenu
           key={menu.id}
@@ -347,7 +375,7 @@ export function MonoRailSection({
             role="menuitem"
             onClick={() => {
               setRoles(undefined);
-              onCreateBot?.("assistant", { blank: true });
+              onCreateBot?.("custom", { blank: true });
             }}
             className="flex w-full flex-col items-start px-2.5 py-1.5 text-left hover:bg-content/8"
           >
