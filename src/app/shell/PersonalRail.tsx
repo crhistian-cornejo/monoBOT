@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { Bell, Users } from "../../shared/ui/icons";
+import { Users } from "../../shared/ui/icons";
 import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
 import {
   listMonos,
@@ -13,7 +13,6 @@ import {
   botNewsSnapshot,
   subscribeBotNews,
 } from "../../features/bots/model/botNews";
-import { RailAction } from "./RailAction";
 
 export type RailZone = "code" | "personal";
 
@@ -73,13 +72,18 @@ export function RailZoneSwitch({
 
 const IDLE: MonoState = { status: "idle" };
 
-/** The Personal zone: the Principal bot on top, the news the bots posted,
- * then every personal bot. */
+/** A hairline between the rail's groups of items. */
+export function RailDivider() {
+  return <div aria-hidden className="mx-3 mb-2 h-px shrink-0 bg-stroke" />;
+}
+
+/** The Personal zone: the Principal bot pinned on top, then the bots and
+ * the groups, each under its own label. The bots' news lives on the
+ * Principal's overview; a dot here says there is something unread. */
 export function PersonalRail({ monos }: { monos: MonoRailProps }) {
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const news = useSyncExternalStore(subscribeBotNews, botNewsSnapshot);
   const newsUnseen = news.some((item) => !item.seen);
-  const newsActive = !!monos.newsActive;
   const principal = useMemo(
     () =>
       listMonos().find(
@@ -90,13 +94,11 @@ export function PersonalRail({ monos }: { monos: MonoRailProps }) {
   const look = principal ? monoLook(principal) : undefined;
   const state = principal ? (monos.states.get(principal.id) ?? IDLE) : IDLE;
   const unseen = principal ? (monos.unseenCounts?.get(principal.id) ?? 0) : 0;
-  // News opens on the Principal's overview, but only one row is the current
-  // one: News while the feed shows, the Principal otherwise.
-  const active = !!principal && monos.activeId === principal.id && !newsActive;
+  const active = !!principal && monos.activeId === principal.id;
 
   return (
     <>
-      <div className="flex shrink-0 flex-col gap-px px-2 pb-2">
+      <div className="flex shrink-0 flex-col gap-px px-2 pb-2" data-rail-principal>
         <button
           type="button"
           aria-current={active ? "true" : undefined}
@@ -128,18 +130,18 @@ export function PersonalRail({ monos }: { monos: MonoRailProps }) {
             <span className="grid h-4 min-w-4 place-items-center bg-accent px-1 text-[10px] font-medium text-white">
               {unseen > 99 ? "99+" : unseen}
             </span>
+          ) : newsUnseen ? (
+            <span
+              aria-label="Unread news"
+              title="Unread news"
+              className="size-1.5 shrink-0 bg-accent"
+            />
           ) : null}
         </button>
-        <RailAction
-          label="News"
-          icon={Bell}
-          onClick={() => monos.onOpenNews?.()}
-          active={newsActive}
-          dot={newsUnseen}
-          ariaLabel={newsUnseen ? "News, new posts" : "News"}
-        />
       </div>
+      <RailDivider />
       <MonoRailSection {...monos} kind="bot" />
+      <RailDivider />
       <MonoRailSection {...monos} kind="group" />
     </>
   );

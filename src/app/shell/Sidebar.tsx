@@ -40,14 +40,9 @@ import {
   StickyNote,
   Zap,
   Bot,
-  Bell,
   Code,
   type IconComponent,
 } from "../../shared/ui/icons";
-import {
-  botNewsSnapshot,
-  subscribeBotNews,
-} from "../../features/bots/model/botNews";
 import { createPortal } from "react-dom";
 import { useProjectSwipe } from "./useProjectSwipe";
 import {
@@ -3599,7 +3594,6 @@ function CompactProjectRail({
   monoViewActive?: boolean;
 }) {
   const monosSnap = useSyncExternalStore(subscribeMonos, monosSnapshot);
-  const news = useSyncExternalStore(subscribeBotNews, botNewsSnapshot);
   const monosPinned = useRailMonosPinned();
   // Each zone keeps its own shortcuts: Code lists the coding Monos, Personal
   // the Principal and the bots.
@@ -3610,6 +3604,7 @@ function CompactProjectRail({
       id: mono.id,
       // Bots and groups are the Personal zone's.
       bot: mono.kind === "bot" || mono.kind === "group",
+      group: mono.kind === "group",
       principal: mono.botRole === "principal",
       ...monoLook(mono),
       status: monos.states.get(mono.id)?.status ?? "idle",
@@ -3704,38 +3699,43 @@ function CompactProjectRail({
           />
         ) : null}
         {personal && monos ? (
-          <>
-            <span aria-hidden className="h-px w-6 shrink-0 bg-stroke" />
-            <CompactRailAction
-              label={news.some((item) => !item.seen) ? "News, new posts" : "News"}
-              icon={Bell}
-              active={!!monos.newsActive}
-              dot={news.some((item) => !item.seen)}
-              onClick={() => monos.onOpenNews?.()}
-            />
-            <div
-              role="group"
-              aria-label="Bots"
-              className="flex flex-col items-center gap-1.5"
-            >
-              {botItems.map((bot) => (
-                <CompactRailMono
-                  key={bot.id}
-                  name={bot.name}
-                  mascot={bot.mascot}
-                  color={bot.color}
-                  status={bot.status}
-                  active={bot.id === monos.activeId}
-                  unseen={
-                    bot.id === monos.activeId
-                      ? 0
-                      : (monos.unseenCounts?.get(bot.id) ?? 0)
-                  }
-                  onClick={() => monos.onOpen(bot.id)}
-                />
-              ))}
-            </div>
-          </>
+          // The Principal pinned on top, then the bots, then the groups, each
+          // set apart; the news lives on the Principal's overview.
+          [
+            botItems.filter((item) => item.principal),
+            botItems.filter((item) => !item.principal && !item.group),
+            botItems.filter((item) => item.group),
+          ]
+            .filter((items) => items.length)
+            .map((items, index) => (
+              <div
+                key={index}
+                role="group"
+                className="flex flex-col items-center gap-1.5"
+              >
+                <span aria-hidden className="h-px w-6 shrink-0 bg-stroke" />
+                {items.map((bot) => (
+                  <CompactRailMono
+                    key={bot.id}
+                    name={bot.name}
+                    mascot={bot.mascot}
+                    color={bot.color}
+                    status={bot.status}
+                    active={bot.id === monos.activeId}
+                    unseen={
+                      bot.id === monos.activeId
+                        ? 0
+                        : (monos.unseenCounts?.get(bot.id) ?? 0)
+                    }
+                    onClick={() => monos.onOpen(bot.id)}
+                  />
+                ))}
+              </div>
+            ))
+        ) : null}
+        {!personal && monos?.onZoneChange ? (
+          // The zone switch stands apart from what the zone holds.
+          <span aria-hidden className="h-px w-6 shrink-0 bg-stroke" />
         ) : null}
         {!personal && monos && monosPinned && monoItems.length ? (
           <>
