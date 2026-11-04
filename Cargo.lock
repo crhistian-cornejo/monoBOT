@@ -2997,13 +2997,21 @@ version = "0.16.0"
 dependencies = [
  "bzip2 0.4.4",
  "cpal",
- "rustls",
- "rustls-platform-verifier",
+ "monobot-http",
  "serde",
  "sha2 0.10.9",
  "sherpa-onnx",
  "tar",
  "thiserror 2.0.20",
+ "ureq",
+]
+
+[[package]]
+name = "monobot-http"
+version = "0.16.0"
+dependencies = [
+ "rustls",
+ "rustls-platform-verifier",
  "ureq",
 ]
 
@@ -3021,6 +3029,7 @@ dependencies = [
  "keyring",
  "libc",
  "monobot-dictation",
+ "monobot-http",
  "monocode-mobile-link",
  "natpmp",
  "notify-rust",

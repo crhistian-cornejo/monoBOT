@@ -1285,7 +1285,7 @@ pub async fn harness_http(
     tauri::async_runtime::spawn_blocking(move || {
         assert_loopback(&url)?;
         let timeout = Duration::from_millis(timeout_ms.unwrap_or(30_000).max(1));
-        let agent = ureq::AgentBuilder::new().timeout(timeout).build();
+        let agent = monobot_http::agent().timeout(timeout).build();
         let mut request = agent.request(&method, &url);
         if let Some(headers) = &headers {
             for (key, value) in headers {
@@ -1328,7 +1328,7 @@ pub fn harness_sse_open(
     );
 
     thread::spawn(move || {
-        let agent = ureq::AgentBuilder::new()
+        let agent = monobot_http::agent()
             .timeout_connect(Duration::from_secs(10))
             .timeout_read(Duration::from_secs(60 * 60 * 6))
             .timeout_write(Duration::from_secs(30))

@@ -15,12 +15,8 @@ ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
 # Parakeet's second source, a .tar.bz2 on GitHub, as Echo unpacks it.
 tar = { version = "0.4", default-features = false }
 bzip2 = "0.4"
+# The app's HTTPS settings: Windows' own certificate store, as Echo does.
+monobot-http = { path = "../http" }
 thiserror.workspace = true
 serde.workspace = true
 
-[target.'cfg(windows)'.dependencies]
-# Windows checks the download's certificate against its own store, as Echo
-# does: a company network that inspects traffic signs with an authority only
-# that store has, and the bundled list alone fails with UnknownIssuer.
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-platform-verifier = "0.7"

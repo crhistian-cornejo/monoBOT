@@ -264,31 +264,9 @@ fn hex(hasher: Sha256) -> String {
         .collect()
 }
 
-/// The HTTP client for the model files. On the Mac it trusts the public
-/// authorities bundled with the app; on Windows, the system's own store.
+/// The HTTP client for the model files, with the app's certificate checks.
 fn agent() -> ureq::Agent {
-    let builder = ureq::AgentBuilder::new();
-    #[cfg(windows)]
-    let builder = match system_tls() {
-        Ok(config) => builder.tls_config(config),
-        Err(_) => builder,
-    };
-    builder.build()
-}
-
-/// Nothing is switched off: the verifier is Windows' own certificate check,
-/// so a certificate nobody trusts is still refused.
-#[cfg(windows)]
-fn system_tls() -> Result<std::sync::Arc<rustls::ClientConfig>, rustls::Error> {
-    use std::sync::Arc;
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let verifier = rustls_platform_verifier::Verifier::new(provider.clone())?;
-    let config = rustls::ClientConfig::builder_with_provider(provider)
-        .with_safe_default_protocol_versions()?
-        .dangerous()
-        .with_custom_certificate_verifier(Arc::new(verifier))
-        .with_no_client_auth();
-    Ok(Arc::new(config))
+    monobot_http::agent().build()
 }
 
 fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) -> Result<(), Error> {
