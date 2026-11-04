@@ -401,6 +401,8 @@ export type MonoLook = {
   mascot: string;
   color: string;
   projects: MonoProject[];
+  /** A personal bot rather than a coding Mono. */
+  bot?: boolean;
 };
 
 /** How a Mono looks, and the projects it works on by their rail labels. */
@@ -410,6 +412,7 @@ export function monoLook(mono: Mono): MonoLook {
     name: mono.name?.trim() || defaultMonoName(mono.mascot),
     mascot: mono.mascot,
     color: mono.color,
+    ...(isBot(mono) ? { bot: true } : {}),
     projects: mono.projects.map((path) => ({
       path,
       name: resolveTabGroupLabel(projectKey(path), labels, projectName(path)),

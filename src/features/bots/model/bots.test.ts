@@ -5,11 +5,16 @@ import { BOT_ROLES, botLaunch, isBotRole } from "./bots";
 describe("bots", () => {
   it("knows its roles", () => {
     expect(BOT_ROLES.map((info) => info.role)).toEqual([
+      "principal",
       "assistant",
       "finance",
       "documents",
       "research",
     ]);
+    // The Principal bot is not offered in the new-bot menu.
+    expect(
+      BOT_ROLES.filter((info) => info.hidden).map((info) => info.role),
+    ).toEqual(["principal"]);
     expect(isBotRole("finance")).toBe(true);
     expect(isBotRole("coder")).toBe(false);
   });

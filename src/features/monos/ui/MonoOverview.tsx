@@ -9,6 +9,8 @@ import {
   MessageMultiple,
   Plus,
   Search,
+  Users,
+  Bell,
 } from "../../../shared/ui/icons";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { artifactLabel, type ArtifactCard } from "../../artifacts/artifacts";
@@ -40,7 +42,13 @@ import type { SessionChangeTotals } from "../../sessions/ui/SessionReview";
 import { MonoChangesView, type MonoChangesRequest } from "./MonoChangesView";
 
 export type MonoOverviewTab =
-  "activity" | "sessions" | "habits" | "documents" | "changes";
+  | "activity"
+  | "sessions"
+  | "habits"
+  | "documents"
+  | "changes"
+  | "subagents"
+  | "news";
 
 // Activity sits apart, beside the panel toggle, since it follows the chat.
 const TABS: {
@@ -52,7 +60,16 @@ const TABS: {
   { id: "documents", label: "Documents", icon: File },
   { id: "habits", label: "Habits", icon: Clock },
   { id: "changes", label: "Changes", icon: FileDiff },
+  { id: "subagents", label: "Sub-agents", icon: Users },
+  { id: "news", label: "News", icon: Bell },
 ];
+
+// A personal bot does not work in projects: no sessions to list and no code
+// changes to commit, but the subagents it runs in parallel.
+const MONO_TABS = new Set(["sessions", "documents", "habits", "changes"]);
+const BOT_TABS = new Set(["documents", "habits", "subagents"]);
+// The Principal bot also reads every bot's news.
+const PRINCIPAL_TABS = new Set(["news", "documents", "habits", "subagents"]);
 
 /** The conversation's recorded changes, reviewed and committed on their tab. */
 export type MonoOverviewChanges = {
@@ -98,6 +115,13 @@ type Props = {
   onOpenDocument: (id: string) => void;
   onClose: () => void;
   windowControls?: ReactNode;
+  /** A personal bot: Documents, Habits and Sub-agents instead of code tabs. */
+  bot?: boolean;
+  /** The subagents its turns ran, newest first; null when there are none. */
+  subagents?: ReactNode;
+  subagentCount?: number;
+  /** Every bot's news, for the Principal bot. */
+  news?: ReactNode;
 };
 
 /**
@@ -116,8 +140,12 @@ export function MonoOverview({
   documents,
   changes,
   activity,
-  tab,
+  tab: requestedTab,
   onTabChange,
+  bot = false,
+  subagents,
+  subagentCount,
+  news,
   onOpenSession,
   shownSession,
   onBackFromSession = () => {},
@@ -130,6 +158,12 @@ export function MonoOverview({
   windowControls,
 }: Props) {
   const lock = useLockOverscroll<HTMLDivElement>();
+  const shownTabs = news ? PRINCIPAL_TABS : bot ? BOT_TABS : MONO_TABS;
+  // A tab the other kind of agent was left on falls back to Documents.
+  const tab: MonoOverviewTab =
+    requestedTab === "activity" || shownTabs.has(requestedTab)
+      ? requestedTab
+      : "documents";
   const habits = useHabits(monoId, state.status);
   const actions = habitActions(monoId);
   const [routes, setRoutes] = useState<Route[]>([]);
@@ -227,6 +261,8 @@ export function MonoOverview({
     habits: habits?.length,
     documents: documents.length,
     changes: changes?.totals?.files,
+    subagents: subagentCount,
+    news: undefined,
   };
 
   return (
@@ -242,7 +278,12 @@ export function MonoOverview({
         <MonoSidebarHeader
           title="Overview"
           heading={
-            <OverviewTabs tab={tab} counts={counts} onChange={onTabChange} />
+            <OverviewTabs
+              tab={tab}
+              tabs={shownTabs}
+              counts={counts}
+              onChange={onTabChange}
+            />
           }
           onClose={onClose}
           actions={
@@ -344,6 +385,16 @@ export function MonoOverview({
                 like a bug fix or a review, and it shows up here.
               </EmptyState>
             )
+          ) : tab === "news" ? (
+            news
+          ) : tab === "subagents" ? (
+            (subagents ?? (
+              <EmptyState icon={Users}>
+                Ask {agent.name} to research something in parallel, like
+                comparing options or collecting news, and each subagent it runs
+                shows up here.
+              </EmptyState>
+            ))
           ) : tab === "habits" ? (
             <HabitsList
               habits={habits}
@@ -455,10 +506,12 @@ function SessionSearchBar({
  */
 function OverviewTabs({
   tab,
+  tabs,
   counts,
   onChange,
 }: {
   tab: MonoOverviewTab;
+  tabs: ReadonlySet<string>;
   counts: Record<(typeof TABS)[number]["id"], number | undefined>;
   onChange: (tab: MonoOverviewTab) => void;
 }) {
@@ -468,7 +521,7 @@ function OverviewTabs({
       aria-label="Overview"
       className="-ml-2 flex items-center gap-0.5"
     >
-      {TABS.map(({ id, label, icon }) => {
+      {TABS.filter(({ id }) => tabs.has(id)).map(({ id, label, icon }) => {
         const selected = id === tab;
         return (
           <TabButton

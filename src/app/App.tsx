@@ -586,6 +586,7 @@ import { useUnseenReplyCounts } from "../features/sessions/hooks/useUnseenReplyC
 import {
   loadNotificationsEnabled,
   NOTIFICATION_CLICK_EVENT,
+  announceBotPost,
   announceSessionFinished,
   probeNotificationPermission,
   setWindowFocused,
@@ -620,6 +621,7 @@ import {
 import {
   createMono,
   findMono,
+  isBot,
   monoWorksOn,
   isMonoSession,
   listMonos,
@@ -633,7 +635,14 @@ import {
   subscribeMonos,
   type MonoState,
 } from "../features/monos/model/mono";
-import { botRole, type BotRole } from "../features/bots/model/bots";
+import { SubagentStack } from "../features/sessions/ui/AgentTranscript";
+import { addBotNews, removeBotNewsFor } from "../features/bots/model/botNews";
+import { BotNewsList } from "../features/bots/ui/BotNewsList";
+import {
+  BLANK_BOT_SOUL,
+  botRole,
+  type BotRole,
+} from "../features/bots/model/bots";
 import {
   loadMonoFiles,
   MONO_PROMPT_VERSION,
@@ -5140,17 +5149,36 @@ function Workspace({
   // A bot starts from its role's name and instructions, so it opens straight
   // into its conversation instead of the settings a new Mono shows first.
   const onCreateBot = useCallback(
-    (role: BotRole) => {
+    (role: BotRole, options?: { blank?: boolean }) => {
       const info = botRole(role);
       const monoId = createMono([], {
         role,
-        name: info.name,
-        instructions: info.instructions,
+        name: options?.blank ? "New bot" : info.name,
+        instructions: options?.blank ? BLANK_BOT_SOUL : info.instructions,
       }).id;
+      // A blank bot opens on its settings, where the user writes who it is.
+      if (options?.blank) setMonoSettingsFor(monoId);
       void onOpenMono(monoId);
     },
     [onOpenMono],
   );
+
+  // The news feed lives on the Principal bot, made the first time it is needed.
+  const onOpenNews = useCallback(() => {
+    const principal = listMonos().find(
+      (mono) => isBot(mono) && mono.botRole === "principal",
+    );
+    const monoId =
+      principal?.id ??
+      createMono([], {
+        role: "principal",
+        name: botRole("principal").name,
+        instructions: botRole("principal").instructions,
+      }).id;
+    setMonoOverviewTab("news");
+    setMonoOverviewOpen(true);
+    void onOpenMono(monoId);
+  }, [onOpenMono]);
 
   const onResetMono = useCallback(
     async (sessionId: string): Promise<void> => {
@@ -6111,6 +6139,7 @@ function Workspace({
         }
       }
       removeMono(monoId);
+      removeBotNewsFor(monoId);
       if (lastMonoIdRef.current === monoId) lastMonoIdRef.current = undefined;
     },
     [closeMonoView, history, onRemoveHistorySession],
@@ -8752,6 +8781,21 @@ function Workspace({
         },
         (posted) => {
           monoReplies.noteReply(monoId);
+          const bot = monoForSession(monoId);
+          if (bot && isBot(bot)) {
+            // A bot's habit is news: it joins the feed and always notifies,
+            // since its chat has no project to take settings from.
+            const botName = monoLook(bot).name;
+            addBotNews({ monoId: bot.id, botName, source: habit.name, text });
+            void announceBotPost(
+              monoId,
+              botName,
+              habit.name,
+              text,
+              monoId === activeSessionIdRef.current,
+            );
+            return;
+          }
           void announceSessionFinished(
             { ...posted, title: name },
             monoId === activeSessionIdRef.current,
@@ -13588,6 +13632,15 @@ function Workspace({
     () => (monoViewBlocks ? artifactCards(monoViewBlocks) : []),
     [monoViewBlocks],
   );
+  // A personal bot's subagents: every delegated run in its chat, newest first.
+  const monoViewIsBot = !!monoViewMono && isBot(monoViewMono);
+  const botSubagentRuns = useMemo(
+    () =>
+      monoViewIsBot && monoViewBlocks
+        ? monoViewBlocks.filter((block) => block.agentRun).reverse()
+        : [],
+    [monoViewIsBot, monoViewBlocks],
+  );
   const monoActivityView =
     monoViewSession && selectedMonoActivity ? (
       <MonoActivityView
@@ -13718,14 +13771,36 @@ function Workspace({
         history={history}
         documents={monoDocuments}
         activity={monoActivityView}
-        changes={{
-          sessionId: monoViewSession.id,
-          cwd: monoViewCwd,
-          totals: monoChangeTotals,
-          request: monoChangesRequest,
-          textHarness: monoViewSession.harness,
-          projects: monoViewMono.projects,
-        }}
+        changes={
+          monoViewIsBot
+            ? undefined
+            : {
+                sessionId: monoViewSession.id,
+                cwd: monoViewCwd,
+                totals: monoChangeTotals,
+                request: monoChangesRequest,
+                textHarness: monoViewSession.harness,
+                projects: monoViewMono.projects,
+              }
+        }
+        bot={monoViewIsBot}
+        news={
+          monoViewMono.botRole === "principal" ? (
+            <BotNewsList onOpenBot={(monoId) => void onOpenMono(monoId)} />
+          ) : undefined
+        }
+        subagentCount={botSubagentRuns.length || undefined}
+        subagents={
+          botSubagentRuns.length ? (
+            <SubagentStack
+              blocks={botSubagentRuns}
+              cwd={monoViewSession.cwd}
+              live={monoState(monoViewSession).status === "working"}
+              embedded
+              onOpenFile={onOpenFile}
+            />
+          ) : null
+        }
         tab={monoOverviewTab}
         onTabChange={setMonoOverviewTab}
         onOpenSession={(sessionId) =>
@@ -13820,16 +13895,25 @@ function Workspace({
             onCreate: onCreateMono,
             onCreateBot,
             onDelete: onDeleteRailMono,
+            onOpenNews,
+            newsActive:
+              monoViewMono?.botRole === "principal" &&
+              monoOverviewOpen &&
+              monoOverviewTab === "news",
           }
         : undefined,
     [
       monosEnabled,
       monoViewMono?.id,
+      monoViewMono?.botRole,
       monoRail,
       onOpenRailMono,
       onCreateMono,
       onCreateBot,
       onDeleteRailMono,
+      onOpenNews,
+      monoOverviewOpen,
+      monoOverviewTab,
     ],
   );
   const onDismissUpdate = useCallback(() => setUpdateNotice(null), []);

@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 32] = [
+const APP_ACTIONS: [&str; 34] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -114,6 +114,8 @@ const APP_ACTIONS: [&str; 32] = [
     "habits.update",
     "habits.run",
     "habits.remove",
+    "bots.list",
+    "bots.create",
     "chat.card",
 ];
 const APP_USAGE: &str = r#"MonoBOT app access — use in a thread enabled by /operator.
@@ -254,6 +256,10 @@ Actions:
                   "schedule":{...},"enabled":false}  Change or pause one.
   habits.run     {"id":"..."}  Run one within a minute, to try it out.
   habits.remove  {"id":"..."}
+  bots.list      {}  Principal bot only. The user's personal bots.
+  bots.create    {"name":"Daily digest","role":"research","instructions":"..."}
+                  Principal bot only. role is assistant, finance, documents
+                  or research; instructions seed its soul (optional).
   chat.card      Mono or habit only. Post a card to the Mono's chat:
                   {"type":"pr","repo":"owner/repo","number":123,"note":"..."}
                   {"type":"session","sessionId":"...","note":"..."}

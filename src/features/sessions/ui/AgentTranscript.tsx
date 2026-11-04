@@ -3905,7 +3905,7 @@ function PhaseStep({
  * A row is a mascot, a name, and what that agent is doing right now. Click it
  * and the agent's own trail opens underneath.
  */
-function SubagentStack({
+export function SubagentStack({
   blocks,
   cwd,
   live = false,

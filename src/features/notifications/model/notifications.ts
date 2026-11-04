@@ -241,6 +241,40 @@ export async function notifySession(
   });
 }
 
+/**
+ * A personal bot posted on its own. Its chat runs in the home folder, not a
+ * project, so this skips the per-project rules that would otherwise drop it.
+ */
+export async function announceBotPost(
+  sessionId: string,
+  botName: string,
+  source: string,
+  text: string,
+  sessionVisible: boolean,
+): Promise<void> {
+  const decision = shouldNotify({
+    enabled: loadNotificationsEnabled(),
+    permission,
+    windowFocused,
+    sessionVisible,
+  });
+  if (decision) {
+    try {
+      await invoke("show_notification", {
+        sessionId,
+        title: botName,
+        subtitle: source,
+        body: text.replace(/\s+/g, " ").trim().slice(0, 240),
+        sound: loadSoundsEnabled(),
+      });
+      return;
+    } catch {
+      // fall through to the in-app cue
+    }
+  }
+  playCue("turnFinished", { projectId: "", category: "agentFinished", occurredAt: Date.now() });
+}
+
 export function announceSessionFinished(
   session: Session,
   sessionVisible: boolean,

@@ -42,9 +42,11 @@ export function MonoHeader({
       </div>
       {greeting ? (
         <p className="mt-3 max-w-sm text-[13px] leading-relaxed text-content/50">
-          {agent.projects.length
-            ? `I can see every session, note and folder in ${monoProjectsPhrase(agent.projects)}. Ask what’s going on, or hand me work.`
-            : "Add the projects I should work on in my settings, or just ask me something."}
+          {agent.bot
+            ? "Ask me something, hand me a task, or ask me to do it every day. I can read your Notion, Gmail and Drive."
+            : agent.projects.length
+              ? `I can see every session, note and folder in ${monoProjectsPhrase(agent.projects)}. Ask what’s going on, or hand me work.`
+              : "Add the projects I should work on in my settings, or just ask me something."}
         </p>
       ) : (
         <MonoStatus

@@ -54,7 +54,10 @@ async function loadMonoSession(
   const home = await host.home();
   // Removed while the home folder was looked up.
   if (!findMono(monoId)) return undefined;
-  const session: Session = { ...host.create(home), runtimeMode: "auto" };
+  // A bot's accounts, connectors and skills reach Claude Code only, so its
+  // chat starts there whatever the default agent is.
+  const base = mono.kind === "bot" ? newSession("claude", home) : host.create(home);
+  const session: Session = { ...base, runtimeMode: "auto" };
   saveMonoSessionId(monoId, session.id);
   host.add(session);
   return session;

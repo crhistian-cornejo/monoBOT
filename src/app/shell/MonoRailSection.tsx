@@ -49,9 +49,12 @@ export type MonoRailProps = {
   onOpen: (monoId: string) => void;
   /** Creates a Mono, given these projects to start with. */
   onCreate: (projects?: readonly string[]) => void;
-  /** Creates a productivity bot with this role. */
-  onCreateBot?: (role: BotRole) => void;
+  /** Creates a productivity bot with this role, or a blank one to set up. */
+  onCreateBot?: (role: BotRole, options?: { blank?: boolean }) => void;
   onDelete: (monoId: string) => void;
+  /** Opens the bots' news feed, on the Principal bot. */
+  onOpenNews?: () => void;
+  newsActive?: boolean;
 };
 
 const IDLE: MonoState = { status: "idle" };
@@ -95,7 +98,10 @@ export function MonoRailSection({
     () =>
       listMonos().filter(
         (mono) =>
-          isBot(mono) === bots && (!project || monoWorksOn(mono, project)),
+          isBot(mono) === bots &&
+          // The Principal bot has its own row above the bots.
+          mono.botRole !== "principal" &&
+          (!project || monoWorksOn(mono, project)),
       ),
     [snapshot, project, bots],
   );
@@ -308,7 +314,22 @@ export function MonoRailSection({
           aria-label="New bot"
           className="p-1"
         >
-          {BOT_ROLES.map((info) => (
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setRoles(undefined);
+              onCreateBot?.("assistant", { blank: true });
+            }}
+            className="flex w-full flex-col items-start px-2.5 py-1.5 text-left hover:bg-content/8"
+          >
+            <span className="text-[13px] font-medium">Blank bot</span>
+            <span className="text-xs text-content/55">
+              Start from scratch: name, soul, model
+            </span>
+          </button>
+          <div role="separator" className="my-1 h-px bg-content/10" />
+          {BOT_ROLES.filter((info) => !info.hidden).map((info) => (
             <button
               key={info.role}
               type="button"

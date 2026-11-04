@@ -41,6 +41,15 @@ import type { Worktree, Worktrees } from "../../source-control/model/worktrees";
 import { pathKey, projectName } from "../../../shared/lib/paths";
 import type { SplitDir } from "../../workspace/model/layout";
 import { consumeOperatorCommand } from "../../sessions/model/operatorCommand";
+import {
+  createMono,
+  isBot,
+  listMonos,
+  monoForSession,
+  monoLook,
+  type Mono,
+} from "../../monos/model/mono";
+import { BOT_ROLES, botRole, isBotRole } from "../../bots/model/bots";
 import { sessionConversationPage, type SessionReadOptions } from "./sessionConversation";
 import {
   CARD_FIELDS,
@@ -219,6 +228,8 @@ const FIELDS = new Map<string, readonly string[]>([
   ["habits.update", ["id", "name", "instructions", "schedule", "enabled"]],
   ["habits.run", ["id"]],
   ["habits.remove", ["id"]],
+  ["bots.list", []],
+  ["bots.create", ["name", "role", "instructions"]],
   ["chat.card", [...CARD_FIELDS]],
 ]);
 
@@ -714,6 +725,37 @@ function habitView(habit: Habit) {
   };
 }
 
+/** The Principal bot creates and lists the user's personal bots. */
+function handleBots(
+  source: { id: string },
+  action: string,
+  input: Record<string, unknown>,
+): unknown {
+  const principal = monoForSession(source.id);
+  if (principal?.kind !== "bot" || principal.botRole !== "principal")
+    throw new Error("Only the Principal bot can manage bots");
+  const view = (mono: Mono) => ({
+    id: mono.id,
+    name: monoLook(mono).name,
+    role: mono.botRole ?? "assistant",
+  });
+  if (action === "bots.list")
+    return { bots: listMonos().filter(isBot).map(view) };
+  const role = input.role === undefined ? "assistant" : input.role;
+  if (!isBotRole(role) || role === "principal")
+    throw new Error(
+      `role must be one of ${BOT_ROLES.filter((info) => !info.hidden)
+        .map((info) => info.role)
+        .join(", ")}`,
+    );
+  const name = requiredString(input.name, "name", 40);
+  const instructions =
+    input.instructions === undefined
+      ? botRole(role).instructions
+      : requiredString(input.instructions, "instructions", 4_000);
+  return { bot: view(createMono([], { role, name, instructions })) };
+}
+
 async function handleHabits(
   source: Session,
   action: string,
@@ -956,6 +998,7 @@ export async function handleAgentApp(
     return handleMemory(source, action, input, host);
   if (action.startsWith("habits."))
     return handleHabits(source, action, input, host);
+  if (action.startsWith("bots.")) return handleBots(source, action, input);
   if (action === "chat.card") {
     if (
       !host.postCard ||

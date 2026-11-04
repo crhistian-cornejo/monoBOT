@@ -96,6 +96,13 @@ import {
 import { remoteProjectFor } from "../../features/connections/model/remoteProjects";
 import { useProjectMenu } from "./useProjectMenu";
 import { MonoRailSection, type MonoRailProps } from "./MonoRailSection";
+import {
+  loadRailZone,
+  PersonalRail,
+  RailZoneSwitch,
+  saveRailZone,
+  type RailZone,
+} from "./PersonalRail";
 
 type Props = {
   visible?: boolean;
@@ -188,6 +195,12 @@ export function ProjectRail({
   monos,
 }: Props) {
   const trafficLightsVisible = useTrafficLightsVisible();
+  const [zone, setZoneState] = useState<RailZone>(loadRailZone);
+  const setZone = (next: RailZone) => {
+    setZoneState(next);
+    saveRailZone(next);
+  };
+  const personal = zone === "personal" && !!monos;
   const resize = useDragResize({
     min: sharedWidth?.min ?? PROJECT_RAIL_WIDTH_MIN,
     max:
@@ -406,8 +419,28 @@ export function ProjectRail({
           onSelect={(next) => onSelectSettingsSection?.(next)}
           onClose={() => onCloseSettings?.()}
         />
+      ) : personal && monos ? (
+        <>
+          <RailZoneSwitch zone={zone} onChange={setZone} />
+          <div
+            ref={lockOverscroll}
+            className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
+          >
+            <PersonalRail monos={monos} onOpenCode={() => setZone("code")} />
+          </div>
+          <div className="flex shrink-0 flex-col gap-px p-2">
+            <RailAction
+              label="Settings"
+              icon={Settings}
+              onClick={onOpenSettings}
+              shortcut={`${MOD},`}
+              ariaLabel={`Settings (${MOD},)`}
+            />
+          </div>
+        </>
       ) : (
         <>
+          {monos ? <RailZoneSwitch zone={zone} onChange={setZone} /> : null}
           <div className="flex shrink-0 flex-col gap-px px-2 pb-2 pt-0.5">
             <RailSearch
               label="Search"
@@ -460,7 +493,6 @@ export function ProjectRail({
             className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-none pb-2"
           >
             {monos ? <MonoRailSection {...monos} /> : null}
-            {monos ? <MonoRailSection {...monos} kind="bot" /> : null}
 
             {sections.pinned.length > 0 ? (
               <ProjectSection
