@@ -14251,6 +14251,7 @@ function Workspace({
       projectRailOpen={projectRailOpen}
       sessionSidebarOpen={sessionSidebarOpen}
       compactRail={!insetLayout && compactTitleNavigation}
+      compactRailShown={!insetLayout && compactRailActive}
       inset={insetLayout}
       rightPanelOpen={rightPanelOpen}
       onToggleRightPanel={
