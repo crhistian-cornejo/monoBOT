@@ -159,6 +159,26 @@ export function botLaunch(role: BotRole): {
       ...info.services.flatMap((service) => toolNames(service, DENIED[service])),
       // A service the role does not use stays out of the session entirely.
       ...unused.map((service) => PREFIX[service].replace(/__$/, "")),
+      ...DESTRUCTIVE_COMMANDS,
     ],
   };
 }
+
+/**
+ * The soul's "never delete" made a rule Claude Code enforces: a bot moves
+ * what it would remove into a _revisar folder instead, and never rewrites a
+ * repository's history or pushes.
+ */
+export const DESTRUCTIVE_COMMANDS = [
+  "Bash(rm:*)",
+  "Bash(rmdir:*)",
+  "Bash(del:*)",
+  "Bash(erase:*)",
+  "Bash(rd:*)",
+  "Bash(Remove-Item:*)",
+  "Bash(git push:*)",
+  "Bash(git reset:*)",
+  "Bash(git clean:*)",
+  "Bash(format:*)",
+  "Bash(shutdown:*)",
+] as const;

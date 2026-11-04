@@ -50,6 +50,15 @@ describe("bots", () => {
     }
   });
 
+  it("keeps every bot from deleting files or pushing", () => {
+    for (const { role } of BOT_ROLES) {
+      const { disallowedTools } = botLaunch(role);
+      expect(disallowedTools, role).toContain("Bash(rm:*)");
+      expect(disallowedTools, role).toContain("Bash(Remove-Item:*)");
+      expect(disallowedTools, role).toContain("Bash(git push:*)");
+    }
+  });
+
   it("passes the denied tools to Claude", () => {
     const { disallowedTools } = botLaunch("assistant");
     const args = buildClaudeSpawnArgs({ disallowedTools });
