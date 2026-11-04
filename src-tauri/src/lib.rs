@@ -60,6 +60,7 @@ mod tool_detail;
 mod trackpad_zoom;
 #[cfg(target_os = "windows")]
 mod tray;
+mod voice;
 mod window;
 mod window_transfer;
 #[cfg(windows)]
@@ -490,6 +491,10 @@ pub fn run() {
             dictation::dictation_start,
             dictation::dictation_stop,
             dictation::dictation_cancel,
+            voice::voice_status,
+            voice::voice_install,
+            voice::voice_speakers,
+            voice::voice_speak,
             search::search_project,
             search::cancel_project_search,
             cursor_store::cursor_tool_calls,

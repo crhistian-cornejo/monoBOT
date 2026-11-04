@@ -102,7 +102,10 @@ pub fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<(), Err
     Ok(())
 }
 
-fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) -> Result<(), Error> {
+/// Downloads one pinned file to `target`, reporting each chunk's size. The
+/// file only lands at `target` when its size and SHA-256 both match; the
+/// voice crate fetches its model through here too.
+pub fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) -> Result<(), Error> {
     let partial = target.with_extension("part");
     let response = ureq::get(&url_of(file))
         .call()

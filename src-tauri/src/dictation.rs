@@ -90,8 +90,9 @@ pub async fn dictation_install(app: AppHandle) -> Result<(), String> {
     result
 }
 
-/// Opens the microphone. Emits `dictation-level` (0 to 1) as it hears and
-/// `dictation-partial` with the transcript so far.
+/// Opens the microphone. Emits `dictation-level` (0 to 1) as it hears,
+/// `dictation-partial` with the transcript so far, and `dictation-speech`
+/// when the user starts or stops talking.
 #[tauri::command]
 pub async fn dictation_start(app: AppHandle) -> Result<(), String> {
     let state = state(&app)?;
@@ -108,6 +109,9 @@ pub async fn dictation_start(app: AppHandle) -> Result<(), String> {
             }
             Event::Partial(text) => {
                 let _ = emitter.emit("dictation-partial", text);
+            }
+            Event::Speech(speaking) => {
+                let _ = emitter.emit("dictation-speech", speaking);
             }
         })
     })

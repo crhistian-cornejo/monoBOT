@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconButton } from "../../../app/shell/TitleBar";
 import {
+  Call,
   Clock,
   File,
   FileDiff,
@@ -53,7 +54,8 @@ export type MonoOverviewTab =
   | "news"
   | "prs"
   | "files"
-  | "members";
+  | "members"
+  | "call";
 
 // Activity sits apart, beside the panel toggle, since it follows the chat.
 const TABS: {
@@ -70,6 +72,7 @@ const TABS: {
   { id: "prs", label: "PRs", icon: GitPullRequest },
   { id: "files", label: "Files", icon: Folder },
   { id: "members", label: "Members", icon: Users },
+  { id: "call", label: "Call", icon: Call },
 ];
 
 // A personal bot does not work in projects: no sessions to list and no code
@@ -82,8 +85,8 @@ const PRINCIPAL_TABS = new Set(["news", "habits", "documents", "subagents"]);
 // A workstream's orchestrator: its agents, their pull requests, and the
 // shared folder.
 const WORKSTREAM_TABS = new Set(["sessions", "prs", "files"]);
-// A group: who is in it, and what it wrote.
-const GROUP_TABS = new Set(["members", "documents"]);
+// A group: who is in it, talking with them out loud, and what it wrote.
+const GROUP_TABS = new Set(["members", "call", "documents"]);
 
 /** The conversation's recorded changes, reviewed and committed on their tab. */
 export type MonoOverviewChanges = {
@@ -141,6 +144,9 @@ type Props = {
   /** A group's members, with adding and removing. */
   members?: ReactNode;
   memberCount?: number;
+  /** A group's voice call; it stays mounted so a look at another tab
+   * does not hang up. */
+  call?: ReactNode;
 };
 
 /**
@@ -168,6 +174,7 @@ export function MonoOverview({
   workstream,
   members,
   memberCount,
+  call,
   onOpenSession,
   shownSession,
   onBackFromSession = () => {},
@@ -296,6 +303,7 @@ export function MonoOverview({
     prs: undefined,
     files: undefined,
     members: memberCount,
+    call: undefined,
   };
 
   return (
@@ -378,6 +386,17 @@ export function MonoOverview({
             />
           </div>
         ) : null}
+        {call ? (
+          <div
+            role="tabpanel"
+            aria-label="Call"
+            hidden={tab !== "call"}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-none px-2 py-2"
+            data-mono-overview={tab === "call" ? "call" : undefined}
+          >
+            {call}
+          </div>
+        ) : null}
         <div
           ref={lock}
           role="tabpanel"
@@ -386,11 +405,13 @@ export function MonoOverview({
               ? "Activity"
               : TABS.find((entry) => entry.id === tab)?.label
           }
-          hidden={tab === "changes"}
+          hidden={tab === "changes" || tab === "call"}
           className="min-h-0 flex-1 overflow-y-auto overscroll-none px-2 py-2"
-          data-mono-overview={tab === "changes" ? undefined : tab}
+          data-mono-overview={
+            tab === "changes" || tab === "call" ? undefined : tab
+          }
         >
-          {tab === "activity" ? (
+          {tab === "call" ? null : tab === "activity" ? (
             (activity ?? (
               <EmptyState icon={ListBullet}>
                 Select the activity on one of {agent.name}&apos;s messages to

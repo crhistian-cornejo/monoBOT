@@ -7,6 +7,7 @@ import {
   onDictationInstall,
   onDictationLevel,
   onDictationPartial,
+  onDictationSpeech,
   startDictation,
   stopDictation,
 } from "../model/dictation";
@@ -27,6 +28,8 @@ export type Dictation = {
   levels: number[];
   /** What has been heard so far, before it lands in the draft. */
   partial: string;
+  /** The user is talking right now, by the voice detector. */
+  speaking: boolean;
   /** Download progress, 0 to 1, while the model installs. */
   progress: number;
   modelBytes: number;
@@ -45,6 +48,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
   const [phase, setPhase] = useState<DictationPhase>("idle");
   const [levels, setLevels] = useState<number[]>(() => Array(BARS).fill(0));
   const [partial, setPartial] = useState("");
+  const [speaking, setSpeaking] = useState(false);
   const [progress, setProgress] = useState(0);
   const [modelBytes, setModelBytes] = useState(0);
   const [error, setError] = useState<string>();
@@ -57,6 +61,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
   const unlisten = () => {
     for (const stop of listeners.current) stop();
     listeners.current = [];
+    setSpeaking(false);
   };
   useEffect(() => unlisten, []);
 
@@ -77,6 +82,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
           setLevels((current) => [...current.slice(1), level]),
         ),
         await onDictationPartial(setPartial),
+        await onDictationSpeech(setSpeaking),
       );
       await startDictation();
       setPhase("listening");
@@ -163,6 +169,7 @@ export function useDictation(onText: (text: string) => void): Dictation {
     phase,
     levels,
     partial,
+    speaking,
     progress,
     modelBytes,
     error,

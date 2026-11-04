@@ -24,6 +24,11 @@ export function onDictationPartial(handler: (text: string) => void): Promise<Unl
   return listen<string>("dictation-partial", (event) => handler(event.payload));
 }
 
+/** The voice detector heard the user start (true) or stop (false) talking. */
+export function onDictationSpeech(handler: (speaking: boolean) => void): Promise<UnlistenFn> {
+  return listen<boolean>("dictation-speech", (event) => handler(event.payload));
+}
+
 export function onDictationInstall(
   handler: (progress: { done: number; total: number }) => void,
 ): Promise<UnlistenFn> {

@@ -27,6 +27,9 @@ pub enum Event {
     Level(f32),
     /// Everything transcribed so far.
     Partial(String),
+    /// The voice detector heard speech start (true) or stop (false), so a
+    /// call can tell when the user has finished their turn.
+    Speech(bool),
 }
 
 pub struct Session {
@@ -63,6 +66,7 @@ impl Session {
                         seen: 0,
                         delivered: 0,
                         phrases: Vec::new(),
+                        speaking: false,
                     };
                     run.go(mic, &stop, &cancel, &on_event)
                 })?
@@ -111,6 +115,8 @@ struct Run {
     /// Where the last transcribed phrase ended, so pre-roll never repeats it.
     delivered: usize,
     phrases: Vec<String>,
+    /// Whether the detector was hearing speech at the last check.
+    speaking: bool,
 }
 
 impl Run {
@@ -147,6 +153,11 @@ impl Run {
             if last_level.elapsed() >= Duration::from_millis(40) {
                 on_event(Event::Level(mic.level()));
                 last_level = Instant::now();
+            }
+            let speaking = self.vad.detected();
+            if speaking != self.speaking {
+                self.speaking = speaking;
+                on_event(Event::Speech(speaking));
             }
             self.drain(on_event);
         }

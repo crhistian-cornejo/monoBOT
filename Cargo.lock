@@ -3004,6 +3004,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "monobot-voice"
+version = "0.16.0"
+dependencies = [
+ "bzip2 0.5.2",
+ "monobot-dictation",
+ "serde_json",
+ "sherpa-onnx",
+ "tar",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "monocode"
 version = "0.16.0"
 dependencies = [
@@ -3017,6 +3029,7 @@ dependencies = [
  "keyring",
  "libc",
  "monobot-dictation",
+ "monobot-voice",
  "monocode-mobile-link",
  "natpmp",
  "notify-rust",

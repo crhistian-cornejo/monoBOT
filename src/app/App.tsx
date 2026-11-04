@@ -661,6 +661,8 @@ import { WorkstreamIntro } from "../features/workstreams/ui/WorkstreamIntro";
 import { WorkstreamPrs } from "../features/workstreams/ui/WorkstreamPrs";
 import { NewGroupDialog } from "../features/groups/ui/NewGroupDialog";
 import { GroupMembers } from "../features/groups/ui/GroupMembers";
+import { GroupCall } from "../features/groups/ui/GroupCall";
+import type { MemberAsk } from "../features/groups/ui/useGroupCall";
 import {
   BLANK_BOT_SOUL,
   botRole,
@@ -13888,6 +13890,78 @@ function Workspace({
         ),
       }
     : undefined;
+  // A group's call asks each member in its own conversation, as group.ask
+  // does, and keeps the transcript among the group's documents.
+  const openMonoSession = (monoId: string) =>
+    ensureMonoSession(monoId, {
+      home: homeDir,
+      load: ensureOpenSession,
+      create: newDefaultSession,
+      add: (created) => {
+        sessionsRef.current = [...sessionsRef.current, created];
+        setSessions(sessionsRef.current);
+      },
+    });
+  const askGroupMember = async (
+    memberId: string,
+    prompt: string,
+    requestId: string,
+  ): Promise<MemberAsk> => {
+    const opened = await openMonoSession(memberId);
+    if (!opened) throw new Error("Its conversation is not available");
+    const current =
+      sessionsRef.current.find((session) => session.id === opened.id) ??
+      opened;
+    if (current.busy) throw new Error("It is in the middle of something else");
+    if (sessionDraftBlock(current))
+      throw new Error("It has an unsent draft in its chat");
+    let accepted: Promise<boolean> = Promise.resolve(false);
+    const outcome = new Promise<ControlOutcome>((resolve) => {
+      accepted = submitWithSettlement({
+        submit: (onSettled) =>
+          submitSessionRef.current(opened.id, prompt, [], {
+            appRequestId: requestId,
+            onSettled,
+          }),
+        onSettled: resolve,
+        rejectionMessage: "It could not take the call's message.",
+      });
+    });
+    if (!(await accepted))
+      throw new Error("It could not take the call's message");
+    return { sessionId: opened.id, outcome };
+  };
+  const saveGroupCall = async (groupId: string, title: string, body: string) => {
+    const opened = await openMonoSession(groupId);
+    if (!opened) return;
+    const saved = await saveArtifact({
+      id: `artifact-${opened.id}-call-${Date.now().toString(36)}`,
+      kind: "document",
+      title,
+      body,
+      sourceSessionId: opened.id,
+      sourceCwd: opened.cwd,
+    });
+    const latest =
+      sessionsRef.current.find((session) => session.id === opened.id) ??
+      opened;
+    // Documents hang off a turn of the chat; a group that never chatted
+    // keeps the transcript in the documents store only.
+    const anchor =
+      [...latest.blocks].reverse().find((block) => block.role === "user")
+        ?.id ?? latest.blocks[latest.blocks.length - 1]?.id;
+    if (!anchor) return;
+    const updated = recordArtifactCard(latest, anchor, {
+      id: saved.id,
+      kind: saved.kind,
+      title: saved.title,
+    });
+    sessionsRef.current = sessionsRef.current.map((session) =>
+      session.id === opened.id ? updated : session,
+    );
+    setSessions(sessionsRef.current);
+    await upsertSession(updated);
+  };
   const monoOverviewPanel =
     monoViewMono && monoViewSession ? (
       <MonoOverview
@@ -13926,6 +14000,19 @@ function Workspace({
           ) : undefined
         }
         memberCount={monoViewMono.group?.members.length || undefined}
+        call={
+          monoViewMono.group ? (
+            <GroupCall
+              group={monoViewMono}
+              sessions={sessions}
+              onAskMember={askGroupMember}
+              onStopMember={(sessionId) => void onStop(sessionId)}
+              onSaveTranscript={(title, body) =>
+                saveGroupCall(monoViewMono.id, title, body)
+              }
+            />
+          ) : undefined
+        }
         workstream={
           monoViewMono.workstream
             ? {

@@ -73,6 +73,8 @@ type Props = {
   controls?: ReactNode;
   /** Sits beside attach and emoji, on the left under the input. */
   tools?: ReactNode;
+  /** Offers the mic; off where something else holds it, like a call. */
+  dictation?: boolean;
 };
 
 /**
@@ -94,6 +96,7 @@ export function MonoComposer({
   onFocus,
   controls,
   tools,
+  dictation: dictates = true,
 }: Props) {
   const [text, setText] = useState(() => getComposerDraft(sessionId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -459,7 +462,9 @@ export function MonoComposer({
           // bottom as the text grows.
           <div className="flex items-end gap-1.5 p-1.25">
             {input("flex-1 self-center px-1.5")}
-            {enabled ? <DictationButton dictation={dictation} /> : null}
+            {enabled && dictates ? (
+              <DictationButton dictation={dictation} />
+            ) : null}
             {sendButton("shrink-0")}
           </div>
         )}
