@@ -154,7 +154,7 @@ describe("file picker command mode", () => {
     const dialog = document.querySelector<HTMLElement>("[data-file-picker]")!;
     const input = dialog.querySelector<HTMLInputElement>("input")!;
 
-    inputText(input, "> rmc");
+    inputText(input, "> rmb");
     const reload = [
       ...dialog.querySelectorAll<HTMLButtonElement>("button"),
     ].find((button) => button.textContent?.includes("Reload MonoBOT"))!;
