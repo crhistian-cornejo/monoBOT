@@ -11,9 +11,11 @@ import {
   askingPermissionMode,
   connectorAllowedTools,
   connectorAskTools,
+  connectorCheckout,
   connectorMcpConfig,
   sessionConnectors,
 } from "../../../../features/settings/model/connectors";
+import { startPoki } from "../../../../platform/tauri/poki";
 import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
 import { enabledSkillPacks } from "../../../../features/skills/model/skillPacks";
 import {
@@ -561,6 +563,11 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   );
   // A group's chat and the coding Monos in groups get the groups' folders.
   const group = groupLaunchForSession(input.sessionId);
+  // A Phone bot's bridge needs Poki's daemon; it starts from the saved
+  // folder unless one runs. When it cannot, the bridge says Poki is not
+  // running and the bot tells the user.
+  if (launch.mcpConfig?.mcpServers.poki)
+    await startPoki(connectorCheckout("poki")).catch(() => undefined);
   await spawnChild(
     input.sessionId,
     path,

@@ -18,23 +18,22 @@ export const POKI_STEPS: readonly PokiStep[] = [
   {
     scene: "needs",
     title: "What you need",
-    body: "Poki is a separate open-source project that runs on your Mac and drives the iPhone through Xcode's developer services. MonoBOT starts it for your Phone bot; you install it once.",
+    body: "Poki is a separate open-source project (AGPL-3.0) that runs on your Mac and drives the iPhone through Xcode's developer services, over MCP. MonoBOT can install it for you and starts it while its connector is on.",
     points: [
-      "A Mac with macOS 15 or later",
+      "A Mac with Apple Silicon and macOS 15 or later",
       "Full Xcode, not only the command line tools",
-      "Node.js 24 or later, Rust and ffmpeg",
+      "Node.js 24 or later, Python 3 and ffmpeg (brew install node ffmpeg)",
       "An iPhone and its USB cable, or the iOS Simulator",
-      "About ten minutes for the first build",
     ],
   },
   {
     scene: "clone",
     title: "Get Poki",
-    body: "Clone it anywhere you like, then let its setup check what is missing and build the native bridge. The first build takes a few minutes.",
-    commands: [`git clone ${POKI_REPO}.git ~/poki`, "cd ~/poki", "./bin/setup"],
+    body: "Turn on Settings › Connectors › iPhone (Poki). MonoBOT asks, then downloads Poki's published release (about 11 MB), refuses it unless its SHA-256 matches the one GitHub lists, and unpacks it inside MonoBOT's own data folder. No admin rights, no install scripts, nothing else on your Mac changes.",
     points: [
-      "On Apple Silicon you can download the prebuilt package from Poki's releases instead and run npm ci in it: no Rust needed.",
+      "Intel Mac, or you prefer your own copy? Clone and build it yourself (needs Rust), then choose that folder:",
     ],
+    commands: [`git clone ${POKI_REPO}.git ~/poki`, "cd ~/poki", "./bin/setup"],
   },
   {
     scene: "cable",
@@ -51,24 +50,24 @@ export const POKI_STEPS: readonly PokiStep[] = [
     body: "On the iPhone, open Settings › Privacy & Security › Developer Mode, turn it on and let the phone restart. Then turn on Settings › Developer › UI Automation.",
     commands: ["node bin/prepare-device.mjs"],
     points: [
+      "Run it from the Poki folder that Settings shows.",
       "No Developer Mode in Settings? Open Xcode › Window › Devices and Simulators once with the phone connected.",
       "prepare-device mounts the developer services when they are missing. It changes no security setting and downloads nothing.",
     ],
   },
   {
     scene: "start",
-    title: "Start Poki and leave it running",
-    body: "Poki's service has to run while a bot uses the phone. Start it in a terminal and keep that window open; MonoBOT tells you when it stops.",
-    commands: ["cd ~/poki", "npm start"],
+    title: "Poki runs while the connector is on",
+    body: "MonoBOT starts Poki's service (its npm start) when you turn the connector on or a Phone bot needs it, and stops it when you turn it off or quit. Its address and token stay on this Mac.",
     points: [
-      "Never start it with POKI_MCP_APPROVAL_MODE=allow: that approves sensitive actions without asking anyone.",
-      "After updating Poki, stop it and run npm start again.",
+      "MonoBOT never starts it with POKI_MCP_APPROVAL_MODE=allow, which would approve sensitive actions without asking anyone.",
+      "Running your own copy in a terminal with npm start works too; MonoBOT uses it and leaves it alone.",
     ],
   },
   {
     scene: "folder",
-    title: "Point MonoBOT to it",
-    body: "In Settings › Connectors › iPhone (Poki), choose the folder you cloned and turn the switch on. The status says Ready when the folder is right and Poki is running.",
+    title: "Check that it says Ready",
+    body: "After installing, the Poki folder fills in by itself; with your own copy, choose its folder. The status says Ready when the folder is right and Poki is running.",
   },
   {
     scene: "bot",

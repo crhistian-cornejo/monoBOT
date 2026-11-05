@@ -35,6 +35,7 @@ import {
 } from "../model/connectors";
 import { BetaBadge } from "../../../shared/ui/BetaBadge";
 import { PokiSetup } from "./PokiSetup";
+import { stopPoki } from "../../../platform/tauri/poki";
 import {
   getCachedMcpSettings,
   loadMcpSettings,
@@ -345,8 +346,13 @@ function BuiltInConnectors() {
         CONNECTORS.filter(isConnectorEnabled).map((connector) => connector.id),
       ),
   );
+  // Turned on here, in this visit: Poki then installs (after asking) and starts.
+  const [switchedOn, setSwitchedOn] = useState<ConnectorId | null>(null);
   const toggle = (id: ConnectorId, on: boolean) => {
     setConnectorEnabled(id, on);
+    setSwitchedOn(on ? id : null);
+    // Its daemon runs only while the connector is on.
+    if (id === "poki" && !on) void stopPoki().catch(() => undefined);
     setEnabled((current) => {
       const next = new Set(current);
       if (on) next.add(id);
@@ -401,7 +407,9 @@ function BuiltInConnectors() {
                   onChange={(next) => toggle(connector.id, next)}
                 />
               </div>
-              {connector.id === "poki" && on ? <PokiSetup /> : null}
+              {connector.id === "poki" && on ? (
+                <PokiSetup activate={switchedOn === "poki"} />
+              ) : null}
             </li>
           );
         })}

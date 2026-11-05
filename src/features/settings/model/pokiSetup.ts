@@ -53,7 +53,7 @@ export const POKI_STATUS_TEXT: Record<
 > = {
   "no-folder": {
     label: "Not set up",
-    hint: "Choose the folder where you cloned Poki.",
+    hint: "Install it from here, or choose a folder where you cloned it.",
   },
   "no-bridge": {
     label: "Not a Poki folder",
@@ -61,13 +61,80 @@ export const POKI_STATUS_TEXT: Record<
   },
   stopped: {
     label: "Poki is not running",
-    hint: "Run npm start in the Poki folder and keep that terminal open.",
+    hint: "Start it here; MonoBOT stops it when you turn this off or quit.",
   },
   ready: {
     label: "Ready",
     hint: "Give the connector to a Phone bot in its settings.",
   },
 };
+
+/** What the app's Rust side reports about this Mac. */
+export type PokiMachine = {
+  /** macOS on Apple Silicon, which the published package needs. */
+  supported: boolean;
+  /** Tools Poki needs that this Mac lacks, as the user would install them. */
+  missing: string[];
+  /** The folder MonoBOT installed Poki in, if it did. */
+  installed: string | null;
+  /** Whether the daemon MonoBOT started still runs. */
+  running: boolean;
+  version: string;
+  /** Download size in bytes. */
+  size: number;
+};
+
+export type PokiInstallStage =
+  "download" | "verify" | "unpack" | "dependencies" | "done";
+
+export const POKI_STAGE_TEXT: Record<PokiInstallStage, string> = {
+  download: "Downloading Poki…",
+  verify: "Checking it is the published release…",
+  unpack: "Unpacking into MonoBOT's folder…",
+  dependencies: "Installing its packages (no install scripts)…",
+  done: "Installed",
+};
+
+/** What turning the switch on does next. */
+export type PokiNext =
+  /** Not an Apple Silicon Mac: only the manual tutorial. */
+  | { kind: "unsupported" }
+  /** Install these first; MonoBOT never installs them. */
+  | { kind: "missing"; missing: string[] }
+  /** Ask, then download and verify the pinned release. */
+  | { kind: "install" }
+  /** Use the copy MonoBOT already installed. */
+  | { kind: "use"; folder: string }
+  /** Start the daemon from the saved folder. */
+  | { kind: "start"; folder: string }
+  | { kind: "ready" };
+
+export function pokiNext(
+  folder: string,
+  status: PokiStatus,
+  machine: PokiMachine,
+): PokiNext {
+  if (status === "ready") return { kind: "ready" };
+  if (folder.trim() && status === "stopped")
+    return { kind: "start", folder: folder.trim() };
+  if (machine.installed) return { kind: "use", folder: machine.installed };
+  // A folder that is not Poki's is the user's to fix in the field.
+  if (folder.trim()) return { kind: "ready" };
+  if (!machine.supported) return { kind: "unsupported" };
+  if (machine.missing.length)
+    return { kind: "missing", missing: machine.missing };
+  return { kind: "install" };
+}
+
+/** The question before downloading anything. */
+export function pokiInstallQuestion(machine: PokiMachine): string {
+  const megabytes = Math.round(machine.size / 1_000_000);
+  return [
+    `Download Poki ${machine.version} (${megabytes} MB, AGPL-3.0) from its GitHub release?`,
+    "MonoBOT checks it against the SHA-256 GitHub published and refuses anything else, unpacks it only inside its own data folder, and runs no install scripts. It needs no admin rights and changes nothing else on your Mac.",
+    "Poki's daemon runs while this connector is on and stops when you turn it off or quit.",
+  ].join("\n\n");
+}
 
 /** Whether the daemon's file names a local endpoint, as the bridge checks. */
 export function pokiEndpointLive(raw: string): boolean {

@@ -44,6 +44,7 @@ mod notifications;
 mod pasteboard;
 mod pi_usage;
 mod plugins;
+mod poki;
 mod project_logo;
 mod provider_session_transfer;
 mod pty;
@@ -526,6 +527,10 @@ pub fn run() {
             dictation::dictation_start,
             dictation::dictation_stop,
             dictation::dictation_cancel,
+            poki::poki_setup,
+            poki::poki_install,
+            poki::poki_start,
+            poki::poki_stop,
             voice::voice_status,
             voice::voice_install,
             voice::voice_speakers,
@@ -760,6 +765,7 @@ pub fn run() {
         }
         tauri::RunEvent::Exit => {
             handle.state::<remote::RemoteConnections>().shutdown();
+            poki::shutdown();
             reap_harness_children(handle);
         }
         _ => {}

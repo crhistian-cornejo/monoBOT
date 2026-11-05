@@ -4,8 +4,11 @@ import {
   POKI_ENDPOINT_FILE,
   pokiEndpointLive,
   pokiFolderProblem,
+  pokiInstallQuestion,
+  pokiNext,
   pokiStatus,
   type PokiIO,
+  type PokiMachine,
 } from "./pokiSetup";
 import { POKI_STEPS } from "./pokiTutorial";
 
@@ -68,5 +71,57 @@ describe("Poki setup status", () => {
     expect(new Set(POKI_STEPS.map((step) => step.scene)).size).toBe(
       POKI_STEPS.length,
     );
+  });
+});
+
+describe("turning the iPhone switch on", () => {
+  const mac: PokiMachine = {
+    supported: true,
+    missing: [],
+    installed: null,
+    running: false,
+    version: "v0.1.0",
+    size: 11_370_797,
+  };
+
+  it("asks to install only on a ready Apple Silicon Mac with no copy", () => {
+    expect(pokiNext("", "no-folder", mac)).toEqual({ kind: "install" });
+    expect(pokiNext("", "no-folder", { ...mac, supported: false })).toEqual({
+      kind: "unsupported",
+    });
+    expect(pokiNext("", "no-folder", { ...mac, missing: ["FFmpeg"] })).toEqual({
+      kind: "missing",
+      missing: ["FFmpeg"],
+    });
+  });
+
+  it("reuses what is there and starts it", () => {
+    const installed = {
+      ...mac,
+      installed: "/data/connectors/poki/poki-v0.1.0",
+    };
+    expect(pokiNext("", "no-folder", installed)).toEqual({
+      kind: "use",
+      folder: "/data/connectors/poki/poki-v0.1.0",
+    });
+    expect(pokiNext("/Users/me/poki", "stopped", mac)).toEqual({
+      kind: "start",
+      folder: "/Users/me/poki",
+    });
+    expect(pokiNext("/Users/me/poki", "ready", mac)).toEqual({
+      kind: "ready",
+    });
+    // A folder that is not Poki's is never replaced by a download.
+    expect(pokiNext("/Users/me/other", "no-bridge", mac)).toEqual({
+      kind: "ready",
+    });
+  });
+
+  it("says what it downloads and what it never does", () => {
+    const question = pokiInstallQuestion(mac);
+    expect(question).toContain("Poki v0.1.0 (11 MB, AGPL-3.0)");
+    expect(question).toContain("SHA-256");
+    expect(question).toContain("no install scripts");
+    expect(question).toContain("no admin rights");
   });
 });

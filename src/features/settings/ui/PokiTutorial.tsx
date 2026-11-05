@@ -183,12 +183,12 @@ function Scene({
       return (
         <TerminalScene
           lines={[
-            { type: "git clone …/poki.git ~/poki" },
-            { type: "cd ~/poki" },
-            { type: "./bin/setup" },
-            { out: "✓ Xcode  ✓ Node 24  ✓ Rust  ✓ ffmpeg" },
-            { out: "Building the native bridge…" },
+            { out: "Downloading Poki v0.1.0 (11 MB) from GitHub…" },
+            { out: "✓ SHA-256 matches the published release" },
+            { out: "✓ Unpacked inside MonoBOT's data folder" },
+            { out: "✓ Packages installed, no install scripts run" },
           ]}
+          footer="No admin rights, nothing else changed"
         />
       );
     case "cable":
@@ -274,7 +274,7 @@ function TerminalScene({
               </div>
             );
           }
-          delay += 300;
+          delay += 450;
           return (
             <div
               key={at}
