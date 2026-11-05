@@ -215,10 +215,10 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
   {
     role: "writer",
     name: "Writer",
-    description: "Drafts emails, posts and documents",
+    description: "Drafts emails, posts and messages in your voice",
     specialty:
-      "Writing: drafts and edits emails, posts, documents and messages in the user's voice",
-    instructions: `You are the user's writer bot. Draft and edit emails, posts, documents and messages in the user's voice: ask for the audience and the goal when they are not clear, keep it short, and offer one version rather than many. Save longer pieces as documents next to the user's files or in Notion. You never send or publish anything yourself. ${SAFETY}`,
+      "Writing: drafts and edits the words of emails, posts, messages and short texts in the user's voice",
+    instructions: `You are the user's writer bot. Draft and edit emails, posts, messages and short texts in the user's voice: ask for the audience and the goal when they are not clear, keep it short, and offer one version rather than many. Save longer drafts as documents with artifacts.write or in Notion. When the user wants a file (a Word report, a PDF, a spreadsheet, slides), write the text and ask the Documents agent to make the file (agents.list, then agents.message). You never send or publish anything yourself. ${WRITING} ${SAFETY}`,
     services: ["notion", "drive"],
     plugins: [],
     connectors: [],
@@ -253,7 +253,7 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
   {
     role: "documents",
     name: "Documents",
-    description: "Read and write PDFs, Word, Excel and slides",
+    description: "Makes and reads files: Word, PDF, Excel and slides",
     specialty:
       "Documents: reads, compares and summarizes PDFs and Office files, and writes reports, spreadsheets and slides",
     instructions: `You are the user's documents bot. You read PDFs and Office files, summarize and compare them, extract data into spreadsheets and write reports or slides. Use the files skill for folders and the document skills (docx, xlsx, pptx, pdf) when they are installed. Write new files next to the originals, never over them. When another agent asks you for a file (a Word report, a PDF, a spreadsheet), make it from what it sends, keep its structure, sources and formulas, and reply with where you saved it. Always load the writing skill before you write: follow its style and structure, and run its clean_text.py on every file you create before you say it is ready. ${WRITING} ${SAFETY}`,

@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from "react";
-import { FileCard } from "../../../shared/ui/FileCard";
+import { FileCard, fileFormatOf } from "../../../shared/ui/FileCard";
 import { ChevronDown, Folder, FolderOpen, Star } from "../../../shared/ui/icons";
 import { artifactLabel, type ArtifactCard } from "../artifacts";
 import {
@@ -19,9 +19,12 @@ import { cardFormat } from "./ArtifactCard";
 export function DocumentFolders({
   groups,
   onOpen,
+  onOpenFile,
 }: {
   groups: readonly DocumentGroup[];
   onOpen: (id: string) => void;
+  /** Opens a file the bot wrote in the app's viewer. */
+  onOpenFile?: (path: string) => void;
 }) {
   const stars = useSyncExternalStore(
     subscribeDocumentStars,
@@ -37,6 +40,7 @@ export function DocumentFolders({
         .map((group) => ({
           ...group,
           cards: group.cards.filter((card) => stars.has(card.id)),
+          files: [],
         }))
         .filter((group) => group.cards.length)
     : groups;
@@ -83,6 +87,7 @@ export function DocumentFolders({
               // The newest request opens; older ones stay folded.
               open={index === 0 || onlyStars}
               onOpen={onOpen}
+              onOpenFile={onOpenFile}
             />
           </div>
         );
@@ -96,12 +101,15 @@ function RequestFolder({
   stars,
   open: initiallyOpen,
   onOpen,
+  onOpenFile,
 }: {
   group: DocumentGroup;
   stars: ReadonlySet<string>;
   open: boolean;
   onOpen: (id: string) => void;
+  onOpenFile?: (path: string) => void;
 }) {
+  const count = group.cards.length + group.files.length;
   const [open, setOpen] = useState(initiallyOpen);
   const Icon = open ? FolderOpen : Folder;
   return (
@@ -126,10 +134,10 @@ function RequestFolder({
           </span>
         ) : null}
         <span
-          aria-label={`${group.cards.length} documents`}
+          aria-label={`${count} documents and files`}
           className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-content/8 px-1 text-[10px] tabular-nums text-content/55"
         >
-          {group.cards.length}
+          {count}
         </span>
         <ChevronDown
           aria-hidden
@@ -149,9 +157,48 @@ function RequestFolder({
               />
             </li>
           ))}
+          {group.files.map((path) => (
+            <li key={path}>
+              <FileRow path={path} onOpen={onOpenFile} />
+            </li>
+          ))}
         </ul>
       ) : null}
     </section>
+  );
+}
+
+/** A file the bot wrote, by its name and folder; opens in the app's viewer. */
+function FileRow({
+  path,
+  onOpen,
+}: {
+  path: string;
+  onOpen?: (path: string) => void;
+}) {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const name = parts.pop() ?? path;
+  const folder = parts.slice(-2).join("/");
+  return (
+    <button
+      type="button"
+      data-document-file={path}
+      title={path}
+      aria-label={`Open ${name}`}
+      onClick={() => onOpen?.(path)}
+      disabled={!onOpen}
+      className="flex w-full min-w-0 items-center gap-2.5 rounded-md px-2 py-2 text-left hover:bg-content/5 disabled:opacity-60"
+    >
+      <FileCard format={fileFormatOf(name)} size="sm" />
+      <span className="flex min-w-0 flex-1 flex-col">
+        <span className="truncate text-[12px] leading-5 text-content/85">
+          {name}
+        </span>
+        <span className="truncate text-[11px] leading-4 text-content/40">
+          {folder || "File"}
+        </span>
+      </span>
+    </button>
   );
 }
 

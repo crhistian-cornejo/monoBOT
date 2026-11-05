@@ -691,6 +691,7 @@ import {
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
 import { BotNewsToasts } from "../features/bots/ui/BotNewsToasts";
 import { documentGroups } from "../features/artifacts/documentGroups";
+import { useDocumentTopics } from "../features/artifacts/ui/useDocumentTopics";
 import {
   followTurn,
   startFollow,
@@ -14271,12 +14272,19 @@ function Workspace({
     () => (monoViewBlocks ? artifactCards(monoViewBlocks) : []),
     [monoViewBlocks],
   );
-  const monoDocumentGroups = useMemo(
-    () => (monoViewBlocks ? documentGroups(monoViewBlocks) : []),
-    [monoViewBlocks],
-  );
   // A personal bot's subagents: every delegated run in its chat, newest first.
   const monoViewIsBot = !!monoViewMono && isBot(monoViewMono);
+  // A bot's documents as folders by topic, named by a small model.
+  const documentTopics = useDocumentTopics(
+    monoViewBlocks,
+    monoViewBusy,
+    monoViewIsBot,
+  );
+  const monoDocumentGroups = useMemo(
+    () =>
+      monoViewBlocks ? documentGroups(monoViewBlocks, documentTopics) : [],
+    [monoViewBlocks, documentTopics],
+  );
   const botSubagentRuns = useMemo(
     () =>
       monoViewIsBot && monoViewBlocks

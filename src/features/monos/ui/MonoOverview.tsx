@@ -475,7 +475,11 @@ export function MonoOverview({
               }
             />
           ) : documentGroups?.length ? (
-            <DocumentFolders groups={documentGroups} onOpen={onOpenDocument} />
+            <DocumentFolders
+              groups={documentGroups}
+              onOpen={onOpenDocument}
+              onOpenFile={onOpenFile}
+            />
           ) : documents.length ? (
             <ul className="flex flex-col gap-px">
               {[...documents].reverse().map((card) => (
