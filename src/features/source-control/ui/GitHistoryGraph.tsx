@@ -16,6 +16,11 @@ import {
 } from "../../../shared/ui/icons";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { suppressTextSelection } from "../../../shared/lib/drag";
+import {
+  alongHandle,
+  clearResizeLimit,
+  paintResizeLimit,
+} from "../../../shared/lib/resizeLimit";
 import { PaneHeader } from "../../../shared/ui/PaneHeader";
 import {
   gitHistory,
@@ -581,9 +586,16 @@ export function GraphResizeSash({
 
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId || !drag.current) return;
-      const next = clamp(drag.current.size - (ev.clientY - drag.current.start));
+      const wanted = drag.current.size - (ev.clientY - drag.current.start);
+      const next = clamp(wanted);
       paintedRef.current = next;
       paintRef.current(next);
+      paintResizeLimit(
+        handle,
+        "y",
+        next - wanted,
+        alongHandle(handle, "y", ev.clientX, ev.clientY),
+      );
     };
 
     const stop = () => {
@@ -591,6 +603,7 @@ export function GraphResizeSash({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
       restoreSelection();
+      clearResizeLimit(handle);
       document.body.style.cursor = previousCursor;
       document.documentElement.classList.remove("is-resizing");
       setDragging(false);
@@ -619,7 +632,7 @@ export function GraphResizeSash({
       aria-orientation="horizontal"
       aria-label="Resize graph"
       aria-valuenow={height}
-      className={`z-10 h-1.5 shrink-0 cursor-row-resize touch-none ${
+      className={`relative z-10 h-1.5 shrink-0 cursor-row-resize touch-none ${
         dragging ? "bg-content/15" : "hover:bg-content/10"
       }`}
       onPointerDown={onPointerDown}

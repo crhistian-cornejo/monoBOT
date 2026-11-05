@@ -178,6 +178,7 @@ export function GroupCall({
         <MonoComposer
           sessionId={`group-call-${group.id}`}
           name={look.name}
+          placeholder="Ask the group"
           dictation={false}
           onSubmit={(text) => {
             if (!text.trim()) return false;

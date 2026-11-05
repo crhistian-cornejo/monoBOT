@@ -28,6 +28,11 @@ import {
 import { MOD } from "../../../platform/tauri/platform";
 import type { TerminalMetaPatch } from "../model/terminalTab";
 import { lazySurface } from "../../../shared/ui/lazySurface";
+import {
+  alongHandle,
+  clearResizeLimit,
+  paintResizeLimit,
+} from "../../../shared/lib/resizeLimit";
 
 const TerminalView = lazySurface(async () => {
   const module = await import("./TerminalView");
@@ -152,14 +157,23 @@ export function ProjectTerminalDock({
     if (!drag.current) return;
     const point = vertical ? event.clientY : event.clientX;
     const delta = point - drag.current.start;
-    const signed =
-      dock.side === "bottom" || dock.side === "right" ? -delta : delta;
-    paint(clampDockSize(dock.side, drag.current.size + signed, viewport()));
+    const flip = dock.side === "bottom" || dock.side === "right" ? -1 : 1;
+    const wanted = drag.current.size + delta * flip;
+    const next = clampDockSize(dock.side, wanted, viewport());
+    paint(next);
+    const axis = vertical ? "y" : "x";
+    paintResizeLimit(
+      event.currentTarget,
+      axis,
+      (wanted - next) * flip,
+      alongHandle(event.currentTarget, axis, event.clientX, event.clientY),
+    );
   };
 
   const onResizePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drag.current) return;
     drag.current = null;
+    clearResizeLimit(event.currentTarget);
     commit();
     setDragging(false);
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {

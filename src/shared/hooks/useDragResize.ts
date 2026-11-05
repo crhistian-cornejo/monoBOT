@@ -7,6 +7,11 @@ import {
 } from "react";
 import { suppressTextSelection } from "../lib/drag";
 import { beginLayoutTransition } from "../lib/layoutTransition";
+import {
+  alongHandle,
+  clearResizeLimit,
+  paintResizeLimit,
+} from "../lib/resizeLimit";
 
 type Options = {
   min: number;
@@ -112,14 +117,24 @@ export function useDragResize({
     // Write once per frame: each width change lays out the panes beside it.
     let frame = 0;
     let pendingX = startX;
+    let pendingY = event.clientY;
+    const sign = direction === "left" ? -1 : 1;
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== pointerId) return;
       pendingX = ev.clientX;
+      pendingY = ev.clientY;
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        apply(
-          clamp(startW + (pendingX - startX) * (direction === "left" ? -1 : 1)),
+        const wanted = startW + (pendingX - startX) * sign;
+        const next = clamp(wanted);
+        apply(next);
+        // Past min or max, the handle glows instead of just going still.
+        paintResizeLimit(
+          handle,
+          "x",
+          (wanted - next) * sign,
+          alongHandle(handle, "x", pendingX, pendingY),
         );
       });
     };
@@ -132,6 +147,7 @@ export function useDragResize({
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
       restoreSelection();
+      clearResizeLimit(handle);
       document.body.style.cursor = previousCursor;
       document.documentElement.classList.remove("is-resizing");
       setDragging(false);
@@ -140,7 +156,7 @@ export function useDragResize({
       } catch {
         /* already released */
       }
-      commit(startW + (pendingX - startX) * (direction === "left" ? -1 : 1));
+      commit(startW + (pendingX - startX) * sign);
       endTransition();
     };
 

@@ -12,6 +12,11 @@ import {
 import { setGrabbing, suppressTextSelection } from "../../../shared/lib/drag";
 import { beginLayoutTransition } from "../../../shared/lib/layoutTransition";
 import {
+  alongHandle,
+  clearResizeLimit,
+  paintResizeLimit,
+} from "../../../shared/lib/resizeLimit";
+import {
   paneDropFromPoint,
   setExternalTitleTabDrop,
   titleTabDropFromPoint,
@@ -27,6 +32,7 @@ import {
   layoutLeaves,
   layoutSashes,
   setSplitRatio,
+  splitSizesAtBoundary,
   type EditorPane,
   type LayoutLeaf,
   type LayoutNode,
@@ -1076,11 +1082,26 @@ function Sash({
           let moved = false;
           let frame: number | null = null;
 
+          const axis = row ? "x" : "y";
           const move = (ev: PointerEvent) => {
             const pos = row ? ev.clientX : ev.clientY;
             if (span <= 0) return;
             moved = true;
             nextBoundary = (pos - origin) / span;
+            // Where the split stops, so a pane at its smallest can say so.
+            const held = splitSizesAtBoundary(
+              sash.sizes,
+              sash.index,
+              nextBoundary,
+            )
+              .slice(0, sash.index + 1)
+              .reduce((sum, size) => sum + size, 0);
+            paintResizeLimit(
+              handle,
+              axis,
+              (nextBoundary - held) * span,
+              alongHandle(handle, axis, ev.clientX, ev.clientY),
+            );
             if (frame != null) return;
             frame = requestAnimationFrame(() => {
               frame = null;
@@ -1100,6 +1121,7 @@ function Sash({
             handle.removeEventListener("pointercancel", cancel);
             window.removeEventListener("keydown", keydown);
             restoreSelection();
+            clearResizeLimit(handle);
             document.body.style.cursor = previousCursor;
             if (!moved) return;
             if (commit) onCommit(nextBoundary);

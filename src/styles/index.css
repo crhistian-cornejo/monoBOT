@@ -1886,6 +1886,60 @@ html.is-resizing * {
   user-select: none !important;
 }
 
+/* A resize handle pushed past its limit glows in the accent near the pointer,
+   stronger the further it goes (src/shared/lib/resizeLimit.ts). */
+[data-resize-limit]::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  opacity: var(--resize-strain, 0);
+  transition:
+    opacity 160ms ease-out,
+    translate 160ms ease-out;
+}
+[data-resize-limit="x"]::after {
+  inset-block: 0;
+  left: 50%;
+  width: 28px;
+  margin-left: -14px;
+  translate: var(--resize-pull, 0px) 0;
+  background:
+    radial-gradient(
+      1.5px 140px at 50% var(--resize-at, 50%),
+      var(--color-accent),
+      transparent
+    ),
+    radial-gradient(
+      14px 120px at 50% var(--resize-at, 50%),
+      color-mix(in srgb, var(--color-accent) 45%, transparent),
+      transparent
+    );
+}
+[data-resize-limit="y"]::after {
+  inset-inline: 0;
+  top: 50%;
+  height: 28px;
+  margin-top: -14px;
+  translate: 0 var(--resize-pull, 0px);
+  background:
+    radial-gradient(
+      140px 1.5px at var(--resize-at, 50%) 50%,
+      var(--color-accent),
+      transparent
+    ),
+    radial-gradient(
+      120px 14px at var(--resize-at, 50%) 50%,
+      color-mix(in srgb, var(--color-accent) 45%, transparent),
+      transparent
+    );
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-resize-limit]::after {
+    translate: none;
+    transition: none;
+  }
+}
+
 .composer-toolbar {
   container: composer-toolbar / inline-size;
   overflow-x: auto;

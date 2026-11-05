@@ -1226,6 +1226,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     key={session.id}
                     sessionId={session.id}
                     name={agent.name}
+                    // A group's title runs long; its field just invites a question.
+                    placeholder={lead ? "Ask the group" : undefined}
                     enabled={visible}
                     quoteRequest={quoteRequest}
                     onQuoteRequestConsumed={acknowledgeQuote}

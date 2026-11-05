@@ -83,6 +83,11 @@ type Props = {
   dictation?: boolean;
   /** Square corners and tighter padding, for the floating chat. */
   square?: boolean;
+  /**
+   * Replaces "Message <name>" where the name is long, like a group's title.
+   * The field's label keeps the full name for screen readers.
+   */
+  placeholder?: string;
 };
 
 /**
@@ -107,6 +112,7 @@ export function MonoComposer({
   fieldTools,
   dictation: dictates = true,
   square = false,
+  placeholder,
 }: Props) {
   const corner = square ? "rounded-none" : "rounded-md";
   const [text, setText] = useState(() => getComposerDraft(sessionId) ?? "");
@@ -361,7 +367,7 @@ export function MonoComposer({
       ref={field}
       rows={1}
       aria-label={`Message ${name}`}
-      placeholder={`Message ${name}`}
+      placeholder={placeholder ?? `Message ${name}`}
       spellCheck={autocorrect}
       autoCorrect={autocorrect ? "on" : "off"}
       disabled={!enabled || submitting}
