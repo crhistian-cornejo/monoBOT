@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -46,6 +47,21 @@ import {
   type MonoState,
 } from "../model/mono";
 import { ConfirmReset } from "./ConfirmReset";
+import { Switch } from "../../../shared/ui/Switch";
+import {
+  addHabit,
+  checkHabitsNow,
+  loadHabits,
+  nextHabitRunAt,
+  updateHabits,
+  type Habit,
+} from "../model/monoHabits";
+import {
+  DAILY_BRIEF_TIME,
+  dailyBriefDraft,
+  findDailyBrief,
+  isBriefTime,
+} from "../../bots/model/dailyBrief";
 import { MemoryPage, SoulPage, useMonoFiles } from "./MonoFilePages";
 import { MonoProjects } from "./MonoProjects";
 import { ColorPicker, MascotPicker, SwitchRow } from "./monoPanelParts";
@@ -207,6 +223,8 @@ function GeneralSection({
         </>
       )}
 
+      {agent.principal ? <DailyBriefSetting key={monoId} monoId={monoId} /> : null}
+
       <GroupHeading title="Model" />
       <SettingGroup>
         <SettingRow
@@ -322,6 +340,132 @@ function GeneralSection({
 }
 
 /** A titled group of settings, with what it covers under the title. */
+/** The orchestrator's morning brief, a habit it runs on weekdays. */
+function DailyBriefSetting({ monoId }: { monoId: string }) {
+  const [brief, setBrief] = useState<Habit | null>();
+  const [time, setTime] = useState(DAILY_BRIEF_TIME);
+  const [error, setError] = useState<string>();
+
+  const reload = useCallback(
+    () =>
+      loadHabits(monoId)
+        .then((habits) => {
+          const found = findDailyBrief(habits);
+          setBrief(found ?? null);
+          if (found) setTime(found.schedule.time);
+        })
+        .catch(() => setBrief(null)),
+    [monoId],
+  );
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const change = async (task: () => Promise<unknown>) => {
+    setError(undefined);
+    try {
+      await task();
+      await reload();
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  };
+
+  const toggle = (on: boolean) =>
+    change(() =>
+      on
+        ? addHabit(monoId, dailyBriefDraft(isBriefTime(time) ? time : DAILY_BRIEF_TIME))
+        : updateHabits(monoId, (habits) => ({
+            habits: habits.filter((habit) => habit.id !== brief?.id),
+            result: undefined,
+          })),
+    );
+
+  const changeTime = (value: string) => {
+    setTime(value);
+    if (!brief || !isBriefTime(value)) return;
+    void change(() =>
+      updateHabits(monoId, (habits) => ({
+        habits: habits.map((habit) =>
+          habit.id === brief.id
+            ? {
+                ...habit,
+                schedule: { ...habit.schedule, time: value },
+                nextRunAt: nextHabitRunAt({ ...habit.schedule, time: value }, Date.now()),
+              }
+            : habit,
+        ),
+        result: undefined,
+      })),
+    );
+  };
+
+  const runNow = () =>
+    change(async () => {
+      await updateHabits(monoId, (habits) => ({
+        habits: habits.map((habit) =>
+          habit.id === brief?.id ? { ...habit, runRequested: true } : habit,
+        ),
+        result: undefined,
+      }));
+      checkHabitsNow();
+    });
+
+  return (
+    <>
+      <GroupHeading
+        title="Daily brief"
+        description="Each weekday morning it goes through your email, what the other agents did and what is due, and tells you what needs you today."
+      />
+      <SettingGroup>
+        <SettingRow
+          label="Daily brief"
+          description="Weekdays. Replies it can write wait in Drafts; it never sends."
+        >
+          <Switch
+            label="Daily brief"
+            on={!!brief}
+            disabled={brief === undefined}
+            onChange={(on) => void toggle(on)}
+          />
+        </SettingRow>
+        <SettingRow label="Time" description="Local time on this computer.">
+          <input
+            type="time"
+            aria-label="Daily brief time"
+            value={time}
+            onChange={(event) => changeTime(event.target.value)}
+            className="h-8 rounded-md border border-content/10 bg-background-base px-2 text-[12px] outline-none focus:border-content/25"
+          />
+        </SettingRow>
+        {brief ? (
+          <SettingRow
+            label="Try it now"
+            description={
+              brief.lastRunAt
+                ? `Last brief ${new Date(brief.lastRunAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}`
+                : "It hasn't run yet."
+            }
+          >
+            <button
+              type="button"
+              onClick={() => void runNow()}
+              className="rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8"
+            >
+              Run now
+            </button>
+          </SettingRow>
+        ) : null}
+      </SettingGroup>
+      {error ? (
+        <p role="alert" className="px-1 pt-2 text-xs text-red-400">
+          {error}
+        </p>
+      ) : null}
+    </>
+  );
+}
+
 function GroupHeading({
   title,
   description,
