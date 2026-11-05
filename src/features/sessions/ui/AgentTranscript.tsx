@@ -4564,7 +4564,9 @@ function MonoCodeCallRow({
     block.tool?.preview?.output?.trim();
   const hasError = state === "rejected" && (!!output || stored.omitted);
   const pendingApproval = needsApproval(block);
-  const command = `monocode app ${call.action}`;
+  // The executable is still `monocode` (an internal name the installer and
+  // agents rely on); what the user reads says MonoBOT.
+  const command = `monobot app ${call.action}`;
   const verb = pendingApproval
     ? "Run"
     : state === "pending"

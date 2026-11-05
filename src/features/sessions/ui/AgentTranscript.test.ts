@@ -101,8 +101,8 @@ describe("AgentTranscript collapsed work", () => {
     expect(markup).toContain("Using MonoBOT");
     expect(markup).toContain('data-monocode-tool-call="--help"');
     expect(markup).toContain('data-monocode-tool-call="notes.list"');
-    expect(markup).toContain("monocode app --help");
-    expect(markup).toContain("monocode app notes.list");
+    expect(markup).toContain("monobot app --help");
+    expect(markup).toContain("monobot app notes.list");
     expect(markup).toContain("Ran");
     expect(markup).toContain("Running");
     expect(markup).not.toContain("Contents/MacOS/monocode");
@@ -164,7 +164,7 @@ describe("AgentTranscript collapsed work", () => {
     ]);
     expect(markup).toContain('data-monocode-tool-call="notes.list"');
     expect(markup).toContain("Ran");
-    expect(markup).toContain("monocode app notes.list");
+    expect(markup).toContain("monobot app notes.list");
     expect(markup).toContain("Show error details for MonoBOT: List notes");
     expect(markup).not.toContain("Connection refused");
   });
