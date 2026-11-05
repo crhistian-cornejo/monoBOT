@@ -4,6 +4,42 @@
  * incoming bot meets one that is already here. Pure: no storage, no React.
  */
 import type { BotRole, BotTools } from "./bots";
+import {
+  HARNESSES,
+  RUNTIME_MODES,
+  type HarnessId,
+  type RuntimeMode,
+} from "../../sessions/model/session";
+
+/** What a bot thinks with and may do without asking: its chat's model and permissions. */
+export type BotModel = {
+  harness: HarnessId;
+  model: string;
+  modelSettings: Record<string, string>;
+  runtimeMode: RuntimeMode;
+};
+
+export function parseBotModel(value: unknown): BotModel | undefined {
+  const model = value as Partial<BotModel> | null;
+  if (
+    !model ||
+    !HARNESSES.includes(model.harness as HarnessId) ||
+    typeof model.model !== "string" ||
+    !model.model.trim() ||
+    model.model.length > 200 ||
+    !RUNTIME_MODES.includes(model.runtimeMode as RuntimeMode)
+  )
+    return undefined;
+  const settings: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(model.modelSettings ?? {}))
+    if (typeof entry === "string" && key.length <= 60) settings[key] = entry.slice(0, 200);
+  return {
+    harness: model.harness as HarnessId,
+    model: model.model,
+    modelSettings: settings,
+    runtimeMode: model.runtimeMode as RuntimeMode,
+  };
+}
 
 export const BOT_EXPORT_FORMAT = "monobot.bots";
 export const BOT_EXPORT_VERSION = 1;
@@ -24,6 +60,8 @@ export type ExportedBot = {
   topics: Record<string, string>;
   /** habits.json as it was; absent when the bot had none. */
   habits?: string;
+  /** Its model and permissions; absent for a bot never opened. */
+  model?: BotModel;
 };
 
 export type BotExport = {
@@ -125,6 +163,7 @@ export function parseBotExport(raw: string): BotExport {
         memory: text(bot.memory),
         topics,
         ...(typeof bot.habits === "string" ? { habits: bot.habits } : {}),
+        ...(parseBotModel(bot.model) ? { model: parseBotModel(bot.model) } : {}),
       },
     ];
   });
@@ -283,6 +322,28 @@ export function compareBots(
   );
   if (currentSpecialty !== incomingSpecialty)
     changes.push(`Its specialty becomes: ${incomingSpecialty}.`);
+
+  const modelOf = (bot: ExportedBot) =>
+    bot.model ? `${bot.model.harness} · ${bot.model.model}` : "—";
+  const modeOf = (bot: ExportedBot) => bot.model?.runtimeMode ?? "—";
+  if (current.model || incoming.model) {
+    row(
+      "Model",
+      modelOf(current),
+      modelOf(incoming),
+      modelOf(current) === modelOf(incoming) ? "same" : "different",
+    );
+    if (incoming.model && modelOf(current) !== modelOf(incoming))
+      changes.push(`It thinks with ${modelOf(incoming)} instead of ${modelOf(current)}.`);
+    row(
+      "Permissions",
+      modeOf(current),
+      modeOf(incoming),
+      modeOf(current) === modeOf(incoming) ? "same" : "different",
+    );
+    if (incoming.model && modeOf(current) !== modeOf(incoming))
+      changes.push(`Its permissions become "${modeOf(incoming)}" instead of "${modeOf(current)}".`);
+  }
 
   // Instructions: which lines one has that the other lacks.
   const a = soulLines(current.soul);

@@ -17,9 +17,12 @@ import {
   readAgentFile,
   writeAgentFile,
 } from "../../monos/model/monoFiles";
+import { readSession } from "../../sessions/data/sessionStore";
 import {
   botExport,
   freeName,
+  parseBotModel,
+  type BotModel,
   parseBotExport,
   portableTools,
   type BotExport,
@@ -54,6 +57,7 @@ export async function snapshotBot(mono: Mono): Promise<ExportedBot> {
   const habits = await readAgentFile(mono.id, "habits.json").catch(
     () => undefined,
   );
+  const model = mono.modelChoice ?? (await sessionModel(mono));
   const tools = portableTools(mono.botTools);
   return {
     syncId,
@@ -67,7 +71,22 @@ export async function snapshotBot(mono: Mono): Promise<ExportedBot> {
     memory: files.memory,
     topics,
     ...(habits?.text ? { habits: habits.text } : {}),
+    ...(model ? { model } : {}),
   };
+}
+
+/** The model and permissions of the bot's chat, as last saved. */
+async function sessionModel(mono: Mono): Promise<BotModel | undefined> {
+  if (!mono.sessionId) return undefined;
+  const session = await readSession(mono.sessionId).catch(() => null);
+  return session
+    ? parseBotModel({
+        harness: session.harness,
+        model: session.model,
+        modelSettings: session.modelSettings,
+        runtimeMode: session.runtimeMode,
+      })
+    : undefined;
 }
 
 const platform = IS_MAC ? "macos" : IS_WIN ? "windows" : "linux";
@@ -141,6 +160,7 @@ export async function createImportedBot(
       color: bot.color,
       ...(bot.specialty ? { specialty: bot.specialty } : {}),
       ...(bot.botTools ? { botTools: { ...bot.botTools } } : {}),
+      ...(bot.model ? { modelChoice: bot.model } : {}),
     })) ?? mono
   );
 }
@@ -161,6 +181,7 @@ export async function replaceBot(
     mascot: bot.mascot,
     color: bot.color,
     specialty: bot.specialty ?? "",
+    ...(bot.model ? { modelChoice: bot.model } : {}),
     ...(bot.botTools
       ? {
           botTools: {

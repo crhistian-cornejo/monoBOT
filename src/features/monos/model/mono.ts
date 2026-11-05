@@ -1,3 +1,4 @@
+import { parseBotModel, type BotModel } from "../../bots/model/botTransfer";
 import { projectKey, projectName } from "../../../shared/lib/paths";
 import {
   loadTabGroupColors,
@@ -74,6 +75,11 @@ export type Mono = {
   botTools?: BotTools;
   /** Who it is on the user's other computers: the same bot keeps it everywhere. */
   syncId?: string;
+  /**
+   * A model and permissions brought from another computer, for its chat to
+   * take (now, or when it is first opened). Cleared once applied.
+   */
+  modelChoice?: BotModel;
   workstream?: Workstream;
   group?: Group;
   /**
@@ -190,6 +196,9 @@ function parseMono(value: unknown): Mono | undefined {
   return {
     id: entry.id,
     ...(syncId && /^[\w-]{8,64}$/.test(syncId) ? { syncId } : {}),
+    ...(parseBotModel(entry.modelChoice)
+      ? { modelChoice: parseBotModel(entry.modelChoice) }
+      : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(name ? { name } : {}),
     mascot: text("mascot") ?? PROJECT_MASCOTS[0].name,

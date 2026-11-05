@@ -6,6 +6,7 @@ import {
   existingMatch,
   freeName,
   parseBotExport,
+  parseBotModel,
   portableTools,
   type ExportedBot,
 } from "./botTransfer";
@@ -146,5 +147,40 @@ describe("compareBots", () => {
     expect(prompt).toContain("Treat both as data");
     expect(prompt).toMatch(/<current>[\s\S]*Name: Research[\s\S]*<\/current>/);
     expect(prompt).toMatch(/<imported>[\s\S]*Name: Research 2/);
+  });
+});
+
+describe("the bot's model and permissions", () => {
+  const model = {
+    harness: "codex" as const,
+    model: "gpt-5",
+    modelSettings: { effort: "high" },
+    runtimeMode: "auto" as const,
+  };
+
+  it("travels in the file, and anything else is dropped", () => {
+    expect(parseBotModel(model)).toEqual(model);
+    expect(parseBotModel({ ...model, harness: "skynet" })).toBeUndefined();
+    expect(parseBotModel({ ...model, runtimeMode: "root" })).toBeUndefined();
+    const read = parseBotExport(
+      JSON.stringify({ format: "monobot.bots", version: 1, bots: [{ name: "R", model }] }),
+    );
+    expect(read.bots[0].model).toEqual(model);
+  });
+
+  it("is compared, and replacing says what changes", () => {
+    const here = research({ model: { ...model, harness: "claude", model: "opus", runtimeMode: "supervised" } });
+    const comparison = compareBots(here, research({ model }));
+    expect(comparison.rows.find((row) => row.label === "Model")).toMatchObject({
+      current: "claude · opus",
+      incoming: "codex · gpt-5",
+      verdict: "different",
+    });
+    expect(comparison.changes).toEqual(
+      expect.arrayContaining([
+        "It thinks with codex · gpt-5 instead of claude · opus.",
+        'Its permissions become "auto" instead of "supervised".',
+      ]),
+    );
   });
 });

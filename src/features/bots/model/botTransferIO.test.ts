@@ -25,6 +25,13 @@ vi.mock("../../monos/model/monoFiles", () => ({
   }),
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+vi.mock("../../sessions/data/sessionStore", () => ({
+  readSession: vi.fn(async (id: string) =>
+    id === "chat-1"
+      ? { harness: "claude", model: "opus", modelSettings: {}, runtimeMode: "supervised" }
+      : null,
+  ),
+}));
 
 const { createMono, findMono, listMonos, updateMono } = await import(
   "../../monos/model/mono"
@@ -76,6 +83,22 @@ describe("importing bots", () => {
     expect(files.get(`${here.id}/SOUL.md`)).toBe("# Research from the Mac");
     expect(files.get(`${here.id}/memory/mining.md`)).toBe("- Pozas de sedimentación");
     expect(files.get(`${here.id}/habits.json`)).toContain("Weekly papers");
+  });
+
+  it("carries the chat's model and permissions, and leaves the imported ones for its chat", async () => {
+    const here = createMono([], { role: "research", name: "Research", instructions: "" });
+    updateMono(here.id, (mono) => ({ ...mono, sessionId: "chat-1" }));
+    expect((await snapshotBot(findMono(here.id)!)).model).toEqual({
+      harness: "claude",
+      model: "opus",
+      modelSettings: {},
+      runtimeMode: "supervised",
+    });
+    const model = { harness: "codex" as const, model: "gpt-5", modelSettings: {}, runtimeMode: "auto" as const };
+    await replaceBot(here.id, { ...incoming, model });
+    // Read back from storage: the roster keeps it until the chat takes it.
+    expect(findMono(here.id)?.modelChoice).toEqual(model);
+    expect((await snapshotBot(findMono(here.id)!)).model).toEqual(model);
   });
 
   it("keeps both under a name that isn't taken, and exports what it imported", async () => {

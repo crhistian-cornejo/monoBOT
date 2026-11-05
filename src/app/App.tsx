@@ -665,6 +665,7 @@ import {
   monoWorksOn,
   isMonoSession,
   listMonos,
+  updateMono,
   loadOpenMono,
   monoForSession,
   monoLook,
@@ -10426,6 +10427,34 @@ function Workspace({
     },
     [],
   );
+
+  // A bot brought from another computer takes its model and permissions in
+  // its chat: the model first, then (once that took) its settings and mode,
+  // so switching the model cannot undo them.
+  const modelChoicesTried = useRef(new Set<string>());
+  useEffect(() => {
+    for (const mono of listMonos()) {
+      const choice = mono.modelChoice;
+      if (!choice || !mono.sessionId) continue;
+      const session = sessions.find((entry) => entry.id === mono.sessionId);
+      if (!session || session.busy || isPreparingHandoff(session)) continue;
+      const wanted = `${mono.id}:${choice.harness}:${choice.model}`;
+      if (session.harness !== choice.harness || session.model !== choice.model) {
+        // Once: an agent missing on this computer must not be asked forever.
+        if (!modelChoicesTried.current.has(wanted)) {
+          modelChoicesTried.current.add(wanted);
+          onModelChange(session.id, choice.harness, choice.model);
+          continue;
+        }
+      } else if (
+        JSON.stringify(session.modelSettings) !== JSON.stringify(choice.modelSettings)
+      )
+        onModelSettingsChange(session.id, choice.modelSettings);
+      if (session.runtimeMode !== choice.runtimeMode)
+        onRuntimeModeChange(session.id, choice.runtimeMode);
+      updateMono(mono.id, ({ modelChoice: _applied, ...rest }) => rest);
+    }
+  }, [sessions, monosSnap, onModelChange, onModelSettingsChange, onRuntimeModeChange]);
 
   const openSessionBeside = useCallback(
     (
