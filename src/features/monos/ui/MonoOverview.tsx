@@ -37,6 +37,8 @@ import {
 import { EmptyState, PageHeader } from "./monoPanelParts";
 import { SpreadsheetView } from "../../files/ui/SpreadsheetView";
 import { warmSpreadsheetReader } from "../../files/model/spreadsheetWorker";
+import { DocumentView } from "../../files/ui/DocumentView";
+import { isDocumentPath } from "../../files/model/document";
 import { basename } from "../../../platform/tauri/fs";
 import { PanelStack, type StackPage } from "./PanelStack";
 import { SessionFiltersMenu } from "../../sessions/ui/SessionFiltersMenu";
@@ -137,7 +139,7 @@ type Props = {
   /** A document it wrote, open over the list until Back. */
   shownDocumentId?: string;
   onBackFromDocument?: () => void;
-  /** A spreadsheet an agent pointed to, open over the list until Back. */
+  /** A spreadsheet or document an agent pointed to, open over the list until Back. */
   shownFile?: { path: string; cwd: string };
   onBackFromFile?: () => void;
   onOpenFile?: (path: string) => void;
@@ -331,7 +333,11 @@ export function MonoOverview({
             </IconButton>
           </PageHeader>
           <div className="min-h-0 flex-1">
-            <SpreadsheetView path={shownFile.path} cwd={shownFile.cwd} />
+            {isDocumentPath(shownFile.path) ? (
+              <DocumentView path={shownFile.path} cwd={shownFile.cwd} />
+            ) : (
+              <SpreadsheetView path={shownFile.path} cwd={shownFile.cwd} />
+            )}
           </div>
         </div>
       ),

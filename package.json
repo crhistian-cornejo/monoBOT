@@ -80,6 +80,7 @@
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2",
     "cuelume": "^0.2.2",
+    "docx-preview": "0.4.1",
     "emojibase-data": "^17.0.0",
     "exceljs": "^4.4.0",
     "frimousse": "^0.4.0",

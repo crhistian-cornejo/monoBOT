@@ -273,6 +273,7 @@ import {
   resolveOpenablePath,
 } from "../features/files/model/fileIndex";
 import { isSpreadsheetPath } from "../features/files/model/spreadsheet";
+import { isDocumentPath } from "../features/files/model/document";
 import {
   collectTexts,
   locateReferencedFile,
@@ -7249,10 +7250,11 @@ function Workspace({
 
   const onOpenFile = useCallback<OpenFileFn>(
     (path, navigation, options) => {
-      // In the agents' view a spreadsheet opens beside the chat, on the
-      // overview, instead of leaving for a code tab.
+      // In the agents' view a spreadsheet or a document (PDF, Word,
+      // PowerPoint) opens beside the chat, on the overview, instead of
+      // leaving for a code tab.
       const monoSessionId = monoViewIdRef.current;
-      if (monoSessionId && isSpreadsheetPath(path)) {
+      if (monoSessionId && (isSpreadsheetPath(path) || isDocumentPath(path))) {
         const monoSession = sessionsRef.current.find(
           (session) => session.id === monoSessionId,
         );

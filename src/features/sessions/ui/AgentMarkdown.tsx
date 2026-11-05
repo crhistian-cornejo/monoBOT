@@ -1221,16 +1221,28 @@ function fileNameForLanguage(language: string): string {
   return LANGUAGE_FILE_NAMES[key] ?? `code.${key}`;
 }
 
+/** A full path (drive, root or home): its folders and name may hold spaces,
+ * as documents' often do ("D:/Proyectos/Informe final.pdf"). */
+const ABSOLUTE_PATH = /^(?:[A-Za-z]:[\\/]|\/|~[\\/])/;
+
 function inlineFileName(value: string): string | undefined {
   const text = value.trim();
-  if (!text || text.length > 240 || /\s/.test(text)) return undefined;
+  if (!text || text.length > 240) return undefined;
+  const absolute = ABSOLUTE_PATH.test(text);
+  if (/[\n\t]/.test(text) || (!absolute && /\s/.test(text))) return undefined;
 
   const withoutLocation = text.replace(
     /(?::\d+(?::\d+)?|#L\d+(?:-L\d+)?)$/,
     "",
   );
   const fileName = withoutLocation.split(/[/\\]/).filter(Boolean).pop();
-  if (!fileName || !/^[\w%@+().-]+$/.test(fileName)) return undefined;
+  if (
+    !fileName ||
+    !(absolute ? /^[\p{L}\p{N}_%@+()[\]&',. -]+$/u : /^[\w%@+().-]+$/).test(
+      fileName,
+    )
+  )
+    return undefined;
 
   if (isExtensionlessFileName(fileName)) {
     return fileName;

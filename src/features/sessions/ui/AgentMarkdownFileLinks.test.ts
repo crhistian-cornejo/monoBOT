@@ -57,6 +57,23 @@ describe("markdown file navigation", () => {
     },
   );
 
+  it.each([
+    ["D:/Proyectos/1062_26 Nexa/Informe técnico final.pdf", "D:/Proyectos/1062_26 Nexa/Informe técnico final.pdf"],
+    ["D:\\Proyectos\\Nexa - Act. IF\\Planos (Rev 0).pptx", "D:/Proyectos/Nexa - Act. IF/Planos (Rev 0).pptx"],
+    ["/home/ana/Mis documentos/memoria.docx", "/home/ana/Mis documentos/memoria.docx"],
+  ])("opens a full document path with spaces, %s", async (path, opened) => {
+    await render(`Aquí está: \`${path}\``);
+    const link = container.querySelector<HTMLElement>('code[role="link"]');
+    expect(link).not.toBeNull();
+    await act(async () => link!.click());
+    expect(onOpenFile.mock.calls[0][0]).toBe(opened);
+  });
+
+  it("keeps a relative phrase with spaces as plain code", async () => {
+    await render("`npm run build`");
+    expect(container.querySelector('code[role="link"]')).toBeNull();
+  });
+
   it("opens inline file references at their line and column with the keyboard", async () => {
     await render("`src/main.ts:12:3`");
     const link = container.querySelector<HTMLElement>('code[role="link"]')!;
