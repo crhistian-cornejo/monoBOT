@@ -15760,7 +15760,9 @@ function Workspace({
               onFocusSession={onOpenApprovalSession}
               onApproval={onApproval}
             />
-            {monosEnabled ? (
+            {/* The bots' news belongs to the Agents zone: in Code it waits in
+                the principal's news tab and the dot on its row. */}
+            {monosEnabled && railZone === "personal" ? (
               <BotNewsToasts
                 onRead={onOpenNews}
                 onOpenBot={onOpenRailMono}

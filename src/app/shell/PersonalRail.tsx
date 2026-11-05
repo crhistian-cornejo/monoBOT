@@ -141,8 +141,19 @@ export function PersonalRail({
           ) : (
             <Users className="size-4 text-content/60" strokeWidth={1.75} />
           )}
-          <span className="min-w-0 flex-1 truncate font-medium">
-            {look?.name ?? "Principal"}
+          {/* The pill takes room from the name, never from the counts after it. */}
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 truncate font-medium">
+              {look?.name ?? "Principal"}
+            </span>
+            {principal ? (
+              <span
+                title="Your main bot: it coordinates the others"
+                className="shrink-0 rounded bg-accent/10 px-1 text-[10px] font-medium leading-4 text-accent"
+              >
+                Orchestrator
+              </span>
+            ) : null}
           </span>
           {unseen ? (
             <span className="grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-medium tabular-nums text-white">

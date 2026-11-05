@@ -3756,7 +3756,8 @@ function CompactProjectRail({
                 {items.map((bot) => (
                   <CompactRailMono
                     key={bot.id}
-                    name={bot.name}
+                    // Too narrow for a pill: the tooltip says it.
+                    name={bot.principal ? `${bot.name} · Orchestrator` : bot.name}
                     mascot={bot.mascot}
                     color={bot.color}
                     status={bot.status}
