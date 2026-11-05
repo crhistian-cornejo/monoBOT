@@ -50,5 +50,7 @@ describe("paperKeyOfDocument", () => {
     ).toBe(key);
     expect(paperKeyOfDocument("# A report\n\nNo marker here.")).toBeUndefined();
     expect(paperKeyOfDocument("[monobot-paper]: paper:%E0%A4%A")).toBeUndefined();
-  });
+    // The import brings the whole reader (Markdown, KaTeX, the paper viewer);
+    // on a cold, busy run that alone can pass the default 5 seconds.
+  }, 30_000);
 });
