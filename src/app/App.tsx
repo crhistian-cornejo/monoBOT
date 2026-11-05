@@ -655,6 +655,7 @@ import {
   markWorkstreamIntroSeen,
   workstreamIntroSeen,
 } from "../features/workstreams/model/workstreams";
+import { BotDelegations } from "../features/bots/ui/BotDelegations";
 import {
   NewWorkstreamDialog,
   type NewWorkstream,
@@ -13977,6 +13978,23 @@ function Workspace({
     setSessions(sessionsRef.current);
     await upsertSession(updated);
   };
+  const monoRailState = useMemo(() => {
+    const states = new Map<string, MonoState>();
+    const unseen = new Map<string, number>();
+    for (const mono of listMonos()) {
+      const session = mono.sessionId
+        ? sessions.find((entry) => entry.id === mono.sessionId)
+        : undefined;
+      if (session) states.set(mono.id, monoState(session));
+      const count = mono.sessionId
+        ? monoReplies.counts.get(mono.sessionId)
+        : undefined;
+      if (count) unseen.set(mono.id, count);
+    }
+    return { states, unseen };
+    // The roster is read through its snapshot.
+  }, [monosSnap, sessions, monoReplies.counts]);
+  const monoRail = useStableValue(monoRailState);
   const monoOverviewPanel =
     monoViewMono && monoViewSession ? (
       <MonoOverview
@@ -14049,9 +14067,21 @@ function Workspace({
             />
           ) : undefined
         }
-        subagentCount={botSubagentRuns.length || undefined}
+        subagentCount={
+          monoViewMono.botRole === "principal"
+            ? undefined
+            : botSubagentRuns.length || undefined
+        }
         subagents={
-          botSubagentRuns.length ? (
+          // The Principal's agents are the bots it asks.
+          monoViewMono.botRole === "principal" ? (
+            <BotDelegations
+              leadId={monoViewMono.id}
+              leadName={monoLook(monoViewMono).name}
+              states={monoRail.states}
+              onOpenBot={(monoId) => void onOpenMono(monoId)}
+            />
+          ) : botSubagentRuns.length ? (
             <SubagentStack
               blocks={botSubagentRuns}
               cwd={monoViewSession.cwd}
@@ -14117,23 +14147,6 @@ function Workspace({
         onClose={() => setMonoSettingsFor(null)}
       />
     ) : null;
-  const monoRailState = useMemo(() => {
-    const states = new Map<string, MonoState>();
-    const unseen = new Map<string, number>();
-    for (const mono of listMonos()) {
-      const session = mono.sessionId
-        ? sessions.find((entry) => entry.id === mono.sessionId)
-        : undefined;
-      if (session) states.set(mono.id, monoState(session));
-      const count = mono.sessionId
-        ? monoReplies.counts.get(mono.sessionId)
-        : undefined;
-      if (count) unseen.set(mono.id, count);
-    }
-    return { states, unseen };
-    // The roster is read through its snapshot.
-  }, [monosSnap, sessions, monoReplies.counts]);
-  const monoRail = useStableValue(monoRailState);
   const busyProjectPaths = useStableValue(
     promptableSessions.flatMap((session) =>
       session.busy && session.cwd ? [session.cwd] : [],

@@ -103,6 +103,13 @@ describe("bots", () => {
     expect(parseBotTools("nope")).toBeUndefined();
   });
 
+  it("leaves subagents to the bots, not the Principal", () => {
+    expect(botLaunch("principal").disallowedTools).toEqual(
+      expect.arrayContaining(["Task", "Agent"]),
+    );
+    expect(botLaunch("research").disallowedTools).not.toContain("Task");
+  });
+
   it("passes the denied tools to Claude", () => {
     const { disallowedTools } = botLaunch("assistant");
     const args = buildClaudeSpawnArgs({ disallowedTools });

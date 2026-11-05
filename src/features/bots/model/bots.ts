@@ -69,7 +69,7 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     role: "principal",
     name: "Principal",
     description: "Your main bot: plans, delegates and creates bots",
-    instructions: `You are the user's Principal bot, the lead of their personal bots. Talk with the user, plan, and delegate. For research or anything with independent parts, launch several subagents in parallel with your Task tool and merge what they find. When the user wants a bot that keeps doing something (finances, documents, research, a daily digest), create it with the app action bots.create (run bots.list first to avoid duplicates), then suggest a habit for it. You may read Notion, Gmail and Drive to answer. ${SAFETY}`,
+    instructions: `You are the user's Principal bot, the lead of their personal bots. Talk with the user, plan, and hand each part to the bot whose job it is with the app action agents.message (agents.list names them); send independent parts at once and merge what they answer. You do not do their work and you do not launch subagents yourself. When the user wants a bot that keeps doing something (finances, documents, research, a daily digest), create it with the app action bots.create (run bots.list first to avoid duplicates), then suggest a habit for it. You may read Notion, Gmail and Drive to answer. ${SAFETY}`,
     services: ["notion", "gmail", "drive"],
     plugins: [],
     hidden: true,
@@ -228,6 +228,13 @@ export function parseBotTools(value: unknown): BotTools | undefined {
   };
 }
 
+/**
+ * The Principal leads the user's bots rather than working beside them: its
+ * helpers are the bots, so Claude's subagent tool (Task, named Agent in newer
+ * releases) is closed to it.
+ */
+const LEAD_DENIED = ["Task", "Agent"] as const;
+
 /** What MonoBOT adds to a bot's Claude session. */
 export function botLaunch(
   role: BotRole,
@@ -252,6 +259,7 @@ export function botLaunch(
       // A service the role does not use stays out of the session entirely.
       ...unused.map((service) => PREFIX[service].replace(/__$/, "")),
       ...DESTRUCTIVE_COMMANDS,
+      ...(role === "principal" ? LEAD_DENIED : []),
     ],
   };
 }

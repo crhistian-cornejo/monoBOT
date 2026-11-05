@@ -499,6 +499,8 @@ export type MonoLook = {
   projects: MonoProject[];
   /** A personal bot rather than a coding Mono. */
   bot?: boolean;
+  /** The bot that leads the others. */
+  principal?: boolean;
   /** A workstream's orchestrator. */
   workstream?: Workstream;
   /** A group of agents, led by this chat. */
@@ -513,6 +515,7 @@ export function monoLook(mono: Mono): MonoLook {
     mascot: mono.mascot,
     color: mono.color,
     ...(isBot(mono) ? { bot: true } : {}),
+    ...(mono.botRole === "principal" ? { principal: true } : {}),
     ...(mono.workstream ? { workstream: mono.workstream } : {}),
     ...(mono.group ? { group: mono.group } : {}),
     projects: mono.projects.map((path) => ({

@@ -587,9 +587,14 @@ function OverviewTabs({
         .flatMap((id) => TABS.filter((entry) => entry.id === id))
         .map(({ id, label: tabLabel, icon }) => {
           const selected = id === tab;
-          // A workstream's sessions are its agents.
+          // A workstream's sessions are its agents; the Principal's agents
+          // are the user's bots.
           const label =
-            id === "sessions" && tabs.has("prs") ? "Agents" : tabLabel;
+            id === "sessions" && tabs.has("prs")
+              ? "Agents"
+              : id === "subagents" && tabs.has("news")
+                ? "Bots"
+                : tabLabel;
           return (
             <TabButton
               key={id}

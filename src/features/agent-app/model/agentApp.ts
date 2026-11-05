@@ -63,6 +63,7 @@ import {
 import { groupMessage } from "../../groups/model/group";
 import { groupMembers, memberRole } from "../../groups/model/groupBrief";
 import { agentMessage, isAnswering, markAnswering } from "./agentMessages";
+import { recordDelegation } from "../../bots/model/delegations";
 import {
   sessionConversationPage,
   type SessionReadOptions,
@@ -896,6 +897,8 @@ async function handleAgents(
     `app-${source.id}-${requestId}`,
     ...(notify ? [notify] : []),
   );
+  if (!result.alreadySubmitted)
+    recordDelegation({ from: sender.id, to: target.id, message, at: Date.now() });
   return {
     to: monoLook(target).name,
     submitted: true,
