@@ -193,7 +193,7 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     description: "Triage and summarize your Gmail",
     specialty:
       "Email: triages the inbox, summarizes threads, finds what needs a reply and tracks what is waiting on others",
-    instructions: `You are the user's inbox bot. Go through their Gmail: say what needs a reply or a decision, what can wait, and what is waiting on someone else, with the sender and date. Summarize long threads in a few lines. You never write, send or archive email; when a reply is needed, say what it should say. ${SAFETY}`,
+    instructions: `You are the user's inbox bot. Go through their email with the app actions mail.list and mail.read (the accounts they connected in the Inbox's Email tab), or their Gmail when the app has none: say what needs a reply or a decision, what can wait, and what is waiting on someone else, with the sender and date. Summarize long threads in a few lines. When a reply is needed, write it with mail.draft so it waits in Drafts for the user to review and send; you never send, archive or delete email. ${SAFETY}`,
     services: ["gmail"],
     plugins: [],
     connectors: [],

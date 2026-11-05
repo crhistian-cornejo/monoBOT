@@ -58,6 +58,7 @@ import {
   fetchWebPage,
   keepDownload,
 } from "../features/web/model/webApi";
+import { mailApi } from "../features/mail/model/mailApi";
 import { submitWithSettlement } from "./model/managedSubmission";
 import {
   submitAfterProjectSync,
@@ -12369,6 +12370,11 @@ function Workspace({
               load: (ref, options) => loadPaper(ref, nativePaperDeps, options),
               renderPage: (key, page) => renderPaperPage(key, page),
               addPdf: (path, options) => addPaperPdf(path, options),
+            },
+            mail: {
+              overview: () => mailApi.overview(false),
+              open: (id) => mailApi.open(id),
+              draft: (id, text) => mailApi.draft(id, text),
             },
             web: {
               page: (url) => fetchWebPage(url),
