@@ -4,7 +4,12 @@ import { readFlag, writeFlag } from "./storageFlags";
  * and no account. MonoBOT passes the enabled ones to each Claude turn with
  * `--mcp-config`, so the user's own `~/.claude.json` is never touched. They
  * are network tools: what they return is data, never instructions. */
-export type ConnectorId = "context7" | "mslearn" | "deepwiki" | "xmd";
+export type ConnectorId =
+  | "context7"
+  | "mslearn"
+  | "deepwiki"
+  | "xmd"
+  | "openalex";
 
 export type Connector = {
   id: ConnectorId;
@@ -63,6 +68,22 @@ export const CONNECTORS: readonly Connector[] = [
       "x_md_search_posts",
       "x_md_get_followers",
       "x_md_get_following",
+    ],
+  },
+  {
+    id: "openalex",
+    name: "OpenAlex",
+    description:
+      "Scholarly papers, authors, citations and trends. Community-hosted: your queries reach that server.",
+    url: "https://openalex.caseyjhand.com/mcp",
+    site: "https://github.com/cyanheads/openalex-mcp-server",
+    onByDefault: false,
+    tools: [
+      "openalex_resolve_name",
+      "openalex_search_entities",
+      "openalex_analyze_trends",
+      "openalex_get_citation_graph",
+      "openalex_describe_fields",
     ],
   },
 ];

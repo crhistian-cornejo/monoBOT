@@ -35,6 +35,15 @@ describe("connectors", () => {
     ]);
   });
 
+  it("keeps the community-hosted OpenAlex connector off until the user opts in", () => {
+    const [openalex] = byId("openalex");
+    expect(openalex.onByDefault).toBe(false);
+    expect(openalex.url).toMatch(/^https:\/\//);
+    expect(connectorAllowedTools([openalex])).toEqual(
+      openalex.tools.map((tool) => `mcp__openalex__${tool}`),
+    );
+  });
+
   it("adds nothing when every connector is off", () => {
     expect(connectorMcpConfig([])).toBeNull();
     expect(connectorAllowedTools([])).toEqual([]);

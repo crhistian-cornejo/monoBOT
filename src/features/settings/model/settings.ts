@@ -192,7 +192,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     section: "mcp",
     label: "Connectors",
     keywords:
-      "mcp remote http context7 microsoft learn deepwiki x twitter docs built-in",
+      "mcp remote http context7 microsoft learn deepwiki x twitter openalex papers docs built-in",
   },
   {
     id: "mcp-servers",
