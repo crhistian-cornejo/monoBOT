@@ -230,6 +230,8 @@ type Props = {
   agentName?: string;
   /** A Mono's mascot and color, in place of the provider's mark. */
   agentMascot?: Pick<MonoLook, "mascot" | "color">;
+  /** A group's chat marks each speaker's avatar with the model it used. */
+  modelBadges?: boolean;
   /** Keeps short conversations at the bottom and skips prompt-to-top anchoring. */
   bottomAligned?: boolean;
   /** Keeps process in the activity trail, with live progress in the header. */
@@ -304,6 +306,7 @@ function AgentTranscriptComponent({
   busy,
   cwd,
   agentName,
+  modelBadges = false,
   agentMascot,
   bottomAligned = false,
   inlineWork = false,
@@ -1211,10 +1214,18 @@ function AgentTranscriptComponent({
               ? monoTurnUserBlock(runs[runs.length - 1], messageDeliveries)
               : userBlock;
           const habit = turn[0].monoHabit;
+          // A group member's answer speaks with its own name and mascot.
+          const member = turn[0].groupMember;
+          const turnAgentName = member?.name ?? agentName;
+          const turnMascot = member
+            ? { mascot: member.mascot, color: member.color }
+            : agentMascot;
           // Older saved reports may have lost their habit tag. A Mono's
           // standalone reply still needs its identity and response actions.
           const standaloneReply =
-            !userBlock && !!(agentName || habit) && turn.some(isProseBlock);
+            !userBlock &&
+            !!(turnAgentName || habit) &&
+            turn.some(isProseBlock);
           const durationMs =
             runs.length > 1
               ? sumDurations(
@@ -1247,6 +1258,7 @@ function AgentTranscriptComponent({
           const startedAt =
             userBlock?.startedAt ??
             habit?.at ??
+            member?.at ??
             turn[0].startedAt ??
             joinedTurnStart(turns, firstVisibleTurn + turnIndex);
           const previousTurn = turns[firstVisibleTurn + turnIndex - 1];
@@ -1256,6 +1268,7 @@ function AgentTranscriptComponent({
               ? monoTurnLatestStart(previousTurn)
               : (turnUserBlock(previousTurn, managed)?.startedAt ??
                 previousTurn[0].monoHabit?.at ??
+                previousTurn[0].groupMember?.at ??
                 previousTurn[0].startedAt);
           const stampAt =
             daySeparators &&
@@ -1324,7 +1337,7 @@ function AgentTranscriptComponent({
           const live = visible && !settled && !preparingHandoff;
           // A Mono's turns are its own, whichever model ran them.
           const turnModelName =
-            agentName ??
+            turnAgentName ??
             turnModel?.name ??
             (live ? currentModelName : undefined);
           // The fold line speaks for the main agent only. A delegated run has
@@ -1332,7 +1345,7 @@ function AgentTranscriptComponent({
           // it again here would be two lines telling the same story.
           const foldTitle: ReactNode =
             habit || standaloneReply ? (
-              (agentName ?? habit?.name)
+              (turnAgentName ?? habit?.name)
             ) : live ? (
               <LiveFoldTitle
                 startedAt={startedAt}
@@ -1347,9 +1360,11 @@ function AgentTranscriptComponent({
                 background={backgroundTasks}
                 modelName={turnModelName}
               />
-            ) : agentMascot && agentName ? (
+            ) : turnMascot && turnAgentName ? (
               // A Mono signs its settled turns with just its mascot and name.
-              <span className="font-medium text-content/80">{agentName}</span>
+              <span className="font-medium text-content/80">
+                {turnAgentName}
+              </span>
             ) : durationMs != null ? (
               formatWorkingDuration(durationMs, turnModelName, true)
             ) : inlineWork && turnModelName ? (
@@ -1476,7 +1491,7 @@ function AgentTranscriptComponent({
                   !seenBlocks.current!.has(item.block.id)
                 }
                 layout={transcriptLayout}
-                bubbleTail={!!agentMascot}
+                bubbleTail={!!turnMascot}
                 localMedia={isMonoChat}
                 compactFollowUp={isCompactFollowUp(item, itemIndex)}
                 stackedOnPrevious={
@@ -1548,7 +1563,23 @@ function AgentTranscriptComponent({
                   title={foldTitle}
                   name={turnModelName}
                   harness={turnHarness}
-                  agentMascot={agentMascot}
+                  modelBadge={
+                    !modelBadges
+                      ? undefined
+                      : member
+                        ? member.harness
+                          ? { harness: member.harness, model: member.model }
+                          : undefined
+                        : turnHarness
+                          ? {
+                              harness: turnHarness,
+                              model:
+                                turnModel?.name ??
+                                (live ? currentModelName : undefined),
+                            }
+                          : undefined
+                  }
+                  agentMascot={turnMascot}
                   active={!settled}
                   live={live}
                   waitingForAnswers={!!pendingQuestion}
@@ -1575,7 +1606,7 @@ function AgentTranscriptComponent({
                   title={foldTitle}
                   kind={workKind(summarizedWork)}
                   harness={turnHarness}
-                  agentMascot={agentMascot}
+                  agentMascot={turnMascot}
                   live={live}
                   expandable={!!fold}
                   open={workOpen && !!fold}
@@ -1749,13 +1780,14 @@ function AgentTranscriptComponent({
                   revealOnHover={inlineWork}
                   elapsedMs={durationMs ?? null}
                   label={
-                    standaloneReply ? (agentName ?? habit?.name) : undefined
+                    standaloneReply ? (turnAgentName ?? habit?.name) : undefined
                   }
                   metrics={hideTurnMetrics ? undefined : userBlock?.turnMetrics}
                   labelHidden={showFoldLine}
                   modelName={turnModelName}
                   completedAt={
                     habit?.at ??
+                    member?.at ??
                     (runs.length > 1 && lastRun?.startedAt != null
                       ? lastRun.startedAt + (lastRun.durationMs ?? 0)
                       : startedAt != null
@@ -3265,6 +3297,7 @@ function MonoTurnHeader({
   title,
   name,
   harness,
+  modelBadge,
   agentMascot,
   active,
   live,
@@ -3278,6 +3311,8 @@ function MonoTurnHeader({
   title: ReactNode;
   name?: string;
   harness?: HarnessId;
+  /** The model it answered with, as a small mark on its avatar. */
+  modelBadge?: { harness: HarnessId; model?: string };
   agentMascot?: Props["agentMascot"];
   active: boolean;
   live: boolean;
@@ -3307,13 +3342,27 @@ function MonoTurnHeader({
           : `Waiting for ${backgroundTasks.length} background tasks…`,
     };
   }
-  const mark = agentMascot ? (
+  const mascot = agentMascot ? (
     <PixelMascot
       name={agentMascot.mascot}
       color={agentMascot.color}
       still
       className="size-3.5 shrink-0"
     />
+  ) : null;
+  const mark = mascot && modelBadge ? (
+    <span
+      className="relative shrink-0"
+      title={modelBadge.model}
+      aria-label={modelBadge.model}
+    >
+      {mascot}
+      <span className="absolute -bottom-1 -right-1.5 grid size-2.5 place-items-center rounded-full bg-background-base">
+        <HarnessIcon harness={modelBadge.harness} className="size-2" />
+      </span>
+    </span>
+  ) : mascot ? (
+    mascot
   ) : harness ? (
     <HarnessIcon harness={harness} className="size-3.5 shrink-0" />
   ) : (

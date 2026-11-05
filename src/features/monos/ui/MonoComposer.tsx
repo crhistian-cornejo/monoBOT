@@ -73,6 +73,12 @@ type Props = {
   controls?: ReactNode;
   /** Sits beside attach and emoji, on the left under the input. */
   tools?: ReactNode;
+  /**
+   * One line, nothing under it: attach and emoji open the field, these sit
+   * after the text beside the mic. A group's chat, whose agents come with
+   * their own models, has no model controls to show.
+   */
+  fieldTools?: ReactNode;
   /** Offers the mic; off where something else holds it, like a call. */
   dictation?: boolean;
   /** Square corners and tighter padding, for the floating chat. */
@@ -98,6 +104,7 @@ export function MonoComposer({
   onFocus,
   controls,
   tools,
+  fieldTools,
   dictation: dictates = true,
   square = false,
 }: Props) {
@@ -123,7 +130,8 @@ export function MonoComposer({
     !submitting &&
     pendingReads === 0 &&
     (text.trim().length > 0 || attachments.length > 0);
-  const inline = !controls;
+  const compact = fieldTools !== undefined;
+  const inline = !controls && !compact;
   // Attachments sit above the field like a second line of text, so an inline
   // field moves above the buttons for them too.
   const stacked = inline && (multiline || attachments.length > 0);
@@ -392,6 +400,35 @@ export function MonoComposer({
     </button>
   );
 
+  const emojiControl = (
+    <>
+      <button
+        ref={emojiButton}
+        type="button"
+        title="Emoji"
+        aria-label="Add emoji"
+        aria-expanded={emojiOpen}
+        disabled={!enabled || submitting}
+        onClick={toggleEmoji}
+        className={`${TOOL_BUTTON} ${emojiOpen ? "bg-content/8 text-content" : ""}`}
+      >
+        <SmilePlus className="size-3.25" strokeWidth={2} />
+      </button>
+      {emojiOpen ? (
+        <Suspense fallback={null}>
+          <EmojiPickerPopover
+            anchor={emojiButton}
+            onPick={insertEmoji}
+            onDismiss={() => {
+              setEmojiOpen(false);
+              field.current?.focus();
+            }}
+          />
+        </Suspense>
+      ) : null}
+    </>
+  );
+
   return (
     <form
       className={`mx-auto w-full max-w-4xl shrink-0 font-sans ${square ? "p-0.5 pt-0" : "p-1.5 pt-0"}`}
@@ -463,6 +500,23 @@ export function MonoComposer({
               `col-start-3 ${stacked ? "row-start-2" : "row-start-1"}`,
             )}
           </div>
+        ) : compact ? (
+          // Everything on the field's line; the buttons stay at its bottom
+          // as the text grows, send last.
+          <div className="flex items-end gap-0.5 p-1.25">
+            <div className="flex shrink-0 items-center gap-0.5">
+              {attachButton(TOOL_BUTTON, true)}
+              {emojiControl}
+            </div>
+            {input("flex-1 self-center px-1.5")}
+            <div className="flex shrink-0 items-center gap-1">
+              {fieldTools}
+              {enabled && dictates ? (
+                <DictationButton dictation={dictation} />
+              ) : null}
+              {sendButton("shrink-0")}
+            </div>
+          </div>
         ) : (
           // Even padding centers send beside one line, and keeps it at the
           // bottom as the text grows.
@@ -476,36 +530,13 @@ export function MonoComposer({
         )}
         <DictationBar dictation={dictation} />
       </div>
-      {inline ? null : (
+      {inline || compact ? null : (
         // The right inset matches the box's border and padding, so the last
         // control lines up under send. A container, so the tools and controls
         // passed in can compact themselves when the chat is narrow.
         <div className="@container flex min-w-0 items-center gap-0.5 pt-1 pl-1 pr-1.5">
           {attachButton(TOOL_BUTTON, true)}
-          <button
-            ref={emojiButton}
-            type="button"
-            title="Emoji"
-            aria-label="Add emoji"
-            aria-expanded={emojiOpen}
-            disabled={!enabled || submitting}
-            onClick={toggleEmoji}
-            className={`${TOOL_BUTTON} ${emojiOpen ? "bg-content/8 text-content" : ""}`}
-          >
-            <SmilePlus className="size-3.25" strokeWidth={2} />
-          </button>
-          {emojiOpen ? (
-            <Suspense fallback={null}>
-              <EmojiPickerPopover
-                anchor={emojiButton}
-                onPick={insertEmoji}
-                onDismiss={() => {
-                  setEmojiOpen(false);
-                  field.current?.focus();
-                }}
-              />
-            </Suspense>
-          ) : null}
+          {emojiControl}
           {tools}
           <div className="ml-auto flex min-w-0 items-center gap-1">
             {controls}

@@ -12,6 +12,7 @@ export type BotRole =
   | "finance"
   | "documents"
   | "research"
+  | "social"
   | "inbox"
   | "planner"
   | "writer"
@@ -284,6 +285,19 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
       "playwright",
     ],
     skills: ["deep-research"],
+  },
+  {
+    role: "social",
+    name: "Social",
+    description: "News and posts from X, Hacker News, Instagram and the web",
+    specialty:
+      "Social media and news: follows what is said on X, Hacker News, Instagram, Reddit and news sites about the user's topics, and reports each item with its direct link",
+    instructions: `You are the user's social media bot. You follow what people post and what the news says about the topics the user cares about, on X, Hacker News, Instagram, Reddit, YouTube and news sites, and report what is new since your last report. Read X posts with the x.md connector (x_md_search_posts, x_md_get_post) and Hacker News at news.ycombinator.com or its API (hacker-news.firebaseio.com/v0). Each item is one short line of what happened and why it matters, then its direct link. Leave out what you already reported and what you could not open. ${WRITING} ${SAFETY}`,
+    services: [],
+    plugins: [],
+    connectors: ["xmd", "exa", "playwright"],
+    skills: [],
+    access: ["web", "read"],
   },
   {
     role: "images",

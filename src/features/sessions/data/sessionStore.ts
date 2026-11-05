@@ -983,6 +983,30 @@ function sanitizeBlock(
       at: block.monoHabit.at,
     };
   }
+  const member = block.groupMember;
+  if (
+    block.role === "assistant" &&
+    member &&
+    [member.monoId, member.name, member.mascot, member.color, member.request]
+      .every((value) => typeof value === "string" && value.trim()) &&
+    typeof member.at === "number" &&
+    Number.isFinite(member.at)
+  ) {
+    next.groupMember = {
+      monoId: member.monoId,
+      name: member.name,
+      mascot: member.mascot,
+      color: member.color,
+      request: member.request,
+      at: member.at,
+      ...(member.harness && HARNESSES.includes(member.harness)
+        ? { harness: member.harness }
+        : {}),
+      ...(typeof member.model === "string" && member.model.trim()
+        ? { model: member.model.slice(0, 120) }
+        : {}),
+    };
+  }
   if (block.role === "user" && typeof block.sentAt === "number")
     next.sentAt = block.sentAt;
   const turnModel = sanitizeTurnModel(block.turnModel);

@@ -1116,9 +1116,20 @@ async function handleGroup(
   const message = requiredString(input.message, "message", 30_000);
   const wait = input.wait === true;
   const appRequestId = `app-${source.id}-${requestId}`;
+  // Members keep to what the project decided: its memory rides along.
+  const memory = await Promise.resolve()
+    .then(() => host.readAgentFile(group.id, "MEMORY.md"))
+    .then((file) => file.text ?? "")
+    .catch(() => "");
   const result = await host.send(
     sessionId,
-    groupMessage(monoLook(group).name, group.group.goal, message, group.group),
+    groupMessage(
+      monoLook(group).name,
+      group.group.goal,
+      message,
+      group.group,
+      memory,
+    ),
     appRequestId,
     // A waited answer comes back to this call, not as a completion.
     ...(wait ? [] : [source.id]),

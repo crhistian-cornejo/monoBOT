@@ -16,6 +16,8 @@ import { Popover, type PopoverAnchor } from "../../shared/ui/Popover";
 import { Shimmer } from "../../shared/ui/Shimmer";
 import { useAnimatedReorder } from "../../shared/hooks/useAnimatedReorder";
 import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
+import { GroupAvatarStack } from "../../features/groups/ui/GroupAvatarStack";
+import { useMonoCardPreview } from "../../features/monos/ui/MonoCardPreview";
 import { MonoIntroCard } from "../../features/monos/ui/MonoIntro";
 import { RailAction } from "./RailAction";
 import { saveMonosEnabled } from "../../features/settings/model/settings";
@@ -141,6 +143,8 @@ export function MonoRailSection({
   const [roles, setRoles] = useState<PopoverAnchor>();
   const section = useRef<HTMLDivElement>(null);
   const [background, setBackground] = useState<string>();
+  // The hover card of the row under the pointer, as a session's in Code.
+  const preview = useMonoCardPreview(states);
   // Invites a bot made from scratch until there is one or the card is closed.
   const [botIntroHidden, setBotIntroHidden] = useState(botIntroDismissed);
   const showBotIntro =
@@ -252,10 +256,12 @@ export function MonoRailSection({
               ref={(el) => sortable.setItemRef(mono.id, el)}
               data-selected={selected || undefined}
               data-mono-status={state.status}
+              {...preview.bind(mono.id)}
               className={`reorder-item project-reorder-item group relative flex h-8 cursor-default touch-none items-stretch rounded-md px-2 ${
                 selected ? "bg-selection-strong text-content" : "opacity-65"
               }`}
               onPointerDown={(event) => {
+                preview.close();
                 if (event.button !== 0) return;
                 if (
                   (event.target as HTMLElement | null)?.closest(
@@ -277,6 +283,7 @@ export function MonoRailSection({
               }}
               onContextMenu={(event) => {
                 event.preventDefault();
+                preview.close();
                 setMenu({
                   id: mono.id,
                   anchor: { x: event.clientX, y: event.clientY },
@@ -285,7 +292,6 @@ export function MonoRailSection({
             >
               <button
                 type="button"
-                title={[look.name, projects, status].filter(Boolean).join("\n")}
                 aria-label={[
                   look.name,
                   status ?? "idle",
@@ -297,11 +303,15 @@ export function MonoRailSection({
                 aria-current={selected ? "true" : undefined}
                 className="flex min-w-0 flex-1 cursor-default items-center gap-2 text-left transition-[padding] duration-150 motion-reduce:transition-none group-hover:pr-6 group-has-[button:focus-visible]:pr-6"
               >
-                <MonoRailMascot
-                  name={look.mascot}
-                  color={look.color}
-                  status={state.status}
-                />
+                {look.group ? (
+                  <GroupAvatarStack group={look.group} status={state.status} />
+                ) : (
+                  <MonoRailMascot
+                    name={look.mascot}
+                    color={look.color}
+                    status={state.status}
+                  />
+                )}
                 {state.status === "working" ? (
                   <Shimmer
                     as="span"
@@ -344,6 +354,7 @@ export function MonoRailSection({
           );
         })}
       </div>
+      {menu ? null : preview.card}
       {showBotIntro ? (
         // The card brings its own side margin; the inset section has one too.
         <div className={insetLook ? "-mx-2 mt-2" : "mt-2"}>

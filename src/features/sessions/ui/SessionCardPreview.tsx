@@ -89,11 +89,11 @@ export function SessionCardPreview({
       </p>
       <dl className="mt-2 grid grid-cols-[4.5rem_minmax(0,1fr)] gap-x-2 gap-y-1.5 border-t border-stroke pt-2">
         {session.branch || session.worktreeRemoved ? (
-          <Detail label="Branch">
+          <PreviewDetail label="Branch">
             {session.worktreeRemoved ? NO_BRANCH_LABEL : session.branch}
-          </Detail>
+          </PreviewDetail>
         ) : null}
-        <Detail
+        <PreviewDetail
           label={
             session.worktreeCwd || session.worktreeRemoved
               ? "Worktree"
@@ -112,9 +112,9 @@ export function SessionCardPreview({
           ) : (
             prettyCwd(session.worktreeCwd || session.cwd)
           )}
-        </Detail>
+        </PreviewDetail>
         {additions > 0 || deletions > 0 ? (
-          <Detail label="Changes">
+          <PreviewDetail label="Changes">
             <span className="flex gap-2 font-medium tabular-nums">
               {additions > 0 ? (
                 <span className="text-diff-add-fg">
@@ -127,23 +127,30 @@ export function SessionCardPreview({
                 </span>
               ) : null}
             </span>
-          </Detail>
+          </PreviewDetail>
         ) : null}
         {session.linkedWorkItem ? (
-          <Detail
+          <PreviewDetail
             label={
               session.linkedWorkItem.kind === "pr" ? "Pull request" : "Issue"
             }
           >
             {session.linkedWorkItem.repo} #{session.linkedWorkItem.number}
-          </Detail>
+          </PreviewDetail>
         ) : null}
       </dl>
     </Popover>
   );
 }
 
-function Detail({ label, children }: { label: string; children: ReactNode }) {
+/** One label and value row of a hover card's details list. */
+export function PreviewDetail({
+  label,
+  children,
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
     <>
       <dt className="text-[11px] leading-4 text-content/45">{label}</dt>

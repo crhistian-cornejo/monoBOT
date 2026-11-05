@@ -1,6 +1,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import { Bot, Code, Users } from "../../shared/ui/icons";
 import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
+import { useMonoCardPreview } from "../../features/monos/ui/MonoCardPreview";
 import {
   listMonos,
   monoLook,
@@ -108,6 +109,7 @@ export function PersonalRail({
   const state = principal ? (monos.states.get(principal.id) ?? IDLE) : IDLE;
   const unseen = principal ? (monos.unseenCounts?.get(principal.id) ?? 0) : 0;
   const active = !!principal && monos.activeId === principal.id;
+  const preview = useMonoCardPreview(monos.states);
 
   return (
     <>
@@ -118,6 +120,8 @@ export function PersonalRail({
         <button
           type="button"
           aria-current={active ? "true" : undefined}
+          {...(principal ? preview.bind(principal.id) : {})}
+          onPointerDown={preview.close}
           onClick={() =>
             principal
               ? monos.onOpen(principal.id)
@@ -167,6 +171,7 @@ export function PersonalRail({
             />
           ) : null}
         </button>
+        {preview.card}
       </div>
       <RailDivider />
       <MonoRailSection {...monos} kind="bot" inset={inset} />

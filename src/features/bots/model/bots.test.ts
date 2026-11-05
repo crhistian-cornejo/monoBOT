@@ -29,6 +29,7 @@ describe("bots", () => {
       "finance",
       "documents",
       "research",
+      "social",
       "images",
       "custom",
     ]);

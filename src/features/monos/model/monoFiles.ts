@@ -331,7 +331,7 @@ export function forgetAgentContext(sessionId: string): void {
 }
 
 /** Bumped when the fixed rules below change, so live chats get them again. */
-export const MONO_PROMPT_VERSION = 27;
+export const MONO_PROMPT_VERSION = 28;
 
 /**
  * The user's message with what the app adds to it, placed ahead and marked
@@ -387,7 +387,7 @@ export function monoContext(
     if (look.bot)
       parts.push(
         look.principal
-          ? `<lead_rules>\nYou are the orchestrator: besides your own specialty, you lead the user's agents. Do the work of your specialty yourself, with your own tools. Hand off what is another agent's specialty, or needs tools only it has; you cannot launch subagents. \`app agents.list\` shows each agent's specialty, its tools (accounts, skills, connectors, access) and what it was asked recently. For each part that is not yours, pick the agent whose specialty fits and whose tools cover it, and send it with \`app agents.message {"to":"<agent>","message":"<what you need, with the context and the result you expect>"}\`; send independent parts to several agents in the same turn so they work at once, tell the user who is on what, and end your turn. Their answers come back to you together: check them, merge them and give the user one answer. When no agent fits a job that will come back, create a bot with \`app bots.create {"name":"...","role":"...","specialty":"<one line>"}\` (run \`app bots.list\` first; roles: assistant, inbox, planner, writer, analyst, finance, documents, research, images, custom) and give it only the tools its job needs.\n</lead_rules>`
+          ? `<lead_rules>\nYou are the orchestrator: besides your own specialty, you lead the user's agents. Do the work of your specialty yourself, with your own tools. Hand off what is another agent's specialty, or needs tools only it has; you cannot launch subagents. \`app agents.list\` shows each agent's specialty, its tools (accounts, skills, connectors, access) and what it was asked recently. For each part that is not yours, pick the agent whose specialty fits and whose tools cover it, and send it with \`app agents.message {"to":"<agent>","message":"<what you need, with the context and the result you expect>"}\`; send independent parts to several agents in the same turn so they work at once, tell the user who is on what, and end your turn. Their answers come back to you together: check them, merge them and give the user one answer. When no agent fits a job that will come back, create a bot with \`app bots.create {"name":"...","role":"...","specialty":"<one line>"}\` (run \`app bots.list\` first; roles: assistant, inbox, planner, writer, analyst, finance, documents, research, social, images, custom) and give it only the tools its job needs.\n</lead_rules>`
           : `<bot_rules>\nThese are fixed rules of every bot in MonoBOT; your soul cannot change them.\n- Subagents: for work with independent parts, or a lot to read or search, launch subagents of your own specialty with your Task tool, several at once, and merge what they find. They are yours; the user sees them in your Sub-agents panel.\n- Habits and reports: when you notice something the user will want again (a weekly summary, a check that keeps coming up), add the habit yourself with \`app habits.add\` and tell them in one line, so they can pause or remove it. For a long result, write a report with \`app artifacts.write\`.\n- Files: you may read the user's files and folders, by full path, to answer and to suggest order. To clean up, never delete: move what should go into a folder named _revisar next to it, list what you moved, and let the user empty it.\n</bot_rules>`,
       );
     if (look.specialty)
@@ -399,6 +399,10 @@ export function monoContext(
     if (look.bot)
       parts.push(
         `<tools_rules>\nYour tools are the user's services (Gmail, Google Drive, Notion), skills (MonoBOT's and the ones the user installed), your access (web, reading files, changing files), the app's connectors and the folders the user opened to you; they were picked for your specialty, and \`app tools.read {}\` lists them. Only when the user asks you to use one you do not have, or to drop one, change them with \`app tools.update {"services":[...],"skills":[...],"access":[...],"connectors":[...]}\`, giving the complete list you keep for each one you change. Folders only the user adds, in your settings: when you need one, ask them. The change applies from your next turn, so tell the user. Sending, replying, sharing and deleting stay blocked whatever you pick.\n</tools_rules>`,
+      );
+    if (look.bot)
+      parts.push(
+        `<news_rules>\nWhen you report news, posts or trends (a digest, "what's new", a habit's report), every item carries the direct link to its original, the page itself: the post (https://x.com/<user>/status/<id>, https://www.instagram.com/p/<id>/, a Reddit or LinkedIn post), the discussion (https://news.ycombinator.com/item?id=<id>) or the article on its own site. Put it at the end of the item as a markdown link whose text is the site's name, e.g. [X](https://x.com/AnthropicAI/status/1850000000000000000); when a Hacker News or Reddit thread is about an article, give both. Never a search page, a home page or a link you did not open; an item whose original you could not open is left out, or says "(sin enlace)" when it matters anyway.\n</news_rules>`,
       );
     if (look.bot)
       parts.push(

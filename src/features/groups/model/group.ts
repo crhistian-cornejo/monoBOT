@@ -308,15 +308,32 @@ export function groupPlaces(group: Group): string {
 export const GROUP_ACCESS_RULE =
   'Stay inside the group\'s folders and files. Before you open a path or a link outside them, even one the user or another member sent, ask for it with app group.access {"target":"<full path or link>","reason":"<one line>"}: it answers at once when the user already decided; otherwise the user is asked in the group chat and you end your turn until they answer. Never work around a "no".';
 
+const MEMORY_LINES_MAX = 60;
+const MEMORY_CHARS_MAX = 6_000;
+
+/** The project's live memory entries; the newest stay when it runs long. */
+export function projectMemory(memory: string | undefined): string {
+  const lines = (memory ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^[-*]\s/.test(line) && !line.includes("~~"))
+    .slice(-MEMORY_LINES_MAX);
+  while (lines.length > 1 && lines.join("\n").length > MEMORY_CHARS_MAX)
+    lines.shift();
+  return lines.join("\n");
+}
+
 /** What a member is told when the leader brings it in. */
 export function groupMessage(
   groupName: string,
   goal: string | undefined,
   message: string,
   group?: Group,
+  memory?: string,
 ): string {
+  const remembered = projectMemory(memory);
   return `<group_message group="${groupName}">
-${goal ? `The group is for: ${goal}\n` : ""}${group ? `${groupPlaces(group)}\n${GROUP_ACCESS_RULE}\n` : ""}${message.trim()}
+${goal ? `The group is for: ${goal}\n` : ""}${group ? `${groupPlaces(group)}\n${GROUP_ACCESS_RULE}\n` : ""}${remembered ? `What the project remembers (keep to these decisions and preferences):\n${remembered}\n` : ""}${message.trim()}
 </group_message>
 Answer as yourself with your own contribution, briefly unless asked for more. You may ask another member of this group for something you need with app agents.message {"to":"<member>","message":"...","wait":true}, which waits for its reply. If you have nothing new to add, reply with exactly PASS.`;
 }

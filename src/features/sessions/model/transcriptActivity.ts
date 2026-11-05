@@ -353,7 +353,7 @@ function groupTranscriptTurns(
       }
       continue;
     }
-    if (block.role === "handoff" || block.monoHabit) {
+    if (block.role === "handoff" || block.monoHabit || block.groupMember) {
       if (current.length > 0) turns.push(current);
       turns.push([block]);
       current = [];
@@ -411,7 +411,8 @@ export function opensNewStretch(at: number, previousAt?: number): boolean {
 
 /** When the latest run in a Mono turn started, for measuring the gap after it. */
 export function monoTurnLatestStart(turn: Block[]): number | undefined {
-  let latest = turn[0].monoHabit?.at ?? turn[0].startedAt;
+  let latest =
+    turn[0].monoHabit?.at ?? turn[0].groupMember?.at ?? turn[0].startedAt;
   for (const block of turn) {
     if (
       block.role === "user" &&
@@ -440,6 +441,7 @@ export function groupMonoChatTurns(
     if (
       previous &&
       !previous[0].monoHabit &&
+      !previous[0].groupMember &&
       previous[0].role !== "handoff" &&
       isMonoCompletionPrompt(turn[0]) &&
       (at == null || !opensNewStretch(at, monoTurnLatestStart(previous)))

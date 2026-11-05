@@ -77,6 +77,7 @@ import { UsageChips } from "../../../app/shell/UsageFooter";
 import type { RateLimitProvider } from "../../providers/model/rateLimits";
 import { MonoUsageLimitNotice } from "../../monos/ui/MonoUsageLimitNotice";
 import { GroupAccessPrompt } from "../../groups/ui/GroupAccessPrompt";
+import { groupLead } from "../../groups/model/groupBrief";
 import { QuestionForm } from "./QuestionForm";
 import {
   monoMessageDeliveries,
@@ -430,6 +431,9 @@ const LocalSessionPane = memo(function LocalSessionPane({
   useSyncExternalStore(subscribeMonos, monosSnapshot);
   const mono = monoForSession(session.id);
   const agent = mono ? monoLook(mono) : undefined;
+  // A group has no voice of its own: its Principal speaks in it.
+  const lead = mono?.group ? groupLead(mono.group) : undefined;
+  const speaker = lead ? monoLook(lead) : agent;
   // A Mono shows only its own background, never the project's or the app's.
   const projectBackground = mono
     ? monoChatBackground(mono.id)
@@ -995,13 +999,14 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     busy={!!session.busy && !monoTranscript.viewingOlderPage}
                     visible={visible}
                     cwd={workCwd}
-                    agentName={agent?.name}
+                    agentName={speaker?.name}
                     onOpenArtifact={
                       onOpenArtifact
                         ? (id) => onOpenArtifact(session.id, id)
                         : undefined
                     }
-                    agentMascot={agent}
+                    agentMascot={speaker}
+                    modelBadges={!!lead}
                     bottomAligned={!!agent}
                     inlineWork={!!agent}
                     messageDeliveries={agent ? messageDeliveries : undefined}
@@ -1241,7 +1246,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
                     // with the usage-limit notice, not here. A narrow chat
                     // drops it first, then shows the model controls as icons.
                     tools={
-                      monoComposerUsage ? (
+                      !lead && monoComposerUsage ? (
                         <div className="flex shrink-0 items-center gap-0.5 text-[11px] text-content/55 @max-md:hidden">
                           <UsageChips
                             providers={monoUsageProviders(session.harness)}
@@ -1258,45 +1263,59 @@ const LocalSessionPane = memo(function LocalSessionPane({
                         </div>
                       ) : undefined
                     }
-                    controls={
-                      <>
-                        <ModelPicker
-                          harness={session.harness}
-                          model={session.model}
-                          values={session.modelSettings}
-                          allowedHarnesses={allowedModelHarnesses}
-                          project={workCwd}
-                          hideSettings
-                          hotkeys={focused && !btw.open}
-                          variant="text"
-                          labelClassName="@max-sm:hidden"
-                          onChange={(harness, model) =>
-                            onModelChange(session.id, harness, model)
-                          }
-                          onSettingsChange={(settings) =>
-                            onModelSettingsChange(session.id, settings)
-                          }
-                        />
-                        <ModelControlPills
-                          harness={session.harness}
-                          model={session.model}
-                          values={session.modelSettings}
-                          variant="text"
-                          labelClassName="@max-sm:hidden"
-                          onSettingsChange={(settings) =>
-                            onModelSettingsChange(session.id, settings)
-                          }
-                        />
-                        {/* A Mono is one long conversation; this is how full
-                            its current thread is. It rotates threads itself,
-                            so there is nothing to compact here. */}
+                    // A group's agents come with their own models: its line
+                    // keeps attach, emoji and how full the thread is.
+                    fieldTools={
+                      lead ? (
                         <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
                           <ContextMeter
                             usage={session.context}
                             empty={isEmpty}
                           />
                         </div>
-                      </>
+                      ) : undefined
+                    }
+                    controls={
+                      lead ? undefined : (
+                        <>
+                          <ModelPicker
+                            harness={session.harness}
+                            model={session.model}
+                            values={session.modelSettings}
+                            allowedHarnesses={allowedModelHarnesses}
+                            project={workCwd}
+                            hideSettings
+                            hotkeys={focused && !btw.open}
+                            variant="text"
+                            labelClassName="@max-sm:hidden"
+                            onChange={(harness, model) =>
+                              onModelChange(session.id, harness, model)
+                            }
+                            onSettingsChange={(settings) =>
+                              onModelSettingsChange(session.id, settings)
+                            }
+                          />
+                          <ModelControlPills
+                            harness={session.harness}
+                            model={session.model}
+                            values={session.modelSettings}
+                            variant="text"
+                            labelClassName="@max-sm:hidden"
+                            onSettingsChange={(settings) =>
+                              onModelSettingsChange(session.id, settings)
+                            }
+                          />
+                          {/* A Mono is one long conversation; this is how full
+                              its current thread is. It rotates threads itself,
+                              so there is nothing to compact here. */}
+                          <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
+                            <ContextMeter
+                              usage={session.context}
+                              empty={isEmpty}
+                            />
+                          </div>
+                        </>
+                      )
                     }
                   />
                 </>

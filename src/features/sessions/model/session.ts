@@ -430,6 +430,8 @@ export type Block = {
   statusKey?: string;
   /** Posted to a Mono's chat by one of its habits, outside any turn. */
   monoHabit?: { id: string; name: string; at: number };
+  /** A group member's answer, posted in the group's chat under its name. */
+  groupMember?: GroupMemberPost;
   /** A card a Mono put in its chat; see `features/monos/model/monoCards`. */
   monoCard?: import("../../monos/model/monoCards").MonoCard;
   /**
@@ -437,6 +439,20 @@ export type Block = {
    * when the chat renders; see `features/monos/model/monoReaction`.
    */
   monoReaction?: string;
+};
+
+/** Who answered in a group's chat, and which group.ask it answered. */
+export type GroupMemberPost = {
+  monoId: string;
+  name: string;
+  mascot: string;
+  color: string;
+  /** The member's request id; one post per request. */
+  request: string;
+  at: number;
+  /** What it answered with, for the mark on its avatar. */
+  harness?: HarnessId;
+  model?: string;
 };
 
 export type RuntimeMode =

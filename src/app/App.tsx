@@ -680,6 +680,7 @@ import {
   removeMono,
   saveOpenMono,
   subscribeMonos,
+  type Mono,
   type MonoState,
 } from "../features/monos/model/mono";
 import { SubagentStack } from "../features/sessions/ui/AgentTranscript";
@@ -730,6 +731,31 @@ import {
   groupDraft,
   seedGroupMemory,
 } from "../features/groups/model/groupProject";
+import {
+  askableMembers,
+  groupLead,
+} from "../features/groups/model/groupBrief";
+import { groupMessage } from "../features/groups/model/group";
+import { leadModelChoice } from "../features/groups/model/groupVoice";
+import {
+  roundAnswers,
+  roundPrompt,
+  roundRequest,
+  type GroupRound,
+} from "../features/groups/model/groupRound";
+import { useGroupLearning } from "../features/groups/ui/useGroupLearning";
+import {
+  finishedGroupReplies,
+  groupMemberPost,
+  groupPostsContext,
+  postedGroupRequests,
+  unseenGroupPosts,
+  directMember,
+  groupRequestPrefix,
+  DIRECT_PREFIX,
+  ROUND_PREFIX,
+  type GroupReply,
+} from "../features/groups/model/groupReplies";
 import { GroupMembers } from "../features/groups/ui/GroupMembers";
 import { GroupCall } from "../features/groups/ui/GroupCall";
 import type { MemberAsk } from "../features/groups/ui/useGroupCall";
@@ -8746,6 +8772,12 @@ function Workspace({
           if (habitPosts.length) {
             appContext.push(habitPostsContext(habitPosts));
           }
+          // Members' answers to an @Name went around the lead; it reads
+          // them once, with the user's next message.
+          const groupPosts = mono ? unseenGroupPosts(current.blocks) : [];
+          if (groupPosts.length) {
+            appContext.push(groupPostsContext(groupPosts));
+          }
           if (
             agentFiles &&
             agentLook &&
@@ -9003,6 +9035,7 @@ function Workspace({
     (...args: Parameters<Submit>): boolean => {
       // Reject before async preparation can make the composer clear its draft.
       if (workspaceNavigation.isSwitching(args[0])) return false;
+      if (directGroupAskRef.current(args[0], args[1], args[2])) return true;
       const result = submitSession(...args);
       if (typeof result === "boolean") return result;
       // Deferred errors have already been displayed by submitAfterProjectSync.
@@ -9011,6 +9044,12 @@ function Workspace({
     },
     [submitSession],
   );
+
+  // A group's @Name goes to that member alone, around the lead; set below,
+  // once the helpers it needs exist.
+  const directGroupAskRef = useRef<
+    (sessionId: string, text: string, attachments?: Attachment[]) => boolean
+  >(() => false);
 
   // onApproval is created once; it reaches the current helper through this.
   const decideMonoBlockRef = useRef<
@@ -9044,6 +9083,71 @@ function Workspace({
     persistSession(next);
     then?.(next);
   };
+  // A group's chat reads like a team's: each member's answer posts there
+  // under its own name as soon as it is done, not only through the lead.
+  const groupPostsPending = useRef(new Set<string>());
+  const groupRepliesCache = useRef(
+    new WeakMap<Session, Map<string, GroupReply[]>>(),
+  );
+  useEffect(() => {
+    const cached = (member: Session, groupSessionId: string) => {
+      let byGroup = groupRepliesCache.current.get(member);
+      if (!byGroup) {
+        byGroup = new Map();
+        groupRepliesCache.current.set(member, byGroup);
+      }
+      let replies = byGroup.get(groupSessionId);
+      if (!replies) {
+        replies = finishedGroupReplies(member, groupSessionId);
+        byGroup.set(groupSessionId, replies);
+      }
+      return replies;
+    };
+    for (const mono of listMonos()) {
+      if (!mono.group || !mono.sessionId) continue;
+      const group = sessions.find((entry) => entry.id === mono.sessionId);
+      if (!group) continue;
+      const posted = postedGroupRequests(group);
+      for (const memberId of mono.group.members) {
+        const member = findMono(memberId);
+        const memberSession = member?.sessionId
+          ? sessions.find((entry) => entry.id === member.sessionId)
+          : undefined;
+        if (!member || !memberSession) continue;
+        const look = monoLook(member);
+        for (const reply of cached(memberSession, group.id)) {
+          if (
+            posted.has(reply.request) ||
+            groupPostsPending.current.has(reply.request)
+          )
+            continue;
+          groupPostsPending.current.add(reply.request);
+          appendToMono(
+            group.id,
+            groupMemberPost(
+              {
+                monoId: member.id,
+                name: look.name,
+                mascot: look.mascot,
+                color: look.color,
+                harness: memberSession.harness,
+                model: resolveModel(memberSession.harness, memberSession.model)
+                  .name,
+              },
+              reply,
+              crypto.randomUUID(),
+            ),
+            () => {
+              groupPostsPending.current.delete(reply.request);
+              monoReplies.noteReply(group.id);
+            },
+          );
+        }
+      }
+    }
+    // appendToMono reads the live sessions through its ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessions, monosSnap]);
   const decideMonoBlock = (
     monoId: string,
     blockId: string,
@@ -9456,6 +9560,133 @@ function Workspace({
   saveDraftRef.current = onSaveDraft;
   const ensureOpenSessionRef = useRef(ensureOpenSession);
   ensureOpenSessionRef.current = ensureOpenSession;
+  // One member's part of a group's message, in its own chat and model, with
+  // the project's memory; false when its chat could not take it.
+  const sendToGroupMember = async (
+    group: Mono,
+    memberId: string,
+    message: string,
+    request: string,
+  ): Promise<boolean> => {
+    const info = group.group;
+    if (!info) return false;
+    const member = await ensureMonoSession(memberId, {
+      home: homeDir,
+      load: ensureOpenSessionRef.current,
+      create: (path) => newDefaultSession(path),
+      add: (created) =>
+        updateSessionState(sessionsRef, setSessions, (current) => [
+          ...current,
+          created,
+        ]),
+    });
+    if (!member) return false;
+    const memory = await readAgentFile(group.id, "MEMORY.md")
+      .then((file) => file.text ?? "")
+      .catch(() => "");
+    const accepted = await submitSessionRef.current(
+      member.id,
+      groupMessage(monoLook(group).name, info.goal, message, info, memory),
+      [],
+      { appRequestId: request, followsUp: true },
+    );
+    return accepted !== false;
+  };
+  directGroupAskRef.current = (sessionId, text, attachments) => {
+    if (attachments?.length) return false;
+    const group = monoForSession(sessionId);
+    const chat = sessionsRef.current.find((entry) => entry.id === sessionId);
+    if (!group?.group || !chat || chat.busy) return false;
+    const members = askableMembers(group.group).map((mono) => ({
+      id: mono.id,
+      name: monoLook(mono).name,
+    }));
+    if (!members.length || !text.trim()) return false;
+    const key = crypto.randomUUID();
+    const direct = directMember(text, members);
+    appendToMono(sessionId, {
+      id: crypto.randomUUID(),
+      role: "user",
+      text: text.trim(),
+      startedAt: Date.now(),
+      appRequestId: `${direct ? DIRECT_PREFIX : ROUND_PREFIX}${key}`,
+    });
+    if (direct) {
+      // @Name: that member alone answers, around the lead.
+      void sendToGroupMember(
+        group,
+        direct.member.id,
+        direct.message,
+        `${groupRequestPrefix(sessionId)}direct-${key}`,
+      ).catch((error) =>
+        console.warn("Could not reach the group member", error),
+      );
+      return true;
+    }
+    // Everyone answers first, each with its own model; the lead has the
+    // last word once they all have.
+    const round: GroupRound = {
+      key,
+      groupSessionId: sessionId,
+      text: text.trim(),
+      startedAt: Date.now(),
+      asks: members.map((member) => ({
+        request: roundRequest(sessionId, key, member.id),
+        memberId: member.id,
+        name: member.name,
+      })),
+      failed: [],
+    };
+    groupRounds.current.set(key, round);
+    for (const ask of round.asks)
+      void sendToGroupMember(group, ask.memberId, text.trim(), ask.request)
+        .catch(() => false)
+        .then((accepted) => {
+          if (!accepted) round.failed.push(ask.request);
+          setRoundTick((tick) => tick + 1);
+        });
+    return true;
+  };
+  // Hands each finished round to the lead, once, for the last word.
+  const groupRounds = useRef(new Map<string, GroupRound>());
+  const [roundTick, setRoundTick] = useState(0);
+  useEffect(() => {
+    if (!groupRounds.current.size) return;
+    const sessionOf = (memberId: string) => {
+      const id = findMono(memberId)?.sessionId;
+      return id ? sessions.find((entry) => entry.id === id) : undefined;
+    };
+    for (const round of [...groupRounds.current.values()]) {
+      const answers = roundAnswers(round, sessionOf);
+      if (!answers) continue;
+      const chat = sessions.find((entry) => entry.id === round.groupSessionId);
+      if (!chat || chat.busy) continue;
+      groupRounds.current.delete(round.key);
+      void Promise.resolve(
+        submitSessionRef.current(
+          round.groupSessionId,
+          roundPrompt(round.text, answers),
+          [],
+          {
+            appRequestId: `mono-completion-round-${round.key}`,
+            monoSessionCompletion: {
+              sessionId: round.groupSessionId,
+              title: "Group answers",
+              status: "completed",
+              sessionCount: answers.length,
+            },
+          },
+        ),
+      ).catch((error) => console.warn("The lead could not answer", error));
+    }
+  }, [sessions, roundTick]);
+  // A round still waiting checks again when a slow member runs out of time.
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (groupRounds.current.size) setRoundTick((tick) => tick + 1);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useMobileWorkspace({
     sessions,
@@ -10517,6 +10748,30 @@ function Workspace({
       updateMono(mono.id, ({ modelChoice: _applied, ...rest }) => rest);
     }
   }, [sessions, monosSnap, onModelChange, onModelSettingsChange, onRuntimeModeChange]);
+
+  // What a group's chat settles joins the project's memory on its own.
+  useGroupLearning(sessions);
+
+  // A group answers as its Principal: its chat takes the Principal's model,
+  // settings and permissions, through the same choice a bot import uses.
+  // Each choice once, so a model this computer lacks is not asked forever.
+  const leadChoicesTried = useRef(new Set<string>());
+  useEffect(() => {
+    for (const mono of listMonos()) {
+      if (!mono.group || !mono.sessionId || mono.modelChoice) continue;
+      const lead = groupLead(mono.group);
+      const leadSession = lead?.sessionId
+        ? sessions.find((entry) => entry.id === lead.sessionId)
+        : undefined;
+      const session = sessions.find((entry) => entry.id === mono.sessionId);
+      if (!leadSession || !session) continue;
+      const choice = leadModelChoice(session, leadSession);
+      const key = choice && `${mono.id}:${JSON.stringify(choice)}`;
+      if (!choice || !key || leadChoicesTried.current.has(key)) continue;
+      leadChoicesTried.current.add(key);
+      updateMono(mono.id, (entry) => ({ ...entry, modelChoice: choice }));
+    }
+  }, [sessions, monosSnap]);
 
   const openSessionBeside = useCallback(
     (

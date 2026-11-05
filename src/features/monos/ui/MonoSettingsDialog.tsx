@@ -35,6 +35,7 @@ import {
   defaultMonoName,
   findMono,
   isBot,
+  monoLook,
   resetBotTools,
   saveBotTools,
   saveMonoMascot,
@@ -64,6 +65,14 @@ import {
 } from "../../bots/model/dailyBrief";
 import { MemoryPage, SoulPage, useMonoFiles } from "./MonoFilePages";
 import { MonoProjects } from "./MonoProjects";
+import { groupLead } from "../../groups/model/groupBrief";
+import type { Group } from "../../groups/model/group";
+
+/** Who answers in a group's chat, by name. */
+function groupLeadName(group: Group): string {
+  const lead = groupLead(group);
+  return lead ? monoLook(lead).name : "The Principal";
+}
 import { ColorPicker, MascotPicker, SwitchRow } from "./monoPanelParts";
 
 export type MonoSettingsSection = "general" | "soul" | "memory";
@@ -226,47 +235,56 @@ function GeneralSection({
 
       {agent.principal ? <DailyBriefSetting key={monoId} monoId={monoId} /> : null}
 
-      <GroupHeading title="Model" />
-      <SettingGroup>
-        <SettingRow
-          label="Model"
-          description="What it thinks and replies with."
-        >
-          <ModelPicker
-            harness={harness}
-            model={model}
-            values={modelSettings}
-            project={cwd}
-            hideSettings
-            side="bottom"
-            variant="plain"
-            onChange={onModelChange}
-            onSettingsChange={onModelSettingsChange}
-          />
-        </SettingRow>
-        <ModelSettingRows
-          harness={harness}
-          model={model}
-          values={modelSettings}
-          side="bottom"
-          onSettingsChange={onModelSettingsChange}
-          row={({ label, control }) => (
-            <SettingRow label={label}>{control}</SettingRow>
-          )}
+      {agent.group ? (
+        <GroupHeading
+          title="Model"
+          description={`${groupLeadName(agent.group)} answers here with its own model, effort and permissions. Change them in its settings.`}
         />
-        <SettingRow
-          label="Permissions"
-          description="What it may do without asking."
-        >
-          <AccessPicker
-            value={runtimeMode}
-            onChange={onRuntimeModeChange}
-            busy={busy}
-            side="bottom"
-            variant="plain"
-          />
-        </SettingRow>
-      </SettingGroup>
+      ) : (
+        <>
+          <GroupHeading title="Model" />
+          <SettingGroup>
+            <SettingRow
+              label="Model"
+              description="What it thinks and replies with."
+            >
+              <ModelPicker
+                harness={harness}
+                model={model}
+                values={modelSettings}
+                project={cwd}
+                hideSettings
+                side="bottom"
+                variant="plain"
+                onChange={onModelChange}
+                onSettingsChange={onModelSettingsChange}
+              />
+            </SettingRow>
+            <ModelSettingRows
+              harness={harness}
+              model={model}
+              values={modelSettings}
+              side="bottom"
+              onSettingsChange={onModelSettingsChange}
+              row={({ label, control }) => (
+                <SettingRow label={label}>{control}</SettingRow>
+              )}
+            />
+            <SettingRow
+              label="Permissions"
+              description="What it may do without asking."
+            >
+              <AccessPicker
+                value={runtimeMode}
+                onChange={onRuntimeModeChange}
+                busy={busy}
+                side="bottom"
+                variant="plain"
+              />
+            </SettingRow>
+          </SettingGroup>
+        </>
+      )}
 
       <BotToolsGroup monoId={monoId} />
 
