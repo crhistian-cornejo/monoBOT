@@ -196,7 +196,18 @@ import {
   taggedMcpServers,
   type McpTag,
 } from "../model/mcpPicker";
-import { getComposerMcpTags, setComposerMcpTags } from "../model/draftCache";
+import {
+  getComposerMcpTags,
+  getComposerQuotes,
+  setComposerMcpTags,
+  setComposerQuotes,
+} from "../model/draftCache";
+import {
+  addComposerQuote,
+  withComposerQuotes,
+  type ComposerQuote,
+} from "../model/composerQuotes";
+import { QuoteChip } from "./QuoteChip";
 import { type McpConnection } from "../../settings/model/mcp";
 import {
   getCachedMcpSettings,
@@ -517,6 +528,12 @@ export function Composer({
     sessionId ? getComposerMcpTags(sessionId) : [],
   );
   const mcpInsertAt = useRef<number | null>(null);
+  // Text added with "Add to chat", shown as chips and sent as quotes.
+  const [quotes, setQuotes] = useState<ComposerQuote[]>(() =>
+    sessionId ? getComposerQuotes(sessionId) : [],
+  );
+  const quotesRef = useRef(quotes);
+  quotesRef.current = quotes;
   const [createError, setCreateError] = useState<string | null>(null);
   const [createBusy, setCreateBusy] = useState(false);
   const remote = remoteSession;
@@ -568,6 +585,7 @@ export function Composer({
   const navigationEmpty =
     draft.length === 0 &&
     attachments.length === 0 &&
+    quotes.length === 0 &&
     !inboxCard &&
     !noteCard &&
     !handoffCard;
@@ -672,6 +690,7 @@ export function Composer({
       setHasValue(
         text.trim().length > 0 ||
           files.length > 0 ||
+          quotesRef.current.length > 0 ||
           !!inboxCard ||
           !!noteCard ||
           !!handoffCard,
@@ -762,6 +781,11 @@ export function Composer({
   useEffect(() => {
     syncHasValue(ref.current?.value ?? "", attachmentsRef.current);
   }, [inboxCard, noteCard, handoffCard, syncHasValue]);
+
+  useEffect(() => {
+    if (sessionId) setComposerQuotes(sessionId, quotes);
+    syncHasValue(ref.current?.value ?? "", attachmentsRef.current);
+  }, [sessionId, quotes, syncHasValue]);
 
   const addAttachments = useCallback(
     (incoming: Attachment[]) => {
@@ -1048,6 +1072,20 @@ export function Composer({
   useEffect(() => {
     const el = ref.current;
     if (!el || !quoteRequest) return;
+
+    // A quote waits as a chip; only plain inserts go into the text.
+    if (quoteRequest.mode !== "plain") {
+      if (consumedQuoteId.current !== quoteRequest.id) {
+        consumedQuoteId.current = quoteRequest.id;
+        const text = quoteRequest.text;
+        setQuotes((current) =>
+          addComposerQuote(current, text, crypto.randomUUID()),
+        );
+        el.focus();
+      }
+      onQuoteRequestConsumed?.(quoteRequest.id);
+      return;
+    }
 
     const result = consumeQuoteRequest(
       el.value,
@@ -1411,13 +1449,17 @@ export function Composer({
       : { text: value, matched: false };
     if ((draftSelected || draftCommand.matched) && onSaveDraft) {
       const files = attachmentsRef.current;
-      const text = draftCommand.text;
+      const savedQuotes = quotesRef.current;
+      const text = withComposerQuotes(draftCommand.text, savedQuotes);
       if (!text.trim() && files.length === 0) return;
       const accepted = onSaveDraft(
         mcpContextText(taggedMcpServers(text, selectedMcp), text),
         files,
       );
       if (accepted === false || !ref.current) return;
+      setQuotes((current) =>
+        current.filter((quote) => !savedQuotes.includes(quote)),
+      );
       pasteGenerationRef.current += 1;
       ref.current.value = "";
       ref.current.style.height = "auto";
@@ -1492,15 +1534,29 @@ export function Composer({
       !remote && !hideTopBar && !command.planning
         ? consumeOrchestratorCommand(command.text)
         : { text: command.text, matched: false };
-    const text = isNativeCommandPrompt(orchestratorCommand.text, harness)
+    const nativeCommand = isNativeCommandPrompt(
+      orchestratorCommand.text,
+      harness,
+    );
+    const text = nativeCommand
       ? orchestratorCommand.text
       : composeInboxMessage(inboxCard, orchestratorCommand.text);
+    // A native command goes out exactly as typed; its quotes keep waiting.
+    const sentQuotes = nativeCommand ? [] : quotesRef.current;
+    const quotedText = withComposerQuotes(text, sentQuotes);
     const submittedText =
       operatorSelected && !consumeOperatorCommand(text).matched
-        ? `/operator ${text}`
-        : text;
+        ? `/operator ${quotedText}`
+        : quotedText;
     const files = attachmentsRef.current;
-    if (!text && files.length === 0 && !noteCard && !handoffCard) return;
+    if (
+      !text &&
+      files.length === 0 &&
+      !noteCard &&
+      !handoffCard &&
+      sentQuotes.length === 0
+    )
+      return;
     // Clear the parent draft before onSubmit. The app can synchronously remount
     // the composer when the first message leaves an empty session (EmptySession →
     // docked layout). If draftRef still holds the sent text, the new instance
@@ -1531,6 +1587,7 @@ export function Composer({
               onResendRejected: ({ providerRewound }) => {
                 if (draftRevisionRef.current !== resendDraftRevision) return;
                 restoreDraft(text, files, resendBorrowedAttachmentIds);
+                if (sentQuotes.length) setQuotes(sentQuotes);
                 setSelectedMcp(resendSelectedMcp);
                 setResendEdited(!providerRewound);
                 onEditingLastTurnChange?.(!providerRewound);
@@ -1556,6 +1613,10 @@ export function Composer({
     borrowedAttachmentIdsRef.current.clear();
     attachmentsRef.current = [];
     setAttachments([]);
+    if (sentQuotes.length)
+      setQuotes((current) =>
+        current.filter((quote) => !sentQuotes.includes(quote)),
+      );
     setSelectedMcp([]);
     setResendEdited(false);
     onEditingLastTurnChange?.(false);
@@ -2149,8 +2210,19 @@ export function Composer({
           ) : null}
           {workspaceBarOutside ? null : workspaceBar}
 
-          {attachments.length > 0 ? (
+          {attachments.length > 0 || quotes.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 px-3 pt-2">
+              {quotes.map((quote) => (
+                <QuoteChip
+                  key={quote.id}
+                  text={quote.text}
+                  onRemove={() =>
+                    setQuotes((current) =>
+                      current.filter((entry) => entry.id !== quote.id),
+                    )
+                  }
+                />
+              ))}
               {attachments.map((file) => (
                 <AttachmentChip
                   key={file.id}

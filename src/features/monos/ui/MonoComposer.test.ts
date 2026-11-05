@@ -88,16 +88,36 @@ function submit() {
     .dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
 }
 
-it("consumes quotes once and adds them to the current draft", () => {
+it("keeps a quote as one chip and sends it before the text", () => {
   const consumed = vi.fn();
-  render();
+  const onSubmit = vi.fn(() => true);
+  render({ onSubmit });
   type("My question");
   const quoteRequest = { id: 1, text: "Selected answer" };
-  render({ quoteRequest, onQuoteRequestConsumed: consumed });
-  expect(field().value).toBe("My question\n\n> Selected answer\n\n");
-  render({ quoteRequest, onQuoteRequestConsumed: consumed, enabled: false });
-  expect(field().value.match(/Selected answer/g)).toHaveLength(1);
+  const chips = () => container.querySelectorAll('[title="Selected answer"]');
+  render({ quoteRequest, onQuoteRequestConsumed: consumed, onSubmit });
+  // The draft keeps only what was typed; the quote waits beside it.
+  expect(field().value).toBe("My question");
+  expect(chips()).toHaveLength(1);
+  render({
+    quoteRequest,
+    onQuoteRequestConsumed: consumed,
+    onSubmit,
+    enabled: false,
+  });
+  render({ quoteRequest, onQuoteRequestConsumed: consumed, onSubmit });
+  expect(chips()).toHaveLength(1);
   expect(consumed).toHaveBeenCalledWith(1);
+  act(submit);
+  expect(onSubmit).toHaveBeenCalledWith("> Selected answer\n\nMy question", []);
+  expect(chips()).toHaveLength(0);
+});
+
+it("inserts plain text into the draft itself", () => {
+  render();
+  type("Before");
+  render({ quoteRequest: { id: 2, text: "plain words", mode: "plain" } });
+  expect(field().value).toBe("Before\n\nplain words\n\n");
 });
 
 it("sends consecutive messages without duplicating rapid Enter presses", () => {

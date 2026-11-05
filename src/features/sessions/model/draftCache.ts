@@ -17,10 +17,25 @@
  * separate, larger change (touches the Rust-side session_upsert schema
  * too).
  */
+import type { ComposerQuote } from "./composerQuotes";
 import type { McpTag } from "./mcpPicker";
 
 const drafts = new Map<string, string>();
 const mcpTags = new Map<string, McpTag[]>();
+// Kept apart from the text: clearing what was typed leaves the quotes waiting.
+const quotes = new Map<string, ComposerQuote[]>();
+
+export function getComposerQuotes(sessionId: string): ComposerQuote[] {
+  return quotes.get(sessionId) ?? [];
+}
+
+export function setComposerQuotes(
+  sessionId: string,
+  next: ComposerQuote[],
+): void {
+  if (next.length > 0) quotes.set(sessionId, next);
+  else quotes.delete(sessionId);
+}
 
 export function getComposerDraft(sessionId: string): string | undefined {
   return drafts.get(sessionId);
@@ -50,4 +65,5 @@ export function setComposerMcpTags(sessionId: string, tags: McpTag[]): void {
 export function clearComposerDraft(sessionId: string): void {
   drafts.delete(sessionId);
   mcpTags.delete(sessionId);
+  quotes.delete(sessionId);
 }

@@ -2,6 +2,7 @@ import {
   lazy,
   Suspense,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -23,8 +24,16 @@ import {
 } from "../../sessions/model/attachments";
 import {
   getComposerDraft,
+  getComposerQuotes,
   setComposerDraft,
+  setComposerQuotes,
 } from "../../sessions/model/draftCache";
+import {
+  addComposerQuote,
+  withComposerQuotes,
+  type ComposerQuote,
+} from "../../sessions/model/composerQuotes";
+import { QuoteChip } from "../../sessions/ui/QuoteChip";
 import { useFileDrop } from "../../sessions/hooks/useFileDrop";
 import { resizeComposer } from "../../sessions/model/composerResize";
 import { useComposerAutocorrect } from "../../settings/model/displayPrefs";
@@ -117,6 +126,13 @@ export function MonoComposer({
   const corner = square ? "rounded-none" : "rounded-md";
   const [text, setText] = useState(() => getComposerDraft(sessionId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  // Text added with "Add to chat", shown as chips and sent as quotes.
+  const [quotes, setQuotes] = useState<ComposerQuote[]>(() =>
+    getComposerQuotes(sessionId),
+  );
+  const quotesRef = useRef(quotes);
+  quotesRef.current = quotes;
+  useEffect(() => setComposerQuotes(sessionId, quotes), [sessionId, quotes]);
   const autocorrect = useComposerAutocorrect();
   const textRef = useRef(text);
   const attachmentsRef = useRef(attachments);
@@ -135,7 +151,7 @@ export function MonoComposer({
     enabled &&
     !submitting &&
     pendingReads === 0 &&
-    (text.trim().length > 0 || attachments.length > 0);
+    (text.trim().length > 0 || attachments.length > 0 || quotes.length > 0);
   const compact = fieldTools !== undefined;
   const inline = !controls && !compact;
   // Attachments sit above the field like a second line of text, so an inline
@@ -230,6 +246,19 @@ export function MonoComposer({
     });
   };
   useLayoutEffect(() => {
+    // A quote waits as a chip; only plain inserts go into the text.
+    if (quoteRequest && quoteRequest.mode !== "plain") {
+      if (consumedQuote.current !== quoteRequest.id) {
+        consumedQuote.current = quoteRequest.id;
+        const added = quoteRequest.text;
+        setQuotes((current) =>
+          addComposerQuote(current, added, crypto.randomUUID()),
+        );
+        if (enabled) field.current?.focus();
+      }
+      onQuoteRequestConsumed?.(quoteRequest.id);
+      return;
+    }
     const next = consumeQuoteRequest(
       textRef.current,
       consumedQuote.current,
@@ -308,7 +337,8 @@ export function MonoComposer({
   const send = () => {
     if (!enabled || submittingRef.current || pendingReadsRef.current > 0)
       return;
-    const message = textRef.current.trim();
+    const sentQuotes = quotesRef.current;
+    const message = withComposerQuotes(textRef.current.trim(), sentQuotes);
     const draft = textRef.current;
     const files = attachmentsRef.current;
     if (!message && !files.length) return;
@@ -323,6 +353,9 @@ export function MonoComposer({
       update("");
       attachmentsRef.current = [];
       setAttachments([]);
+      setQuotes((current) =>
+        current.filter((quote) => !sentQuotes.includes(quote)),
+      );
       setDropError(null);
     };
     const result = onSubmit(message, files);
@@ -459,8 +492,20 @@ export function MonoComposer({
             {dropError}
           </p>
         ) : null}
-        {attachments.length > 0 ? (
+        {attachments.length > 0 || quotes.length > 0 ? (
           <div className="flex flex-wrap gap-1.5 px-2.5 pt-2">
+            {quotes.map((quote) => (
+              <QuoteChip
+                key={quote.id}
+                text={quote.text}
+                onRemove={() => {
+                  if (submittingRef.current) return;
+                  setQuotes((current) =>
+                    current.filter((entry) => entry.id !== quote.id),
+                  );
+                }}
+              />
+            ))}
             {attachments.map((file) => (
               <AttachmentChip
                 key={file.id}
