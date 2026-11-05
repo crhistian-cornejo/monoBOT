@@ -200,7 +200,11 @@ it("routes transcript quotes to the Mono draft", () => {
     ...container.querySelectorAll<HTMLButtonElement>("button"),
   ].find((button) => button.textContent === "Quote response")!;
   act(() => quote.click());
-  expect(field().value).toBe("> Selected response\n\n");
+  // The quote waits as a chip beside the draft, not inside its text.
+  expect(field().value).toBe("");
+  expect(
+    container.querySelectorAll('[title="Selected response"]'),
+  ).toHaveLength(1);
 });
 
 it("shows usage recovery above the Mono input and routes the reset option", () => {
