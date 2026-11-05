@@ -220,6 +220,13 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
       "mono reset soul name projects sessions sidebar visibility hidden show",
   },
   {
+    id: "bots-transfer",
+    section: "monos",
+    label: "Export and import bots",
+    keywords:
+      "bots export import backup move mac windows another computer file sync",
+  },
+  {
     id: "project-worktrees",
     section: "worktrees",
     label: "Project worktrees",

@@ -42,6 +42,7 @@ import {
 } from "../../../shared/ui/ColorPickerPopover";
 import { Popover } from "../../../shared/ui/Popover";
 import { SecondaryButton } from "../../../shared/ui/SecondaryButton";
+import { BotTransferControls } from "../../bots/ui/BotTransferControls";
 import { JiraSettings } from "./JiraSettings";
 import { GradientBlurBackground } from "./GradientBlurBackground";
 import { McpSettings } from "./McpSettings";
@@ -4327,6 +4328,15 @@ function MonosPage() {
             No monos yet.
           </p>
         )}
+      </Group>
+      <Group title="Bots on another computer">
+        <Row
+          id="bots-transfer"
+          label="Export and import bots"
+          description="Save every bot (its instructions, memory, habits and tools) to a file, then import it on your other computer, Windows or Mac. A bot that already exists there is compared with the imported one before you choose which to keep. Folders you opened to a bot stay on each computer."
+        >
+          <BotTransferControls />
+        </Row>
       </Group>
     </>
   );
