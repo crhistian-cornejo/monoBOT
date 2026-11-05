@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   addBotNews,
+  botTurnNews,
   hasUnseenBotNews,
   listBotNews,
   dismissNewsToast,
@@ -96,5 +97,32 @@ describe("bot news", () => {
     expect(newsToastsSnapshot().map((item) => item.id)).toEqual([first.id]);
     markBotNewsSeen();
     expect(newsToastsSnapshot()).toEqual([]);
+  });
+
+  it("tells a finished turn as its request and reply, with the final report", () => {
+    expect(
+      botTurnNews([
+        { id: "u0", role: "user", text: "old" },
+        { id: "a0", role: "assistant", text: "old reply" },
+        {
+          id: "u1",
+          role: "user",
+          text: ["Pozas de paso para minería", "más detalle"].join("\n"),
+          artifactCards: [{ id: "r", kind: "document", title: "Informe", final: true }],
+        },
+        { id: "a1", role: "assistant", text: "Primero busco." },
+        { id: "a2", role: "assistant", text: "Listo, guardé el informe." },
+      ]),
+    ).toEqual({
+      source: "Pozas de paso para minería",
+      text: ["**Final report: Informe**", "", "Listo, guardé el informe."].join("\n"),
+    });
+    expect(
+      botTurnNews([
+        { id: "u", role: "user", text: "hidden", monocode: true },
+        { id: "a", role: "assistant", text: "Done." },
+      ]),
+    ).toEqual({ source: "Finished", text: "Done." });
+    expect(botTurnNews([{ id: "u", role: "user", text: "Hi" }])).toBeNull();
   });
 });

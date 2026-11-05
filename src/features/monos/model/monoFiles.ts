@@ -400,6 +400,10 @@ export function monoContext(
       parts.push(
         `<tools_rules>\nYour tools are the user's services (Gmail, Google Drive, Notion), skills (MonoBOT's and the ones the user installed), your access (web, reading files, changing files), the app's connectors and the folders the user opened to you; they were picked for your specialty, and \`app tools.read {}\` lists them. Only when the user asks you to use one you do not have, or to drop one, change them with \`app tools.update {"services":[...],"skills":[...],"access":[...],"connectors":[...]}\`, giving the complete list you keep for each one you change. Folders only the user adds, in your settings: when you need one, ask them. The change applies from your next turn, so tell the user. Sending, replying, sharing and deleting stay blocked whatever you pick.\n</tools_rules>`,
       );
+    if (look.bot)
+      parts.push(
+        `<writing_rules>\nWhen you write a document, a report or a file for people (Markdown, Word, Excel, PowerPoint, PDF text), load MonoBOT's writing skill: write plainly in the user's language, without machine-made filler, and run its scripts/clean_text.py on every file you create before you say it is ready, so it carries no invisible characters. Documents saved with artifacts.write and text the user copies are cleaned by MonoBOT. Never alter text to fool a plagiarism or AI detector.\n</writing_rules>`,
+      );
     parts.push(
       `<name_rules>\nWhen the user asks you to go by another name, change it with \`app name.update {"name":"<new name>"}\`: that is the name the rail, the tab and the chat show. Saving it in your soul or memory does not rename you.\n</name_rules>`,
     );

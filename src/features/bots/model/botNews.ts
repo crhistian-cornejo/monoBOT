@@ -1,4 +1,6 @@
 import type { ReportStatus } from "../../monos/model/monoHabits";
+import { monoReplyText } from "../../monos/model/monoReaction";
+import type { Block } from "../../sessions/model/session";
 
 /** What personal bots post on their own (a habit's report, a digest, an
  * alert), gathered into one feed so the user reads the news in one place. */
@@ -202,4 +204,45 @@ export function newsToastsSnapshot(): BotNewsItem[] {
     .slice(0, MAX_TOASTS);
   toastCache = { items, ids: toastIds, out };
   return out;
+}
+
+/**
+ * What a bot's finished turn tells the user, for the feed when they were
+ * elsewhere: the request it answered (its first line) and its reply, with the
+ * final report it wrote, if any. Null when the turn left no reply.
+ */
+export function botTurnNews(
+  blocks: readonly Block[],
+): { source: string; text: string } | null {
+  let start = -1;
+  for (let index = blocks.length - 1; index >= 0; index -= 1)
+    if (blocks[index].role === "user") {
+      start = index;
+      break;
+    }
+  if (start < 0) return null;
+  const reply = blocks
+    .slice(start + 1)
+    .reverse()
+    .find((block) => block.role === "assistant" && block.text.trim());
+  const text = reply ? monoReplyText(reply.text).trim() : "";
+  if (!text) return null;
+  const request = blocks[start];
+  const line =
+    request.internal || request.monocode
+      ? ""
+      : (request.text
+          .split("\n")
+          .map((part) => part.trim())
+          .find(Boolean) ?? "");
+  const source = !line
+    ? "Finished"
+    : line.length > 80
+      ? `${line.slice(0, 79).trimEnd()}…`
+      : line;
+  const final = request.artifactCards?.find((card) => card.final);
+  return {
+    source,
+    text: final ? `**Final report: ${final.title}**\n\n${text}` : text,
+  };
 }

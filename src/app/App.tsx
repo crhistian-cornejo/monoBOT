@@ -683,6 +683,7 @@ import {
 } from "./shell/PersonalRail";
 import {
   addBotNews,
+  botTurnNews,
   queueNewsToast,
   removeBotNewsFor,
   shouldAlertNews,
@@ -690,6 +691,12 @@ import {
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
 import { BotNewsToasts } from "../features/bots/ui/BotNewsToasts";
 import { documentGroups } from "../features/artifacts/documentGroups";
+import {
+  followTurn,
+  startFollow,
+  touchFollow,
+  type FollowState,
+} from "../features/monos/model/panelFollow";
 import { installedClaudeSkills } from "../features/bots/model/botSession";
 import { createWorkstream } from "../features/workstreams/model/workstreamApi";
 import {
@@ -1267,16 +1274,27 @@ function Workspace({
   monoOverviewOpenRef.current = monoOverviewOpen;
   const monoOverviewTabRef = useRef(monoOverviewTab);
   monoOverviewTabRef.current = monoOverviewTab;
+  // The overview follows a bot's turn (see panelFollow.ts) until the user
+  // moves it themselves during that turn.
+  const panelFollowRef = useRef<{ monoId: string; state: FollowState } | null>(
+    null,
+  );
+  const touchPanel = useCallback(() => {
+    const current = panelFollowRef.current;
+    if (current)
+      panelFollowRef.current = { ...current, state: touchFollow(current.state) };
+  }, []);
   // The Mono whose settings dialog is open; another Mono's view closes it.
   const [monoSettingsFor, setMonoSettingsFor] = useState<string | null>(null);
   // A document opened from the chat shows on the overview's Documents tab,
   // the same page the tab opens it on.
   const onOpenMonoArtifact = useCallback((_sessionId: string, id: string) => {
+    touchPanel();
     setMonoShownSession(null);
     setMonoOverviewDocument(id);
     setMonoOverviewTab("documents");
     setMonoOverviewOpen(true);
-  }, []);
+  }, [touchPanel]);
   // What the overview's Changes tab was last asked to show.
   const [monoChangesRequest, setMonoChangesRequest] =
     useState<MonoChangesRequest>({});
@@ -8835,6 +8853,23 @@ function Workspace({
             // A habit's hidden run speaks through its Mono's chat instead.
             if (finished && !isHabitRun(sessionId))
               void announceSessionFinished(finished, visible);
+            // A bot that finished while the user was elsewhere says so in
+            // the Principal's News, and the Principal brings it up as a card.
+            const bot = finished && !visible ? monoForSession(sessionId) : undefined;
+            const news =
+              bot && isBot(bot) && bot.botRole !== "principal"
+                ? botTurnNews(finished!.blocks)
+                : null;
+            if (bot && news) {
+              const added = addBotNews({
+                monoId: bot.id,
+                botName: monoLook(bot).name,
+                source: news.source,
+                text: news.text,
+                status: "done",
+              });
+              if (added) queueNewsToast(added.id);
+            }
           }, 0);
           notifyReviewChanged(sessionId);
           notifyGitChanged();
@@ -14249,6 +14284,33 @@ function Workspace({
         : [],
     [monoViewIsBot, monoViewBlocks],
   );
+  // To the subagents while they run, to what the turn made once it is done.
+  const botRunCount = botSubagentRuns.length;
+  useEffect(() => {
+    if (!monoViewId || !monoViewIsBot) {
+      panelFollowRef.current = null;
+      return;
+    }
+    const view = {
+      busy: monoViewBusy,
+      agentRuns: botRunCount,
+      cards: monoDocuments,
+    };
+    const current = panelFollowRef.current;
+    if (!current || current.monoId !== monoViewId) {
+      panelFollowRef.current = { monoId: monoViewId, state: startFollow(view) };
+      return;
+    }
+    const { state, move } = followTurn(current.state, view);
+    panelFollowRef.current = { monoId: monoViewId, state };
+    if (!move) return;
+    setMonoShownSession(null);
+    setMonoOverviewDocument(
+      move.tab === "documents" ? (move.document ?? null) : null,
+    );
+    setMonoOverviewTab(move.tab);
+    setMonoOverviewOpen(true);
+  }, [monoViewId, monoViewIsBot, monoViewBusy, botRunCount, monoDocuments]);
   const monoActivityView =
     monoViewSession && selectedMonoActivity ? (
       <MonoActivityView
@@ -14557,7 +14619,10 @@ function Workspace({
           ) : null
         }
         tab={monoOverviewTab}
-        onTabChange={setMonoOverviewTab}
+        onTabChange={(next) => {
+          touchPanel();
+          setMonoOverviewTab(next);
+        }}
         onOpenSession={(sessionId) =>
           showMonoLaunchedSession(monoViewSession.id, sessionId)
         }
@@ -14569,6 +14634,7 @@ function Workspace({
         }}
         onOpenSessionInWorkspace={onOpenMonoLaunchedSession}
         onOpenDocument={(id) => {
+          touchPanel();
           setMonoShownSession(null);
           setMonoOverviewDocument(id);
         }}

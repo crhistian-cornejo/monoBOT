@@ -39,6 +39,7 @@ describe("bundled plugins", () => {
       "review-animations",
       "threejs-graphics",
       "write-swift",
+      "writing",
     ]);
     // Emil Kowalski's design skills ship with their license, and every file
     // they link to ships beside them.

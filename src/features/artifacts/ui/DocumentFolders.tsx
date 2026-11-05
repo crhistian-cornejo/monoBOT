@@ -117,7 +117,18 @@ function RequestFolder({
         <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-content/80">
           {group.title}
         </span>
-        <span className="shrink-0 text-[11px] tabular-nums text-content/40">
+        {group.at !== undefined ? (
+          <span className="shrink-0 text-[11px] tabular-nums text-content/40">
+            {new Date(group.at).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </span>
+        ) : null}
+        <span
+          aria-label={`${group.cards.length} documents`}
+          className="grid h-4 min-w-4 shrink-0 place-items-center rounded-full bg-content/8 px-1 text-[10px] tabular-nums text-content/55"
+        >
           {group.cards.length}
         </span>
         <ChevronDown
