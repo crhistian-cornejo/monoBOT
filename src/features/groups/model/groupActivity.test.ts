@@ -124,6 +124,56 @@ describe("a group's activity", () => {
     expect(rows[2]!.usage).toBeUndefined();
   });
 
+  it("times a working member's turn, and gives the lead its usage too", () => {
+    const rows = groupActivity(
+      group,
+      [
+        {
+          id: "nexa-chat",
+          cwd: "/home",
+          harness: "claude" as const,
+          model: "sonnet",
+          blocks: [
+            {
+              id: "u",
+              role: "user",
+              text: "go",
+              startedAt: 5_000,
+              turnMetrics: { inputTokens: 100, outputTokens: 20 },
+            } as Block,
+          ],
+          busy: false,
+        },
+        {
+          id: "research-seat",
+          cwd: "/home",
+          harness: "claude" as const,
+          model: "sonnet",
+          blocks: [
+            { id: "u1", role: "user", text: "first", startedAt: 1_000 } as Block,
+            { id: "u2", role: "user", text: "find", startedAt: 9_000 } as Block,
+            {
+              id: "i",
+              role: "user",
+              text: "keep going",
+              internal: true,
+              startedAt: 12_000,
+            } as Block,
+          ],
+          busy: true,
+        },
+      ],
+      new Map(),
+      find,
+    );
+    const [lead, research] = rows;
+    expect(lead!.state.status).toBe("idle");
+    expect(lead!.startedAt).toBeUndefined();
+    expect(lead!.usage).toMatchObject({ turns: 1, tokens: 120 });
+    expect(research!.state.status).toBe("working");
+    expect(research!.startedAt).toBe(9_000);
+  });
+
   it("shows what members asked each other lately", () => {
     const now = 1_000_000_000;
     const entry = (id: string, from: string, to: string, at: number) =>

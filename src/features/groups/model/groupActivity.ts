@@ -27,6 +27,8 @@ export type MemberActivity = {
   cwd?: string;
   /** What it has spent in this group: its seat's turns, tokens and model. */
   usage?: { turns: number; tokens: number; model: string };
+  /** When its current turn began, while it works or waits on the user. */
+  startedAt?: number;
 };
 
 type ActivitySession = Pick<
@@ -55,6 +57,15 @@ export function latestRuns(blocks: readonly Block[]): Block[] {
     }
   }
   return blocks.slice(start).filter((block) => !!block.agentRun);
+}
+
+/** When the session's latest turn began. */
+export function turnStartedAt(blocks: readonly Block[]): number | undefined {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i]!;
+    if (block.role === "user" && !block.internal) return block.startedAt;
+  }
+  return undefined;
 }
 
 /** A seat's turns and tokens in its group, and the model it answers with. */
@@ -98,6 +109,15 @@ export function groupActivity(
       lead ? group.sessionId : group.group?.seats?.[mono.id],
     );
     const look = monoLook(mono);
+    const state = session
+      ? monoState(session)
+      : lead
+        ? (states.get(group.id) ?? IDLE)
+        : IDLE;
+    const startedAt =
+      session && state.status !== "idle"
+        ? turnStartedAt(session.blocks)
+        : undefined;
     return {
       monoId: mono.id,
       name: look.name,
@@ -105,14 +125,11 @@ export function groupActivity(
       color: look.color,
       role: lead ? "Leads the group" : memberRole(mono),
       lead,
-      state: session
-        ? monoState(session)
-        : lead
-          ? (states.get(group.id) ?? IDLE)
-          : IDLE,
+      state,
       runs: session ? latestRuns(session.blocks) : [],
       ...(session?.cwd ? { cwd: session.cwd } : {}),
-      ...(session && !lead ? { usage: seatUsage(session) } : {}),
+      ...(session?.harness ? { usage: seatUsage(session) } : {}),
+      ...(startedAt != null ? { startedAt } : {}),
     };
   });
   return [
