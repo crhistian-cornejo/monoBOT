@@ -7,6 +7,8 @@ import type { MailOverview } from "../model/mail";
 const api = vi.hoisted(() => ({
   accounts: vi.fn(),
   overview: vi.fn(),
+  last: vi.fn(),
+  prefetch: vi.fn(),
   open: vi.fn(),
   act: vi.fn(async () => undefined),
   addAccount: vi.fn(),
@@ -58,6 +60,8 @@ beforeEach(() => {
   root = createRoot(container);
   Object.values(api).forEach((fn) => fn.mockReset());
   api.act.mockResolvedValue(undefined);
+  api.last.mockResolvedValue(null);
+  api.prefetch.mockResolvedValue(undefined);
 });
 
 afterEach(() => {
@@ -75,6 +79,24 @@ describe("MailInbox", () => {
     expect(container.textContent).toContain("Your email in the Inbox");
     expect(container.textContent).toContain("Create a Gmail app password");
     expect(api.overview).not.toHaveBeenCalled();
+  });
+
+  it("paints the last reading at once, then the fresh one, and reads ahead", async () => {
+    api.accounts.mockResolvedValue(overview.accounts);
+    api.last.mockResolvedValue({
+      ...overview,
+      messages: [{ ...overview.messages[0], subject: "From the snapshot" }],
+    });
+    let fresh!: (value: MailOverview) => void;
+    api.overview.mockReturnValue(new Promise((resolve) => (fresh = resolve)));
+    act(() => root.render(createElement(MailInbox)));
+    await flush();
+    await flush();
+    expect(container.textContent).toContain("From the snapshot");
+    expect(api.prefetch).toHaveBeenCalledWith(["a.inbox.7"]);
+    await act(async () => fresh(overview));
+    expect(container.textContent).toContain("Planos de las pozas");
+    expect(container.textContent).not.toContain("From the snapshot");
   });
 
   it("lists the mail, and opening a message marks it read", async () => {

@@ -293,6 +293,7 @@ pub fn run() {
             control::init(app.handle())?;
             mobile_access::init(app.handle())?;
             reminders::init(app.handle());
+            mail::init(app.handle());
             checkpoint::init(app.handle())?;
             dictation::init(app.handle());
             menu::install(app.handle())?;
@@ -458,6 +459,8 @@ pub fn run() {
             mail::mail_add_account,
             mail::mail_remove_account,
             mail::mail_overview,
+            mail::mail_last,
+            mail::mail_prefetch,
             mail::mail_archive_more,
             mail::mail_open,
             mail::mail_act,

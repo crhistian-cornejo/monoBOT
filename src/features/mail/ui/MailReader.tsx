@@ -31,6 +31,17 @@ function frameColors() {
   };
 }
 
+/** Messages opened this session: going back to one shows it at once. */
+const openedCache = new Map<string, OpenedMail>();
+const OPENED_KEPT = 40;
+
+function remember(opened: OpenedMail) {
+  openedCache.delete(opened.id);
+  openedCache.set(opened.id, opened);
+  while (openedCache.size > OPENED_KEPT)
+    openedCache.delete(openedCache.keys().next().value!);
+}
+
 function bytes(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
@@ -60,15 +71,20 @@ export function MailReader({
 
   useEffect(() => {
     let alive = true;
-    setOpened(undefined);
+    const cached = openedCache.get(message.id);
+    setOpened(cached);
     setError(undefined);
     setImages({});
     setReplying(false);
     setNotice(undefined);
-    void mailApi
-      .open(message.id)
-      .then((result) => alive && setOpened(result))
-      .catch((failure) => alive && setError(String(failure)));
+    if (!cached)
+      void mailApi
+        .open(message.id)
+        .then((result) => {
+          remember(result);
+          if (alive) setOpened(result);
+        })
+        .catch((failure) => alive && setError(String(failure)));
     return () => {
       alive = false;
     };

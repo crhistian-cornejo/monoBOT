@@ -65,6 +65,76 @@ fn store(app: &AppHandle, saved: &Saved) -> Result<(), String> {
     fs::write(saved_path(app)?, text).map_err(|e| e.to_string())
 }
 
+/// The last reading, kept on disk so the tab paints at once on the next start;
+/// each body is cut short, as the list only needs its start.
+const SNAPSHOT_BODY: usize = 1_500;
+
+fn snapshot_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(saved_path(app)?.with_file_name("snapshot.json"))
+}
+
+fn keep_snapshot(app: &AppHandle, overview: &Overview) {
+    let kept = for_snapshot(overview);
+    if let (Ok(path), Ok(text)) = (snapshot_path(app), serde_json::to_string(&kept)) {
+        let _ = fs::write(path, text);
+    }
+}
+
+/// The reading with each body cut to `SNAPSHOT_BODY` bytes, never mid-character.
+fn for_snapshot(overview: &Overview) -> Overview {
+    let mut kept = overview.clone();
+    for message in &mut kept.messages {
+        let mut left = SNAPSHOT_BODY;
+        message.body.retain_mut(|paragraph| {
+            if left == 0 {
+                return false;
+            }
+            if paragraph.len() > left {
+                let mut end = left;
+                while !paragraph.is_char_boundary(end) {
+                    end -= 1;
+                }
+                paragraph.truncate(end);
+            }
+            left = left.saturating_sub(paragraph.len());
+            true
+        });
+    }
+    kept
+}
+
+fn read_snapshot(app: &AppHandle) -> Option<Overview> {
+    let text = fs::read_to_string(snapshot_path(app).ok()?).ok()?;
+    serde_json::from_str(&text).ok()
+}
+
+/// A full reading from the servers, kept as the snapshot.
+fn read_now(app: &AppHandle, saved: &Saved) -> Overview {
+    let overview = mail().overview(&saved.accounts, &interesting(saved));
+    keep_snapshot(app, &overview);
+    *last_read().lock().unwrap_or_else(|p| p.into_inner()) = Some(Instant::now());
+    overview
+}
+
+/// Reads the mail in the background a little after the app starts, and listens
+/// for new messages, so the Email tab opens with fresh mail and none is missed.
+pub fn init(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(8));
+        let saved = load(&app);
+        if saved.accounts.is_empty() {
+            return;
+        }
+        if let Some(snapshot) = read_snapshot(&app) {
+            mail().restore(snapshot);
+        }
+        watch_all(&app, &saved.accounts);
+        read_now(&app, &saved);
+        let _ = app.emit("mail-changed", false);
+    });
+}
+
 fn interesting(saved: &Saved) -> HashSet<String> {
     saved
         .interesting
@@ -168,6 +238,10 @@ pub fn mail_remove_account(app: AppHandle, id: String) -> Result<(), String> {
         .unwrap_or_else(|p| p.into_inner())
         .remove(&removed.id);
     *last_read().lock().unwrap_or_else(|p| p.into_inner()) = None;
+    // Nothing of its messages stays on this computer.
+    if let Ok(path) = snapshot_path(&app) {
+        let _ = fs::remove_file(path);
+    }
     store(&app, &saved)
 }
 
@@ -178,18 +252,46 @@ pub async fn mail_overview(app: AppHandle, force: bool) -> Result<Overview, Stri
     tauri::async_runtime::spawn_blocking(move || {
         let saved = load(&app);
         watch_all(&app, &saved.accounts);
-        let mut at = last_read().lock().unwrap_or_else(|p| p.into_inner());
+        let at = last_read().lock().unwrap_or_else(|p| p.into_inner());
         if !force && at.is_some_and(|read| read.elapsed() < FRESH) {
             if let Some(last) = mail().last() {
                 return Ok(last);
             }
         }
-        let overview = mail().overview(&saved.accounts, &interesting(&saved));
-        *at = Some(Instant::now());
-        Ok(overview)
+        drop(at);
+        Ok(read_now(&app, &saved))
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// The last reading, at once: from memory, else the snapshot on disk. None
+/// before the first reading. The page shows it, then asks for a fresh one.
+#[tauri::command]
+pub async fn mail_last(app: AppHandle) -> Result<Option<Overview>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(last) = mail().last() {
+            return Ok(Some(last));
+        }
+        let snapshot = read_snapshot(&app);
+        if let Some(snapshot) = &snapshot {
+            mail().restore(snapshot.clone());
+        }
+        Ok(snapshot)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Reads ahead the messages the user is likely to open next, so opening them
+/// comes from memory. Nothing is marked read.
+#[tauri::command]
+pub fn mail_prefetch(app: AppHandle, ids: Vec<String>) {
+    let ids: Vec<String> = ids.into_iter().filter(|id| !mail().is_warm(id)).collect();
+    if ids.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || mail().prefetch(&load(&app).accounts, &ids));
 }
 
 /// The next stretch of the archive.
@@ -309,4 +411,43 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_millis() as i64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn overview(body: Vec<String>) -> Overview {
+        serde_json::from_value(serde_json::json!({
+            "accounts": [],
+            "problems": [],
+            "messages": [{
+                "id": "a.inbox.1", "accountId": "a", "folder": "inbox", "from": "Ana",
+                "address": "ana@mina.pe", "subject": "Pozas", "preview": "…", "body": body,
+                "at": 0, "unread": true, "starred": false, "triage": "routine", "labels": []
+            }]
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_snapshot_keeps_the_start_of_each_body() {
+        let long = "ñ".repeat(SNAPSHOT_BODY); // two bytes each
+        let kept = for_snapshot(&overview(vec![
+            "Hola Ana".into(),
+            long,
+            "never kept".into(),
+        ]));
+        let body = &kept.messages[0].body;
+        assert_eq!(body[0], "Hola Ana");
+        assert!(body[1].len() <= SNAPSHOT_BODY - "Hola Ana".len());
+        assert!(body[1].chars().all(|c| c == 'ñ'));
+        assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn a_short_body_is_kept_whole() {
+        let kept = for_snapshot(&overview(vec!["Gracias".into()]));
+        assert_eq!(kept.messages[0].body, vec!["Gracias".to_string()]);
+    }
 }

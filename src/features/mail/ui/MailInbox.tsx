@@ -15,6 +15,7 @@ import {
 } from "../model/mail";
 import { mailApi, onMailChanged } from "../model/mailApi";
 import { MailAccounts } from "./MailAccounts";
+import { MailArt } from "./MailArt";
 import { MailReader } from "./MailReader";
 
 /** The user's mail, beside GitHub in the Inbox: read it, sort it, reply with AI. */
@@ -49,8 +50,12 @@ export function MailInbox() {
   const loadAccounts = useCallback(async () => {
     const list = await mailApi.accounts().catch(() => []);
     setAccounts(list);
-    if (list.length) void read(false);
-    else setOverview(undefined);
+    if (!list.length) return setOverview(undefined);
+    // The last reading paints at once (memory or the snapshot on disk); the
+    // fresh one replaces it when it lands.
+    const last = await mailApi.last().catch(() => null);
+    if (last) setOverview((current) => current ?? last);
+    void read(false);
   }, [read]);
 
   useEffect(() => {
@@ -65,6 +70,25 @@ export function MailInbox() {
     [messages, view, accountId, query],
   );
   const selected = messages.find((message) => message.id === selectedId);
+
+  // Read ahead what is likely opened next: the top of the list, and the
+  // messages beside the open one. Opening them then comes from memory.
+  const shownIds = shown.map((message) => message.id).join(" ");
+  useEffect(() => {
+    const ids = shownIds ? shownIds.split(" ") : [];
+    const at = selectedId ? ids.indexOf(selectedId) : -1;
+    const next = at >= 0 ? [ids[at + 1], ids[at - 1]] : ids.slice(0, 3);
+    const wanted = next.filter((id): id is string => !!id);
+    if (wanted.length) void mailApi.prefetch(wanted).catch(() => undefined);
+  }, [shownIds, selectedId]);
+  const hoverTimer = useRef<number | undefined>(undefined);
+  const prefetchSoon = (id: string) => {
+    window.clearTimeout(hoverTimer.current);
+    hoverTimer.current = window.setTimeout(
+      () => void mailApi.prefetch([id]).catch(() => undefined),
+      120,
+    );
+  };
 
   const act = useCallback(
     (id: string, action: MailAction) => {
@@ -113,7 +137,8 @@ export function MailInbox() {
 
   if (!accounts.length)
     return (
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="flex min-h-0 min-w-0 flex-1">
+      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-md px-5 py-8">
           <h2 className="flex items-center gap-2 text-[15px] font-medium">
             <Mail className="size-4 text-accent" /> Your email in the Inbox
@@ -124,6 +149,10 @@ export function MailInbox() {
           </p>
           <MailAccounts accounts={accounts} onChanged={() => void loadAccounts()} />
         </div>
+      </div>
+      <div className="hidden min-h-0 w-[42%] shrink-0 border-l border-stroke md:block">
+        <MailArt />
+      </div>
       </div>
     );
 
@@ -226,6 +255,7 @@ export function MailInbox() {
                     key={message.id}
                     type="button"
                     onClick={() => open(message.id)}
+                    onMouseEnter={() => prefetchSoon(message.id)}
                     aria-current={message.id === selectedId ? "true" : undefined}
                     className={`flex w-full flex-col gap-0.5 border-b border-content/5 px-3 py-2 text-left ${
                       message.id === selectedId ? "bg-selection" : "hover:bg-content/4"
@@ -278,8 +308,17 @@ export function MailInbox() {
           }
         />
       ) : (
-        <div className="grid min-h-0 flex-1 place-items-center text-[12px] text-content/40">
-          Pick a message · J/K to move, E archive, S star, R reply
+        <div className="min-h-0 min-w-0 flex-1">
+          <MailArt>
+            <p className="text-[13px] font-medium text-content">
+              {unreadCount(messages, "inbox")
+                ? `${unreadCount(messages, "inbox")} unread in your inbox`
+                : "You're up to date"}
+            </p>
+            <p className="mt-1 text-[12px] text-content/60">
+              Pick a message · J/K to move, E archive, S star, R reply
+            </p>
+          </MailArt>
         </div>
       )}
 

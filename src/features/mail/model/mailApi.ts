@@ -26,6 +26,10 @@ export const mailApi = {
     }),
   removeAccount: (id: string) => invoke<void>("mail_remove_account", { id }),
   overview: (force = false) => invoke<MailOverview>("mail_overview", { force }),
+  /** The last reading at once (memory, else the snapshot on disk); null before the first. */
+  last: () => invoke<MailOverview | null>("mail_last"),
+  /** Reads ahead what the user will likely open; nothing is marked read. */
+  prefetch: (ids: string[]) => invoke<void>("mail_prefetch", { ids }),
   archiveMore: () => invoke<MailOverview>("mail_archive_more"),
   open: (id: string) => invoke<OpenedMail>("mail_open", { id }),
   act: (id: string, action: MailAction) =>
