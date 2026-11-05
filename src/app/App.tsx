@@ -14043,7 +14043,10 @@ function Workspace({
         }
         news={
           monoViewMono.botRole === "principal" ? (
-            <BotNewsList onOpenBot={(monoId) => void onOpenMono(monoId)} />
+            <BotNewsList
+              onOpenBot={(monoId) => void onOpenMono(monoId)}
+              notes={notesEnabled}
+            />
           ) : undefined
         }
         subagentCount={botSubagentRuns.length || undefined}
