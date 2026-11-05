@@ -5,7 +5,13 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { ImagePlus, MoreHorizontal, Plus, Trash2 } from "../../shared/ui/icons";
+import {
+  ImagePlus,
+  MoreHorizontal,
+  Plus,
+  Settings,
+  Trash2,
+} from "../../shared/ui/icons";
 import { Popover, type PopoverAnchor } from "../../shared/ui/Popover";
 import { Shimmer } from "../../shared/ui/Shimmer";
 import { useAnimatedReorder } from "../../shared/hooks/useAnimatedReorder";
@@ -69,6 +75,8 @@ export type MonoRailProps = {
   onCreateWorkstream?: () => void;
   /** Opens the dialog that makes a group. */
   onCreateGroup?: () => void;
+  /** Opens a group's settings: name, goal, members, folders and the rest. */
+  onEditGroup?: (monoId: string) => void;
 };
 
 const IDLE: MonoState = { status: "idle" };
@@ -96,6 +104,7 @@ export function MonoRailSection({
   onCreateBot,
   onCreateWorkstream,
   onCreateGroup,
+  onEditGroup,
   onDelete,
   project,
   kind,
@@ -227,9 +236,12 @@ export function MonoRailSection({
           const state = states.get(mono.id) ?? IDLE;
           const selected = mono.id === activeId;
           const unseen = selected ? 0 : (unseenCounts?.get(mono.id) ?? 0);
-          const projects = look.projects.length
-            ? monoProjectsPhrase(look.projects)
-            : "No projects yet";
+          // A group says what it is for; the others, where they work.
+          const projects = look.group
+            ? look.group.goal || `${look.group.members.length} members`
+            : look.projects.length
+              ? monoProjectsPhrase(look.projects)
+              : "No projects yet";
           const status =
             state.status === "idle"
               ? undefined
@@ -362,6 +374,14 @@ export function MonoRailSection({
             setMenu(undefined);
             onDelete(menu.id);
           }}
+          onSettings={
+            groups && onEditGroup
+              ? () => {
+                  setMenu(undefined);
+                  onEditGroup(menu.id);
+                }
+              : undefined
+          }
           onClose={() => setMenu(undefined)}
         />
       ) : null}
@@ -431,12 +451,15 @@ function MonoMenu({
   anchor,
   onBackground,
   onDelete,
+  onSettings,
   onClose,
 }: {
   monoId: string;
   anchor: PopoverAnchor;
   onBackground: () => void;
   onDelete: () => void;
+  /** A group's settings; other Monos have theirs in their chat. */
+  onSettings?: () => void;
   onClose: () => void;
 }) {
   useSyncExternalStore(subscribeMonos, monosSnapshot);
@@ -502,6 +525,20 @@ function MonoMenu({
         />
       </div>
       <div role="separator" className="my-1 h-px bg-content/10" />
+      {onSettings ? (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            commitName();
+            onSettings();
+          }}
+          className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] text-content/85 hover:bg-content/8"
+        >
+          <Settings className="size-3.5 shrink-0" strokeWidth={1.75} />
+          Group settings…
+        </button>
+      ) : null}
       <button
         type="button"
         role="menuitem"

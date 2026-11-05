@@ -87,8 +87,9 @@ const PRINCIPAL_TABS = new Set(["news", "habits", "documents", "subagents"]);
 // A workstream's orchestrator: its agents, their pull requests, and the
 // shared folder.
 const WORKSTREAM_TABS = new Set(["sessions", "prs", "files"]);
-// A group: who is in it, talking with them out loud, and what it wrote.
-const GROUP_TABS = new Set(["members", "call", "documents"]);
+// A group: who is in it, talking with them out loud, what it wrote and the
+// tasks it runs on a schedule, as a project's are.
+const GROUP_TABS = new Set(["members", "call", "documents", "habits"]);
 
 /** The conversation's recorded changes, reviewed and committed on their tab. */
 export type MonoOverviewChanges = {
@@ -136,6 +137,8 @@ type Props = {
   onOpenDocument: (id: string) => void;
   onClose: () => void;
   windowControls?: ReactNode;
+  /** Changes when the Habits tab should open on a new habit. */
+  newHabitRequest?: number;
   /** A personal bot: Documents, Habits and Sub-agents instead of code tabs. */
   bot?: boolean;
   /** The subagents its turns ran, newest first; null when there are none. */
@@ -190,6 +193,7 @@ export function MonoOverview({
   onOpenDocument,
   onClose,
   windowControls,
+  newHabitRequest,
 }: Props) {
   const lock = useLockOverscroll<HTMLDivElement>();
   const shownTabs = members
@@ -228,6 +232,10 @@ export function MonoOverview({
     setQuery("");
     setFilters(DEFAULT_SESSION_SIDEBAR_FILTERS);
   }, [monoId]);
+  // Asked to start on a new habit, as a group made with a scheduled task is.
+  useEffect(() => {
+    if (newHabitRequest) setRoutes([{ kind: "new-habit" }]);
+  }, [newHabitRequest]);
   const push = (route: Route) => setRoutes((current) => [...current, route]);
   const back = () => setRoutes((current) => current.slice(0, -1));
 

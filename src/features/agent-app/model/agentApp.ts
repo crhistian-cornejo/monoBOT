@@ -73,12 +73,14 @@ import {
 import {
   createMono,
   findMono,
+  groupsOf,
   isBot,
   listMonos,
   monoForSession,
   monoLook,
   monoSpecialty,
   saveBotTools,
+  saveGroup,
   saveMonoName,
   saveMonoSpecialty,
   SPECIALTY_MAX,
@@ -95,15 +97,33 @@ import {
   BOT_SKILLS,
   botRole,
   botTools,
+  folderProblem,
   isBotRole,
   isSkillName,
   skillMatches,
   type BotTools,
 } from "../../bots/model/bots";
-import { groupMessage } from "../../groups/model/group";
-import { groupMembers, memberRole } from "../../groups/model/groupBrief";
-import { agentMessage, isAnswering, markAnswering } from "./agentMessages";
 import {
+  groupAccessFor,
+  groupMessage,
+  isLink,
+  withAccessRequest,
+  type GroupAccessRequest,
+} from "../../groups/model/group";
+import { askableMembers, memberRole } from "../../groups/model/groupBrief";
+import {
+  agentMessage,
+  findWait,
+  forgetWait,
+  isAnswering,
+  markAnswering,
+  rememberWait,
+  replyAfter,
+  type AgentReply,
+  type AgentWait,
+} from "./agentMessages";
+import {
+  answerDelegation,
   delegationsSnapshot,
   recordDelegation,
   type Delegation,
@@ -385,9 +405,11 @@ const FIELDS = new Map<string, readonly string[]>([
   ["tools.read", []],
   ["tools.update", ["services", "skills", "access", "connectors"]],
   ["group.members", []],
-  ["group.ask", ["member", "message"]],
+  ["group.ask", ["member", "message", "wait"]],
+  ["group.access", ["target", "reason", "group"]],
   ["agents.list", []],
-  ["agents.message", ["to", "message"]],
+  ["agents.message", ["to", "message", "wait"]],
+  ["agents.wait", ["waitId"]],
   ["wakes.add", ["in", "at", "note"]],
   ["chat.card", [...CARD_FIELDS]],
   ["images.generate", ["prompt", "count", "aspect", "source"]],
@@ -938,10 +960,100 @@ function habitView(habit: Habit) {
   };
 }
 
+/** How long one call waits for an answer: under the CLI's read timeout. */
+const WAIT_STEP_MS = 25_000;
+const WAIT_POLL_MS = 500;
+
+/**
+ * Waits up to `ms` for the agent's answer to an app message, reading its
+ * chat. A wait that runs out says so; the asker calls agents.wait again.
+ */
+async function awaitReply(
+  host: AgentAppHost,
+  wait: AgentWait,
+  ms: number,
+): Promise<AgentReply | undefined> {
+  const until = Date.now() + ms;
+  for (;;) {
+    const session = await host.session(wait.sessionId);
+    const reply = session ? replyAfter(session, wait.appRequestId) : undefined;
+    if (reply?.done || Date.now() >= until) return reply;
+    await new Promise((resolve) => setTimeout(resolve, WAIT_POLL_MS));
+  }
+}
+
+/** What a waited message returns: the answer, or how to keep waiting. */
+async function waitedAnswer(
+  host: AgentAppHost,
+  id: string,
+  wait: AgentWait,
+  ms: number,
+) {
+  const reply = await awaitReply(host, wait, ms);
+  if (reply?.done) {
+    forgetWait(id);
+    if (wait.delegationId) answerDelegation(wait.delegationId, reply.text);
+    return { from: wait.name, reply: reply.text || "(no written answer)" };
+  }
+  return {
+    from: wait.name,
+    pending: true,
+    waitId: id,
+    note: `${wait.name} is still working. Call app agents.wait {"waitId":"${id}"} to keep waiting; do not end your turn while you wait for it.`,
+  };
+}
+
+/** The access a group has to a path or link, or asks the user for it. */
+function groupAccess(
+  group: Mono,
+  by: string,
+  input: Record<string, unknown>,
+) {
+  const target = requiredString(input.target, "target", 2048);
+  if (!isLink(target) && folderProblem(target, false))
+    throw new Error("target must be a full path or an http(s) link");
+  const known = groupAccessFor(group.group!, target);
+  if (known)
+    return {
+      target,
+      access: known,
+      note:
+        known === "no"
+          ? "The user said no: do not open it, and carry on without it."
+          : known === "edit"
+            ? "Open: read it and change files there; never delete."
+            : "Open to read; do not change it.",
+    };
+  const reason =
+    typeof input.reason === "string" && input.reason.trim()
+      ? input.reason.trim().slice(0, 300)
+      : undefined;
+  let asked: GroupAccessRequest | undefined;
+  saveGroup(group.id, (current) => {
+    const { group: next, request } = withAccessRequest(current, {
+      id: crypto.randomUUID(),
+      target,
+      by,
+      ...(reason ? { reason } : {}),
+      at: Date.now(),
+    });
+    asked = request;
+    return next;
+  });
+  return {
+    target,
+    access: "asked",
+    requestId: asked?.id,
+    note: `The user is asked in the group "${monoLook(group).name}" whether the members may open it: read only, read and edit, or no. Do not open it now. Say in one line that you asked, and end your turn; the answer comes back to the group chat.`,
+  };
+}
+
 /**
  * A group's chat leads it: it lists its members and brings one in. The
  * member answers from its own conversation and the answer comes back to the
- * group with the other completions of the same turn.
+ * group with the other completions of the same turn, or to this call when
+ * the leader waits for it. A member may also ask the group for access to a
+ * path or link outside its folders.
  */
 async function handleGroup(
   source: { id: string },
@@ -951,9 +1063,35 @@ async function handleGroup(
   host: AgentAppHost,
 ): Promise<unknown> {
   const group = monoForSession(source.id);
+  if (action === "group.access") {
+    if (group?.kind === "group" && group.group)
+      return groupAccess(group, monoLook(group).name, input);
+    // A member, from its chat or a habit run, asks through its group.
+    const memberId = host.monoOf?.(source.id)?.id;
+    const member = memberId ? findMono(memberId) : undefined;
+    const groups = member ? groupsOf(member.id) : [];
+    const wanted =
+      typeof input.group === "string" ? input.group.trim().toLowerCase() : "";
+    const target = wanted
+      ? groups.find(
+          (entry) =>
+            entry.id.toLowerCase() === wanted ||
+            monoLook(entry).name.toLowerCase() === wanted,
+        )
+      : groups.length === 1
+        ? groups[0]
+        : undefined;
+    if (!member || !target?.group)
+      throw new Error(
+        groups.length > 1
+          ? `You are in several groups; add "group":"<name>" (${groups.map((entry) => monoLook(entry).name).join(", ")})`
+          : "Only a group or one of its members can ask for access",
+      );
+    return groupAccess(target, monoLook(member).name, input);
+  }
   if (group?.kind !== "group" || !group.group)
     throw new Error("Only a group's own chat can talk to its members");
-  const members = groupMembers(group.group);
+  const members = askableMembers(group.group);
   if (action === "group.members")
     return {
       members: members.map((mono) => ({
@@ -976,12 +1114,28 @@ async function handleGroup(
   if (!sessionId)
     throw new Error("That member's conversation is not available");
   const message = requiredString(input.message, "message", 30_000);
+  const wait = input.wait === true;
+  const appRequestId = `app-${source.id}-${requestId}`;
   const result = await host.send(
     sessionId,
-    groupMessage(monoLook(group).name, group.group.goal, message),
-    `app-${source.id}-${requestId}`,
-    source.id,
+    groupMessage(monoLook(group).name, group.group.goal, message, group.group),
+    appRequestId,
+    // A waited answer comes back to this call, not as a completion.
+    ...(wait ? [] : [source.id]),
   );
+  if (wait) {
+    const entry: AgentWait = {
+      from: source.id,
+      sessionId,
+      appRequestId,
+      name: monoLook(member).name,
+    };
+    rememberWait(requestId, entry);
+    return {
+      member: entry.name,
+      ...(await waitedAnswer(host, requestId, entry, WAIT_STEP_MS)),
+    };
+  }
   return {
     member: monoLook(member).name,
     submitted: true,
@@ -992,8 +1146,10 @@ async function handleGroup(
 
 /**
  * Any Mono or bot, from its chat or a habit run, lists the user's other
- * agents and writes to one. The answer comes back to a chat as a completion;
- * a habit run's message is fire-and-forget.
+ * agents and writes to one. The answer comes back to a chat as a completion,
+ * or to the call itself with "wait":true; a habit run's message is
+ * fire-and-forget unless it waits. Members of one group may ask each other
+ * while answering the group: that is how a room works together.
  */
 async function handleAgents(
   source: { id: string },
@@ -1005,6 +1161,13 @@ async function handleAgents(
   const senderId = host.monoOf?.(source.id)?.id;
   const sender = senderId ? findMono(senderId) : undefined;
   if (!sender) throw new Error("Only a Mono or a bot can message other agents");
+  if (action === "agents.wait") {
+    const id = requiredString(input.waitId, "waitId", 128);
+    const entry = findWait(id);
+    if (!entry || entry.from !== source.id)
+      throw new Error("No answer is awaited by that waitId");
+    return waitedAnswer(host, id, entry, WAIT_STEP_MS);
+  }
   const others = listMonos().filter(
     (mono) => mono.id !== sender.id && mono.kind !== "group",
   );
@@ -1015,10 +1178,6 @@ async function handleAgents(
       note: "Pick by specialty first, then by tools; recent shows what each was asked lately, so you do not ask twice.",
     };
   }
-  if (isAnswering(source.id))
-    throw new Error(
-      "You are answering another agent: reply to it instead of messaging others",
-    );
   const wanted = requiredString(input.to, "to", 128).toLowerCase();
   const target = others.find(
     (mono) =>
@@ -1026,27 +1185,52 @@ async function handleAgents(
       monoLook(mono).name.toLowerCase() === wanted,
   );
   if (!target) throw new Error("No agent by that name or id; run agents.list");
+  const sameGroup = groupsOf(sender.id).some((group) =>
+    group.group?.members.includes(target.id),
+  );
+  if (isAnswering(source.id) && !sameGroup)
+    throw new Error(
+      "You are answering another agent: reply to it instead of messaging others",
+    );
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
     throw new Error("Invalid request ID");
   const sessionId = await host.monoSession?.(target.id);
   if (!sessionId) throw new Error("That agent's conversation is not available");
   const message = requiredString(input.message, "message", 30_000);
+  const wait = input.wait === true;
   markAnswering(sessionId);
-  // Only a chat can take the answer back; a habit run is fire-and-forget.
-  const notify = host.isMono(source.id) ? source.id : undefined;
+  // Only a chat can take the answer back; a habit run is fire-and-forget,
+  // and a waited answer comes back to this call.
+  const notify = !wait && host.isMono(source.id) ? source.id : undefined;
+  const appRequestId = `app-${source.id}-${requestId}`;
   const result = await host.send(
     sessionId,
     agentMessage(monoLook(sender).name, memberRole(sender), message),
-    `app-${source.id}-${requestId}`,
+    appRequestId,
     ...(notify ? [notify] : []),
   );
-  if (!result.alreadySubmitted)
-    recordDelegation({
-      from: sender.id,
-      to: target.id,
-      message,
-      at: Date.now(),
-    });
+  const delegationId = result.alreadySubmitted
+    ? undefined
+    : recordDelegation({
+        from: sender.id,
+        to: target.id,
+        message,
+        at: Date.now(),
+      });
+  if (wait) {
+    const entry: AgentWait = {
+      from: source.id,
+      sessionId,
+      appRequestId,
+      name: monoLook(target).name,
+      ...(delegationId ? { delegationId } : {}),
+    };
+    rememberWait(requestId, entry);
+    return {
+      to: entry.name,
+      ...(await waitedAnswer(host, requestId, entry, WAIT_STEP_MS)),
+    };
+  }
   return {
     to: monoLook(target).name,
     submitted: true,

@@ -150,7 +150,10 @@ import {
   MonoOverview,
   type MonoOverviewTab,
 } from "../features/monos/ui/MonoOverview";
-import { MonoSettingsDialog } from "../features/monos/ui/MonoSettingsDialog";
+import {
+  MonoSettingsDialog,
+  type MonoSettingsSection,
+} from "../features/monos/ui/MonoSettingsDialog";
 import { MonoActivityView } from "../features/monos/ui/MonoActivityView";
 import {
   launchedSessionState,
@@ -661,7 +664,9 @@ import {
   findMono,
   isBot,
   isPersonal,
+  saveGroup,
   saveGroupMembers,
+  saveMonoName,
   monoWorksOn,
   isMonoSession,
   listMonos,
@@ -713,7 +718,16 @@ import {
 import { WorkstreamFiles } from "../features/workstreams/ui/WorkstreamFiles";
 import { WorkstreamIntro } from "../features/workstreams/ui/WorkstreamIntro";
 import { WorkstreamPrs } from "../features/workstreams/ui/WorkstreamPrs";
-import { NewGroupDialog } from "../features/groups/ui/NewGroupDialog";
+import {
+  GroupDialog,
+  type GroupDraft,
+  type GroupPage,
+} from "../features/groups/ui/GroupDialog";
+import { GroupActivity } from "../features/groups/ui/GroupActivity";
+import {
+  groupDraft,
+  seedGroupMemory,
+} from "../features/groups/model/groupProject";
 import { GroupMembers } from "../features/groups/ui/GroupMembers";
 import { GroupCall } from "../features/groups/ui/GroupCall";
 import type { MemberAsk } from "../features/groups/ui/useGroupCall";
@@ -1288,6 +1302,9 @@ function Workspace({
   }, []);
   // The Mono whose settings dialog is open; another Mono's view closes it.
   const [monoSettingsFor, setMonoSettingsFor] = useState<string | null>(null);
+  // A group's instructions and memory open on their own section.
+  const [monoSettingsSection, setMonoSettingsSection] =
+    useState<MonoSettingsSection>();
   // A document opened from the chat shows on the overview's Documents tab,
   // the same page the tab opens it on.
   const onOpenMonoArtifact = useCallback((_sessionId: string, id: string) => {
@@ -5330,18 +5347,63 @@ function Workspace({
     [onOpenMono],
   );
 
-  // A group is named, given its goal and members, then opened on its chat.
+  // A group is named, given its goal and members, and, like a project,
+  // folders, instructions, context, memory and scheduled tasks; then it
+  // opens on its chat. The same dialog edits one from the rail.
   const [groupDialogOpen, setGroupDialogOpen] = useState(false);
+  const [groupSettingsFor, setGroupSettingsFor] = useState<string | null>(
+    null,
+  );
+  const [newHabitRequest, setNewHabitRequest] = useState(0);
   const onCreateGroup = useCallback(() => setGroupDialogOpen(true), []);
+  const onEditGroup = useCallback(
+    (monoId: string) => setGroupSettingsFor(monoId),
+    [],
+  );
   const onStartGroup = useCallback(
-    (input: { name: string; goal: string; members: string[] }) => {
-      const mono = createGroupMono(input.name, {
-        members: input.members,
-        ...(input.goal ? { goal: input.goal } : {}),
-      });
-      setMonoOverviewTab("members");
+    (draft: GroupDraft) => {
+      const mono = createGroupMono(
+        draft.name,
+        {
+          members: draft.members,
+          ...(draft.goal ? { goal: draft.goal } : {}),
+          ...(draft.folders.length ? { folders: draft.folders } : {}),
+          ...(draft.context.length ? { context: draft.context } : {}),
+        },
+        draft.instructions,
+      );
+      if (draft.memory) void seedGroupMemory(mono.id, draft.memory);
+      setMonoOverviewTab(draft.addTask ? "habits" : "members");
+      if (draft.addTask) setNewHabitRequest(Date.now());
       setMonoOverviewOpen(true);
       void onOpenMono(mono.id);
+    },
+    [onOpenMono],
+  );
+  const onSaveGroup = useCallback((monoId: string, draft: GroupDraft) => {
+    saveMonoName(monoId, draft.name);
+    saveGroup(monoId, (group) => {
+      const { goal: _, folders: __, context: ___, ...rest } = group;
+      return {
+        ...rest,
+        members: draft.members,
+        ...(draft.goal ? { goal: draft.goal } : {}),
+        ...(draft.folders.length ? { folders: draft.folders } : {}),
+        ...(draft.context.length ? { context: draft.context } : {}),
+      };
+    });
+  }, []);
+  const onOpenGroupPage = useCallback(
+    (monoId: string, page: GroupPage) => {
+      setGroupSettingsFor(null);
+      if (page === "habits") {
+        setMonoOverviewTab("habits");
+        setMonoOverviewOpen(true);
+      } else {
+        setMonoSettingsSection(page === "memory" ? "memory" : "soul");
+        setMonoSettingsFor(monoId);
+      }
+      void onOpenMono(monoId);
     },
     [onOpenMono],
   );
@@ -14325,6 +14387,22 @@ function Workspace({
     setMonoOverviewTab(move.tab);
     setMonoOverviewOpen(true);
   }, [monoViewId, monoViewIsBot, monoViewBusy, botRunCount, monoDocuments]);
+  // A group's turn opens its Activity, where each member's work shows live.
+  const monoViewIsGroup = !!monoViewMono?.group;
+  const groupFollowRef = useRef<{ id: string; busy: boolean } | null>(null);
+  useEffect(() => {
+    if (!monoViewId || !monoViewIsGroup) {
+      groupFollowRef.current = null;
+      return;
+    }
+    const was = groupFollowRef.current;
+    groupFollowRef.current = { id: monoViewId, busy: monoViewBusy };
+    if (!was || was.id !== monoViewId || was.busy || !monoViewBusy) return;
+    setMonoShownSession(null);
+    setMonoOverviewDocument(null);
+    setMonoOverviewTab("activity");
+    setMonoOverviewOpen(true);
+  }, [monoViewId, monoViewIsGroup, monoViewBusy]);
   const monoActivityView =
     monoViewSession && selectedMonoActivity ? (
       <MonoActivityView
@@ -14550,7 +14628,20 @@ function Workspace({
         history={history}
         documents={monoDocuments}
         documentGroups={monoDocumentGroups}
-        activity={monoActivityView}
+        activity={
+          monoViewMono.group ? (
+            <GroupActivity
+              group={monoViewMono}
+              sessions={sessions}
+              states={monoRail.states}
+              onOpenMember={(monoId) => void onOpenMono(monoId)}
+              onOpenFile={onOpenFile}
+            />
+          ) : (
+            monoActivityView
+          )
+        }
+        newHabitRequest={newHabitRequest || undefined}
         changes={
           monoViewIsBot
             ? undefined
@@ -14679,6 +14770,7 @@ function Workspace({
         modelSettings={monoViewSession.modelSettings}
         runtimeMode={monoViewSession.runtimeMode}
         busy={!!monoViewSession.busy}
+        initialSection={monoSettingsSection}
         onModelChange={(harness, model) =>
           onModelChange(monoViewSession.id, harness, model)
         }
@@ -14689,7 +14781,10 @@ function Workspace({
           onRuntimeModeChange(monoViewSession.id, mode)
         }
         onReset={() => onResetMono(monoViewSession.id)}
-        onClose={() => setMonoSettingsFor(null)}
+        onClose={() => {
+          setMonoSettingsFor(null);
+          setMonoSettingsSection(undefined);
+        }}
       />
     ) : null;
   const busyProjectPaths = useStableValue(
@@ -14730,6 +14825,7 @@ function Workspace({
             onZoneChange: onRailZoneChange,
             onCreateWorkstream,
             onCreateGroup,
+            onEditGroup,
           }
         : undefined,
     [
@@ -14737,6 +14833,7 @@ function Workspace({
       onRailZoneChange,
       onCreateWorkstream,
       onCreateGroup,
+      onEditGroup,
       monosEnabled,
       monoViewMono?.id,
       monoViewMono?.botRole,
@@ -15496,9 +15593,22 @@ function Workspace({
                             }}
                           />
                         ) : groupDialogOpen ? (
-                          <NewGroupDialog
-                            onCreate={onStartGroup}
+                          <GroupDialog
+                            onSave={onStartGroup}
                             onClose={() => setGroupDialogOpen(false)}
+                          />
+                        ) : groupSettingsFor &&
+                          findMono(groupSettingsFor)?.group ? (
+                          <GroupDialog
+                            key={groupSettingsFor}
+                            initial={groupDraft(groupSettingsFor)}
+                            onSave={(draft) =>
+                              onSaveGroup(groupSettingsFor, draft)
+                            }
+                            onOpenPage={(page) =>
+                              onOpenGroupPage(groupSettingsFor, page)
+                            }
+                            onClose={() => setGroupSettingsFor(null)}
                           />
                         ) : workstreamDialog === "new" ? (
                           <NewWorkstreamDialog

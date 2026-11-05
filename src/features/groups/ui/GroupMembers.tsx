@@ -17,6 +17,20 @@ export function groupCandidates(): Mono[] {
   return listMonos().filter((mono) => mono.kind !== "group");
 }
 
+/** The Principal leads every group: it is always in, and cannot leave. */
+const leads = (mono: Mono) => mono.botRole === "principal";
+
+function LeadTag() {
+  return (
+    <span
+      className="shrink-0 rounded bg-accent/10 px-1.5 text-[11px] font-medium leading-4 text-accent"
+      title="The Principal leads every group and is always in it."
+    >
+      Leads
+    </span>
+  );
+}
+
 function MemberRow({ mono, action }: { mono: Mono; action: React.ReactNode }) {
   const look = monoLook(mono);
   return (
@@ -52,10 +66,18 @@ export function MemberPicker({
       </p>
     );
   const full = selected.length >= GROUP_MAX_MEMBERS;
+  const ordered = [
+    ...candidates.filter(leads),
+    ...candidates.filter((mono) => !leads(mono)),
+  ];
   return (
     <div className="flex max-h-64 flex-col overflow-y-auto rounded-md border border-content/10 bg-background-base">
-      {candidates.map((mono) => {
+      {ordered.map((mono) => {
         const on = selected.includes(mono.id);
+        if (leads(mono))
+          return (
+            <MemberRow key={mono.id} mono={mono} action={<LeadTag />} />
+          );
         return (
           <label key={mono.id} className="cursor-pointer hover:bg-content/4">
             <MemberRow
@@ -106,15 +128,21 @@ export function GroupMembers({
             key={mono.id}
             mono={mono}
             action={
-              <button
-                type="button"
-                title="Remove from the group"
-                aria-label={`Remove ${monoLook(mono).name}`}
-                onClick={() => onChange(members.filter((id) => id !== mono.id))}
-                className="grid size-6 place-items-center text-content/45 hover:bg-content/8 hover:text-content"
-              >
-                <Trash2 className="size-3.5" strokeWidth={1.75} />
-              </button>
+              leads(mono) ? (
+                <LeadTag />
+              ) : (
+                <button
+                  type="button"
+                  title="Remove from the group"
+                  aria-label={`Remove ${monoLook(mono).name}`}
+                  onClick={() =>
+                    onChange(members.filter((id) => id !== mono.id))
+                  }
+                  className="grid size-6 place-items-center text-content/45 hover:bg-content/8 hover:text-content"
+                >
+                  <Trash2 className="size-3.5" strokeWidth={1.75} />
+                </button>
+              )
             }
           />
         ))
