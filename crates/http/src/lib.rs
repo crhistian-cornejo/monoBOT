@@ -48,6 +48,14 @@ mod windows {
 
 #[cfg(test)]
 mod tests {
+    /// Should the system's verifier fail to load, `agent()` quietly keeps the
+    /// bundled list, and every inspected network fails again.
+    #[cfg(windows)]
+    #[test]
+    fn windows_checks_certificates_with_its_own_store() {
+        super::windows::config().unwrap();
+    }
+
     /// Reaches GitHub with the app's client; needs the network, so run it by
     /// hand: `cargo test -p monobot-http -- --ignored`.
     #[test]

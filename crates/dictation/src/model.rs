@@ -112,10 +112,14 @@ pub(crate) fn install_from(
     fs::create_dir_all(dir)?;
     let total = files.iter().map(|file| file.bytes).sum();
     let mut done = 0;
+    // What GitHub's archive put in place, counted when it did.
+    let mut unpacked: Vec<&str> = Vec::new();
     for file in files {
         let target = dir.join(file.name);
-        if fs::metadata(&target).is_ok_and(|meta| meta.len() == file.bytes) {
-            done += file.bytes;
+        if present(dir, file) {
+            if !unpacked.contains(&file.name) {
+                done += file.bytes;
+            }
             progress(done, total);
             continue;
         }
@@ -136,10 +140,17 @@ pub(crate) fn install_from(
             progress(done, total);
         }) {
             Ok(()) => {}
-            // Hugging Face refused or never answered: the rest of Parakeet
-            // comes from GitHub, and the loop then finds it in place.
+            // Hugging Face refused, never answered or sent something else:
+            // the rest of Parakeet comes from GitHub, and the loop then finds
+            // it in place.
             Err(Error::Download(_)) if file.url.is_none() => {
-                done = before + from_archive(dir, before, total, &mut progress)?;
+                unpacked = from_archive(dir, before, total, &mut progress)?;
+                done = before
+                    + FILES
+                        .iter()
+                        .filter(|file| unpacked.contains(&file.name))
+                        .map(|file| file.bytes)
+                        .sum::<u64>();
                 progress(done, total);
             }
             Err(error) => return Err(error),
@@ -175,16 +186,21 @@ fn present(dir: &Path, file: &ModelFile) -> bool {
 }
 
 /// Downloads Parakeet's archive from GitHub, unpacks the files still missing
-/// and deletes the archive. Returns the bytes of model it put in place.
+/// and deletes the archive. Returns the names of the files it put in place.
 fn from_archive(
     dir: &Path,
     done: u64,
     total: u64,
     progress: &mut impl FnMut(u64, u64),
-) -> Result<u64, Error> {
-    let missing: u64 = FILES
+) -> Result<Vec<&'static str>, Error> {
+    let names: Vec<&'static str> = FILES
         .iter()
         .filter(|file| file.url.is_none() && !present(dir, file))
+        .map(|file| file.name)
+        .collect();
+    let missing: u64 = FILES
+        .iter()
+        .filter(|file| names.contains(&file.name))
         .map(|file| file.bytes)
         .sum();
     let archive = dir.join(ARCHIVE.name);
@@ -198,7 +214,7 @@ fn from_archive(
     }
     let unpacked = unpack(dir, &archive);
     let _ = fs::remove_file(&archive);
-    unpacked.map(|()| missing)
+    unpacked.map(|()| names)
 }
 
 /// A reader that refuses to give more than `left` bytes: a crafted archive
@@ -316,40 +332,78 @@ fn agent() -> ureq::Agent {
 /// Downloads one pinned file to `target`, reporting each chunk's size. The
 /// file only lands at `target` when its size and SHA-256 both match; the
 /// voice crate fetches its model through here too.
+///
+/// A company proxy that blocks a site may answer with a page of its own
+/// instead of the file. Anything that is not the file (a web page, another
+/// length, a connection cut short) is a failed download, so Parakeet still
+/// has GitHub to try; the right length with other bytes is a checksum error.
 pub fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) -> Result<(), Error> {
+    let failed = |why: String| Error::Download(format!("{}: {why}", file.name));
     let partial = target.with_extension("part");
     let response = agent()
         .get(&url_of(file))
         .call()
-        .map_err(|error| Error::Download(format!("{}: {error}", file.name)))?;
+        .map_err(|error| failed(error.to_string()))?;
+    if let Some(why) = not_the_file(&response, file) {
+        return Err(failed(why));
+    }
     let mut reader = response.into_reader();
     let mut out = File::create(&partial)?;
-    let mut hasher = Sha256::new();
-    let mut written = 0u64;
-    let mut buffer = vec![0u8; 1 << 16];
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
+    let streamed = (|| -> Result<Sha256, Error> {
+        let mut hasher = Sha256::new();
+        let mut written = 0u64;
+        let mut buffer = vec![0u8; 1 << 16];
+        loop {
+            let read = reader
+                .read(&mut buffer)
+                .map_err(|error| failed(error.to_string()))?;
+            if read == 0 {
+                break;
+            }
+            written += read as u64;
+            if written > file.bytes {
+                return Err(failed(format!("more than the {} bytes expected", file.bytes)));
+            }
+            hasher.update(&buffer[..read]);
+            out.write_all(&buffer[..read])?;
+            on_chunk(read as u64);
         }
-        written += read as u64;
-        if written > file.bytes {
-            drop(out);
-            let _ = fs::remove_file(&partial);
-            return Err(Error::Integrity(file.name.into()));
+        if written != file.bytes {
+            return Err(failed(format!("{written} of the {} bytes expected", file.bytes)));
         }
-        hasher.update(&buffer[..read]);
-        out.write_all(&buffer[..read])?;
-        on_chunk(read as u64);
-    }
-    out.flush()?;
+        out.flush()?;
+        Ok(hasher)
+    })();
     drop(out);
-    if written != file.bytes || hex(hasher) != file.sha256 {
+    let verified = streamed.and_then(|hasher| {
+        if hex(hasher) == file.sha256 {
+            Ok(())
+        } else {
+            Err(Error::Integrity(file.name.into()))
+        }
+    });
+    if let Err(error) = verified {
         let _ = fs::remove_file(&partial);
-        return Err(Error::Integrity(file.name.into()));
+        return Err(error);
     }
     fs::rename(&partial, target)?;
     Ok(())
+}
+
+/// Why a response cannot be the pinned file, from its headers alone: a web
+/// page, or a stated length other than the file's.
+fn not_the_file(response: &ureq::Response, file: &ModelFile) -> Option<String> {
+    let kind = response.content_type().trim();
+    if kind.eq_ignore_ascii_case("text/html") || kind.eq_ignore_ascii_case("application/xhtml+xml") {
+        return Some(format!("the network answered with a web page ({kind}), not the file"));
+    }
+    match response.header("content-length").map(str::parse::<u64>) {
+        Some(Ok(length)) if length != file.bytes => Some(format!(
+            "the network offered {length} bytes, not the {} expected",
+            file.bytes
+        )),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -449,6 +503,142 @@ mod tests {
         install_from(&dir, &FILES, &places, |_, _| {}).unwrap();
         eprintln!("installed from another app in {:?}", started.elapsed());
         assert!(installed(&dir));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Answers one request on this machine with `reply`, as a site (or a
+    /// proxy standing in for it) would, and returns the address to ask.
+    fn serve(reply: &[u8]) -> &'static str {
+        use std::io::{BufRead, BufReader};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/tokens.txt", listener.local_addr().unwrap());
+        let reply = reply.to_vec();
+        std::thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut request = BufReader::new(stream);
+            let mut line = String::new();
+            // The request's headers end with an empty line.
+            while request.read_line(&mut line).unwrap() > 2 {
+                line.clear();
+            }
+            let mut stream = request.into_inner();
+            stream.write_all(&reply).unwrap();
+            let _ = stream.shutdown(std::net::Shutdown::Write);
+        });
+        Box::leak(url.into_boxed_str())
+    }
+
+    /// Downloads SMALL's tokens.txt ("hello") from a server that answers
+    /// with `reply`; returns what landed in place.
+    fn fetch(tag: &str, reply: &[u8]) -> Result<Vec<u8>, Error> {
+        let dir = std::env::temp_dir().join(format!("monobot-dictation-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let file = ModelFile {
+            url: Some(serve(reply)),
+            ..SMALL[0]
+        };
+        let target = dir.join(file.name);
+        let result = download(&file, &target, |_| {}).map(|()| fs::read(&target).unwrap());
+        // Nothing half-written stays behind, and nothing wrong lands.
+        assert!(!target.with_extension("part").exists());
+        assert_eq!(target.exists(), result.is_ok());
+        fs::remove_dir_all(&dir).unwrap();
+        result
+    }
+
+    fn reply(kind: &str, length: Option<usize>, body: &str) -> Vec<u8> {
+        let length = length.map_or("Connection: close\r\n".into(), |length| {
+            format!("Content-Length: {length}\r\n")
+        });
+        format!("HTTP/1.1 200 OK\r\nContent-Type: {kind}\r\n{length}\r\n{body}").into_bytes()
+    }
+
+    #[test]
+    fn the_pinned_file_lands_in_place() {
+        let got = fetch("ok", &reply("text/plain; charset=utf-8", Some(5), "hello"));
+        assert_eq!(got.unwrap(), b"hello");
+        // Without a stated length too: the body ends with the connection.
+        let got = fetch("unsized", &reply("application/octet-stream", None, "hello"));
+        assert_eq!(got.unwrap(), b"hello");
+    }
+
+    #[test]
+    fn a_proxy_page_instead_of_the_file_is_a_failed_download() {
+        let page = "<html><body>Blocked by your organization</body></html>";
+        let got = fetch("page", &reply("text/html; charset=utf-8", Some(page.len()), page));
+        assert!(matches!(got, Err(Error::Download(_))), "{got:?}");
+        // A page is a page even at the file's length.
+        let got = fetch("page5", &reply("TEXT/HTML", Some(5), "hello"));
+        assert!(matches!(got, Err(Error::Download(_))), "{got:?}");
+        let refused = b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\nContent-Length: 2\r\n\r\nno";
+        let got = fetch("refused", refused);
+        assert!(matches!(got, Err(Error::Download(_))), "{got:?}");
+    }
+
+    #[test]
+    fn another_length_is_a_failed_download() {
+        let kind = "application/octet-stream";
+        for (tag, length, body) in [
+            ("stated", Some(4), "hell"),
+            ("short", None, "hell"),
+            ("long", None, "hello, world"),
+        ] {
+            let got = fetch(tag, &reply(kind, length, body));
+            assert!(matches!(got, Err(Error::Download(_))), "{tag}: {got:?}");
+        }
+    }
+
+    #[test]
+    fn the_right_length_with_other_bytes_fails_its_checksum() {
+        let got = fetch("tampered", &reply("application/octet-stream", Some(5), "hellO"));
+        assert!(matches!(got, Err(Error::Integrity(_))), "{got:?}");
+    }
+
+    /// Through this computer's own network, company proxy and all: silero
+    /// comes from GitHub, and Hugging Face either sends tokens.txt or fails
+    /// as a download, which turns install to GitHub's archive. Run it by
+    /// hand: `cargo test -p monobot-dictation -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn downloads_through_this_network() {
+        let dir = std::env::temp_dir().join(format!("monobot-dictation-net-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let named = |name: &str| FILES.iter().find(|file| file.name == name).unwrap();
+        let silero = named("silero_vad.onnx");
+        download(silero, &dir.join(silero.name), |_| {}).unwrap();
+        assert!(present(&dir, silero));
+        let tokens = named("tokens.txt");
+        match download(tokens, &dir.join(tokens.name), |_| {}) {
+            Ok(()) => eprintln!("Hugging Face sent tokens.txt"),
+            Err(Error::Download(why)) => eprintln!("Hugging Face failed as a download: {why}"),
+            Err(error) => panic!("{error}"),
+        }
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// The whole model through this computer's network as a new user gets it,
+    /// with no other app to take it from; behind a proxy that refuses Hugging
+    /// Face, Parakeet comes from GitHub. The bar only moves forward and ends
+    /// full. About 1.2 GB: `cargo test -p monobot-dictation -- --ignored
+    /// --nocapture installs_through_this_network`.
+    #[test]
+    #[ignore]
+    fn installs_through_this_network() {
+        let dir = std::env::temp_dir().join(format!("monobot-dictation-full-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let started = std::time::Instant::now();
+        let mut last = (0, 0);
+        install_from(&dir, &FILES, &[], |done, total| {
+            assert!(done >= last.0 && done <= total, "{done} after {} of {total}", last.0);
+            last = (done, total);
+        })
+        .unwrap();
+        eprintln!("installed in {:?}", started.elapsed());
+        assert_eq!(last, (total_bytes(), total_bytes()));
+        assert!(installed(&dir));
+        assert!(!dir.join(ARCHIVE.name).exists());
         fs::remove_dir_all(&dir).unwrap();
     }
 
