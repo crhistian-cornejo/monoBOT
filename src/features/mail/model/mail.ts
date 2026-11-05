@@ -43,11 +43,20 @@ export type MailOverview = {
   totals: { accountId: string; folder: MailFolder; total: number }[];
 };
 
+/** What Rust's look at a file's bytes found: nothing, a reason for care, or a file it won't open. */
+export type MailRisk = {
+  level: "safe" | "caution" | "danger";
+  reasons: string[];
+};
+
 export type MailAttachment = {
   index: number;
   name: string;
   kind: string;
   size: number;
+  risk: MailRisk;
+  /** A picture's own bytes as a data URL, shown in place; nothing is saved. */
+  preview?: string;
 };
 
 export type OpenedMail = {
@@ -55,7 +64,7 @@ export type OpenedMail = {
   /** Sanitized HTML; empty when the message has none. */
   html: string;
   text: string[];
-  /** Pictures on the web it names, loaded only when the user allows. */
+  /** Pictures on the web it names, fetched by Rust for the frame. */
   remote: string[];
   imagesAllowed: boolean;
   attachments: MailAttachment[];
@@ -283,9 +292,61 @@ export function mailDocument(
   images: Record<string, string> = {},
 ): string {
   let body = html;
+  // The sanitized HTML writes `&` in an address as `&amp;`.
   for (const [url, data] of Object.entries(images))
-    body = body.split(url).join(data);
+    for (const written of new Set([url, url.split("&").join("&amp;")]))
+      body = body.split(written).join(data);
   return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'"><base target="_blank"><style>html,body{margin:0;padding:0;background:${colors.background};color:${colors.text};font:13px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;word-wrap:break-word}body{padding:4px 2px}a{color:${colors.link}}img{max-width:100%;height:auto}table{max-width:100%}pre{white-space:pre-wrap}</style></head><body>${body}</body></html>`;
+}
+
+// ---- Pictures from the web ----
+
+const AUTO_IMAGES_KEY = "monocode.mail.autoImages";
+
+/**
+ * Whether a message's pictures on the web load as it opens (the default).
+ * Off, they wait for a press: a sender can tell from them that it was opened.
+ */
+export function loadAutoImages(): boolean {
+  try {
+    return localStorage.getItem(AUTO_IMAGES_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+export function saveAutoImages(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_IMAGES_KEY, on ? "1" : "0");
+  } catch {
+    // private mode / quota
+  }
+}
+
+/**
+ * Runs `load` over `items` at most `limit` at a time, handing each result to
+ * `onEach` as it lands. A failed item is skipped.
+ */
+export async function loadInBatches<T, R>(
+  items: readonly T[],
+  limit: number,
+  load: (item: T) => Promise<R>,
+  onEach: (item: T, result: R) => void,
+  cancelled: () => boolean = () => false,
+): Promise<void> {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length && !cancelled()) {
+      const item = items[next++];
+      try {
+        const result = await load(item);
+        if (!cancelled()) onEach(item, result);
+      } catch {
+        // one picture that fails leaves the rest
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
 }
 
 // ---- Which tab the Inbox shows ----

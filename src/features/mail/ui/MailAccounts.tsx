@@ -1,7 +1,8 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useState } from "react";
 import { Trash2 } from "../../../shared/ui/icons";
-import type { MailAccount } from "../model/mail";
+import { Switch } from "../../../shared/ui/Switch";
+import { loadAutoImages, saveAutoImages, type MailAccount } from "../model/mail";
 import { mailApi } from "../model/mailApi";
 
 type Provider = "gmail" | "icloud" | "imap";
@@ -46,6 +47,7 @@ export function MailAccounts({
   const [host, setHost] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const [autoImages, setAutoImages] = useState(loadAutoImages);
   const steps = STEPS[provider];
 
   const connect = async () => {
@@ -100,6 +102,27 @@ export function MailAccounts({
             </li>
           ))}
         </ul>
+      ) : null}
+
+      {accounts.length ? (
+        <div className="flex items-start gap-3 rounded-md border border-content/10 px-3 py-2">
+          <span className="min-w-0 flex-1">
+            <span className="block text-[13px]">Load pictures automatically</span>
+            <span className="block text-[12px] leading-relaxed text-content/55">
+              MonoBOT fetches them for the message, with no cookies. A sender
+              can still tell you opened it. Mail held back as suspicious never
+              loads them on its own.
+            </span>
+          </span>
+          <Switch
+            label="Load pictures automatically"
+            on={autoImages}
+            onChange={(on) => {
+              saveAutoImages(on);
+              setAutoImages(on);
+            }}
+          />
+        </div>
       ) : null}
 
       <form

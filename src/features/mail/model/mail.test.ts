@@ -4,6 +4,7 @@ import {
   byDay,
   cleanReply,
   dayLabel,
+  loadInBatches,
   mailDocument,
   nextGap,
   replyGaps,
@@ -149,5 +150,39 @@ describe("replyGaps", () => {
     expect(nextGap(gaps, gaps[0].end)).toBe(gaps[1]);
     expect(nextGap(gaps, text.length)).toBe(gaps[0]);
     expect(nextGap([], 0)).toBeUndefined();
+  });
+});
+
+describe("pictures from the web", () => {
+  it("swaps a picture in where the HTML wrote its address with &amp;", () => {
+    const url = "https://img.test/a.png?w=1&h=2";
+    const doc = mailDocument(
+      `<img src="https://img.test/a.png?w=1&amp;h=2">`,
+      { text: "#000", background: "#fff", link: "#00f" },
+      { [url]: "data:image/png;base64,AA" },
+    );
+    expect(doc).toContain('src="data:image/png;base64,AA"');
+    expect(doc).not.toContain("img.test");
+  });
+
+  it("loads a few at a time, hands each over as it lands and skips a failure", async () => {
+    let running = 0;
+    let most = 0;
+    const got: string[] = [];
+    await loadInBatches(
+      ["a", "b", "bad", "c", "d"],
+      2,
+      async (item) => {
+        running += 1;
+        most = Math.max(most, running);
+        await new Promise((resolve) => setTimeout(resolve, 1));
+        running -= 1;
+        if (item === "bad") throw new Error("no");
+        return item.toUpperCase();
+      },
+      (_, result) => got.push(result),
+    );
+    expect(most).toBe(2);
+    expect(got.sort()).toEqual(["A", "B", "C", "D"]);
   });
 });

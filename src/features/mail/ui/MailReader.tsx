@@ -1,20 +1,28 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
-  Paperclip,
   Star,
 } from "../../../shared/ui/icons";
 import { openPathWithDefaultApp } from "../../../platform/tauri/fs";
 import {
+  loadAutoImages,
+  loadInBatches,
   mailDocument,
   type MailAction,
   type MailMessage,
   type OpenedMail,
 } from "../model/mail";
 import { mailApi } from "../model/mailApi";
+import { MailAttachments } from "./MailAttachments";
 import { MailReply } from "./MailReply";
+
+/** The most pictures on the web one message loads, and how many are fetched at once. */
+const MAX_IMAGES = 40;
+const IMAGES_AT_ONCE = 6;
+/** Pictures that land close together redraw the frame once. */
+const IMAGE_PAINT_MS = 250;
 
 const ICON_BUTTON =
   "grid size-7 place-items-center rounded-md text-content/60 hover:bg-content/8 hover:text-content disabled:opacity-40";
@@ -42,12 +50,6 @@ function remember(opened: OpenedMail) {
     openedCache.delete(openedCache.keys().next().value!);
 }
 
-function bytes(size: number): string {
-  if (size < 1024) return `${size} B`;
-  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
-  return `${(size / 1024 / 1024).toFixed(1)} MB`;
-}
-
 export function MailReader({
   message,
   onBack,
@@ -65,6 +67,9 @@ export function MailReader({
   const [opened, setOpened] = useState<OpenedMail>();
   const [error, setError] = useState<string>();
   const [images, setImages] = useState<Record<string, string>>({});
+  const [loadingImages, setLoadingImages] = useState(false);
+  /** Bumped when the message changes, so a load still running for the last one stops. */
+  const imageRun = useRef(0);
   const [replying, setReplying] = useState(false);
   const [notice, setNotice] = useState<string>();
   const held = message.triage === "held";
@@ -94,15 +99,43 @@ export function MailReader({
     if (replyRequest && !held) setReplying(true);
   }, [replyRequest, held]);
 
-  const loadImages = async () => {
-    if (!opened) return;
-    const loaded: Record<string, string> = {};
-    for (const url of opened.remote.slice(0, 40)) {
-      const data = await mailApi.image(message.id, url).catch(() => undefined);
-      if (data) loaded[url] = data;
-    }
-    setImages(loaded);
-  };
+  /** Fetches the message's pictures on the web through Rust, a few at a time, painting them as they land. */
+  const loadImages = useCallback(async (target: OpenedMail) => {
+    const run = ++imageRun.current;
+    const stale = () => imageRun.current !== run;
+    const landed: Record<string, string> = {};
+    let timer: number | undefined;
+    const paint = () => {
+      timer = undefined;
+      if (!stale()) setImages((current) => ({ ...current, ...landed }));
+    };
+    setLoadingImages(true);
+    await loadInBatches(
+      target.remote.slice(0, MAX_IMAGES),
+      IMAGES_AT_ONCE,
+      (url) => mailApi.image(target.id, url),
+      (url, data) => {
+        landed[url] = data;
+        timer ??= window.setTimeout(paint, IMAGE_PAINT_MS);
+      },
+      stale,
+    );
+    window.clearTimeout(timer);
+    paint();
+    if (!stale()) setLoadingImages(false);
+  }, []);
+
+  // A message's pictures load as it opens, unless the user turned that off or
+  // the message is held back as a possible scam: those wait for a press.
+  useEffect(() => {
+    if (!opened || opened.id !== message.id || !opened.remote.length) return;
+    if (held || !loadAutoImages()) return;
+    void loadImages(opened);
+    return () => {
+      imageRun.current += 1;
+      setLoadingImages(false);
+    };
+  }, [opened, message.id, held, loadImages]);
 
   return (
     <article className="flex min-h-0 flex-1 flex-col">
@@ -168,38 +201,30 @@ export function MailReader({
           </p>
         ) : null}
 
-        {opened?.attachments.length ? (
-          <ul className="mt-3 flex flex-wrap gap-1.5">
-            {opened.attachments.map((file) => (
-              <li key={file.index}>
-                <button
-                  type="button"
-                  title="Opens with your system's app; MonoBOT never runs it"
-                  onClick={() =>
-                    void mailApi
-                      .attachment(message.id, file.index)
-                      .then(openPathWithDefaultApp)
-                      .catch((failure) => setNotice(String(failure)))
-                  }
-                  className="flex items-center gap-1.5 rounded-md border border-content/10 px-2 py-1 text-[12px] hover:bg-content/5"
-                >
-                  <Paperclip className="size-3.5 text-content/50" />
-                  <span className="max-w-56 truncate">{file.name}</span>
-                  <span className="text-content/40">{bytes(file.size)}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
+        {opened ? (
+          <MailAttachments
+            attachments={opened.attachments}
+            onOpen={(file) =>
+              void mailApi
+                .attachment(message.id, file.index)
+                .then(openPathWithDefaultApp)
+                .catch((failure) => setNotice(String(failure)))
+            }
+          />
         ) : null}
 
         {opened?.remote.length && !Object.keys(images).length ? (
-          <button
-            type="button"
-            onClick={() => void loadImages()}
-            className="mt-3 rounded-md px-2.5 py-1 text-[12px] text-content/60 hover:bg-content/8"
-          >
-            Show {opened.remote.length} image{opened.remote.length === 1 ? "" : "s"} from the web
-          </button>
+          loadingImages ? (
+            <p className="mt-3 text-[12px] text-content/45">Loading pictures…</p>
+          ) : (
+            <button
+              type="button"
+              onClick={() => void loadImages(opened)}
+              className="mt-3 self-start rounded-md px-2.5 py-1 text-[12px] text-content/60 hover:bg-content/8"
+            >
+              Show {opened.remote.length} picture{opened.remote.length === 1 ? "" : "s"} from the web
+            </button>
+          )
         ) : null}
 
         <div className="mt-4">

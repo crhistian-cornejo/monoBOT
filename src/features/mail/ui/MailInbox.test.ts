@@ -125,4 +125,46 @@ describe("MailInbox", () => {
     expect(container.textContent).toContain("Reply (R)");
     expect(container.querySelector('[aria-label="Unread"]')).toBeNull();
   });
+
+  it("loads a message's pictures as it opens, unless that is turned off", async () => {
+    const open = async (id: string) => {
+      const message = { ...overview.messages[0], id, subject: `Fotos ${id}` };
+      api.accounts.mockResolvedValue(overview.accounts);
+      api.overview.mockResolvedValue({ ...overview, messages: [message] });
+      api.open.mockResolvedValue({
+        id,
+        html: '<img src="https://img.test/a.png">',
+        text: [],
+        remote: ["https://img.test/a.png", "https://img.test/b.png"],
+        imagesAllowed: false,
+        attachments: [],
+      });
+      api.image.mockResolvedValue("data:image/png;base64,AA");
+      act(() => root.render(createElement(MailInbox)));
+      await flush();
+      await flush();
+      const row = [...container.querySelectorAll("button")].find((button) =>
+        button.textContent?.includes(`Fotos ${id}`),
+      )!;
+      act(() => row.click());
+      await flush();
+      await flush();
+    };
+
+    await open("a.inbox.8");
+    expect(api.image).toHaveBeenCalledWith("a.inbox.8", "https://img.test/a.png");
+    expect(api.image).toHaveBeenCalledWith("a.inbox.8", "https://img.test/b.png");
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    api.image.mockClear();
+    localStorage.setItem("monocode.mail.autoImages", "0");
+    try {
+      await open("a.inbox.9");
+      expect(api.image).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("Show 2 pictures from the web");
+    } finally {
+      localStorage.removeItem("monocode.mail.autoImages");
+    }
+  });
 });
