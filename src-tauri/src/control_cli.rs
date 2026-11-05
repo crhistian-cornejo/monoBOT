@@ -269,10 +269,13 @@ Actions:
                   is assistant, finance, documents, research or custom;
                   instructions seed its soul; services and skills pick its
                   tools (all optional).
-  tools.read     {}  Bot only. Your services and skills, on or off.
-  tools.update   {"services":["gmail","notion"],"skills":["monobot-finance"]}
-                  Bot only. The complete list you keep; applies from your next
-                  turn. Sending, sharing and deleting stay blocked.
+  tools.read     {}  Bot only. Your services, skills, access (web, read,
+                  edit), connectors and folders, on or off.
+  tools.update   {"services":["gmail","notion"],"skills":["monobot-finance"],
+                  "access":["web","read"],"connectors":["context7"]}
+                  Bot only. Each list given is the complete one you keep;
+                  applies from your next turn. Folders are the user's to add.
+                  Sending, sharing and deleting stay blocked.
   group.members  {}  Group only. Its members: id, name and role.
   group.ask      {"member":"Finance","message":"..."}  Group only. Bring a
                   member in; its answer comes back to you with the others

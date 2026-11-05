@@ -258,6 +258,8 @@ export function buildClaudeSpawnArgs(input: {
   pluginDirs?: readonly string[];
   /** Tools or whole servers the session may never use. */
   disallowedTools?: readonly string[];
+  /** Folders beyond the working one the session may reach (a bot's). */
+  addDirs?: readonly string[];
 }): string[] {
   const args = [
     "--output-format",
@@ -295,6 +297,9 @@ export function buildClaudeSpawnArgs(input: {
     }
     if (input.disallowedTools?.length) {
       args.push("--disallowedTools", input.disallowedTools.join(","));
+    }
+    for (const dir of input.addDirs ?? []) {
+      args.push("--add-dir", dir);
     }
     for (const dir of input.pluginDirs ?? []) {
       args.push("--plugin-dir", dir);

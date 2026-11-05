@@ -16,11 +16,17 @@ import { AccessPicker } from "../../sessions/ui/AccessPicker";
 import { ModelPicker, ModelSettingRows } from "../../sessions/ui/ModelPicker";
 import { PixelMascot } from "../../projects/ui/PixelMascot";
 import {
+  BOT_ACCESS,
   BOT_SERVICES,
   BOT_SKILLS,
   botTools,
   type BotTools,
 } from "../../bots/model/bots";
+import { BotFolders } from "../../bots/ui/BotFolders";
+import {
+  CONNECTORS,
+  isConnectorEnabled,
+} from "../../settings/model/connectors";
 import {
   defaultMonoName,
   findMono,
@@ -446,7 +452,9 @@ function NameField({ monoId, fallback }: { monoId: string; fallback: string }) {
   );
 }
 
-/** A bot's services and skills; sending, sharing and deleting stay blocked. */
+/** A bot's tools in its settings: the user's accounts, Claude's own tools,
+ * folders, the app's connectors and MonoBOT's skills. Sending, sharing and
+ * deleting stay blocked whatever is on. */
 function BotToolsGroup({ monoId }: { monoId: string }) {
   // A string snapshot, so the store compares by value.
   const snapshot = useSyncExternalStore(subscribeMonos, () => {
@@ -456,32 +464,40 @@ function BotToolsGroup({ monoId }: { monoId: string }) {
       : "";
   });
   if (!snapshot) return null;
-  const tools = JSON.parse(snapshot) as BotTools;
-  const toggle = <K extends keyof BotTools>(
-    key: K,
-    item: BotTools[K][number],
-    on: boolean,
-  ) =>
-    saveBotTools(monoId, {
-      ...tools,
-      [key]: on
-        ? [...tools[key], item]
-        : tools[key].filter((entry) => entry !== item),
-    });
+  const tools = JSON.parse(snapshot) as ReturnType<typeof botTools>;
+  const save = (change: Partial<BotTools>) =>
+    saveBotTools(monoId, { ...tools, ...change });
+  const flip = <T extends string>(list: readonly T[], item: T, on: boolean) =>
+    on ? [...list, item] : list.filter((entry) => entry !== item);
+  const connectorOn = (id: string) =>
+    !tools.connectors || tools.connectors.includes(id);
   return (
     <>
       <GroupHeading
         title="Tools"
-        description="What it can use. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat."
+        description="What it can use. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat, except folders."
       />
       <SettingGroup>
+        {BOT_ACCESS.map((info) => (
+          <SwitchRow
+            key={info.access}
+            label={info.name}
+            description={info.note}
+            on={tools.access.includes(info.access)}
+            onChange={(on) =>
+              save({ access: flip(tools.access, info.access, on) })
+            }
+          />
+        ))}
         {BOT_SERVICES.map((info) => (
           <SwitchRow
             key={info.service}
             label={info.name}
             description={info.note}
             on={tools.services.includes(info.service)}
-            onChange={(on) => toggle("services", info.service, on)}
+            onChange={(on) =>
+              save({ services: flip(tools.services, info.service, on) })
+            }
           />
         ))}
         {BOT_SKILLS.map((info) => (
@@ -490,7 +506,46 @@ function BotToolsGroup({ monoId }: { monoId: string }) {
             label={`${info.name} skill`}
             description={info.note}
             on={tools.plugins.includes(info.plugin)}
-            onChange={(on) => toggle("plugins", info.plugin, on)}
+            onChange={(on) =>
+              save({ plugins: flip(tools.plugins, info.plugin, on) })
+            }
+          />
+        ))}
+      </SettingGroup>
+
+      <GroupHeading
+        title="Folders"
+        description="Beyond its home folder. It reads them without asking; it changes files only where you tick it, and never deletes."
+      />
+      <SettingGroup>
+        <BotFolders
+          folders={tools.folders}
+          canEdit={tools.access.includes("edit")}
+          onChange={(folders) => save({ folders })}
+        />
+      </SettingGroup>
+
+      <GroupHeading
+        title="Connectors"
+        description="The app's connectors it may use, among the ones on in Settings › Connectors."
+      />
+      <SettingGroup>
+        {CONNECTORS.map((connector) => (
+          <SwitchRow
+            key={connector.id}
+            label={connector.name}
+            description={
+              isConnectorEnabled(connector)
+                ? connector.description
+                : "Off in Settings › Connectors"
+            }
+            disabled={!isConnectorEnabled(connector)}
+            on={isConnectorEnabled(connector) && connectorOn(connector.id)}
+            onChange={(on) => {
+              const all = CONNECTORS.map((entry) => entry.id as string);
+              const current = tools.connectors ?? all;
+              save({ connectors: flip(current, connector.id, on) });
+            }}
           />
         ))}
       </SettingGroup>

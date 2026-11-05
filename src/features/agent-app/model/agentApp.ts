@@ -52,6 +52,11 @@ import {
   type Mono,
 } from "../../monos/model/mono";
 import {
+  CONNECTORS,
+  isConnectorEnabled,
+} from "../../settings/model/connectors";
+import {
+  BOT_ACCESS,
   BOT_ROLES,
   BOT_SERVICES,
   BOT_SKILLS,
@@ -262,7 +267,7 @@ const FIELDS = new Map<string, readonly string[]>([
   ["bots.list", []],
   ["bots.create", ["name", "role", "instructions", "services", "skills"]],
   ["tools.read", []],
-  ["tools.update", ["services", "skills"]],
+  ["tools.update", ["services", "skills", "access", "connectors"]],
   ["group.members", []],
   ["group.ask", ["member", "message"]],
   ["agents.list", []],
@@ -982,6 +987,24 @@ function requiredTools(
       BOT_SKILLS.map((info) => info.plugin),
       current.plugins,
     ),
+    access: list(
+      input.access,
+      "access",
+      BOT_ACCESS.map((info) => info.access),
+      current.access ?? [],
+    ),
+    // Folders are the user's to open; a bot keeps the ones it has.
+    folders: current.folders ?? [],
+    ...(input.connectors === undefined && !current.connectors
+      ? {}
+      : {
+          connectors: list(
+            input.connectors,
+            "connectors",
+            CONNECTORS.map((connector) => connector.id as string),
+            current.connectors ?? CONNECTORS.map((connector) => connector.id),
+          ),
+        }),
   };
 }
 
@@ -1011,6 +1034,29 @@ function handleTools(
       does: info.note,
       on: tools.plugins.includes(info.plugin),
     })),
+    access: BOT_ACCESS.map((info) => ({
+      name: info.access,
+      label: info.name,
+      does: info.note,
+      on: tools.access.includes(info.access),
+    })),
+    connectors: CONNECTORS.map((connector) => ({
+      name: connector.id,
+      label: connector.name,
+      does: connector.description,
+      on:
+        isConnectorEnabled(connector) &&
+        (!tools.connectors || tools.connectors.includes(connector.id)),
+      ...(isConnectorEnabled(connector)
+        ? {}
+        : { note: "Off in the app's settings; ask the user" }),
+    })),
+    folders: tools.folders.map((folder) => ({
+      path: folder.path,
+      canChange: folder.edit && tools.access.includes("edit"),
+    })),
+    foldersNote:
+      "Besides your home folder. Only the user adds folders, in your settings; ask them when you need one.",
     alwaysBlocked:
       "Sending, replying to, forwarding or deleting email; sharing or deleting files; deleting Notion pages; deleting files or pushing from the shell.",
     ...(action === "tools.update" ? { appliesFrom: "your next turn" } : {}),

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { buildClaudeSpawnArgs } from "../../../integrations/harness/providers/claude/claudeProtocol";
-import { BOT_ROLES, botLaunch, isBotRole, parseBotTools } from "./bots";
+import {
+  BOT_ROLES,
+  botLaunch,
+  folderProblem,
+  isBotRole,
+  parseBotTools,
+  rulePath,
+} from "./bots";
 
 describe("bots", () => {
   it("knows its roles", () => {
@@ -86,10 +93,11 @@ describe("bots", () => {
       "mcp__claude_ai_Notion__delete-pages",
     );
     expect(launch.disallowedTools).toContain("Bash(rm:*)");
+    // Of the user's accounts, only Notion's tools are pre-allowed.
     expect(
-      launch.allowedTools.every((tool) =>
-        tool.startsWith("mcp__claude_ai_Notion__"),
-      ),
+      launch.allowedTools
+        .filter((tool) => tool.startsWith("mcp__claude_ai_"))
+        .every((tool) => tool.startsWith("mcp__claude_ai_Notion__")),
     ).toBe(true);
   });
 
@@ -108,6 +116,57 @@ describe("bots", () => {
       expect.arrayContaining(["Task", "Agent"]),
     );
     expect(botLaunch("research").disallowedTools).not.toContain("Task");
+  });
+
+  it("writes folder rules the way Claude compares paths", () => {
+    expect(rulePath(String.raw`C:\Users\Ana\Docs\ `.trim())).toBe(
+      "c/Users/Ana/Docs",
+    );
+    expect(rulePath("D:/Facturas")).toBe("d/Facturas");
+    expect(rulePath("/Users/ana/Docs/")).toBe("Users/ana/Docs");
+  });
+
+  it("opens any folder to read but never a disk or a system folder to change", () => {
+    expect(folderProblem("C:\\", false)).toMatch(/whole disk/);
+    expect(folderProblem("Docs", false)).toMatch(/full path/);
+    const system = String.raw`C:\Windows\System32`;
+    expect(folderProblem(system, false)).toBeUndefined();
+    expect(folderProblem(system, true)).toMatch(/never changed/);
+    expect(folderProblem("/etc/hosts", true)).toMatch(/never changed/);
+    expect(folderProblem("/Users/ana/Docs", true)).toBeUndefined();
+  });
+
+  it("gives a bot its folders and access, and denies what it lacks", () => {
+    const launch = botLaunch("custom", {
+      services: [],
+      plugins: [],
+      access: ["read", "edit"],
+      folders: [
+        { path: String.raw`D:\Facturas`, edit: true },
+        { path: String.raw`C:\Windows`, edit: false },
+      ],
+      connectors: ["context7"],
+    });
+    expect(launch.addDirs).toEqual([
+      String.raw`D:\Facturas`,
+      String.raw`C:\Windows`,
+    ]);
+    expect(launch.allowedTools).toEqual(
+      expect.arrayContaining([
+        "Read(//d/Facturas/**)",
+        "Edit(//d/Facturas/**)",
+        "Read(//c/Windows/**)",
+      ]),
+    );
+    expect(launch.allowedTools).not.toContain("Edit(//c/Windows/**)");
+    expect(launch.disallowedTools).toEqual(
+      expect.arrayContaining(["WebSearch", "WebFetch"]),
+    );
+    expect(launch.connectors).toEqual(["context7"]);
+    // Every bot can search the web and read until told otherwise.
+    expect(botLaunch("assistant").allowedTools).toEqual(
+      expect.arrayContaining(["WebSearch", "Read"]),
+    );
   });
 
   it("passes the denied tools to Claude", () => {

@@ -557,6 +557,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
         ...(bot?.allowedTools ?? []),
       ],
       disallowedTools: bot?.disallowedTools,
+      addDirs: bot?.addDirs,
       pluginDirs: await bundledPluginDirs(["monobot", ...(bot?.plugins ?? [])]),
     }),
     input.cwd,
@@ -1781,7 +1782,7 @@ function settingsKeyFor(input: HarnessSessionInput): string {
   // resuming the same conversation.
   const bot = botLaunchForSession(input.sessionId);
   const botKey = bot
-    ? `:${JSON.stringify([bot.plugins, bot.allowedTools])}`
+    ? `:${JSON.stringify([bot.plugins, bot.allowedTools, bot.addDirs, bot.connectors ?? null])}`
     : "";
   return `${input.providerAccountId ?? "default"}${botKey}:${claudeSettingsKey({
     model: nativeModelId(input.model),
@@ -1809,7 +1810,11 @@ function launchOptions(
   allowedTools?: string[];
 } {
   const native = nativeModelId(input.model);
-  const connectors = enabledConnectors();
+  // A bot may narrow the app's connectors to the ones its job needs.
+  const only = botLaunchForSession(input.sessionId)?.connectors;
+  const connectors = enabledConnectors().filter(
+    (connector) => !only || only.includes(connector.id),
+  );
   const effortRaw = input.modelSettings?.effort;
   const context = input.modelSettings?.context;
   const settings: ClaudeCliSettings = {};
