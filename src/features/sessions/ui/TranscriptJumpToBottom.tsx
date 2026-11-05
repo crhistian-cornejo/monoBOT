@@ -43,7 +43,7 @@ export function TranscriptJumpToBottom({
         aria-label="Jump to latest"
         data-jump-to-bottom
         onClick={onJump}
-        className="pointer-events-auto grid size-6 place-items-center rounded-md border border-content/15 bg-content/10 text-content shadow-md hover:bg-content/5 backdrop-blur-md"
+        className="pointer-events-auto grid size-6 place-items-center rounded-md [[data-floating-mono]_&]:rounded-none border border-content/15 bg-content/10 text-content shadow-md hover:bg-content/5 backdrop-blur-md"
       >
         <ChevronDown className="size-4" strokeWidth={2} />
       </button>

@@ -25,8 +25,8 @@ const SELECT: &str = "mono-chat:";
 const CHANGED: &str = "mono_chat_changed";
 const REQUEST: &str = "mono_chat_request";
 /// A 384pt conversation plus the 56pt Mono rail beside it.
-const WIDTH: f64 = 440.0;
-const HEIGHT: f64 = 560.0;
+const WIDTH: f64 = 360.0;
+const HEIGHT: f64 = 460.0;
 
 #[derive(Clone, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -609,7 +609,7 @@ fn build(app: &AppHandle, mono_id: &str) -> tauri::Result<WebviewWindow> {
     )
     .title("Mono chat")
     .inner_size(WIDTH, height)
-    .min_inner_size(370.0, 420.0)
+    .min_inner_size(320.0, 320.0)
     .resizable(true)
     .maximizable(false)
     .minimizable(false)

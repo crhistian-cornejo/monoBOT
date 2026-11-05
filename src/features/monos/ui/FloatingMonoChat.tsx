@@ -31,6 +31,10 @@ import { MonoComposer } from "./MonoComposer";
 import { MonoStatusDot } from "./MonoRailMascot";
 import { MonoStatus } from "./MonoStatus";
 import { MONO_PAGE_TURNS } from "../../sessions/data/sessionStore";
+import {
+  TranscriptJumpToBottom,
+  useTranscriptJumpVisibility,
+} from "../../sessions/ui/TranscriptJumpToBottom";
 
 const EMPTY: FloatingMonoView = {
   monos: [],
@@ -39,16 +43,12 @@ const EMPTY: FloatingMonoView = {
   error: null,
 };
 const BUTTON =
-  "grid size-7 shrink-0 place-items-center rounded-md text-content/45 hover:bg-content/8 hover:text-content disabled:opacity-30";
+  "grid size-5 shrink-0 place-items-center text-content/45 hover:bg-content/8 hover:text-content disabled:opacity-30";
 const SURFACE =
-  "sidebar-glass flex h-full min-h-0 overflow-hidden rounded-2xl font-sans text-content";
-/**
- * Inset from the window by its gap, so its corners follow the window's. Under
- * native glass both surfaces are clear, so the card's spread shadow shades
- * everything around it instead: the rail and the gaps, never the chat.
- */
+  "sidebar-glass flex h-full min-h-0 overflow-hidden font-sans text-content";
+/** Flush with the rail and the window: square, divided by a single line. */
 const CARD =
-  "body-glass relative my-1.5 mr-1.5 flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-xl shadow-[0_0_0_100vmax_rgb(0_0_0/0.28)] [html.theme-light_&]:shadow-[0_0_0_100vmax_rgb(0_0_0/0.05)]";
+  "body-glass relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden border-l border-content/10";
 
 export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
   const [view, setView] = useState(EMPTY);
@@ -167,32 +167,32 @@ export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
       <div className={CARD}>
         <header
           data-tauri-drag-region
-          className="flex shrink-0 items-center gap-2 border-b border-content/8 px-3 py-3"
+          className="flex shrink-0 items-center gap-2 border-b border-content/8 px-2 py-1.5"
         >
           {mono ? (
             <PixelMascot
               name={mono.mascot}
               color={mono.color}
               status={state.status}
-              className="pointer-events-none size-7 shrink-0"
+              className="pointer-events-none size-5 shrink-0"
             />
           ) : null}
           <div
             data-tauri-drag-region
-            className="flex min-h-7 min-w-0 flex-1 flex-col justify-center"
+            className="flex min-h-5 min-w-0 flex-1 items-baseline gap-2"
           >
             {mono ? (
               <>
                 <h1
                   data-tauri-drag-region
-                  className="truncate text-[13px] leading-4 font-semibold"
+                  className="truncate text-[12px] leading-4 font-semibold"
                 >
                   {mono.name}
                 </h1>
                 <MonoStatus
                   state={state}
                   color={mono.color}
-                  className="pointer-events-none text-[11px] leading-3.5 text-content/45"
+                  className="pointer-events-none shrink-0 text-[11px] leading-4 text-content/45"
                 />
               </>
             ) : null}
@@ -205,7 +205,7 @@ export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
               className={BUTTON}
               onClick={() => void action({ kind: "stop" })}
             >
-              <Square className="size-3 fill-current" />
+              <Square className="size-2.5 fill-current" />
             </button>
           ) : null}
           <button
@@ -216,7 +216,7 @@ export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
             className={BUTTON}
             onClick={() => void action({ kind: "reveal" })}
           >
-            <ExternalLink className="size-3.5" />
+            <ExternalLink className="size-3" />
           </button>
           <button
             type="button"
@@ -225,7 +225,7 @@ export function FloatingMonoChat({ onShown }: { onShown: () => void }) {
             className={BUTTON}
             onClick={() => void getCurrentWindow().hide()}
           >
-            <X className="size-4" />
+            <X className="size-3.5" />
           </button>
         </header>
         {loading ? (
@@ -308,10 +308,10 @@ function MonoRail({
       aria-label="Monos"
       data-floating-mono-rail
       data-tauri-drag-region
-      // 17px puts the first mascot's center level with the header's: the
-      // card's 6px inset, the header's 12px padding, and half of its 30px
-      // name row, less half this 32px button.
-      className="relative z-10 flex w-14 shrink-0 flex-col items-center gap-1.5 overflow-y-auto pt-[17px] pb-3 [scrollbar-width:none]"
+      // 3px puts the first mascot's center level with the header's: the
+      // header's 6px padding and half of its 20px name row, less half this
+      // 26px button.
+      className="relative z-10 flex w-9 shrink-0 flex-col items-center gap-0.5 overflow-y-auto pt-[3px] pb-1.5 [scrollbar-width:none]"
     >
       {monos.map((mono) => {
         const selected = mono.id === currentId;
@@ -322,7 +322,7 @@ function MonoRail({
           >
             <span
               aria-hidden
-              className={`absolute top-1/2 left-0 w-1 -translate-y-1/2 rounded-r-full bg-content transition-[height,opacity] duration-150 motion-reduce:transition-none ${
+              className={`absolute top-1/2 left-0 w-0.5 -translate-y-1/2 bg-content transition-[height,opacity] duration-150 motion-reduce:transition-none ${
                 selected
                   ? "h-5 opacity-100"
                   : "h-2 opacity-0 group-hover:opacity-100"
@@ -334,20 +334,22 @@ function MonoRail({
               aria-label={mono.name}
               aria-current={selected ? "true" : undefined}
               onClick={() => onSwitch(mono.id)}
-              className={`grid size-8 place-items-center rounded-lg transition-opacity ${
-                selected ? "" : "opacity-40 hover:opacity-100 focus-visible:opacity-100"
+              className={`grid size-6.5 place-items-center transition-opacity ${
+                selected
+                  ? ""
+                  : "opacity-40 hover:opacity-100 focus-visible:opacity-100"
               }`}
             >
               <PixelMascot
                 name={mono.mascot}
                 color={mono.color}
-                className="pointer-events-none size-7"
+                className="pointer-events-none size-5"
               />
             </button>
             <MonoStatusDot
               status={mono.status}
               color={mono.color}
-              className="pointer-events-none top-0.5 right-2.5 size-2"
+              className="pointer-events-none top-0.5 right-0.5 size-1.5"
             />
           </div>
         );
@@ -361,7 +363,7 @@ function MonoRail({
           setCreating(true);
           void onCreate().finally(() => setCreating(false));
         }}
-        className="grid size-8 shrink-0 place-items-center rounded-lg border border-content/10 bg-content/5 text-content/60 hover:bg-content/10 hover:text-content disabled:opacity-40"
+        className="grid size-6.5 shrink-0 place-items-center border border-content/10 bg-content/5 text-content/60 hover:bg-content/10 hover:text-content disabled:opacity-40"
       >
         <Plus className="size-3.5" strokeWidth={1.75} />
       </button>
@@ -383,6 +385,11 @@ function FloatingConversation({
   onOpenArtifact: (id: string) => void;
 }) {
   const transcript = useMonoTranscript(session, true);
+  const jumpVisibility = useTranscriptJumpVisibility();
+  const jumpToBottom = useRef<(() => void) | null>(null);
+  const onJumpToBottomReady = useCallback((jump: () => void) => {
+    jumpToBottom.current = jump;
+  }, []);
   return (
     <div
       className="flex min-h-0 flex-1 flex-col"
@@ -435,6 +442,8 @@ function FloatingConversation({
           onReturnToLatest={
             transcript.viewingOlderPage ? transcript.latest : undefined
           }
+          onJumpToBottomChange={jumpVisibility.setVisible}
+          onJumpToBottomReady={onJumpToBottomReady}
           harness={session.harness}
           model={session.model}
           modelSettings={session.modelSettings}
@@ -448,6 +457,15 @@ function FloatingConversation({
           onOpenDiff={() => void action({ kind: "reveal" })}
           onShowWork={() => void action({ kind: "reveal" })}
           onOpenSession={() => void action({ kind: "reveal" })}
+        />
+        <TranscriptJumpToBottom
+          visibility={jumpVisibility}
+          onJump={() => {
+            if (transcript.viewingOlderPage) {
+              transcript.latest();
+              requestAnimationFrame(() => jumpToBottom.current?.());
+            } else jumpToBottom.current?.();
+          }}
         />
       </div>
       {session.pendingQuestion ? (
@@ -483,8 +501,9 @@ function FloatingConversation({
           </button>
         </div>
       ) : null}
-      <div className="shrink-0 px-1 pb-1">
+      <div className="shrink-0">
         <MonoComposer
+          square
           sessionId={`floating:${session.id}`}
           name={mono.name}
           enabled={!session.worktreeRemoved}
@@ -568,12 +587,12 @@ function ArtifactSheet({
         role="dialog"
         aria-modal="true"
         aria-label={artifact?.title ?? label}
-        className={`absolute inset-x-0 top-10 bottom-0 flex flex-col rounded-t-xl border-t border-content/10 bg-content/5 shadow-[0_-12px_32px_rgb(0_0_0/0.18)] backdrop-blur-3xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
+        className={`absolute inset-x-0 top-10 bottom-0 flex flex-col border-t border-content/10 bg-content/5 shadow-[0_-12px_32px_rgb(0_0_0/0.18)] backdrop-blur-3xl transition-transform duration-300 ease-out motion-reduce:transition-none ${
           open ? "translate-y-0" : "translate-y-full"
         }`}
       >
         <div aria-hidden className="flex shrink-0 justify-center pt-2">
-          <span className="h-1 w-9 rounded-full bg-content/20" />
+          <span className="h-0.5 w-9 bg-content/20" />
         </div>
         <header className="flex shrink-0 items-center gap-1 px-3 pt-1 pb-2">
           <span className="min-w-0 flex-1 truncate px-1 text-[12px] text-content/50">

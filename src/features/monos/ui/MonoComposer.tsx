@@ -75,6 +75,8 @@ type Props = {
   tools?: ReactNode;
   /** Offers the mic; off where something else holds it, like a call. */
   dictation?: boolean;
+  /** Square corners and tighter padding, for the floating chat. */
+  square?: boolean;
 };
 
 /**
@@ -97,7 +99,9 @@ export function MonoComposer({
   controls,
   tools,
   dictation: dictates = true,
+  square = false,
 }: Props) {
+  const corner = square ? "rounded-none" : "rounded-md";
   const [text, setText] = useState(() => getComposerDraft(sessionId) ?? "");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const autocorrect = useComposerAutocorrect();
@@ -382,7 +386,7 @@ export function MonoComposer({
       aria-label="Send"
       title={pendingReads ? "Reading attachments…" : "Send"}
       disabled={!ready}
-      className={`primary-action grid size-6.5 place-items-center rounded-md transition-[background-color,color,transform] duration-150 active:scale-90 disabled:cursor-default ${className}`}
+      className={`primary-action grid size-6.5 place-items-center ${corner} transition-[background-color,color,transform] duration-150 active:scale-90 disabled:cursor-default ${className}`}
     >
       <ArrowUp className="size-3.5" strokeWidth={2} />
     </button>
@@ -390,7 +394,7 @@ export function MonoComposer({
 
   return (
     <form
-      className="mx-auto w-full max-w-4xl shrink-0 p-1.5 pt-0 font-sans"
+      className={`mx-auto w-full max-w-4xl shrink-0 font-sans ${square ? "p-0.5 pt-0" : "p-1.5 pt-0"}`}
       onSubmit={(event) => {
         event.preventDefault();
         send();
@@ -398,10 +402,12 @@ export function MonoComposer({
     >
       <div
         ref={box}
-        className={`agent-chat-composer relative rounded-lg border bg-content/3 backdrop-blur-sm ${fileDrag ? "border-accent/60" : "border-content/10 has-focus:border-content/20"}`}
+        className={`agent-chat-composer relative ${square ? "rounded-none" : "rounded-lg"} border bg-content/3 backdrop-blur-sm ${fileDrag ? "border-accent/60" : "border-content/10 has-focus:border-content/20"}`}
       >
         {fileDrag ? (
-          <div className="pointer-events-none absolute inset-0 z-20 grid place-items-center rounded-lg bg-accent/8 text-[12px] text-content/70">
+          <div
+            className={`pointer-events-none absolute inset-0 z-20 grid place-items-center ${square ? "rounded-none" : "rounded-lg"} bg-accent/8 text-[12px] text-content/70`}
+          >
             Drop files to attach
           </div>
         ) : null}
@@ -432,7 +438,7 @@ export function MonoComposer({
         {inline ? (
           <div
             data-layout={stacked ? "multiline" : "inline"}
-            className={`relative grid min-h-9 ${INPUT_COLUMNS} items-center gap-x-1.5 p-1 ${stacked ? "gap-y-1" : ""}`}
+            className={`relative grid ${square ? "min-h-8" : "min-h-9"} ${INPUT_COLUMNS} items-center gap-x-1.5 p-1 ${stacked ? "gap-y-1" : ""}`}
           >
             <div
               aria-hidden="true"
@@ -448,7 +454,7 @@ export function MonoComposer({
               />
             </div>
             {attachButton(
-              `col-start-1 grid size-6.5 place-items-center rounded-md bg-content/8 text-content/55 hover:bg-content/12 hover:text-content ${stacked ? "row-start-2" : "row-start-1"}`,
+              `col-start-1 grid size-6.5 place-items-center ${corner} bg-content/8 text-content/55 hover:bg-content/12 hover:text-content ${stacked ? "row-start-2" : "row-start-1"}`,
             )}
             {input(
               `row-start-1 ${stacked ? "col-span-3 col-start-1 px-1.5" : "col-start-2"}`,

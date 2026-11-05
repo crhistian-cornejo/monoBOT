@@ -206,6 +206,12 @@ const LOADING_OUTPUT = "Loading output…";
  * above unmounts. Each turn retains its DOM, fibers and markdown output.
  */
 const HISTORY_TRIM_DELAY_MS = 2000;
+/**
+ * After "jump to latest", the inertia of the scroll that preceded the click is
+ * still arriving as wheel events. Within this window they must not release the
+ * pin or drag the view back up.
+ */
+const JUMP_SETTLE_MS = 700;
 
 type Props = {
   blocks: Block[];
@@ -374,6 +380,7 @@ function AgentTranscriptComponent({
   const scrollAdjustments = useRef<number | undefined>(undefined);
   const pointerScrolling = useRef(false);
   const wheelHold = useRef(0);
+  const jumpSettleUntil = useRef(0);
   const prependHeight = useRef<number | null>(null);
   const prependAnchor = useRef<{ element: HTMLElement; top: number } | null>(
     null,
@@ -520,6 +527,7 @@ function AgentTranscriptComponent({
   );
 
   const jumpToBottom = useCallback(() => {
+    jumpSettleUntil.current = performance.now() + JUMP_SETTLE_MS;
     stickToBottom.current = true;
     distanceFromBottom.current = 0;
     setShowJump(false);
@@ -559,8 +567,15 @@ function AgentTranscriptComponent({
   useEffect(() => {
     if (!visible || !scrollerEl) return;
     const onScroll = () => {
-      if (scrollerEl.isConnected && scrollerEl.clientHeight > 0)
-        syncPinned(scrollerEl);
+      if (!scrollerEl.isConnected || scrollerEl.clientHeight <= 0) return;
+      // Momentum from before a jump can nudge the view off the end; put it back.
+      if (
+        stickToBottom.current &&
+        performance.now() < jumpSettleUntil.current &&
+        !isNearBottom(scrollerEl, 1)
+      )
+        pinTranscript(scrollerEl);
+      syncPinned(scrollerEl);
     };
     let release: ReturnType<typeof setTimeout> | undefined;
     let heldScrollTop: number | undefined;
@@ -587,6 +602,7 @@ function AgentTranscriptComponent({
     const onWheel = (e: WheelEvent) => {
       if (innerScrollerTakes(scrollerEl, e)) return;
       if (e.deltaY < 0) {
+        if (performance.now() < jumpSettleUntil.current) return;
         pauseFollowing();
       } else if (e.deltaY === 0) {
         // A trackpad gesture can open with an event that carries no
@@ -663,7 +679,14 @@ function AgentTranscriptComponent({
       scrollerEl.removeEventListener("touchstart", onTouchStart);
       scrollerEl.removeEventListener("touchmove", onTouchMove);
     };
-  }, [scrollerEl, followTranscript, setShowJump, syncPinned, visible]);
+  }, [
+    scrollerEl,
+    followTranscript,
+    pinTranscript,
+    setShowJump,
+    syncPinned,
+    visible,
+  ]);
 
   useLayoutEffect(() => {
     stickToBottom.current = true;
@@ -1119,6 +1142,7 @@ function AgentTranscriptComponent({
     wheelHold,
     bottomAligned,
     rememberScroll,
+    jumpSettleUntil,
   );
 
   return (
@@ -1862,7 +1886,10 @@ function DaySeparator({ at }: { at: number }) {
       data-day-separator
       className="flex items-center justify-center px-4 pb-3 pt-6 font-sans text-[12px]"
     >
-      <span className="rounded-full bg-content/[0.07] px-3 py-1 leading-4">
+      <span
+        data-pill
+        className="rounded-full bg-content/[0.07] px-3 py-1 leading-4"
+      >
         <span className="font-semibold text-content/75">{day}</span>{" "}
         <span className="text-content/45">{time}</span>
       </span>
@@ -3000,7 +3027,10 @@ function WorkFoldLine({
 
 function MonoSignaturePill({ children }: { children: ReactNode }) {
   return (
-    <span className="flex min-w-0 items-center gap-1.5 rounded-full bg-content/[0.07] py-0.5 pr-3 pl-2">
+    <span
+      data-pill
+      className="flex min-w-0 items-center gap-1.5 rounded-full bg-content/[0.07] py-0.5 pr-3 pl-2"
+    >
       {children}
     </span>
   );

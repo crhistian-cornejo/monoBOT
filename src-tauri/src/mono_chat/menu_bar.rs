@@ -17,16 +17,16 @@ use objc2_app_kit::{
 use objc2_foundation::{NSPoint, NSRect, NSSize, NSString};
 use serde::Deserialize;
 
-const WIDTH: f64 = 260.0;
-const PORTRAIT_SIZE: f64 = 28.0;
-const ROW_HEIGHT: f64 = 34.0;
+const WIDTH: f64 = 200.0;
+const PORTRAIT_SIZE: f64 = 22.0;
+const ROW_HEIGHT: f64 = 26.0;
 /// Where AppKit placed the image and title of a plain item, so rows with a
 /// view line up with the header the same way.
-const IMAGE_X: f64 = 15.0;
-const TITLE_X: f64 = 49.0;
-const PORTRAIT_PIXELS: usize = 56;
+const IMAGE_X: f64 = 10.0;
+const TITLE_X: f64 = 40.0;
+const PORTRAIT_PIXELS: usize = 44;
 /// Pixels per mascot unit: a 1.5-unit sprite cell lands on exactly 3 pixels,
-/// and the 16-unit sprite fills a little over half the circle.
+/// and the 16-unit sprite fills most of the square tile.
 const SPRITE_SCALE: f64 = 2.0;
 
 pub(super) struct Action {
@@ -37,7 +37,7 @@ pub(super) struct Action {
     destructive: bool,
 }
 
-/// The actions below the Monos, each in its own group. Each gets a circle
+/// The actions below the Monos, each in its own group. Each gets a square
 /// like a portrait's so every title in the menu shares one column.
 pub(super) const ACTIONS: [Action; 2] = [
     Action {
@@ -121,7 +121,7 @@ fn show_image(item: &NSMenuItem) {
     }
 }
 
-/// An SF Symbol in a faint circle the size of a Mono portrait. As a template
+/// An SF Symbol in a faint square the size of a Mono portrait. As a template
 /// image it follows the menu's text color, including when highlighted; a
 /// destructive action keeps its red instead.
 fn action_icon(action: &Action) -> Option<Retained<NSImage>> {
@@ -145,9 +145,9 @@ fn action_icon(action: &Action) -> Option<Retained<NSImage>> {
         NSColor::colorWithWhite_alpha(0.0, 0.12)
     };
     let draw = block2::RcBlock::new(move |rect: NSRect| {
-        // Matches the portrait's circle: 1pt inside the image, faint ink.
+        // Matches the portrait's square: 1pt inside the image, faint ink.
         ink.setFill();
-        NSBezierPath::bezierPathWithOvalInRect(NSRect::new(
+        NSBezierPath::bezierPathWithRect(NSRect::new(
             NSPoint::new(rect.origin.x + 1.0, rect.origin.y + 1.0),
             NSSize::new(rect.size.width - 2.0, rect.size.height - 2.0),
         ))
@@ -187,14 +187,10 @@ define_class!(
             }
             let bounds = self.bounds();
             NSColor::labelColor().colorWithAlphaComponent(0.1).setFill();
-            NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(
-                NSRect::new(
-                    NSPoint::new(bounds.origin.x + 5.0, bounds.origin.y),
-                    NSSize::new(bounds.size.width - 10.0, bounds.size.height),
-                ),
-                10.0,
-                10.0,
-            )
+            NSBezierPath::bezierPathWithRect(NSRect::new(
+                NSPoint::new(bounds.origin.x + 4.0, bounds.origin.y),
+                NSSize::new(bounds.size.width - 8.0, bounds.size.height),
+            ))
             .fill();
         }
 
@@ -231,13 +227,13 @@ fn row(
         view.addSubview(&icon);
     }
     let label = NSTextField::labelWithString(&NSString::from_str(title), mtm);
-    label.setFont(Some(&NSFont::systemFontOfSize(14.0)));
+    label.setFont(Some(&NSFont::systemFontOfSize(13.0)));
     label.setTextColor(Some(color));
     label.sizeToFit();
     let height = label.frame().size.height;
     label.setFrame(NSRect::new(
         NSPoint::new(TITLE_X, ((ROW_HEIGHT - height) / 2.0).round()),
-        NSSize::new(WIDTH - TITLE_X - 16.0, height),
+        NSSize::new(WIDTH - TITLE_X - 12.0, height),
     ));
     label.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
     view.addSubview(&label);
@@ -246,7 +242,7 @@ fn row(
 
 fn style_menu(menu: &NSMenu, mtm: MainThreadMarker) {
     menu.setMinimumWidth(WIDTH);
-    unsafe { menu.setFont(Some(&NSFont::systemFontOfSize(14.0))) };
+    unsafe { menu.setFont(Some(&NSFont::systemFontOfSize(13.0))) };
     let Some(header) = menu.itemAtIndex(0) else {
         return;
     };
@@ -254,16 +250,16 @@ fn style_menu(menu: &NSMenu, mtm: MainThreadMarker) {
     // menus. Only this noninteractive item has a custom view.
     let view = NSView::initWithFrame(
         NSView::alloc(mtm),
-        NSRect::new(NSPoint::ZERO, NSSize::new(WIDTH, 30.0)),
+        NSRect::new(NSPoint::ZERO, NSSize::new(WIDTH, 24.0)),
     );
     let title = NSTextField::labelWithString(&NSString::from_str("Monos"), mtm);
-    title.setFont(Some(&NSFont::systemFontOfSize_weight(13.0, unsafe {
+    title.setFont(Some(&NSFont::systemFontOfSize_weight(12.0, unsafe {
         NSFontWeightSemibold
     })));
     title.setTextColor(Some(&NSColor::labelColor()));
     title.setFrame(NSRect::new(
-        NSPoint::new(16.0, 7.0),
-        NSSize::new(WIDTH - 32.0, 17.0),
+        NSPoint::new(12.0, 4.0),
+        NSSize::new(WIDTH - 24.0, 16.0),
     ));
     title.setAutoresizingMask(NSAutoresizingMaskOptions::ViewWidthSizable);
     view.addSubview(&title);
@@ -282,18 +278,15 @@ pub(super) fn icon_for(
 
 fn portrait(rects: &[MascotRect]) -> tauri::image::Image<'static> {
     // Feed real RGBA pixels to IconMenuItemBuilder so the native menu model
-    // owns the image. Render at 2× for a crisp 28pt Retina portrait, using the
+    // owns the image. Render at 2× for a crisp 22pt Retina portrait, using the
     // same shaded layers and crisp rectangle edges as the in-app mascot.
     let mut rgba = vec![0; PORTRAIT_PIXELS * PORTRAIT_PIXELS * 4];
     let center = PORTRAIT_PIXELS as f64 / 2.0;
-    // The sprite sits centred in the circle, like the glyphs in macOS's
-    // own status menus, rather than filling it.
+    // The sprite sits centred in a square tile, one pixel inside the image.
     let inset = center - 8.0 * SPRITE_SCALE;
-    for y in 0..PORTRAIT_PIXELS {
-        for x in 0..PORTRAIT_PIXELS {
-            let distance =
-                ((x as f64 + 0.5 - center).powi(2) + (y as f64 + 0.5 - center).powi(2)).sqrt();
-            let alpha = (center - 2.0 - distance + 0.5).clamp(0.0, 1.0) * 0.12;
+    for y in 1..PORTRAIT_PIXELS - 1 {
+        for x in 1..PORTRAIT_PIXELS - 1 {
+            let alpha = 0.12;
             blend(
                 &mut rgba[(y * PORTRAIT_PIXELS + x) * 4..][..4],
                 [0.5, 0.5, 0.5, alpha],
@@ -393,7 +386,7 @@ mod tests {
     }
 
     #[test]
-    fn menu_portrait_contains_the_mascot_pixels_and_transparent_corners() {
+    fn menu_portrait_contains_the_mascot_pixels_on_a_square_tile() {
         let image = portrait(&[
             MascotRect {
                 x: 2.0,
@@ -410,14 +403,15 @@ mod tests {
                 fill: "#263331".into(),
             },
         ]);
-        assert_eq!((image.width(), image.height()), (56, 56));
-        let pixel = |x: usize, y: usize| &image.rgba()[(y * 56 + x) * 4..][..4];
+        assert_eq!((image.width(), image.height()), (44, 44));
+        let pixel = |x: usize, y: usize| &image.rgba()[(y * 44 + x) * 4..][..4];
         assert_eq!(pixel(0, 0), [0, 0, 0, 0]);
-        // The 16-unit sprite spans the middle 32 pixels, inset 12 on each side.
-        assert_eq!(pixel(18, 18), [255, 0, 0, 255]);
-        assert_eq!(pixel(23, 23), [38, 51, 49, 255]);
-        assert_eq!(pixel(23, 36), [255, 0, 0, 255], "sprite stays upright");
-        assert_ne!(pixel(14, 28), [255, 0, 0, 255], "sprite leaves a margin");
+        // The 16-unit sprite spans the middle 32 pixels, inset 6 on each side.
+        assert_eq!(pixel(12, 12), [255, 0, 0, 255]);
+        assert_eq!(pixel(17, 17), [38, 51, 49, 255]);
+        assert_eq!(pixel(17, 26), [255, 0, 0, 255], "sprite stays upright");
+        assert_ne!(pixel(3, 22), [255, 0, 0, 255], "sprite leaves a margin");
+        assert_eq!(pixel(3, 3)[3], 31, "the tile is a faint square");
     }
 
     #[test]
@@ -497,7 +491,7 @@ mod tests {
                 }],
             },
         ];
-        let center = (28 * 56 + 28) * 4;
+        let center = (22 * 44 + 22) * 4;
         assert_eq!(
             &icon_for("first", &mascots).unwrap().rgba()[center..][..4],
             [255, 0, 0, 255]

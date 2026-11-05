@@ -29,19 +29,17 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use objc2::rc::Retained;
-use objc2::runtime::{Bool, NSObject};
+use objc2::runtime::NSObject;
 use objc2::{
     define_class, msg_send, sel, AnyThread, DefinedClass, MainThreadMarker, MainThreadOnly,
 };
 use objc2_app_kit::{
-    NSApplication, NSAutoresizingMaskOptions, NSBezierPath, NSColor, NSImage, NSImageResizingMode,
-    NSMenu, NSMenuItem, NSRequestUserAttentionType, NSTitlebarSeparatorStyle,
-    NSUserInterfaceItemIdentification, NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial,
-    NSVisualEffectState, NSVisualEffectView, NSWindow, NSWindowOrderingMode,
+    NSApplication, NSAutoresizingMaskOptions, NSColor, NSMenu, NSMenuItem,
+    NSRequestUserAttentionType, NSTitlebarSeparatorStyle, NSUserInterfaceItemIdentification,
+    NSView, NSVisualEffectBlendingMode, NSVisualEffectMaterial, NSVisualEffectState,
+    NSVisualEffectView, NSWindow, NSWindowOrderingMode,
 };
-use objc2_foundation::{
-    NSArray, NSDictionary, NSEdgeInsets, NSNumber, NSRect, NSSize, NSString, NSUserDefaults,
-};
+use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSRect, NSString, NSUserDefaults};
 use objc2_quartz_core::CALayer;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use tauri::{AppHandle, Manager, WebviewWindow, WindowEvent};
@@ -62,8 +60,6 @@ const GLASS_BACKING_ID: &str = "monocode.webview-glass-backing";
 const GLASS_TINT_ID: &str = "monocode.webview-glass-tint";
 const FLOATING_GLASS_ID: &str = "monocode.floating-glass";
 const FLOATING_CONTENT_ID: &str = "monocode.floating-content";
-/// Matches the floating chat's `rounded-2xl` CSS outline.
-const FLOATING_CORNER_RADIUS: f64 = 16.0;
 
 const RTLD_DEFAULT: *mut c_void = -2isize as *mut c_void;
 
@@ -253,23 +249,12 @@ pub fn prepare_floating_window(window: &WebviewWindow) {
     glass.setMaterial(NSVisualEffectMaterial::UnderWindowBackground);
     glass.setBlendingMode(NSVisualEffectBlendingMode::BehindWindow);
     glass.setState(NSVisualEffectState::Active);
-    glass.setMaskImage(Some(&floating_corner_mask()));
-    glass.setWantsLayer(true);
-    if let Some(layer) = glass.layer() {
-        layer.setCornerRadius(FLOATING_CORNER_RADIUS);
-        layer.setMasksToBounds(true);
-    }
 
     glass.setAutoresizingMask(
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
     // Wry owns this host and its responder hierarchy. Insert the material
     // below WebKit instead of replacing or reparenting the content view.
-    content.setWantsLayer(true);
-    if let Some(layer) = content.layer() {
-        layer.setCornerRadius(FLOATING_CORNER_RADIUS);
-        layer.setMasksToBounds(true);
-    }
     content.addSubview_positioned_relativeTo(&glass, NSWindowOrderingMode::Below, None);
 
     // Tint must sit above the material but below WebKit. Painting the host's
@@ -280,38 +265,9 @@ pub fn prepare_floating_window(window: &WebviewWindow) {
         NSAutoresizingMaskOptions::ViewWidthSizable | NSAutoresizingMaskOptions::ViewHeightSizable,
     );
     tint.setWantsLayer(true);
-    if let Some(layer) = tint.layer() {
-        layer.setCornerRadius(FLOATING_CORNER_RADIUS);
-        layer.setMasksToBounds(true);
-    }
     content.addSubview_positioned_relativeTo(&tint, NSWindowOrderingMode::Above, Some(&glass));
     native.setHasShadow(true);
     set_launch_background(window, 23, 23, 23);
-}
-
-fn floating_corner_mask() -> Retained<NSImage> {
-    // A one-point stretchable center preserves the 16pt corners at every
-    // window size and screen scale, without regenerating a mask on resize.
-    let size = FLOATING_CORNER_RADIUS * 2.0 + 1.0;
-    let draw = block2::RcBlock::new(|rect| {
-        NSColor::blackColor().setFill();
-        NSBezierPath::bezierPathWithRoundedRect_xRadius_yRadius(
-            rect,
-            FLOATING_CORNER_RADIUS,
-            FLOATING_CORNER_RADIUS,
-        )
-        .fill();
-        Bool::YES
-    });
-    let mask = NSImage::imageWithSize_flipped_drawingHandler(NSSize::new(size, size), false, &draw);
-    mask.setCapInsets(NSEdgeInsets {
-        top: FLOATING_CORNER_RADIUS,
-        left: FLOATING_CORNER_RADIUS,
-        bottom: FLOATING_CORNER_RADIUS,
-        right: FLOATING_CORNER_RADIUS,
-    });
-    mask.setResizingMode(NSImageResizingMode::Stretch);
-    mask
 }
 
 fn set_native_background(window: &WebviewWindow, native: &NSWindow, color: &NSColor) {
@@ -1108,25 +1064,6 @@ mod tests {
         result.unwrap_or_else(|exception| {
             panic!("Core Animation rejected the native backdrop configuration: {exception:?}")
         });
-    }
-
-    #[test]
-    fn floating_mask_supports_appkit_stretching_without_an_exception() {
-        let result = objc2::exception::catch(|| {
-            let mask = floating_corner_mask();
-            // AppKit draws the retained block later, when it needs the mask.
-            // Exercise that callback as well as the image constructor.
-            let image = unsafe {
-                mask.CGImageForProposedRect_context_hints(std::ptr::null_mut(), None, None)
-            };
-            assert!(image.is_some(), "AppKit must be able to rasterize the mask");
-            mask
-        });
-        let mask = result.unwrap_or_else(|exception| {
-            panic!("AppKit rejected the floating window mask: {exception:?}")
-        });
-        assert_eq!(mask.size(), NSSize::new(33.0, 33.0));
-        assert_eq!(mask.capInsets().top, FLOATING_CORNER_RADIUS);
     }
 
     fn test_bundle_exe_path(app_name: &str) -> (PathBuf, PathBuf) {

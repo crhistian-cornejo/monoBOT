@@ -110,6 +110,11 @@ export function useBottomChatMotion(
   smoothReveals = false,
   /** Acknowledge native offsets written by the animation, including handoff. */
   onScrollAdjust?: (scroller: HTMLDivElement) => void,
+  /**
+   * Until this time upward wheel events are inertia left over from before a
+   * jump to the end, and must not release it.
+   */
+  ignoreWheelUpUntil?: RefObject<number>,
 ) {
   const latest = useRef({
     blocks,
@@ -377,6 +382,11 @@ export function useBottomChatMotion(
     };
     const onWheel = (event: WheelEvent) => {
       // A nested code block scrolling up leaves the reader at the end.
+      if (
+        event.deltaY < 0 &&
+        performance.now() < (ignoreWheelUpUntil?.current ?? 0)
+      )
+        return;
       if (event.deltaY < 0 && !innerScrollerTakes(scroller, event)) pause();
     };
     const onScroll = () => {
@@ -411,6 +421,7 @@ export function useBottomChatMotion(
     holdUntil,
     smoothReveals,
     onScrollAdjust,
+    ignoreWheelUpUntil,
   ]);
 
   // Run after the transcript's pin/restore effects, before this commit paints.
