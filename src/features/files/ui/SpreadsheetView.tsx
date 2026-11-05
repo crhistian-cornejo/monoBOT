@@ -15,7 +15,6 @@ import { copyText } from "../../../platform/tauri/clipboard";
 import {
   basename,
   openPathWithDefaultApp,
-  readBinaryFile,
   REMOTE_PATH_PREFIX,
   revealPath,
 } from "../../../platform/tauri/fs";
@@ -30,7 +29,8 @@ import {
   type SheetCell,
   type Workbook,
 } from "../model/spreadsheet";
-import { readSpreadsheet } from "../model/spreadsheetWorker";
+import { openSpreadsheet } from "../model/spreadsheetCache";
+import { ScrollStrip } from "../../../shared/ui/ScrollStrip";
 import { FileCard } from "./BinaryFileView";
 import { SpreadsheetChart } from "./SpreadsheetChart";
 import { ImageLightbox } from "../../../shared/ui/ImageLightbox";
@@ -72,21 +72,18 @@ function SpreadsheetFile({ path, cwd }: Props) {
     const controller = new AbortController();
     // A reload keeps what is shown until the new read lands.
     if (reloadKey === 0) setState({ status: "loading" });
-    readBinaryFile(path)
-      .then((bytes) => readSpreadsheet(bytes, path, controller.signal))
-      .then(
-        (workbook) => {
-          if (!controller.signal.aborted)
-            setState({ status: "ready", workbook });
-        },
-        (cause: unknown) => {
-          if (controller.signal.aborted) return;
-          setState({
-            status: "error",
-            message: cause instanceof Error ? cause.message : String(cause),
-          });
-        },
-      );
+    openSpreadsheet(path, controller.signal).then(
+      (workbook) => {
+        if (!controller.signal.aborted) setState({ status: "ready", workbook });
+      },
+      (cause: unknown) => {
+        if (controller.signal.aborted) return;
+        setState({
+          status: "error",
+          message: cause instanceof Error ? cause.message : String(cause),
+        });
+      },
+    );
     return () => controller.abort();
   }, [path, reloadKey]);
 
@@ -133,32 +130,40 @@ function SpreadsheetFile({ path, cwd }: Props) {
     <div className="flex h-full min-h-0 flex-col bg-background-base">
       <SheetGrid key={`${path}\n${sheet.name}`} sheet={sheet} path={path} />
       {sheets.length > 1 || sheet.truncated ? (
-        <div
-          role="tablist"
-          aria-label="Sheets"
-          className="flex h-8 shrink-0 items-stretch gap-0.5 overflow-x-auto border-t border-content/10 px-1.5 text-[12px]"
-        >
-          {sheets.map((entry) => {
-            const active = entry === sheet;
-            return (
-              <button
-                key={entry.name}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setSheetName(entry.name)}
-                className={`my-1 shrink-0 rounded-md px-2.5 whitespace-nowrap ${
-                  active
-                    ? "bg-content/10 font-medium text-content"
-                    : "text-content/60 hover:bg-content/6 hover:text-content"
-                }`}
-              >
-                {entry.name}
-              </button>
-            );
-          })}
+        <div className="flex h-8 shrink-0 items-center border-t border-content/10 text-[12px]">
+          {/* Arrows show only when the tabs do not fit the panel. */}
+          <div className="min-w-0 flex-1">
+            <ScrollStrip
+              activeKey={sheet.name}
+              label="sheets"
+              className="gap-0.5 px-1.5"
+            >
+              <div role="tablist" aria-label="Sheets" className="contents">
+                {sheets.map((entry) => {
+                  const active = entry === sheet;
+                  return (
+                    <button
+                      key={entry.name}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      data-active={active || undefined}
+                      onClick={() => setSheetName(entry.name)}
+                      className={`h-6 shrink-0 rounded-md px-2.5 whitespace-nowrap ${
+                        active
+                          ? "bg-content/10 font-medium text-content"
+                          : "text-content/60 hover:bg-content/6 hover:text-content"
+                      }`}
+                    >
+                      {entry.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </ScrollStrip>
+          </div>
           {sheet.truncated ? (
-            <span className="ml-auto self-center pl-3 whitespace-nowrap text-[11px] text-content/45">
+            <span className="shrink-0 px-3 whitespace-nowrap text-[11px] text-content/45">
               Showing the first {sheet.rowCount.toLocaleString()} rows · open in
               Excel for the rest
             </span>

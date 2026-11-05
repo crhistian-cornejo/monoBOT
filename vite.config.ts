@@ -11,6 +11,10 @@ export default defineConfig(async ({ mode }) => {
   return {
     plugins: [react(), tailwindcss()],
     worker: { format: "es" },
+    // The spreadsheet viewer loads these in a worker on first use. Without
+    // this, the dev server finds them only then and optimizes them mid-open,
+    // which held a first sheet back for over 15 seconds.
+    optimizeDeps: { include: ["exceljs", "jszip"] },
     resolve: {
       alias: [
         ...(mode.startsWith("benchmark")

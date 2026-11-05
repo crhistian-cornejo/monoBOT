@@ -40,11 +40,13 @@ export function ScrollStrip({
     if (!el) return;
     sync();
     el.addEventListener("scroll", sync, { passive: true });
+    el.addEventListener("scrollend", sync, { passive: true });
     const observer = new ResizeObserver(sync);
     observer.observe(el);
     for (const child of Array.from(el.children)) observer.observe(child);
     return () => {
       el.removeEventListener("scroll", sync);
+      el.removeEventListener("scrollend", sync);
       observer.disconnect();
     };
   }, [sync]);
@@ -65,6 +67,9 @@ export function ScrollStrip({
     const el = ref.current;
     if (!el) return;
     el.scrollBy({ left: direction * Math.max(el.clientWidth * 0.6, 96), behavior: "smooth" });
+    // A smooth scroll the page does not paint (a hidden or background view)
+    // may land without scroll events: look again once it has.
+    window.setTimeout(sync, 450);
   };
 
   const left = overflow.left ? "transparent 0" : "#000 0";

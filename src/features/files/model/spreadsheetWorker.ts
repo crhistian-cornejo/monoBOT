@@ -42,6 +42,18 @@ function spawn(): Worker | null {
   return worker;
 }
 
+let warmed = false;
+
+/**
+ * Start the worker and load its readers now, off the main thread, so the
+ * first sheet someone opens does not wait for them. Once per app run.
+ */
+export function warmSpreadsheetReader() {
+  if (warmed) return;
+  warmed = true;
+  spawn()?.postMessage({ warm: true });
+}
+
 /**
  * Read a spreadsheet for the viewer, in a worker when one starts. Cancelling
  * drops the answer; the worker finishes the file it was on.

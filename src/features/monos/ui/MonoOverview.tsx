@@ -36,6 +36,7 @@ import {
 } from "./MonoSessionList";
 import { EmptyState, PageHeader } from "./monoPanelParts";
 import { SpreadsheetView } from "../../files/ui/SpreadsheetView";
+import { warmSpreadsheetReader } from "../../files/model/spreadsheetWorker";
 import { basename } from "../../../platform/tauri/fs";
 import { PanelStack, type StackPage } from "./PanelStack";
 import { SessionFiltersMenu } from "../../sessions/ui/SessionFiltersMenu";
@@ -220,6 +221,13 @@ export function MonoOverview({
       : ([...shownTabs][0] as MonoOverviewTab);
   const habits = useHabits(monoId, state.status);
   const actions = habitActions(monoId);
+  // Agents hand over spreadsheets here: have the reader loaded, off the main
+  // thread, before the first one opens. A moment later, to leave the first
+  // paint alone.
+  useEffect(() => {
+    const timer = window.setTimeout(warmSpreadsheetReader, 1500);
+    return () => window.clearTimeout(timer);
+  }, []);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<SessionSidebarFilters>(
