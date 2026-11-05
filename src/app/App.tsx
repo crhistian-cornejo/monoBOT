@@ -691,6 +691,7 @@ import {
 } from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
 import { BotNewsToasts } from "../features/bots/ui/BotNewsToasts";
+import { BotSyncRunner } from "../features/bots/ui/BotSyncRunner";
 import { documentGroups } from "../features/artifacts/documentGroups";
 import { useDocumentTopics } from "../features/artifacts/ui/useDocumentTopics";
 import {
@@ -15776,6 +15777,7 @@ function Workspace({
             />
             {/* The bots' news belongs to the Agents zone: in Code it waits in
                 the principal's news tab and the dot on its row. */}
+            {monosEnabled ? <BotSyncRunner /> : null}
             {monosEnabled && railZone === "personal" ? (
               <BotNewsToasts
                 onRead={onOpenNews}

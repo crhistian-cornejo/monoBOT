@@ -23,7 +23,7 @@ import {
   snapshotBot,
 } from "../model/botTransferIO";
 
-type Choice = "keep" | "replace" | "both";
+export type Choice = "keep" | "replace" | "both";
 
 type Conflict = {
   incoming: ExportedBot;
@@ -44,12 +44,18 @@ const PLATFORM_NAMES: Record<string, string> = {
 /** Imports a bots file: new bots are added; one that exists is compared first. */
 export function BotImportDialog({
   file,
+  matches,
   onClose,
   onDone,
+  onDecided,
 }: {
   file: BotExport;
+  /** The bot here each incoming one is, when already known (the sync pairs them by id). */
+  matches?: readonly (string | undefined)[];
   onClose: () => void;
   onDone: (summary: string) => void;
+  /** What the user chose for each bot that was already here. */
+  onDecided?: (choices: { bot: ExportedBot; choice: Choice }[]) => void;
 }) {
   const plan = useMemo(() => {
     const roster = listMonos()
@@ -61,13 +67,16 @@ export function BotImportDialog({
       }));
     const fresh: ExportedBot[] = [];
     const conflicts: Conflict[] = [];
-    for (const incoming of file.bots) {
-      const match = existingMatch(incoming, roster);
+    for (const [index, incoming] of file.bots.entries()) {
+      const known = matches?.[index];
+      const match = known
+        ? roster.find((bot) => bot.id === known)
+        : existingMatch(incoming, roster);
       if (match) conflicts.push({ incoming, existingId: match.id, choice: "keep" });
       else fresh.push(incoming);
     }
     return { fresh, conflicts };
-  }, [file]);
+  }, [file, matches]);
   const [conflicts, setConflicts] = useState(plan.conflicts);
   const [page, setPage] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -137,6 +146,7 @@ export function BotImportDialog({
         replaced && `${replaced} replaced`,
         copies && `${copies} kept as a copy`,
       ].filter(Boolean);
+      onDecided?.(conflicts.map((entry) => ({ bot: entry.incoming, choice: entry.choice })));
       onDone(parts.length ? `Bots imported: ${parts.join(", ")}.` : "No bots changed.");
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));

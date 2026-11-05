@@ -72,6 +72,8 @@ export type Mono = {
   botRole?: BotRole;
   /** The tools the bot or the user picked, in place of its role's. */
   botTools?: BotTools;
+  /** Who it is on the user's other computers: the same bot keeps it everywhere. */
+  syncId?: string;
   workstream?: Workstream;
   group?: Group;
   /**
@@ -184,8 +186,10 @@ function parseMono(value: unknown): Mono | undefined {
   const instructions = text("instructions");
   const specialty = text("specialty")?.trim().slice(0, SPECIALTY_MAX);
   const legacyProject = text("legacyProject");
+  const syncId = text("syncId");
   return {
     id: entry.id,
+    ...(syncId && /^[\w-]{8,64}$/.test(syncId) ? { syncId } : {}),
     ...(sessionId ? { sessionId } : {}),
     ...(name ? { name } : {}),
     mascot: text("mascot") ?? PROJECT_MASCOTS[0].name,

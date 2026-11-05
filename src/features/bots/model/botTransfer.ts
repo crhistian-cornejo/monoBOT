@@ -10,6 +10,8 @@ export const BOT_EXPORT_VERSION = 1;
 
 /** One bot as it travels. Folder paths stay behind: they differ per computer. */
 export type ExportedBot = {
+  /** The same bot on every computer (Mono.syncId). */
+  syncId?: string;
   name: string;
   mascot: string;
   color: string;
@@ -92,6 +94,9 @@ export function parseBotExport(raw: string): BotExport {
     }
     return [
       {
+        ...(typeof bot.syncId === "string" && /^[\w-]{8,64}$/.test(bot.syncId)
+          ? { syncId: bot.syncId }
+          : {}),
         name,
         mascot: text(bot.mascot, 40) || "invader",
         color: text(bot.color, 40) || "#888888",

@@ -31,8 +31,17 @@ export function exportableBots(): Mono[] {
   return listMonos().filter((mono) => mono.kind === "bot");
 }
 
+/** The bot's identity across computers, given the first time it is needed. */
+export function ensureSyncId(mono: Mono): string {
+  if (mono.syncId) return mono.syncId;
+  const syncId = crypto.randomUUID();
+  updateMono(mono.id, (current) => ({ ...current, syncId }));
+  return syncId;
+}
+
 /** A bot as it would travel: its card, SOUL.md, memory and habits. */
 export async function snapshotBot(mono: Mono): Promise<ExportedBot> {
+  const syncId = ensureSyncId(mono);
   const look = monoLook(mono);
   const files = await loadMonoFiles(mono.id);
   const topics: Record<string, string> = {};
@@ -47,6 +56,7 @@ export async function snapshotBot(mono: Mono): Promise<ExportedBot> {
   );
   const tools = portableTools(mono.botTools);
   return {
+    syncId,
     name: look.name,
     mascot: mono.mascot,
     color: mono.color,
@@ -125,6 +135,8 @@ export async function createImportedBot(
   return (
     updateMono(mono.id, (current) => ({
       ...current,
+      // A copy kept beside the original is a bot of its own.
+      ...(bot.syncId && !copy ? { syncId: bot.syncId } : {}),
       mascot: bot.mascot,
       color: bot.color,
       ...(bot.specialty ? { specialty: bot.specialty } : {}),
@@ -144,6 +156,7 @@ export async function replaceBot(
   await writeFiles(existingId, bot);
   updateMono(existingId, (current) => ({
     ...current,
+    ...(bot.syncId ? { syncId: bot.syncId } : {}),
     name: bot.name,
     mascot: bot.mascot,
     color: bot.color,

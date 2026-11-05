@@ -227,6 +227,13 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
       "bots export import backup move mac windows another computer file sync",
   },
   {
+    id: "bots-sync",
+    section: "monos",
+    label: "Keep bots in sync",
+    keywords:
+      "bots sync onedrive icloud dropbox google drive folder mac windows automatic",
+  },
+  {
     id: "project-worktrees",
     section: "worktrees",
     label: "Project worktrees",

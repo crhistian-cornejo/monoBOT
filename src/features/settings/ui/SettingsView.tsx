@@ -43,6 +43,7 @@ import {
 import { Popover } from "../../../shared/ui/Popover";
 import { SecondaryButton } from "../../../shared/ui/SecondaryButton";
 import { BotTransferControls } from "../../bots/ui/BotTransferControls";
+import { BotSyncControls } from "../../bots/ui/BotSyncControls";
 import { JiraSettings } from "./JiraSettings";
 import { GradientBlurBackground } from "./GradientBlurBackground";
 import { McpSettings } from "./McpSettings";
@@ -4336,6 +4337,13 @@ function MonosPage() {
           description="Save every bot (its instructions, memory, habits and tools) to a file, then import it on your other computer, Windows or Mac. A bot that already exists there is compared with the imported one before you choose which to keep. Folders you opened to a bot stay on each computer."
         >
           <BotTransferControls />
+        </Row>
+        <Row
+          id="bots-sync"
+          label="Keep bots in sync"
+          description="Choose a folder your computers already share (OneDrive, iCloud Drive, Google Drive, Dropbox). Each computer writes its own file there and reads the others' every couple of minutes: a bot changed on one updates on the other, a new one appears, and one changed on both opens the comparison so you choose."
+        >
+          <BotSyncControls />
         </Row>
       </Group>
     </>
