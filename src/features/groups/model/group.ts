@@ -347,13 +347,25 @@ export function groupMessage(
   message: string,
   group?: Group,
   memory?: string,
+  quick = false,
 ): string {
   const remembered = projectMemory(memory);
   return `<group_message group="${groupName}">
 ${goal ? `The group is for: ${goal}\n` : ""}${group ? `${groupPlaces(group)}\n${GROUP_ACCESS_RULE}\n` : ""}${remembered ? `What the project remembers (keep to these decisions and preferences):\n${remembered}\n` : ""}${message.trim()}
 </group_message>
-Answer as yourself with your own contribution, briefly unless asked for more. You may ask another member of this group for something you need with app agents.message {"to":"<member>","message":"...","wait":true}, which waits for its reply. If you have nothing new to add, reply with exactly PASS.`;
+${quick ? QUICK_ANSWER : GROUP_ANSWER} ${FILE_LINK_RULE}`;
 }
+
+const GROUP_ANSWER =
+  'Answer as yourself with your own contribution, briefly unless asked for more. You may ask another member of this group for something you need with app agents.message {"to":"<member>","message":"...","wait":true}, which waits for its reply. If you have nothing new to add, reply with exactly PASS.';
+
+/** An errand goes to every member; the first to do it answers for all. */
+const QUICK_ANSWER =
+  "This is an errand for whichever member can do it fastest, not a discussion: every member got it, the first answer that does it goes to the user, and the others are stopped. If you can do it yourself right now, do just that and reply in one or two lines with the result, no preamble or summary. If it is not yours to do or you cannot, reply with exactly PASS at once.";
+
+/** How a member hands the user a file, so the chat opens it on a click. */
+export const FILE_LINK_RULE =
+  "When you point the user to a file, write its full path in backticks, e.g. `D:/Proyectos/Informe final.pdf`, never a bare path or only its name: the app turns it into a link that opens the file.";
 
 /**
  * The folders an agent's groups open to it, each once with the widest

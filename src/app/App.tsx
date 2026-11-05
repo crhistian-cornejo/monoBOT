@@ -764,10 +764,13 @@ import {
   seatSessionIds,
 } from "../features/groups/model/groupSeats";
 import {
+  isQuickAsk,
+  quickRoundOutcome,
   roundAnswers,
   roundPrompt,
   roundRequest,
   type GroupRound,
+  type RoundAnswer,
 } from "../features/groups/model/groupRound";
 import { useGroupLearning } from "../features/groups/ui/useGroupLearning";
 import {
@@ -779,6 +782,8 @@ import {
   groupRequestPrefix,
   DIRECT_PREFIX,
   ROUND_PREFIX,
+  QUICK_PREFIX,
+  dropGroupRequests,
   type GroupReply,
 } from "../features/groups/model/groupReplies";
 import { addressedMember } from "../features/groups/model/groupMentions";
@@ -9764,6 +9769,7 @@ function Workspace({
     memberId: string,
     message: string,
     request: string,
+    quick = false,
   ): Promise<boolean> => {
     const info = group.group;
     if (!info) return false;
@@ -9774,7 +9780,14 @@ function Workspace({
       .catch(() => "");
     const accepted = await submitSessionRef.current(
       member.id,
-      groupMessage(monoLook(group).name, info.goal, message, info, memory),
+      groupMessage(
+        monoLook(group).name,
+        info.goal,
+        message,
+        info,
+        memory,
+        quick,
+      ),
       [],
       { appRequestId: request, followsUp: true },
     );
@@ -9800,12 +9813,17 @@ function Workspace({
     if (addressed?.kind === "lead") return false;
     const direct = addressed?.kind === "member" ? addressed : undefined;
     const key = crypto.randomUUID();
+    // An errand (open this, give me the path) goes to the first member that
+    // can do it; questions and work for the team get everyone and the lead.
+    const quick = !direct && isQuickAsk(text);
     appendToMono(sessionId, {
       id: crypto.randomUUID(),
       role: "user",
       text: text.trim(),
       startedAt: Date.now(),
-      appRequestId: `${direct ? DIRECT_PREFIX : ROUND_PREFIX}${key}`,
+      appRequestId: `${
+        direct ? DIRECT_PREFIX : quick ? QUICK_PREFIX : ROUND_PREFIX
+      }${key}`,
     });
     if (direct) {
       // @Name: that member alone answers, around the lead.
@@ -9820,22 +9838,29 @@ function Workspace({
       return true;
     }
     // Everyone answers first, each with its own model; the lead has the
-    // last word once they all have.
+    // last word once they all have. An errand ends with the first answer.
     const round: GroupRound = {
       key,
       groupSessionId: sessionId,
       text: text.trim(),
       startedAt: Date.now(),
       asks: members.map((member) => ({
-        request: roundRequest(sessionId, key, member.id),
+        request: roundRequest(sessionId, key, member.id, quick),
         memberId: member.id,
         name: member.name,
       })),
       failed: [],
+      ...(quick ? { quick } : {}),
     };
     groupRounds.current.set(key, round);
     for (const ask of round.asks)
-      void sendToGroupMember(group, ask.memberId, text.trim(), ask.request)
+      void sendToGroupMember(
+        group,
+        ask.memberId,
+        text.trim(),
+        ask.request,
+        quick,
+      )
         .catch(() => false)
         .then((accepted) => {
           if (!accepted) round.failed.push(ask.request);
@@ -9843,7 +9868,9 @@ function Workspace({
         });
     return true;
   };
-  // Hands each finished round to the lead, once, for the last word.
+  // Hands each finished round to the lead, once, for the last word. An
+  // errand someone did ends there: the others stop and nothing reaches the
+  // lead, which reads the answer with the user's next message.
   const groupRounds = useRef(new Map<string, GroupRound>());
   const [roundTick, setRoundTick] = useState(0);
   useEffect(() => {
@@ -9852,7 +9879,25 @@ function Workspace({
       const seats = monoForSession(round.groupSessionId)?.group?.seats ?? {};
       const sessionOf = (memberId: string) =>
         sessions.find((entry) => entry.id === seats[memberId]);
-      const answers = roundAnswers(round, sessionOf);
+      let answers: RoundAnswer[] | undefined;
+      if (round.quick) {
+        const outcome = quickRoundOutcome(round, sessionOf);
+        if (!outcome) continue;
+        if ("winner" in outcome) {
+          groupRounds.current.delete(round.key);
+          dropGroupRequests(outcome.stop);
+          for (const request of outcome.stop) {
+            const ask = round.asks.find((entry) => entry.request === request);
+            const seat = ask ? seats[ask.memberId] : undefined;
+            if (seat)
+              void Promise.resolve(stopSessionRef.current(seat)).catch(
+                (error) => console.warn("Could not stop the member", error),
+              );
+          }
+          continue;
+        }
+        answers = outcome.answers;
+      } else answers = roundAnswers(round, sessionOf);
       if (!answers) continue;
       const chat = sessions.find((entry) => entry.id === round.groupSessionId);
       if (!chat || chat.busy) continue;

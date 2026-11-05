@@ -62,6 +62,7 @@ export function finishedGroupReplies(
   for (let index = 0; index < blocks.length; index++) {
     const ask = blocks[index];
     if (ask.role !== "user" || !ask.appRequestId?.startsWith(prefix)) continue;
+    if (isDroppedGroupRequest(ask.appRequestId)) continue;
     const turn = turnAfter(blocks, index);
     if (!turn.finished && member.busy) continue;
     const at = ask.startedAt ?? ask.sentAt;
@@ -106,12 +107,59 @@ export function groupMemberPost(
 export const DIRECT_PREFIX = "group-direct-";
 /** The receipt of a message every member answered before the lead. */
 export const ROUND_PREFIX = "group-round-";
+/** The receipt of an errand the first member to do it answered. */
+export const QUICK_PREFIX = "group-quick-";
 
-/** Whether a group chat's block is the user's @Name to one member. */
+/**
+ * Whether a group chat's block is a message the members answered around
+ * the lead: the user's @Name to one member, or an errand.
+ */
 export function isDirectAsk(block: Block): boolean {
   return (
-    block.role === "user" && !!block.appRequestId?.startsWith(DIRECT_PREFIX)
+    block.role === "user" &&
+    (!!block.appRequestId?.startsWith(DIRECT_PREFIX) ||
+      !!block.appRequestId?.startsWith(QUICK_PREFIX))
   );
+}
+
+/** Answers to errands that another member did first. */
+const DROPPED_KEY = "monocode.groupRequests.dropped";
+const DROPPED_MAX = 300;
+
+function droppedRequests(): string[] {
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(DROPPED_KEY) ?? "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((entry): entry is string => typeof entry === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Keeps a member's part of an errand out of the group's chat: another
+ * member did it first, and this one was stopped mid-way.
+ */
+export function dropGroupRequests(requests: readonly string[]) {
+  if (!requests.length) return;
+  const next = [...new Set([...requests, ...droppedRequests()])].slice(
+    0,
+    DROPPED_MAX,
+  );
+  try {
+    localStorage.setItem(DROPPED_KEY, JSON.stringify(next));
+  } catch {
+    // private mode / quota: kept out for this window only
+  }
+  memoryDropped = new Set(next);
+}
+
+let memoryDropped: Set<string> | undefined;
+
+export function isDroppedGroupRequest(request: string): boolean {
+  memoryDropped ??= new Set(droppedRequests());
+  return memoryDropped.has(request);
 }
 
 /**
@@ -165,7 +213,9 @@ export function unseenGroupPosts(blocks: readonly Block[]): DirectExchange[] {
       continue;
     }
     if (block.role === "user" && !block.draft && !block.internal) break;
-    if (block.groupMember?.request.includes("-direct-")) posts.unshift(block);
+    const request = block.groupMember?.request;
+    if (request?.includes("-direct-") || request?.includes("-quick-"))
+      posts.unshift(block);
   }
   for (const post of posts) exchanges.unshift({ post });
   return exchanges;
@@ -183,5 +233,5 @@ export function groupPostsContext(exchanges: readonly DirectExchange[]): string 
     const asked = ask ? `The user: "${clip(ask, 300)}" → ` : "";
     return `- ${asked}${post.groupMember!.name}: ${clip(post.text, 1200)}`;
   });
-  return `<group_posts>\nThe user wrote to these members directly with @Name, and they answered in this chat; the user has read them. Build on them rather than repeating them, and save to memory what they decided.\n${lines.join("\n")}\n</group_posts>`;
+  return `<group_posts>\nThe user wrote to these members directly (with @Name, or an errand the first member able to did), and they answered in this chat; the user has read them. Build on them rather than repeating them, and save to memory what they decided.\n${lines.join("\n")}\n</group_posts>`;
 }

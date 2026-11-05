@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Block } from "../../sessions/model/session";
 import {
   directMember,
+  dropGroupRequests,
   finishedGroupReplies,
   groupMemberPost,
   groupPostsContext,
@@ -117,5 +118,34 @@ describe("@Name", () => {
     expect(context).toContain('The user: "@Documents resume el PDF"');
     expect(context).toContain("Documents: Resumen: 3 m/s");
     expect(groupPostsContext([])).toBe("");
+  });
+
+  it("tells the lead about an errand the first member did", () => {
+    const blocks: Block[] = [
+      user("u1", "Pásame la ruta del informe", {
+        appRequestId: "group-quick-k3",
+      }),
+      groupMemberPost(
+        look,
+        { request: "app-g1-quick-k3-docs", text: "`D:/x/Informe.pdf`", at: NOW },
+        "p1",
+      ),
+    ];
+    const context = groupPostsContext(unseenGroupPosts(blocks));
+    expect(context).toContain('The user: "Pásame la ruta del informe"');
+    expect(context).toContain("Documents: `D:/x/Informe.pdf`");
+  });
+
+  it("keeps a member stopped on an errand out of the group's chat", () => {
+    const member = {
+      busy: false,
+      blocks: [
+        user("a1", "<group_message>", { appRequestId: "app-g1-quick-k4-asis" }),
+        said("r1", "Voy a buscarlo…"),
+      ],
+    };
+    expect(finishedGroupReplies(member, "g1", 0)).toHaveLength(1);
+    dropGroupRequests(["app-g1-quick-k4-asis"]);
+    expect(finishedGroupReplies(member, "g1", 0)).toEqual([]);
   });
 });
