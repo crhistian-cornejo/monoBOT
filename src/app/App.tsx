@@ -80,7 +80,13 @@ import {
   type ControlOutcome,
 } from "../features/orchestration/model/orchestration";
 import { DEFAULT_MODEL_ID, modelsFor } from "../features/sessions/model/models";
-import { isHarnessAvailable } from "../integrations/harness/core/availability";
+import {
+  getHarnessAvailabilitySnapshot,
+  isHarnessAvailable,
+  subscribeHarnessAvailability,
+} from "../integrations/harness/core/availability";
+import { footerUsageProviders } from "../features/providers/model/rateLimits";
+import { isProviderHidden } from "../features/sessions/model/projectProviders";
 import {
   completeOrchestrationProposal,
   completeOrRepairOrchestrationProposal,
@@ -2410,17 +2416,22 @@ function Workspace({
   // The footer's usage follows what is in view: under the inset layout a
   // Mono's tab keeps the footer, which then reads the Mono's model.
   const usageSource = insetLayout && monoViewSession ? monoViewSession : active;
-  const usageProviders = useMemo(() => {
-    if (
-      usageSource?.harness === "claude" ||
-      usageSource?.harness === "codex" ||
-      usageSource?.harness === "opencode" ||
-      usageSource?.harness === "devin"
-    ) {
-      return [usageSource.harness];
-    }
-    return [];
-  }, [usageSource?.harness]);
+  // Every installed provider's plan shows, the one in view first.
+  const harnessAvailability = useSyncExternalStore(
+    subscribeHarnessAvailability,
+    getHarnessAvailabilitySnapshot,
+  );
+  const usageProviders = useMemo(
+    () =>
+      footerUsageProviders(
+        usageSource?.harness,
+        (provider) => isHarnessAvailable(provider),
+        (provider) => isProviderHidden(usageSource?.cwd, provider),
+      ),
+    // The availability snapshot changes when a probe lands.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [usageSource?.harness, usageSource?.cwd, harnessAvailability],
+  );
   const usageSession = useMemo(() => {
     if (!usageSource) return undefined;
     return {

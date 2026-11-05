@@ -906,6 +906,20 @@ pub fn harness_resolve_devin() -> Result<CursorBinary, String> {
         })
 }
 
+/// Factory's Droid, which serves ACP through `droid exec -o acp`.
+#[tauri::command(async)]
+pub fn harness_resolve_droid() -> Result<AntigravityBinary, String> {
+    resolve_droid()
+        .map(|path| AntigravityBinary {
+            path: path.to_string_lossy().into_owned(),
+            args: vec!["exec".into(), "-o".into(), "acp".into()],
+        })
+        .ok_or_else(|| {
+            "Droid CLI not found. Install it with `npm i -g droid`, run `droid` once to sign in to Factory, then retry."
+                .into()
+        })
+}
+
 /// Antigravity's ACP server is separate from the interactive agy CLI.
 #[tauri::command(async)]
 pub fn harness_resolve_antigravity() -> Result<AntigravityBinary, String> {
@@ -1869,6 +1883,7 @@ fn is_harness_argv_token(part: &str) -> bool {
             | "fx"
             | "hermes"
             | "devin"
+            | "droid"
             | "agy_acp_server.par"
             | "pi"
             | "worker-server"
@@ -2110,6 +2125,7 @@ fn resolve_harness_binary_default(provider: &str) -> Option<PathBuf> {
         "hermes" => resolve_hermes(),
         "antigravity" => resolve_antigravity(),
         "devin" => resolve_devin(),
+        "droid" => resolve_droid(),
         _ => None,
     }
 }
@@ -2156,6 +2172,7 @@ fn resolve_harness_binary_override(provider: &str, binary_path: &str) -> Result<
         "hermes" => &["hermes"],
         "antigravity" => &["agy_acp_server.par"],
         "devin" => &["devin"],
+        "droid" => &["droid"],
         _ => {
             return Err(format!(
                 "Unsupported configured harness provider: {provider}"
@@ -2520,6 +2537,33 @@ fn resolve_hermes() -> Option<PathBuf> {
     if let Some(from_shell) = which_via_login_shell("hermes") {
         candidates.push(from_shell);
     }
+
+    first_binary(candidates)
+}
+
+/// Factory's Droid CLI: the npm package `droid` or the official installer.
+fn resolve_droid() -> Option<PathBuf> {
+    let home = dirs_home().map(PathBuf::from);
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Some(from_shell) = which_via_login_shell("droid") {
+        candidates.push(from_shell);
+    }
+    #[cfg(windows)]
+    if let Some(app_data) = std::env::var_os("APPDATA").map(PathBuf::from) {
+        // `npm i -g droid` puts its launcher beside npm's own.
+        candidates.push(app_data.join("npm/droid"));
+    }
+    if let Some(home) = &home {
+        candidates.push(home.join(".local/bin/droid"));
+        candidates.push(home.join(".factory/bin/droid"));
+        candidates.push(home.join(".npm-global/bin/droid"));
+        candidates.push(home.join(".bun/bin/droid"));
+    }
+    #[cfg(target_os = "macos")]
+    candidates.push(PathBuf::from("/opt/homebrew/bin/droid"));
+    candidates.push(PathBuf::from("/usr/local/bin/droid"));
+    candidates.push(PathBuf::from("/usr/bin/droid"));
 
     first_binary(candidates)
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   clampUsedPercent,
+  footerUsageProviders,
   exhaustedWindowResetAt,
   formatRateLimitWindowChipLabel,
   formatResetCountdown,
@@ -17,6 +18,35 @@ import {
   parseResetTimestamp,
   rateLimitWindowTooltip,
 } from "./rateLimits";
+
+describe("footerUsageProviders", () => {
+  const installed = new Set(["claude", "codex", "devin"]);
+  const has = (provider: string) => installed.has(provider);
+
+  it("shows every installed plan, the one in view first", () => {
+    expect(footerUsageProviders("devin", has)).toEqual([
+      "devin",
+      "claude",
+      "codex",
+    ]);
+    expect(footerUsageProviders("claude", has)).toEqual([
+      "claude",
+      "codex",
+      "devin",
+    ]);
+  });
+
+  it("keeps the one in view even before its CLI is found", () => {
+    expect(footerUsageProviders("opencode", () => false)).toEqual(["opencode"]);
+  });
+
+  it("leaves out what the project hides, and harnesses without a plan", () => {
+    expect(
+      footerUsageProviders("pi", has, (provider) => provider === "codex"),
+    ).toEqual(["claude", "devin"]);
+    expect(footerUsageProviders(undefined, () => false)).toEqual([]);
+  });
+});
 
 describe("parseDevinUsage", () => {
   it("turns remaining daily and weekly quota into used windows", () => {

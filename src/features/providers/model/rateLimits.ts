@@ -2,6 +2,37 @@ import { asRecord } from "../../../integrations/harness/providers/codex/codexPro
 
 export type RateLimitProvider = "claude" | "codex" | "opencode" | "devin";
 
+export const RATE_LIMIT_PROVIDERS: readonly RateLimitProvider[] = [
+  "claude",
+  "codex",
+  "devin",
+  "opencode",
+];
+
+export function isRateLimitProvider(value: string): value is RateLimitProvider {
+  return (RATE_LIMIT_PROVIDERS as readonly string[]).includes(value);
+}
+
+/**
+ * The plans the footer shows: the one in view first, then every other
+ * provider whose CLI is installed and that this project does not hide, so
+ * the user sees how much is left everywhere they can work, not only here.
+ */
+export function footerUsageProviders(
+  inView: string | undefined,
+  installed: (provider: RateLimitProvider) => boolean,
+  hidden: (provider: RateLimitProvider) => boolean = () => false,
+): RateLimitProvider[] {
+  const first = inView && isRateLimitProvider(inView) ? [inView] : [];
+  return [
+    ...first,
+    ...RATE_LIMIT_PROVIDERS.filter(
+      (provider) =>
+        provider !== inView && installed(provider) && !hidden(provider),
+    ),
+  ];
+}
+
 export type RateLimitStatus =
   "idle" | "fetching" | "ok" | "error" | "unavailable";
 

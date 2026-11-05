@@ -206,6 +206,13 @@ export const MODELS: AgentModel[] = [
     name: "Adaptive",
     nativeId: "adaptive",
   },
+  // Droid lists the rest, with their effort levels, when it starts.
+  {
+    id: "droid:auto",
+    harness: "droid",
+    name: "Auto Model",
+    nativeId: "auto",
+  },
 ];
 
 export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
@@ -220,6 +227,7 @@ export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
   hermes: "hermes:default",
   antigravity: "antigravity:gemini-3.8-flash-high",
   devin: "devin:adaptive",
+  droid: "droid:auto",
 };
 
 const FAVORITES_KEY = "monocode.favoriteModels";
@@ -250,6 +258,7 @@ const HARNESS_ORDER: HarnessId[] = [
   "hermes",
   "antigravity",
   "devin",
+  "droid",
 ];
 
 const EMPTY_MODELS: AgentModel[] = [];

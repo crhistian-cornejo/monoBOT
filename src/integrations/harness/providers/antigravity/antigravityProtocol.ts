@@ -245,7 +245,11 @@ export function eventsFromAcpUpdate(params: unknown): HarnessEvent[] {
 }
 
 /** Discover models and reasoning controls from standard ACP session config. */
-export function modelsFromSessionNew(raw: unknown): AgentModel[] {
+export function modelsFromSessionNew(
+  raw: unknown,
+  /** The ACP provider whose session listed them. */
+  harness: "antigravity" | "droid" = "antigravity",
+): AgentModel[] {
   const rec = asRecord(raw);
   const options = Array.isArray(rec?.configOptions) ? rec.configOptions : [];
   const modelId = extractModelConfigId(readConfigOptions(options));
@@ -276,8 +280,8 @@ export function modelsFromSessionNew(raw: unknown): AgentModel[] {
     return value ? [{ value, label: String(model?.name ?? value) }] : [];
   });
   return [...new Map(models.map(({ value, label }) => [value, {
-    id: `antigravity:${value}`,
-    harness: "antigravity" as const,
+    id: `${harness}:${value}`,
+    harness,
     name: label,
     nativeId: value,
     ...(settings.length > 0 ? { settings } : {}),

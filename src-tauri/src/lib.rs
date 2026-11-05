@@ -558,6 +558,7 @@ pub fn run() {
             harness::harness_resolve_grok,
             harness::harness_resolve_hermes,
             harness::harness_resolve_devin,
+            harness::harness_resolve_droid,
             harness::harness_resolve_antigravity,
             harness::harness_free_port,
             harness::harness_spawn,

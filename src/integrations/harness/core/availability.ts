@@ -6,6 +6,7 @@ import {
   resolveCodexBinary,
   resolveCursorBinary,
   resolveDevinBinary,
+  resolveDroidBinary,
   resolveFxBinary,
   resolveGrokBinary,
   resolveHermesBinary,
@@ -53,6 +54,7 @@ const CLI: Record<HarnessId, { name: string; install?: string }> = {
       "Install from hermes-agent.nousresearch.com, then run hermes model",
   },
   antigravity: { name: "Antigravity ACP server (agy_acp_server.par)" },
+  droid: { name: "Droid CLI", install: "npm i -g droid" },
   devin: {
     name: "Devin CLI",
     install: IS_WIN
@@ -163,6 +165,14 @@ export function probeHarnessAvailability(
       if (id === "antigravity") {
         try {
           await resolveAntigravityBinary();
+          return [id, true] as const;
+        } catch {
+          return [id, false] as const;
+        }
+      }
+      if (id === "droid") {
+        try {
+          await resolveDroidBinary();
           return [id, true] as const;
         } catch {
           return [id, false] as const;

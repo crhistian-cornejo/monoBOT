@@ -1,5 +1,6 @@
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
+import { DROID_ACP_ARGS } from "../providers/droid/droidProtocol";
 import {
   runtimeProviderBinaryPath,
   type ConfigurableBinaryProvider,
@@ -439,6 +440,7 @@ async function resolveHarnessBinary(
     hermes: "harness_resolve_hermes",
     antigravity: "harness_resolve_antigravity",
     devin: "harness_resolve_devin",
+    droid: "harness_resolve_droid",
   };
   return invoke(command[provider]);
 }
@@ -501,6 +503,16 @@ export function resolveDevinBinary(
   binaryPath?: string | null,
 ): Promise<{ path: string }> {
   return resolveHarnessBinary("devin", binaryPath);
+}
+
+/** Droid's ACP server: `droid exec -o acp`, arguments from the resolver. */
+export function resolveDroidBinary(
+  binaryPath?: string | null,
+): Promise<{ path: string; args: string[] }> {
+  return resolveHarnessBinary("droid", binaryPath).then((resolved) => ({
+    path: resolved.path,
+    args: resolved.args ?? [...DROID_ACP_ARGS],
+  }));
 }
 
 export function resolveAntigravityBinary(
