@@ -23,6 +23,7 @@ import {
 import { MOD } from "../../../platform/tauri/platform";
 import { AgentMarkdown } from "../../sessions/ui/AgentMarkdown";
 import { CollapsibleBody } from "../../../shared/ui/CollapsibleBody";
+import { PersonAvatar } from "../../../shared/ui/PersonAvatar";
 
 export type InboxReplyTarget = {
   id: string;
@@ -792,30 +793,5 @@ function InboxCommentPerson({
 }
 
 function InboxAvatar({ name, avatarUrl }: { name: string; avatarUrl: string }) {
-  const [failed, setFailed] = useState(!avatarUrl);
-  const initial = name.trim().charAt(0).toUpperCase() || "?";
-
-  useEffect(() => {
-    setFailed(!avatarUrl);
-  }, [avatarUrl]);
-
-  return avatarUrl && !failed ? (
-    <img
-      src={avatarUrl}
-      alt=""
-      width={20}
-      height={20}
-      referrerPolicy="no-referrer"
-      draggable={false}
-      onError={() => setFailed(true)}
-      className="size-5 shrink-0 rounded-full bg-content/10 object-cover"
-    />
-  ) : (
-    <span
-      aria-hidden
-      className="grid size-5 shrink-0 place-items-center rounded-full bg-content/12 text-[10px] font-medium text-content/55"
-    >
-      {initial}
-    </span>
-  );
+  return <PersonAvatar name={name} src={avatarUrl} />;
 }

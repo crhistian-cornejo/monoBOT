@@ -17,19 +17,24 @@ import {
   personLabel,
   replyGaps,
   replyPrompt,
+  replySubject,
+  splitSubject,
+  type MailAccount,
   type MailMessage,
-  type MailPerson,
   type MailRecipients,
   type OpenedMail,
 } from "../model/mail";
 import { mailApi } from "../model/mailApi";
+import { MailPeopleRow, MailPersonChip } from "./MailPeople";
 
 /** Seconds to change one's mind after pressing Send. */
 const UNDO_SECONDS = 5;
 
 /** The box's text metrics, shared by the field and the streamed text so swapping them doesn't move a letter. */
-const FIELD_TEXT =
-  "min-h-20 max-h-[40vh] w-full rounded-md border px-2.5 py-2 text-[13px] leading-relaxed";
+const FIELD_TEXT = "min-h-20 max-h-[40vh] w-full px-2.5 py-2 text-[13px] leading-relaxed";
+
+/** The subject's, large over the text, shared the same way. */
+const SUBJECT_TEXT = "block w-full px-2.5 pt-2.5 text-[17px] font-medium leading-snug text-content";
 
 const TOOL_BUTTON =
   "flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-[12px] text-content/70 hover:bg-content/8 hover:text-content disabled:opacity-40";
@@ -43,6 +48,7 @@ async function writeWithAI(input: {
   opened?: OpenedMail;
   ask?: string;
   draft?: string;
+  draftSubject?: string;
   signal: AbortSignal;
   onText: (text: string) => void;
 }): Promise<string> {
@@ -62,6 +68,7 @@ async function writeWithAI(input: {
       body: mailText(input.message, input.opened),
       ask: input.ask,
       draft: input.draft,
+      draftSubject: input.draftSubject,
     }),
     timeoutMs: 90_000,
     signal: input.signal,
@@ -80,52 +87,41 @@ async function writeWithAI(input: {
     },
   });
   const text = cleanReply(output);
-  if (!text) throw new Error("The model wrote nothing. Try again.");
+  if (!text || !splitSubject(text).body.trim())
+    throw new Error("The model wrote nothing. Try again.");
   return text;
-}
-
-function People({ label, people }: { label: string; people: MailPerson[] }) {
-  return (
-    <span className="flex min-w-0 items-center gap-1">
-      <span className="shrink-0 text-content/45">{label}</span>
-      {people.map((person) => (
-        <span
-          key={person.address}
-          title={person.address}
-          className="min-w-0 truncate rounded-md bg-content/6 px-1.5 py-0.5 text-content/80"
-        >
-          {personLabel(person)}
-        </span>
-      ))}
-    </span>
-  );
 }
 
 /**
  * The reply to a message, as a small card floating over it. AI writes into it
  * the way a chat reply streams, and the user edits it and sends it with their
  * own press, with a few seconds to undo. Who it goes to is Rust's to decide.
+ * AI also writes a subject, shown large over the text; it goes with the reply.
  */
 export function MailReply({
   message,
+  account,
   opened,
   onClose,
   onSent,
 }: {
   message: MailMessage;
+  /** The user's account the reply goes from. */
+  account?: MailAccount;
   opened?: OpenedMail;
   onClose: () => void;
   onSent: () => void;
 }) {
   const [text, setText] = useState("");
+  const [subject, setSubject] = useState(() => replySubject(message.subject));
   const [ask, setAsk] = useState("");
   const [writing, setWriting] = useState(false);
   /** What AI has written so far this run, shown as it streams. */
   const [streamText, setStreamText] = useState<string>();
   /** The streamed text stays up until its last word has settled. */
   const [streamShown, setStreamShown] = useState(false);
-  /** What the box held before AI last wrote in it, to undo to. */
-  const [before, setBefore] = useState<string>();
+  /** What the box and the subject held before AI last wrote in them, to undo to. */
+  const [before, setBefore] = useState<{ text: string; subject: string }>();
   /** The request AI last wrote for, to try again with. */
   const [lastAsk, setLastAsk] = useState<string>();
   const [people, setPeople] = useState<MailRecipients>();
@@ -168,6 +164,8 @@ export function MailReply({
   }, [text, streamShown]);
 
   const gaps = useMemo(() => (streamShown ? [] : replyGaps(text)), [text, streamShown]);
+  /** What AI has written so far, its subject apart from its text. */
+  const streamed = useMemo(() => splitSubject(streamText ?? ""), [streamText]);
   const to = people?.to.length ? people.to : [{ name: message.from, address: message.address }];
   const copies = people?.cc ?? [];
 
@@ -181,7 +179,7 @@ export function MailReply({
     abort.current?.abort();
     const controller = new AbortController();
     abort.current = controller;
-    const original = retry && before !== undefined ? before : text;
+    const original = retry && before !== undefined ? before : { text, subject };
     setWriting(true);
     setStreamText("");
     setStreamShown(true);
@@ -201,14 +199,17 @@ export function MailReply({
         message,
         opened,
         ask: request,
-        draft: original,
+        draft: original.text,
+        draftSubject: original.subject,
         signal: controller.signal,
         onText: paint,
       });
       if (controller.signal.aborted) return;
       cancelPaint();
+      const reply = splitSubject(written);
       setStreamText(written);
-      setText(written);
+      setText(reply.body);
+      if (reply.subject) setSubject(reply.subject);
       setBefore(original);
     } catch (failure) {
       if (controller.signal.aborted) return;
@@ -226,9 +227,10 @@ export function MailReply({
     if (!controller || !writing) return;
     controller.abort();
     cancelPaint();
-    if (streamText) {
-      setBefore(text);
-      setText(streamText);
+    if (streamed.body) {
+      setBefore({ text, subject });
+      setText(streamed.body);
+      if (streamed.subject) setSubject(streamed.subject);
     }
     setWriting(false);
     setStreamShown(false);
@@ -248,7 +250,8 @@ export function MailReply({
 
   const undoAI = () => {
     if (before === undefined) return;
-    setText(before);
+    setText(before.text);
+    setSubject(before.subject);
     setBefore(undefined);
     box.current?.focus();
   };
@@ -275,7 +278,7 @@ export function MailReply({
       setCountdown(undefined);
       setStatus({ text: "Sending…" });
       void mailApi
-        .send(message.id, text, all)
+        .send(message.id, text, all, subject)
         .then(() => onSent())
         .catch((failure) => setStatus({ text: String(failure), error: true }));
     }, 1000);
@@ -289,7 +292,7 @@ export function MailReply({
 
   const saveDraft = async () => {
     try {
-      await mailApi.draft(message.id, text, all);
+      await mailApi.draft(message.id, text, all, subject);
       setStatus({ text: "Saved as a draft on your mail server." });
     } catch (failure) {
       setStatus({ text: String(failure), error: true });
@@ -334,78 +337,137 @@ export function MailReply({
       aria-label={`Reply to ${message.from}`}
       className="flex flex-col gap-1.5 rounded-xl border border-content/10 bg-background-base p-2 shadow-xl"
     >
-      <div className="flex min-w-0 items-center gap-2 px-1 text-[12px]">
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-          <People label="To" people={to} />
-          {all && copies.length ? <People label="Cc" people={copies} /> : null}
-        </div>
-        {copies.length ? (
-          <button
-            type="button"
-            aria-pressed={all}
-            onClick={() => setAll((on) => !on)}
-            title={
-              all
-                ? "Reply only to the sender"
-                : `Also send a copy to ${copies.map(personLabel).join(", ")}`
-            }
-            className={`shrink-0 rounded-md px-1.5 py-0.5 ${
-              all ? "bg-accent/12 text-accent" : "text-content/55 hover:bg-content/8 hover:text-content"
-            }`}
-          >
-            Reply all
-          </button>
-        ) : null}
-        <button
-          type="button"
-          title="Close (Esc)"
-          aria-label="Close"
-          onClick={onClose}
-          className="grid size-6 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
+      <div className="flex flex-col divide-y divide-content/8 rounded-md border border-content/10">
+        <MailPeopleRow
+          label="From"
+          end={
+            <button
+              type="button"
+              title="Close (Esc)"
+              aria-label="Close"
+              onClick={onClose}
+              className="grid size-6 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
+            >
+              <X className="size-3.5" />
+            </button>
+          }
         >
-          <X className="size-3.5" />
-        </button>
+          {account ? (
+            <MailPersonChip own person={{ name: account.name, address: account.address }} />
+          ) : (
+            <span className="text-content/45">Your account</span>
+          )}
+        </MailPeopleRow>
+        <MailPeopleRow
+          label="To"
+          end={
+            copies.length ? (
+              <button
+                type="button"
+                aria-pressed={all}
+                onClick={() => setAll((on) => !on)}
+                title={
+                  all
+                    ? "Reply only to the sender"
+                    : `Also send a copy to ${copies.map(personLabel).join(", ")}`
+                }
+                className={`rounded-md px-1.5 py-0.5 ${
+                  all ? "bg-accent/12 text-accent" : "text-content/55 hover:bg-content/8 hover:text-content"
+                }`}
+              >
+                Reply all
+              </button>
+            ) : null
+          }
+        >
+          {to.map((person) => (
+            <MailPersonChip key={person.address} person={person} />
+          ))}
+        </MailPeopleRow>
+        {all && copies.length ? (
+          <MailPeopleRow label="Cc">
+            {copies.map((person) => (
+              <MailPersonChip key={person.address} person={person} />
+            ))}
+          </MailPeopleRow>
+        ) : null}
       </div>
 
-      <div className={`relative rounded-md ${writing ? "ai-glow" : ""}`}>
+      <div
+        className={`relative rounded-md border ${
+          writing ? "ai-glow border-transparent" : "border-content/10 focus-within:border-content/25"
+        }`}
+      >
         {streamShown ? (
           <>
+            {streamed.subject ? (
+              <StreamedPlainText
+                text={streamed.subject}
+                streaming={writing}
+                className={SUBJECT_TEXT}
+              />
+            ) : !streamed.body ? (
+              <span className={SUBJECT_TEXT}>
+                <span className="flex items-center gap-1.5 text-[13px] font-normal">
+                  <Sparkles className="size-3.5 text-accent" />
+                  <Shimmer>Reading the email…</Shimmer>
+                </span>
+              </span>
+            ) : (
+              <span className={SUBJECT_TEXT}>{subject}</span>
+            )}
             <StreamedPlainText
-              text={streamText ?? ""}
+              text={streamed.body}
               streaming={writing}
               onSettled={settle}
-              className={`${FIELD_TEXT} overflow-y-auto border-transparent bg-background-base text-content/90`}
+              className={`${FIELD_TEXT} overflow-y-auto text-content/90`}
             />
-            {!streamText ? (
-              <span className="pointer-events-none absolute left-2.5 top-2 flex items-center gap-1.5 text-[13px]">
-                <Sparkles className="size-3.5 text-accent" />
-                <Shimmer>Reading the email…</Shimmer>
-              </span>
-            ) : null}
           </>
         ) : (
-          <textarea
-            ref={box}
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              setStatus(undefined);
-              // Once the user edits AI's text it is theirs: no undo over it.
-              setBefore(undefined);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                send();
-              } else if (event.key === "Escape") {
-                event.preventDefault();
-                onClose();
-              }
-            }}
-            rows={3}
-            placeholder="Write your reply, or let AI draft it"
-            className={`${FIELD_TEXT} block resize-none border-content/10 bg-background-base outline-none focus:border-content/25`}
-          />
+          <>
+            <input
+              value={subject}
+              onChange={(event) => {
+                setSubject(event.target.value);
+                setStatus(undefined);
+                setBefore(undefined);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  box.current?.focus();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  onClose();
+                }
+              }}
+              placeholder="Subject"
+              aria-label="Subject"
+              className={`${SUBJECT_TEXT} bg-transparent outline-none placeholder:text-content/35`}
+            />
+            <textarea
+              ref={box}
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                setStatus(undefined);
+                // Once the user edits AI's text it is theirs: no undo over it.
+                setBefore(undefined);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  send();
+                } else if (event.key === "Escape") {
+                  event.preventDefault();
+                  onClose();
+                }
+              }}
+              rows={3}
+              placeholder="Write your reply, or let AI draft it"
+              className={`${FIELD_TEXT} block resize-none bg-transparent outline-none`}
+            />
+          </>
         )}
         {gaps.length ? (
           <button

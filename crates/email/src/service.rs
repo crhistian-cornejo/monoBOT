@@ -25,6 +25,8 @@ const ARCHIVE_MORE: usize = 40;
 const ARCHIVED_ONLY: &str = "-in:inbox -in:sent -in:drafts";
 /// The longest reply that is saved, in characters.
 const MAX_REPLY: usize = 10_000;
+/// The longest subject a reply goes with, in characters.
+const MAX_SUBJECT: usize = 200;
 /// How many opened messages keep the pictures on the web they name (`Mail::image` fetches only those).
 const MAX_OPENED: usize = 50;
 /// The most messages one `prefetch` reads ahead.
@@ -604,13 +606,14 @@ impl Mail {
     }
 
     /// Saves `text` as a draft of a reply to a message of the last reading.
-    pub fn draft(&self, accounts: &[Account], id: &str, text: &str, all: bool, now_ms: i64) -> Result<(), String> {
+    /// `subject` is the one the user chose for the reply; without it, «Re: » and the message's.
+    pub fn draft(&self, accounts: &[Account], id: &str, text: &str, subject: Option<&str>, all: bool, now_ms: i64) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
         let people = recipients_of(&entry, &account.address, all);
         let password = secrets::get(&account.address)?;
         let mut imap = connect(&self.open, &account, &password)?;
         let drafts = boxes_of(&imap.mailboxes()?).drafts.ok_or("Esta cuenta no tiene carpeta de borradores.")?;
-        imap.save_draft(&drafts, &compose_reply(&account, &entry, &people, &text, now_ms))?;
+        imap.save_draft(&drafts, &compose_reply(&account, &entry, &people, subject, &text, now_ms))?;
         imap.logout();
         Ok(())
     }
@@ -618,12 +621,12 @@ impl Mail {
     /// Sends `text` as the reply to a message of the last reading, to the people `recipients_of` names and no one else.
     /// Only the owner's press gets here. Gmail keeps its own copy of what it sends; any other account gets one in its sent folder, and a failure there does
     /// not undo what already left.
-    pub fn send(&self, accounts: &[Account], id: &str, text: &str, all: bool, now_ms: i64) -> Result<(), String> {
+    pub fn send(&self, accounts: &[Account], id: &str, text: &str, subject: Option<&str>, all: bool, now_ms: i64) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
         let people = recipients_of(&entry, &account.address, all);
         let addresses: Vec<String> = people.to.iter().chain(&people.cc).map(|p| p.address.clone()).collect();
         let password = secrets::get(&account.address)?;
-        let message = compose_reply(&account, &entry, &people, &text, now_ms);
+        let message = compose_reply(&account, &entry, &people, subject, &text, now_ms);
         crate::smtp::send(&account, &password, &addresses, &message)?;
         if !account.is_gmail() {
             if let Ok(mut imap) = connect(&self.open, &account, &password) {
@@ -702,11 +705,21 @@ fn header_people(people: &[Person]) -> String {
         .join(", ")
 }
 
-/// The reply as a message: to `people`, in reply to theirs, its text in base64 so no server can alter it.
-fn compose_reply(account: &Account, entry: &Entry, people: &Recipients, text: &str, now_ms: i64) -> String {
-    use base64::Engine;
+/// The subject a reply goes with: the one the user chose, on one line and cut to `MAX_SUBJECT`; else «Re: » and the
+/// message's. It still answers their message (`In-Reply-To`) whatever it says.
+fn reply_subject(entry: &Entry, chosen: Option<&str>) -> String {
+    let chosen: String = chosen.map(safe).unwrap_or_default().trim().chars().take(MAX_SUBJECT).collect();
+    if !chosen.is_empty() {
+        return chosen;
+    }
     let subject = safe(&entry.subject);
-    let subject = if subject.to_ascii_lowercase().starts_with("re:") { subject } else { format!("Re: {subject}") };
+    if subject.to_ascii_lowercase().starts_with("re:") { subject } else { format!("Re: {subject}") }
+}
+
+/// The reply as a message: to `people`, in reply to theirs, its text in base64 so no server can alter it.
+fn compose_reply(account: &Account, entry: &Entry, people: &Recipients, subject: Option<&str>, text: &str, now_ms: i64) -> String {
+    use base64::Engine;
+    let subject = reply_subject(entry, subject);
     let mut message = format!("From: {} <{}>\r\nTo: {}\r\n", mime::encode_word(&safe(&account.name)), account.address, header_people(&people.to));
     if !people.cc.is_empty() {
         message.push_str(&format!("Cc: {}\r\n", header_people(&people.cc)));
@@ -833,7 +846,7 @@ mod tests {
         assert_eq!(addresses(&recipients_of(&plain, "ana@ejemplo.test", false).to), ["noreply@tienda.test"]);
         let mine = Entry { from_address: "ana@ejemplo.test".into(), reply_to: vec![], others: vec![person("Luis", "luis@ejemplo.test")], ..Entry::default() };
         assert_eq!(addresses(&recipients_of(&mine, "Ana@ejemplo.test", false).to), ["luis@ejemplo.test"]);
-        let message = compose_reply(&account(), &entry, &all, "Hola", 1_792_231_200_000);
+        let message = compose_reply(&account(), &entry, &all, None, "Hola", 1_792_231_200_000);
         assert!(message.contains("To: Soporte <ayuda@tienda.test>\r\nCc: Luis <luis@ejemplo.test>\r\n"), "{message}");
     }
 
@@ -841,13 +854,25 @@ mod tests {
     fn a_reply_names_its_recipient_and_cannot_add_headers() {
         let entry = Entry { account_id: "a".into(), from_address: "lucia@ejemplo.test\r\nBcc: x@y.test".into(), subject: "Cena del sábado".into(), message_id: "<abc@ejemplo.test>".into(), ..Entry::default() };
         let people = recipients_of(&entry, "ana@ejemplo.test", false);
-        let reply = compose_reply(&account(), &entry, &people, "Gracias, ¡nos vemos!", 1_792_231_200_000);
+        let reply = compose_reply(&account(), &entry, &people, None, "Gracias, ¡nos vemos!", 1_792_231_200_000);
         assert!(reply.contains("To: lucia@ejemplo.testBcc: x@y.test\r\n"), "{reply}");
         assert!(!reply.contains("\r\nBcc:"));
         assert!(reply.contains("Subject: =?UTF-8?B?"));
         assert!(reply.contains("In-Reply-To: <abc@ejemplo.test>\r\n"));
         assert!(reply.contains("Date: Sat, 17 Oct 2026 10:00:00 +0000\r\n"));
         assert!(reply.ends_with("\r\n") && !reply.contains("Gracias"), "the text goes in base64");
+    }
+
+    #[test]
+    fn a_reply_takes_the_subject_the_user_chose_on_one_line() {
+        let entry = Entry { subject: "Cena del sábado".into(), ..Entry::default() };
+        assert_eq!(reply_subject(&entry, None), "Re: Cena del sábado");
+        assert_eq!(reply_subject(&entry, Some("   ")), "Re: Cena del sábado");
+        assert_eq!(reply_subject(&Entry { subject: "RE: hola".into(), ..Entry::default() }, None), "RE: hola");
+        assert_eq!(reply_subject(&entry, Some(" Nos vemos el sábado\r\nBcc: x@y.test ")), "Nos vemos el sábadoBcc: x@y.test");
+        assert_eq!(reply_subject(&entry, Some(&"a".repeat(300))).chars().count(), MAX_SUBJECT);
+        let reply = compose_reply(&account(), &entry, &recipients_of(&entry, "ana@ejemplo.test", false), Some("Nos vemos"), "Hola", 0);
+        assert!(reply.contains("Subject: Nos vemos\r\n"), "{reply}");
     }
 
     #[test]
@@ -1189,7 +1214,7 @@ mod tests {
         let mail = Mail::new();
         assert!(mail.act(&[account()], "basura", Action::Read).is_err());
         assert!(mail.act(&[], &id(&account().id, Folder::Inbox, 1), Action::Read).unwrap_err().contains("ya no está conectada"));
-        assert!(mail.draft(&[account()], "x", "  ", false, 0).is_err());
-        assert!(mail.draft(&[account()], &id(&account().id, Folder::Inbox, 1), "hola", false, 0).unwrap_err().contains("Actualiza"));
+        assert!(mail.draft(&[account()], "x", "  ", None, false, 0).is_err());
+        assert!(mail.draft(&[account()], &id(&account().id, Folder::Inbox, 1), "hola", None, false, 0).unwrap_err().contains("Actualiza"));
     }
 }

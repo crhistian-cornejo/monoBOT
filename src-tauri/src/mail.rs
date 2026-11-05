@@ -362,12 +362,12 @@ pub async fn mail_recipients(app: AppHandle, id: String, all: bool) -> Result<Re
         .map_err(|e| e.to_string())?
 }
 
-/// Saves the reply as a draft on the account's server.
+/// Saves the reply as a draft on the account's server. `subject` is the one the user chose, else «Re: » and theirs.
 #[tauri::command]
-pub async fn mail_draft(app: AppHandle, id: String, text: String, all: bool) -> Result<(), String> {
+pub async fn mail_draft(app: AppHandle, id: String, text: String, subject: Option<String>, all: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         may_answer(&id)?;
-        mail().draft(&load(&app).accounts, &id, &text, all, now_ms())
+        mail().draft(&load(&app).accounts, &id, &text, subject.as_deref(), all, now_ms())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -375,13 +375,13 @@ pub async fn mail_draft(app: AppHandle, id: String, text: String, all: bool) -> 
 
 /// Sends the reply to the people `mail_recipients` names. Only the user's own press calls this.
 #[tauri::command]
-pub async fn mail_send(app: AppHandle, id: String, text: String, all: bool) -> Result<(), String> {
+pub async fn mail_send(app: AppHandle, id: String, text: String, subject: Option<String>, all: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         may_answer(&id)?;
         if text.trim().is_empty() {
             return Err("Write the reply first.".into());
         }
-        mail().send(&load(&app).accounts, &id, &text, all, now_ms())
+        mail().send(&load(&app).accounts, &id, &text, subject.as_deref(), all, now_ms())
     })
     .await
     .map_err(|e| e.to_string())?

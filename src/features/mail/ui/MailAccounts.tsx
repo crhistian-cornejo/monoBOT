@@ -1,9 +1,12 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Trash2 } from "../../../shared/ui/icons";
+import { PersonAvatar } from "../../../shared/ui/PersonAvatar";
 import { Switch } from "../../../shared/ui/Switch";
 import { loadAutoImages, saveAutoImages, type MailAccount } from "../model/mail";
+import { loadMyPhoto, saveMyPhoto } from "../model/mailAvatar";
 import { mailApi } from "../model/mailApi";
+import { readPhoto, useMailFace } from "./MailPeople";
 
 type Provider = "gmail" | "icloud" | "imap";
 
@@ -31,6 +34,54 @@ const STEPS: Record<Provider, { text: string; link?: { label: string; url: strin
 const FIELD =
   "h-9 w-full rounded-md border border-content/10 bg-background-base px-2.5 text-[13px] outline-none focus:border-content/25";
 const LABEL = "text-[12px] text-content/70";
+
+/**
+ * An account's face on the replies it sends: press it to choose a photo from
+ * this computer. Without one it is the address's Gravatar, else its initial.
+ */
+function AccountPhoto({ account }: { account: MailAccount }) {
+  const face = useMailFace(account.address, true);
+  const chosen = Boolean(loadMyPhoto(account.address));
+  const input = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState<string>();
+  return (
+    <>
+      <button
+        type="button"
+        title={error ?? "Choose the photo your replies show. Without one, MonoBOT uses your Gravatar."}
+        aria-label={`Choose a photo for ${account.address}`}
+        onClick={() => input.current?.click()}
+        className="shrink-0 rounded-full outline-none hover:opacity-80 focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <PersonAvatar name={account.name || account.address} src={face} className="size-8 text-[12px]" />
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (!file) return;
+          setError(undefined);
+          void readPhoto(file)
+            .then((photo) => saveMyPhoto(account.address, photo))
+            .catch(() => setError("That picture could not be read."));
+        }}
+      />
+      {chosen ? (
+        <button
+          type="button"
+          onClick={() => saveMyPhoto(account.address, undefined)}
+          className="order-last shrink-0 rounded-md px-1.5 py-0.5 text-[12px] text-content/55 hover:bg-content/8 hover:text-content"
+        >
+          Remove photo
+        </button>
+      ) : null}
+    </>
+  );
+}
 
 /** Connect a mail account with an app password, or remove one. */
 export function MailAccounts({
@@ -80,8 +131,9 @@ export function MailAccounts({
           {accounts.map((account) => (
             <li
               key={account.id}
-              className="flex items-center gap-2 rounded-md border border-content/10 px-3 py-2 text-[13px]"
+              className="flex items-center gap-2.5 rounded-md border border-content/10 px-3 py-2 text-[13px]"
             >
+              <AccountPhoto account={account} />
               <span className="min-w-0 flex-1">
                 <span className="block truncate">{account.name}</span>
                 <span className="block truncate text-[12px] text-content/50">
@@ -95,7 +147,7 @@ export function MailAccounts({
                 onClick={() =>
                   void mailApi.removeAccount(account.id).then(onChanged)
                 }
-                className="grid size-7 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
+                className="order-last grid size-7 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
               >
                 <Trash2 className="size-3.5" />
               </button>

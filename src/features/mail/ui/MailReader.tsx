@@ -10,6 +10,7 @@ import {
   loadAutoImages,
   loadInBatches,
   mailDocument,
+  type MailAccount,
   type MailAction,
   type MailMessage,
   type OpenedMail,
@@ -52,12 +53,15 @@ function remember(opened: OpenedMail) {
 
 export function MailReader({
   message,
+  account,
   onBack,
   onAct,
   onInteresting,
   replyRequest,
 }: {
   message: MailMessage;
+  /** The user's account the message came to, which a reply goes from. */
+  account?: MailAccount;
   onBack: () => void;
   onAct: (action: MailAction) => void;
   onInteresting: (on: boolean) => void;
@@ -248,6 +252,7 @@ export function MailReader({
           <div className="mail-reply-float sticky bottom-3 z-10 mx-auto mb-3 w-full max-w-[560px]">
             <MailReply
               message={message}
+              account={account}
               opened={opened}
               onClose={() => setReplying(false)}
               onSent={() => {

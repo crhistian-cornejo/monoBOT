@@ -301,6 +301,7 @@ export function MailInbox() {
       {selected ? (
         <MailReader
           message={selected}
+          account={accounts.find((account) => account.id === selected.accountId)}
           replyRequest={replyRequest}
           onBack={() => setSelectedId(undefined)}
           onAct={(action) => act(selected.id, action)}

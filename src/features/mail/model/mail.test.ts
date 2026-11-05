@@ -9,6 +9,8 @@ import {
   nextGap,
   replyGaps,
   replyPrompt,
+  replySubject,
+  splitSubject,
   visibleMessages,
   type MailMessage,
 } from "./mail";
@@ -107,6 +109,42 @@ describe("replying with AI", () => {
     expect(replyPrompt({ from: "a", subject: "b", body: "c" })).toContain(
       "Propose a suitable reply.",
     );
+  });
+
+  it("asks for a subject first, and changes the draft's along with it", () => {
+    const prompt = replyPrompt({
+      from: "a",
+      subject: "b",
+      body: "c",
+      draft: "Hola",
+      draftSubject: "Nos vemos",
+    });
+    expect(prompt).toContain("first line `Subject: `");
+    expect(prompt).toMatch(/<draft>\nSubject: Nos vemos\n\nHola\n<\/draft>/);
+    expect(replyPrompt({ from: "a", subject: "b", body: "c", draftSubject: "x" })).not.toContain(
+      "Change this draft",
+    );
+  });
+
+  it("splits the subject the model wrote from the text after it", () => {
+    expect(splitSubject("Subject: Next steps today\n\nHi Olivia,\nThanks.")).toEqual({
+      subject: "Next steps today",
+      body: "Hi Olivia,\nThanks.",
+    });
+    expect(splitSubject("**Asunto:** «Cena del sábado»\nHola")).toEqual({
+      subject: "Cena del sábado",
+      body: "Hola",
+    });
+    // While the line is still coming, nothing reaches the body.
+    expect(splitSubject("Subj")).toEqual({ subject: "", body: "" });
+    expect(splitSubject("Subject: Next st")).toEqual({ subject: "Next st", body: "" });
+    // A reply without one is all text.
+    expect(splitSubject("Hola Ana,\nSí.")).toEqual({ body: "Hola Ana,\nSí." });
+  });
+
+  it("answers with «Re: » and their subject by default", () => {
+    expect(replySubject("Cena")).toBe("Re: Cena");
+    expect(replySubject(" RE: Cena ")).toBe("RE: Cena");
   });
 
   it("cleans the fence some models add", () => {

@@ -43,11 +43,12 @@ export const mailApi = {
    */
   recipients: (id: string, all: boolean) =>
     invoke<MailRecipients>("mail_recipients", { id, all }),
-  draft: (id: string, text: string, all = false) =>
-    invoke<void>("mail_draft", { id, text, all }),
+  /** `subject` is the one the user chose; without it, Rust sends «Re: » and theirs. */
+  draft: (id: string, text: string, all = false, subject?: string) =>
+    invoke<void>("mail_draft", { id, text, all, subject: subject?.trim() || null }),
   /** Only the user's own press on Send calls this. */
-  send: (id: string, text: string, all = false) =>
-    invoke<void>("mail_send", { id, text, all }),
+  send: (id: string, text: string, all = false, subject?: string) =>
+    invoke<void>("mail_send", { id, text, all, subject: subject?.trim() || null }),
   image: (id: string, url: string) => invoke<string>("mail_image", { id, url }),
   attachment: (id: string, index: number) =>
     invoke<string>("mail_attachment", { id, index }),
