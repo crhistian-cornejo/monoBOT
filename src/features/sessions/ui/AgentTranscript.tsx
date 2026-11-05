@@ -32,6 +32,7 @@ import {
 import { flushSync } from "react-dom";
 import { AttachmentChip } from "./AttachmentChip";
 import { GeneratedImage } from "./GeneratedImage";
+import { ImageGeneration } from "../../images/ui/ImageGeneration";
 import { MonocodeSparkles } from "./MonocodeSparkles";
 import { OrchestratorConstellation } from "./OrchestratorConstellation";
 import { PlanStepsBurst } from "./PlanStepsBurst";
@@ -1230,6 +1231,8 @@ function AgentTranscriptComponent({
           );
           const proposals = turn.filter((block) => block.orchestration);
           const artifacts = artifactCards(turn);
+          // Pictures the agent asked for show from the moment it asks.
+          const imageJobs = turn.filter((block) => block.imageJob);
           // Proposals are turn results, like the changes card. Keep them out
           // of the live work and append them after all of the lead's output.
           const items = turnCache.turnItems(turn, settled, {
@@ -1723,6 +1726,13 @@ function AgentTranscriptComponent({
                       card={card}
                       onOpen={onOpenArtifact}
                     />
+                  ))}
+                </div>
+              ) : null}
+              {imageJobs.length > 0 ? (
+                <div data-image-results className="flex flex-col">
+                  {imageJobs.map((block) => (
+                    <ImageGeneration key={block.id} job={block.imageJob!} />
                   ))}
                 </div>
               ) : null}
@@ -2298,6 +2308,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
   }
 
   if (block.role === "image") {
+    if (block.imageJob) return <ImageGeneration job={block.imageJob} />;
     return block.image ? <GeneratedImage image={block.image} /> : null;
   }
 

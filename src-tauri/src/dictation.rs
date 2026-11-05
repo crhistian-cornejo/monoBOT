@@ -44,9 +44,6 @@ pub struct DictationStatus {
     installing: bool,
     /// The model's download size, for the install prompt.
     bytes: u64,
-    /// Another app on this computer that already has the model ("Echo"),
-    /// so installing takes it from there instead of downloading.
-    shared_from: Option<&'static str>,
 }
 
 #[tauri::command(async)]
@@ -56,7 +53,6 @@ pub fn dictation_status(app: AppHandle) -> Result<DictationStatus, String> {
         installed: state.engine.installed(),
         installing: state.installing.load(Ordering::Acquire),
         bytes: monobot_dictation::model::total_bytes(),
-        shared_from: state.engine.shared_from(),
     })
 }
 
@@ -66,12 +62,10 @@ struct Progress {
     total: u64,
 }
 
-/// Gets the model, from another app on this computer when one has it, else
-/// by downloading it; verifies it, reporting `dictation-install` progress,
-/// then loads it so the first dictation starts at once.
-#[tauri::command]
-pub async fn dictation_install(app: AppHandle) -> Result<(), String> {
-    let state = state(&app)?;
+/// Downloads the model and verifies it, reporting `dictation-install`
+/// progress, then loads it so the first dictation starts at once.
+async fn install(app: &AppHandle) -> Result<(), String> {
+    let state = state(app)?;
     if state.installing.swap(true, Ordering::AcqRel) {
         return Err("The speech model is already downloading.".into());
     }
@@ -93,6 +87,29 @@ pub async fn dictation_install(app: AppHandle) -> Result<(), String> {
     .and_then(|result| result.map_err(|e| e.to_string()));
     state.installing.store(false, Ordering::Release);
     result
+}
+
+#[tauri::command]
+pub async fn dictation_install(app: AppHandle) -> Result<(), String> {
+    install(&app).await
+}
+
+/// The app sets the speech model up on its own the first time it runs, in the
+/// background, so dictation works when the user first reaches for the mic.
+/// When it cannot (no network, say) the composer offers the download instead.
+pub fn init(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let Ok(state) = state(&app) else { return };
+        if state.engine.installed() {
+            // Load it ahead of the first dictation.
+            let engine = state.engine.clone();
+            let _ = tauri::async_runtime::spawn_blocking(move || engine.prepare().map(|_| ()))
+                .await;
+            return;
+        }
+        let _ = install(&app).await;
+    });
 }
 
 /// Opens the microphone. Emits `dictation-level` (0 to 1) as it hears,

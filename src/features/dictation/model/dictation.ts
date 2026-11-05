@@ -8,9 +8,6 @@ export type DictationStatus = {
   installing: boolean;
   /** The model's download size in bytes. */
   bytes: number;
-  /** Another app on this computer that already has the model ("Echo"):
-   * installing takes it from there, with nothing to download. */
-  sharedFrom?: string | null;
 };
 
 export const dictationStatus = () => invoke<DictationStatus>("dictation_status");
@@ -64,20 +61,16 @@ export function formatModelSize(bytes: number): string {
   return `${Math.round(bytes / 1_000_000)} MB`;
 }
 
-/** What the install prompt says, and what its button does. */
-export function modelOffer(
-  bytes: number,
-  sharedFrom?: string | null,
-): { text: string; action: string; busy: string } {
-  return sharedFrom
-    ? {
-        text: `${sharedFrom} already has the speech model on this computer (Spanish and English). Use it here, with nothing to download.`,
-        action: "Use it",
-        busy: `Setting up the speech model from ${sharedFrom}…`,
-      }
-    : {
-        text: `Dictation runs on this computer. Download the speech model (${formatModelSize(bytes)}, Spanish and English) once to start.`,
-        action: "Download",
-        busy: "Downloading the speech model…",
-      };
+/** What the install prompt says, and what its button does. The app sets the
+ * model up on its own; this only shows when that could not finish. */
+export function modelOffer(bytes: number): {
+  text: string;
+  action: string;
+  busy: string;
+} {
+  return {
+    text: `Dictation runs on this computer. The speech model (${formatModelSize(bytes)}, Spanish and English) could not be set up yet. Try again.`,
+    action: "Download",
+    busy: "Setting up the speech model…",
+  };
 }

@@ -1,5 +1,6 @@
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { AcpSubagents } from "../../core/acpSubagents";
+import { awaitTurnImages, updateMakesImage } from "./antigravityImages";
 import type { RuntimeMode } from "../../../../features/sessions/model/session";
 import { AcpClient, type AcpHandlers } from "../../core/acp";
 import {
@@ -61,6 +62,8 @@ type Live = {
    *  a cancel here makes the transport indeterminate even mid-config. */
   turnActive: boolean;
   stallNotified: boolean;
+  /** The turn asked Gemini for a picture, so its files are collected at the end. */
+  makesImage: boolean;
   watchdog?: ReturnType<typeof setTimeout>;
 };
 
@@ -567,6 +570,7 @@ async function startLive(input: SendTurnInput, life: number): Promise<Live> {
       promptInFlight: false,
       turnActive: false,
       stallNotified: false,
+      makesImage: false,
     };
     liveRef.current = live;
     liveByThread.set(input.sessionId, live);
@@ -690,6 +694,8 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
     const blocks = antigravityPromptBlocks(input.text, input.attachments);
     if (blocks.length === 0) return;
     live.promptInFlight = true;
+    live.makesImage = false;
+    const startedAt = Date.now();
     noteActivity(live);
     const result = await live.acp.request(
       "session/prompt",
@@ -709,6 +715,15 @@ async function prompt(live: Live, input: SendTurnInput): Promise<void> {
         message: `Antigravity ended the turn (${String(stopReason)}).`,
       });
       return;
+    }
+    if (live.makesImage) {
+      // Nano Banana saves its pictures beside the conversation, not in the
+      // reply; they join the chat before the turn ends.
+      const images = await awaitTurnImages({
+        sinceMs: startedAt,
+        stopped: () => live.cancelled || live.muteUpdates,
+      });
+      for (const image of images) live.onEvent(image);
     }
     live.onEvent({ type: "message.completed" });
     live.onEvent({ type: "reasoning.completed" });
@@ -743,6 +758,7 @@ function handleNotification(live: Live, method: string, params: unknown) {
     live.modelConfigId = extractModelConfigId(live.configOptions);
   }
   if (live.muteUpdates) return;
+  if (!live.makesImage && updateMakesImage(update)) live.makesImage = true;
   for (const event of live.subagents.route(params, eventsFromAcpUpdate(params))) {
     live.onEvent(event);
   }

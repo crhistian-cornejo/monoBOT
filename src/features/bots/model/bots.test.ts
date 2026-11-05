@@ -13,6 +13,11 @@ import {
 } from "./bots";
 
 describe("bots", () => {
+  it("gives the image bot Nano Banana through its Images access", () => {
+    expect(botTools("images").access).toContain("images");
+    expect(botTools("research").access).not.toContain("images");
+  });
+
   it("knows its roles", () => {
     expect(BOT_ROLES.map((info) => info.role)).toEqual([
       "principal",
@@ -24,6 +29,7 @@ describe("bots", () => {
       "finance",
       "documents",
       "research",
+      "images",
       "custom",
     ]);
     // Every role says what it takes on, for the orchestrator to pick by.

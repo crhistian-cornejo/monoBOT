@@ -42,7 +42,7 @@ function render(blocks: Block[], live = false) {
   );
 }
 
-it("shows the complete chronological trail", () => {
+it("shows the work in order and leaves the answer to the chat", () => {
   render([
     { id: "user", role: "user", text: "Update my instructions" },
     {
@@ -74,7 +74,37 @@ it("shows the complete chronological trail", () => {
     Array.from(container.querySelectorAll("[data-mono-activity-block]")).map(
       (el) => el.getAttribute("data-mono-activity-block"),
     ),
-  ).toEqual(["thinking", "intro", "read", "progress", "write", "reply"]);
+  ).toEqual(["thinking", "intro", "read", "progress", "write"]);
+});
+
+it("sums up the searches and cites the sources the answer used", () => {
+  render([
+    { id: "user", role: "user", text: "Find a paper", durationMs: 42_000 },
+    {
+      id: "search",
+      role: "tool",
+      text: "Find hydrology R",
+      tool: {
+        kind: "search",
+        status: "completed",
+        preview: { kind: "search", query: "hydrology R" },
+        detail:
+          'Links: [{"title":"airGR","url":"https://hal.science/a"},{"title":"Other","url":"https://example.com/b"}]\n',
+      },
+    },
+    {
+      id: "reply",
+      role: "assistant",
+      text: 'It exists [1](https://hal.science/a "airGR | A suite of models.").',
+    },
+  ]);
+  const research = container.querySelector('[aria-label="Research"]');
+  expect(research?.textContent).toContain("1 search");
+  expect(research?.textContent).toContain("1 cited");
+  expect(research?.textContent).toContain("1 passed over");
+  expect(research?.textContent).toContain("hydrology R");
+  expect(research?.textContent).toContain("airGR");
+  expect(container.textContent).toContain("in 42s");
 });
 
 it("updates a live trail and keeps approval controls actionable", () => {

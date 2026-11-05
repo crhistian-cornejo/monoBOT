@@ -1,6 +1,6 @@
 ---
 name: research
-description: Research a topic in depth with sources and deliver a report (in the chat or as a document) when the user asks to investigate, compare in depth, review the literature or write a report ("investiga", "compara a fondo", "hazme un informe sobre", "busca papers de").
+description: Research a topic in depth with sources and deliver a report (in the chat or as a document) when the user asks to investigate, compare in depth, review the literature or write a report ("investiga", "compara a fondo", "hazme un informe sobre", "busca papers de"), or when they ask for one paper: to find it, get its abstract, read it, summarise it or "dame el paper".
 ---
 # Research with sources
 
@@ -19,8 +19,43 @@ description: Research a topic in depth with sources and deliver a report (in the
 | --- | --- |
 | Library, framework or API | Context7 connector; Microsoft Learn for Microsoft products; DeepWiki for how a public GitHub repo works |
 | Posts, threads, what people say | x.md connector |
-| Papers, authors, citations, trends | OpenAlex connector if it is on; otherwise the open APIs below with `WebFetch` |
+| One paper: find it, its abstract, read it, summarise it | `app papers.find` then `app papers.read` (see Papers below) |
+| Authors, citations, trends | OpenAlex connector if it is on; otherwise the open APIs below with `WebFetch` |
 | Anything else | `WebSearch`, then `WebFetch` to read the pages that matter |
+
+### Papers: find, read, summarise
+
+Never read a paper through `WebFetch` on `doi.org` or a publisher page: you get the paywall, not the paper. Use the app:
+
+- `app papers.find {"query":"lumped GR hydrological models R package","limit":6}`: candidates with `ref`, title,
+  authors, year, citations, open access. Add `"fromYear":2020` for recent work. Say which one you pick and why.
+- `app papers.read {"ref":"<ref from papers.find, a DOI or an arXiv id>"}`: the abstract (from whichever source has it)
+  and, when a free copy exists, the paper's text. The app downloads it to its own cache, not to Downloads, and keeps
+  it. It also saves the paper in your Documents.
+  - A paper in `full-text` also returns its `outline` (section headings with pages) and its `figures` (captions with
+    pages). Ask for the part you need: `"section":"methods"` (or results, conclusion, any heading's words),
+    `"pages":"2-4"`, or `"query":"how is it calibrated"` for the passages that answer it. Use them for a long paper
+    instead of asking for everything.
+- `app papers.figure {"ref":"...","page":4}` draws that page as an image (take the page from `figures`) and returns
+  `markdown`: put it in your reply and the image shows in the chat. It is the whole page, not a crop, so say which
+  figure or table you mean. It only works for `full-text`; for `abstract-only` say there is no PDF to draw.
+- Read `availability` before you write anything:
+  - `full-text`: summarise from the text and cite the page.
+  - `abstract-only`: summarise from the abstract and say, in the first line, that the full text was not accessible
+    and why (`why`). Do not describe sections, methods or results you did not read.
+  - `metadata-only`: say you could not read it. Offer another version (a preprint, the author's page).
+- Free copies are found by the app itself: it follows a paper's open locations and the PDF link in their pages (arXiv,
+  PLOS, Copernicus, Nature and repositories work). Some sites refuse programs outright or ask for a human check
+  (Elsevier's ScienceDirect, MDPI, some repositories): then `availability` is `abstract-only`, `blocked` is true and
+  `why` names the site. Do not try to get around it, and do not offer a list of links as the answer. Say that the
+  paper is probably free to read but the site blocks downloads, give the DOI link, and tell the user to download the
+  PDF and either choose **Add PDF** on the paper's page or send it to you.
+- `app papers.add {"path":"/abs/path/paper.pdf"}` registers a PDF the user gave you (attached or on disk) as a paper,
+  so it is read by sections, drawn, cited and underlined like any other. Add `"ref":"<ref>"` when it is the copy of a
+  paper you already found, and `"title"` when you can tell it.
+- A follow-up like "the summary of the first one" refers to a `ref` you already have: call `papers.read` again, which
+  is instant from the cache. Never search again for a paper you already found in this conversation.
+- A summary is: what question it asks, what it does, the main result, and its limits, each from what you read.
 
 ### Open scholarly APIs (no key, use `WebFetch`)
 
@@ -65,9 +100,11 @@ or a close paraphrase):
 
 - The number is the order of first citation: 1, 2, 3… The same source keeps its number everywhere. Two sources for
   one claim are two links side by side: `[2](…)[3](…)`.
+- For a paper, the passage is a **verbatim** sentence from the abstract or text that `papers.read` returned: the app
+  finds it again in the paper to show where it comes from, so a paraphrase would not match. Use the paper's DOI link.
 - The link text is only the number. MonoBOT shows it as a chip with the site's name and a preview of the title and
   passage; in a docx, PDF or any other viewer it is still a plain link.
-- Cite only pages and papers you actually opened. Use the paper's own link (DOI, arXiv or publisher), never a search
+- Cite only pages and papers you actually opened (for a paper, those `papers.read` returned text for). Use the paper's own link (DOI, arXiv or publisher), never a search
   page, and never invent a title or a passage.
 - In the chat, the chips are the sources: do not repeat them as a list. In a document, finish with a `Sources`
   section: number, title, author, date, link.

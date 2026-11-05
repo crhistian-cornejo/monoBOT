@@ -32,6 +32,9 @@ export function extractToolPreview(
     update,
     tool,
   );
+  // A web fetch reads a page, not a file: its prompt is not a path.
+  const fetched = webFetchUrl(rawKind, title, inputs);
+  if (fetched) return { kind: "read", title, url: fetched };
   const content = update.content ?? tool.content;
   const diff = extractDiff(content);
   const path = extractPath(update, tool, inputs, diff?.path);
@@ -144,6 +147,22 @@ export function extractToolPreview(
     fileName,
     startLine,
   };
+}
+
+const WEB_FETCH = /^(web[_-]?fetch|fetch|fetch[_-]?url|read[_-]?url)$/i;
+
+function webFetchUrl(
+  rawKind: string,
+  title: string | undefined,
+  inputs: Record<string, unknown>[],
+): string | undefined {
+  if (!WEB_FETCH.test(rawKind) && !WEB_FETCH.test(title?.trim() ?? "")) return;
+  for (const input of inputs) {
+    const url = input.url ?? input.uri;
+    if (typeof url === "string" && /^https?:\/\//i.test(url.trim()))
+      return url.trim();
+  }
+  return undefined;
 }
 
 function shellPreview(
@@ -351,7 +370,7 @@ export function titleFromToolInput(
       title: name,
       command: extractShellCommand(input),
       skill: extractSkillName(input),
-      path: preview?.path,
+      path: preview?.path ?? preview?.url,
       query: preview?.query,
       previewKind: preview?.kind,
     }) || name
@@ -495,6 +514,7 @@ export function mergeToolPreview(
     deletions: next.deletions ?? prev.deletions,
     contentOnly: next.lines ? next.contentOnly : prev.contentOnly,
     query: next.query || prev.query,
+    url: next.url || prev.url,
     lines:
       next.kind === "read" || next.kind === "search"
         ? undefined

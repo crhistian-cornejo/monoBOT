@@ -4,40 +4,48 @@ import { invoke } from "@tauri-apps/api/core";
  * the app data folder once per launch and passed to Claude with
  * `--plugin-dir`, so its skills load in MonoBOT's sessions only and nothing
  * is installed into the user's own `~/.claude`. */
-export type BundledPlugin = "monobot" | "monobot-finance";
+export type BundledPlugin =
+  | "monobot"
+  | "monobot-finance"
+  | SkillPackId;
+
+/** Optional packs of third-party skills; each one is off until the user (or
+ * a bot's tools) turns it on. See `skillPacks.ts`. */
+export type SkillPackId =
+  | "monobot-design"
+  | "monobot-imagery"
+  | "monobot-dev"
+  | "monobot-audio"
+  | "monobot-openai";
 
 type Loaders = Record<string, () => Promise<unknown>>;
 
-// Dot folders are not matched by `**`, so each manifest is listed explicitly.
-const SOURCES: Record<BundledPlugin, Loaders> = {
-  monobot: {
-    ...import.meta.glob("../bundled/monobot/.claude-plugin/plugin.json", {
-      query: "?raw",
-      import: "default",
-    }),
-    ...import.meta.glob("../bundled/monobot/skills/**/*.md", {
-      query: "?raw",
-      import: "default",
-    }),
-  },
-  "monobot-finance": {
-    ...import.meta.glob(
-      "../bundled/monobot-finance/.claude-plugin/plugin.json",
-      { query: "?raw", import: "default" },
-    ),
-    ...import.meta.glob("../bundled/monobot-finance/skills/**/*.md", {
-      query: "?raw",
-      import: "default",
-    }),
-  },
+// Dot folders are not matched by `**`, so the manifests have their own glob.
+// Skills carry scripts and data beside their Markdown; all of it is text.
+const ALL: Loaders = {
+  ...import.meta.glob("../bundled/*/.claude-plugin/plugin.json", {
+    query: "?raw",
+    import: "default",
+  }),
+  ...import.meta.glob("../bundled/*/skills/**/*", {
+    query: "?raw",
+    import: "default",
+  }),
 };
+
+function sources(name: BundledPlugin): Loaders {
+  const prefix = `../bundled/${name}/`;
+  return Object.fromEntries(
+    Object.entries(ALL).filter(([path]) => path.startsWith(prefix)),
+  );
+}
 
 export async function bundledPluginFiles(
   name: BundledPlugin,
 ): Promise<{ path: string; content: string }[]> {
   const prefix = `../bundled/${name}/`;
   return Promise.all(
-    Object.entries(SOURCES[name]).map(async ([path, load]) => ({
+    Object.entries(sources(name)).map(async ([path, load]) => ({
       path: path.slice(prefix.length),
       content: String(await load()),
     })),

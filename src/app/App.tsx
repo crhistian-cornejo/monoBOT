@@ -1,7 +1,10 @@
 import { recoverMobileUsage } from "../features/mobile/model/mobileUsageLimit";
 import { sessionConversationPage } from "../features/agent-app/model/sessionConversation";
 import { useMobileWorkspace } from "../features/mobile/hooks/useMobileWorkspace";
-import { hasMobileAttachments, mobileAttachments } from "../features/mobile/model/mobileAttachments";
+import {
+  hasMobileAttachments,
+  mobileAttachments,
+} from "../features/mobile/model/mobileAttachments";
 import {
   applyMobileChoice,
   mobileWorkspaceChoice,
@@ -42,6 +45,14 @@ import {
   type AppSessionListing,
   type AppSessionPlacement,
 } from "../features/agent-app/model/agentApp";
+import { findPapers } from "../features/papers/model/papers";
+import { PaperViewerHost } from "../features/papers/ui/PaperViewerHost";
+import {
+  addPaperPdf,
+  loadPaper,
+  nativePaperDeps,
+  renderPaperPage,
+} from "../features/papers/model/paperStore";
 import { submitWithSettlement } from "./model/managedSubmission";
 import {
   submitAfterProjectSync,
@@ -62,7 +73,7 @@ import {
   workspaceIdentity,
   type ControlOutcome,
 } from "../features/orchestration/model/orchestration";
-import { modelsFor } from "../features/sessions/model/models";
+import { DEFAULT_MODEL_ID, modelsFor } from "../features/sessions/model/models";
 import { isHarnessAvailable } from "../integrations/harness/core/availability";
 import {
   completeOrchestrationProposal,
@@ -144,6 +155,7 @@ import {
 } from "../features/monos/model/monoSpawnedSessions";
 import { groupMonoTurns } from "../features/sessions/model/transcriptActivity";
 import {
+  latestMonoActivity,
   resolveMonoActivity,
   type MonoActivitySelection,
 } from "../features/monos/model/monoActivity";
@@ -219,9 +231,11 @@ import { resolveZoomKeybinding } from "../features/settings/model/zoomKeybinding
 import { resolveAppShortcut } from "../features/settings/model/appShortcuts";
 import { runUpdateFlow } from "./model/updater";
 import {
+  attachmentsFromPaths,
   displayAttachments,
   prepareAttachments,
 } from "../features/sessions/model/attachments";
+import { runImageTurn } from "../features/images/model/generateImages";
 import {
   basename,
   homeDir,
@@ -515,6 +529,7 @@ import {
   titleFromPrompt,
   type Attachment,
   type Block,
+  type ImageJobMeta,
   type BtwThread,
   type ComposerTurnOptions,
   type HarnessId,
@@ -1182,10 +1197,14 @@ function Workspace({
     const tab = newTab(session.id);
     return { session, tab };
   });
-  const { sessions, setSessions, sessionsRef, store: sessionState } =
-    useWorkspaceSessionState(
-      () => windowTransfer?.sessions ?? resumed?.sessions ?? [seed.session],
-    );
+  const {
+    sessions,
+    setSessions,
+    sessionsRef,
+    store: sessionState,
+  } = useWorkspaceSessionState(
+    () => windowTransfer?.sessions ?? resumed?.sessions ?? [seed.session],
+  );
   const [sessionDeleteDialog, setSessionDeleteDialog] = useState<{
     title: string;
     unusedWorktree: string;
@@ -1605,7 +1624,10 @@ function Workspace({
   const linkedWorkItemActivityFetches = useRef(new Map<string, number>());
   const queueDispatchingRef = useRef(new Set<string>());
   const [queueDispatchVersion, setQueueDispatchVersion] = useState(0);
-  const mobileUsageActions = useRef<{ resume: (id: string) => Promise<boolean>; automatic: (id: string, enabled: boolean) => void } | null>(null);
+  const mobileUsageActions = useRef<{
+    resume: (id: string) => Promise<boolean>;
+    automatic: (id: string, enabled: boolean) => void;
+  } | null>(null);
   const mobileUsagePending = useRef(new Set<string>());
   const usageResumingRef = useRef(new Set<string>());
   const usageResetLookups = useRef(new WeakSet<UsageLimit>());
@@ -1871,29 +1893,28 @@ function Workspace({
           const previous = sessionsRef.current;
           const textOnly = [...batches.values()].every((events) =>
             events.every(
-              (event) => event.type === "message.delta" || event.type === "reasoning.delta",
+              (event) =>
+                event.type === "message.delta" ||
+                event.type === "reasoning.delta",
             ),
           );
-          const next = sessionState.update(
-            (current) => {
-              const updated = current.map((session) => {
-                const events = batches.get(session.id);
-                if (!events) return session;
-                const updated = applyHarnessEvents(session, events);
-                noteStreamApplied(
-                  session.blocks, updated.blocks, events,
-                  harnessEvents.isForeground(session.id),
-                );
-                return updated;
-              });
-              return updated.some(
-                (session, index) => session !== current[index],
-              )
-                ? updated
-                : current;
-            },
-            textOnly,
-          );
+          const next = sessionState.update((current) => {
+            const updated = current.map((session) => {
+              const events = batches.get(session.id);
+              if (!events) return session;
+              const updated = applyHarnessEvents(session, events);
+              noteStreamApplied(
+                session.blocks,
+                updated.blocks,
+                events,
+                harnessEvents.isForeground(session.id),
+              );
+              return updated;
+            });
+            return updated.some((session, index) => session !== current[index])
+              ? updated
+              : current;
+          }, textOnly);
           if (!textOnly && next !== previous) syncDockBadge(next);
         },
       ),
@@ -2286,8 +2307,7 @@ function Workspace({
 
   // The footer's usage follows what is in view: under the inset layout a
   // Mono's tab keeps the footer, which then reads the Mono's model.
-  const usageSource =
-    insetLayout && monoViewSession ? monoViewSession : active;
+  const usageSource = insetLayout && monoViewSession ? monoViewSession : active;
   const usageProviders = useMemo(() => {
     if (
       usageSource?.harness === "claude" ||
@@ -4477,10 +4497,16 @@ function Workspace({
       setTabs((prev) => {
         const selectedId = activeTabIdRef.current;
         const selected = prev.find((tab) => tab.id === selectedId);
-        if (!selected || (selected.focusedId === paneId && !selected.diffFocused)) return prev;
-        return prev.map((tab) => tab.id === selectedId
-          ? { ...tab, focusedId: paneId, diffFocused: false }
-          : tab);
+        if (
+          !selected ||
+          (selected.focusedId === paneId && !selected.diffFocused)
+        )
+          return prev;
+        return prev.map((tab) =>
+          tab.id === selectedId
+            ? { ...tab, focusedId: paneId, diffFocused: false }
+            : tab,
+        );
       });
       setComposerFocused(
         sessionsRef.current.some((session) => session.id === paneId),
@@ -5134,14 +5160,14 @@ function Workspace({
         setMonoOverviewDocument(null);
       }
       // A bot belongs to the Personal zone and opens on what a person checks
-      // first: the Principal on its news, any other bot on its habits.
+      // first: the Principal on its news, any other bot on what it is doing.
       const opened = findMono(monoId);
       const personal = !!opened && isPersonal(opened);
       if (personal) lastBotIdRef.current = monoId;
       applyRailZone(personal ? "personal" : "code");
       if (personal && monoViewIdRef.current !== session.id) {
         setMonoOverviewTab(
-          opened?.botRole === "principal" ? "news" : "habits",
+          opened?.botRole === "principal" ? "news" : "activity",
         );
         setMonoOverviewOpen(true);
       }
@@ -5229,11 +5255,14 @@ function Workspace({
   }, [closeMonoView, monosEnabled, onOpenMono]);
 
   /** A new Mono opens straight away, ready to be told what it works on. */
-  const onCreateMono = useCallback((projects?: readonly string[]) => {
-    const monoId = createMono(projects).id;
-    setMonoSettingsFor(monoId);
-    void onOpenMono(monoId);
-  }, [onOpenMono]);
+  const onCreateMono = useCallback(
+    (projects?: readonly string[]) => {
+      const monoId = createMono(projects).id;
+      setMonoSettingsFor(monoId);
+      void onOpenMono(monoId);
+    },
+    [onOpenMono],
+  );
 
   // A bot starts from its role's name and instructions, so it opens straight
   // into its conversation instead of the settings a new Mono shows first.
@@ -8547,7 +8576,9 @@ function Workspace({
               ...agentFiles,
               soulHash: `${agentFiles.soulHash}:${agentLook.name}:${agentLook.projects
                 .map((project) => project.path)
-                .join("|")}:${agentLook.specialty ?? ""}:${MONO_PROMPT_VERSION}`,
+                .join(
+                  "|",
+                )}:${agentLook.specialty ?? ""}:${MONO_PROMPT_VERSION}`,
               // The team's memory loads with its own: a change to either is
               // handed over again.
               memoryHash: `${agentFiles.memoryHash}:${agentFiles.teamHash ?? ""}`,
@@ -9269,40 +9300,68 @@ function Workspace({
       const text = typeof params.text === "string" ? params.text.trim() : "";
       if (
         (method === "session.start" || method === "conversation.send") &&
-        ((!text && !hasMobileAttachments(params.attachments)) || text.length > 100_000)
+        ((!text && !hasMobileAttachments(params.attachments)) ||
+          text.length > 100_000)
       )
         throw new Error("Enter a message under 100,000 characters");
       if (method === "session.start") {
-        const paths = [...loadRecents().map((project) => project.path), ...loadPinnedProjects(), ...listMonos().flatMap((mono) => mono.projects)];
-        const cwd = paths.find((path) => mobileProjectId(path) === params.projectId);
+        const paths = [
+          ...loadRecents().map((project) => project.path),
+          ...loadPinnedProjects(),
+          ...listMonos().flatMap((mono) => mono.projects),
+        ];
+        const cwd = paths.find(
+          (path) => mobileProjectId(path) === params.projectId,
+        );
         if (!cwd) throw new Error("Project is no longer available");
         const id = String(params.sessionId ?? "");
         if (!id) throw new Error("Missing mobile session ID");
-        const existing = sessionsRef.current.find(current => current.id === id) ?? await getSession(id);
-        if (existing?.blocks.some(block => block.appRequestId === commandId)) return { sessionId: id };
+        const existing =
+          sessionsRef.current.find((current) => current.id === id) ??
+          (await getSession(id));
+        if (existing?.blocks.some((block) => block.appRequestId === commandId))
+          return { sessionId: id };
         // Staged before the session exists, so a bad file leaves nothing behind.
         const attachments = await mobileAttachments(params.attachments);
         const session = existing ?? {
-          ...applyMobileChoice(mobileNewSession(cwd, sessionDefaults?.runtimeMode), params),
+          ...applyMobileChoice(
+            mobileNewSession(cwd, sessionDefaults?.runtimeMode),
+            params,
+          ),
           ...(await mobileWorkspaceChoice(cwd, params)),
         };
         // A placeholder title, so the first send seeds and generates one as the composer does.
         session.id = id;
         if (!existing) session.title = HARNESS_LABEL[session.harness];
-        if (!sessionsRef.current.some(current => current.id === id))
-          updateSessionState(sessionsRef, setSessions, (current) => [...current, session]);
-        if (!submitSessionRef.current(session.id, text, attachments, { appRequestId: commandId }))
+        if (!sessionsRef.current.some((current) => current.id === id))
+          updateSessionState(sessionsRef, setSessions, (current) => [
+            ...current,
+            session,
+          ]);
+        if (
+          !submitSessionRef.current(session.id, text, attachments, {
+            appRequestId: commandId,
+          })
+        )
           throw new Error("Desktop could not start this session");
-        await upsertSession(sessionsRef.current.find((current) => current.id === session.id) ?? session);
+        await upsertSession(
+          sessionsRef.current.find((current) => current.id === session.id) ??
+            session,
+        );
         return { sessionId: session.id };
       }
       const conversationId = String(params.conversationId ?? "");
-      const mono = conversationId.startsWith("mono:") ? findMono(conversationId.slice(5)) : undefined;
-      if (conversationId.startsWith("mono:") && !mono) throw new Error("Mono is no longer available");
+      const mono = conversationId.startsWith("mono:")
+        ? findMono(conversationId.slice(5))
+        : undefined;
+      if (conversationId.startsWith("mono:") && !mono)
+        throw new Error("Mono is no longer available");
       if (method === "session.rename") {
         // As the sidebar's rename, which also renames a session that isn't open.
-        const title = typeof params.title === "string" ? params.title.trim() : "";
-        if (!title || title.length > 200) throw new Error("Enter a title under 200 characters");
+        const title =
+          typeof params.title === "string" ? params.title.trim() : "";
+        if (!title || title.length > 200)
+          throw new Error("Enter a title under 200 characters");
         if (mono) throw new Error("A Mono's conversation can't be renamed");
         await onRenameHistorySession(conversationId, title);
         return { sessionId: conversationId };
@@ -9311,25 +9370,46 @@ function Workspace({
         // As the CLI's delete and archive: no desktop dialogs, and the worktree stays.
         const mode = method === "session.archive" ? "archive" : "delete";
         const verb = mode === "archive" ? "archived" : "deleted";
-        const target = mono ? undefined : await ensureOpenSessionRef.current(conversationId);
-        if (!target || target.orchestrationLeadId || isMonoSession(target.id) || isHabitRun(target.id))
+        const target = mono
+          ? undefined
+          : await ensureOpenSessionRef.current(conversationId);
+        if (
+          !target ||
+          target.orchestrationLeadId ||
+          isMonoSession(target.id) ||
+          isHabitRun(target.id)
+        )
           throw new Error(`This session can't be ${verb} from the phone`);
         if (!(await onRemoveHistorySession(target.id, mode, true, "cli")))
-          throw new Error(`Session could not be ${verb}; another session operation is in progress`);
+          throw new Error(
+            `Session could not be ${verb}; another session operation is in progress`,
+          );
         return { sessionId: target.id };
       }
-      const monoSession = mono ? await ensureMonoSession(mono.id, {
-        home: homeDir,
-        load: ensureOpenSessionRef.current,
-        create: (path) => newDefaultSession(path),
-        add: (created) => updateSessionState(sessionsRef, setSessions, (current) => [...current, created]),
-      }) : undefined;
+      const monoSession = mono
+        ? await ensureMonoSession(mono.id, {
+            home: homeDir,
+            load: ensureOpenSessionRef.current,
+            create: (path) => newDefaultSession(path),
+            add: (created) =>
+              updateSessionState(sessionsRef, setSessions, (current) => [
+                ...current,
+                created,
+              ]),
+          })
+        : undefined;
       const sessionId = monoSession?.id ?? conversationId;
-      const session = monoSession ?? await ensureOpenSessionRef.current(sessionId);
+      const session =
+        monoSession ?? (await ensureOpenSessionRef.current(sessionId));
       if (!session) throw new Error("Session is no longer available");
-      if (method === "session.resumeUsage" || method === "session.resumeUsageAtReset") {
+      if (
+        method === "session.resumeUsage" ||
+        method === "session.resumeUsageAtReset"
+      ) {
         await recoverMobileUsage({
-          session: sessionsRef.current.find((current) => current.id === session.id),
+          session: sessionsRef.current.find(
+            (current) => current.id === session.id,
+          ),
           token: params.token,
           automatic: method === "session.resumeUsageAtReset",
           enabled: params.enabled,
@@ -9347,20 +9427,37 @@ function Workspace({
         // The phone's model sheet, through the same paths as the composer's
         // pickers, so a provider switch hands off on the next send as here.
         const choice = mobileChoice(params);
-        if (choice.harness && choice.model && (choice.harness !== session.harness || choice.model !== session.model))
+        if (
+          choice.harness &&
+          choice.model &&
+          (choice.harness !== session.harness || choice.model !== session.model)
+        )
           onModelChange(session.id, choice.harness, choice.model);
         if (choice.modelSettings) {
-          const resolved = resolveModel(choice.harness ?? session.harness, choice.model ?? session.model);
-          onModelSettingsChange(session.id, mergeModelSettings(resolved, choice.modelSettings));
+          const resolved = resolveModel(
+            choice.harness ?? session.harness,
+            choice.model ?? session.model,
+          );
+          onModelSettingsChange(
+            session.id,
+            mergeModelSettings(resolved, choice.modelSettings),
+          );
         }
-        if (choice.runtimeMode) onRuntimeModeChange(session.id, choice.runtimeMode);
+        if (choice.runtimeMode)
+          onRuntimeModeChange(session.id, choice.runtimeMode);
         return { sessionId: session.id };
       }
-      if (method === "session.answerQuestion" || method === "session.keepQuestionOpen") {
+      if (
+        method === "session.answerQuestion" ||
+        method === "session.keepQuestionOpen"
+      ) {
         // As the composer's question card; only the question still waiting,
         // read as it is now since opening the session may have taken a while.
-        const live = sessionsRef.current.find((current) => current.id === session.id);
-        if (!live || live.worktreeRemoved) throw new Error("Session is no longer available");
+        const live = sessionsRef.current.find(
+          (current) => current.id === session.id,
+        );
+        if (!live || live.worktreeRemoved)
+          throw new Error("Session is no longer available");
         const question = live.pendingQuestion;
         if (!question || question.requestId !== params.requestId)
           throw new Error("This question was already answered");
@@ -9376,7 +9473,8 @@ function Workspace({
         onQuestionReply(live.id, question.requestId, reply);
         return { sessionId: live.id };
       }
-      if (method !== "conversation.send") throw new Error("Unsupported mobile command");
+      if (method !== "conversation.send")
+        throw new Error("Unsupported mobile command");
       if (
         session.blocks.some((block) => block.appRequestId === commandId) ||
         session.queuedMessages?.some((message) => message.id === commandId)
@@ -9384,9 +9482,19 @@ function Workspace({
         return { sessionId: session.id };
       const attachments = await mobileAttachments(params.attachments);
       // Mid-turn it steers or queues, as a message typed in the composer would.
-      if (!submitSessionRef.current(session.id, text, attachments, { appRequestId: commandId, followsUp: true }))
-        throw new Error("Desktop could not accept the message. Wait for the current turn to finish and try again.");
-      await upsertSession(sessionsRef.current.find(current => current.id === session.id) ?? session);
+      if (
+        !submitSessionRef.current(session.id, text, attachments, {
+          appRequestId: commandId,
+          followsUp: true,
+        })
+      )
+        throw new Error(
+          "Desktop could not accept the message. Wait for the current turn to finish and try again.",
+        );
+      await upsertSession(
+        sessionsRef.current.find((current) => current.id === session.id) ??
+          session,
+      );
       return { sessionId: session.id };
     },
   });
@@ -9855,29 +9963,45 @@ function Workspace({
 
   const onUsageLimitResume = useCallback(
     async (sessionId: string): Promise<boolean> => {
-      const session = sessionsRef.current.find((entry) => entry.id === sessionId);
+      const session = sessionsRef.current.find(
+        (entry) => entry.id === sessionId,
+      );
       if (!session?.usageLimit || session.busy) return false;
       if (isMonoSession(sessionId)) {
         updateSessionState(sessionsRef, setSessions, (prev) =>
-          prev.map((entry) => entry.id === sessionId ? resumeMonoUsageLimit(entry) : entry),
+          prev.map((entry) =>
+            entry.id === sessionId ? resumeMonoUsageLimit(entry) : entry,
+          ),
         );
         return true;
       }
       onUsageLimitDismiss(sessionId);
       try {
         if (await submitSession(sessionId, CONTINUE_PROMPT)) return true;
-      } catch { /* The submission path reports its desktop error. */ }
+      } catch {
+        /* The submission path reports its desktop error. */
+      }
       // A rejected continuation previously cleared the limit entirely. Keep
       // that one-attempt scheduler behavior, but retain a manual retry notice.
-      updateSessionState(sessionsRef, setSessions, (prev) => prev.map((entry) =>
-        entry.id === sessionId && !entry.busy && !entry.usageLimit
-          ? { ...entry, usageLimit: { ...session.usageLimit!, resumeAtReset: false } } : entry));
+      updateSessionState(sessionsRef, setSessions, (prev) =>
+        prev.map((entry) =>
+          entry.id === sessionId && !entry.busy && !entry.usageLimit
+            ? {
+                ...entry,
+                usageLimit: { ...session.usageLimit!, resumeAtReset: false },
+              }
+            : entry,
+        ),
+      );
       return false;
     },
     [submitSession, onUsageLimitDismiss],
   );
 
-  mobileUsageActions.current = { resume: onUsageLimitResume, automatic: onUsageLimitResumeAtReset };
+  mobileUsageActions.current = {
+    resume: onUsageLimitResume,
+    automatic: onUsageLimitResumeAtReset,
+  };
 
   const usageLimitSwitching = useRef(new Set<string>());
   const onUsageLimitAccountChange = useCallback(
@@ -9900,8 +10024,7 @@ function Workspace({
       let carried = false;
       if (
         session.providerSessionId &&
-        (session.harness === "claude" ||
-          (session.harness === "codex" && !mono))
+        (session.harness === "claude" || (session.harness === "codex" && !mono))
       ) {
         usageLimitSwitching.current.add(sessionId);
         try {
@@ -11860,6 +11983,86 @@ function Workspace({
             },
             isMono: (id) => isMonoSession(id),
             isHabitRun: (id) => isHabitRun(id),
+            generateImages: (sessionId, request) => {
+              const jobId = crypto.randomUUID();
+              const job: ImageJobMeta = {
+                id: jobId,
+                prompt: request.prompt,
+                count: request.count,
+                ...(request.aspect ? { aspect: request.aspect } : {}),
+                status: "generating",
+                startedAt: Date.now(),
+                images: [],
+              };
+              const patchJob = (next: ImageJobMeta) => {
+                sessionsRef.current = sessionsRef.current.map((session) =>
+                  session.id === sessionId
+                    ? {
+                        ...session,
+                        blocks: session.blocks.some(
+                          (block) => block.id === jobId,
+                        )
+                          ? session.blocks.map((block) =>
+                              block.id === jobId
+                                ? { ...block, imageJob: next }
+                                : block,
+                            )
+                          : [
+                              ...session.blocks,
+                              {
+                                id: jobId,
+                                role: "image" as const,
+                                text: "",
+                                imageJob: next,
+                              },
+                            ],
+                      }
+                    : session,
+                );
+                setSessions(sessionsRef.current);
+                const updated = sessionsRef.current.find(
+                  (session) => session.id === sessionId,
+                );
+                // A turn still running saves the block when it ends.
+                if (updated && !updated.busy) persistSession(updated);
+              };
+              patchJob(job);
+              void (async () => {
+                try {
+                  const [source] = request.source
+                    ? await prepareAttachments(
+                        await attachmentsFromPaths([request.source]),
+                      )
+                    : [];
+                  const images = await runImageTurn(request, {
+                    cwd: await homeDir(),
+                    model: DEFAULT_MODEL_ID.antigravity,
+                    source,
+                    runner: {
+                      send: (input) =>
+                        sendHarnessTurn({ ...input, harness: "antigravity" }),
+                      approve: (id, requestId, allow) =>
+                        respondHarnessApproval(
+                          "antigravity",
+                          id,
+                          requestId,
+                          allow ? "allow" : "deny",
+                        ),
+                      forget: (id) => forgetHarnessSession("antigravity", id),
+                    },
+                  });
+                  patchJob({ ...job, status: "done", images });
+                } catch (error) {
+                  patchJob({
+                    ...job,
+                    status: "failed",
+                    error:
+                      error instanceof Error ? error.message : String(error),
+                  });
+                }
+              })();
+              return jobId;
+            },
             monoSession: (monoId) =>
               ensureMonoSession(monoId, {
                 home: homeDir,
@@ -11879,6 +12082,7 @@ function Workspace({
                   projects: mono.projects,
                   showStartedSessionsInSidebar:
                     mono.showStartedSessionsInSidebar,
+                  name: monoLook(mono).name,
                   ...(mono.useSidebarFolders
                     ? {
                         folder: {
@@ -11892,8 +12096,14 @@ function Workspace({
             },
             habits: { load: loadHabits, update: updateHabits },
             agentFiles: (monoId) => loadMonoFiles(monoId),
-            installedSkills: async () =>
-              installedClaudeSkills(await homeDir()),
+            papers: {
+              find: (query, limit, since) =>
+                findPapers(query, nativePaperDeps, limit, since),
+              load: (ref, options) => loadPaper(ref, nativePaperDeps, options),
+              renderPage: (key, page) => renderPaperPage(key, page),
+              addPdf: (path, options) => addPaperPdf(path, options),
+            },
+            installedSkills: async () => installedClaudeSkills(await homeDir()),
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
             writeAgentFile: (monoId, path, text, hash) =>
               writeAgentFile(monoId, path, text, hash),
@@ -12134,12 +12344,17 @@ function Workspace({
     [onOpenApprovalSession],
   );
 
+  // In the Agents zone the title bar is the open bots' and groups' strip;
+  // the project's tabs wait for the Code zone.
+  const agentsTitleBar = insetLayout && railZone === "personal";
   const orderedTitleTabs: TitleTab[] = orderByIds(
     [
-      ...deckProjectTabs.map((tab) =>
-        toTitleTab(tab, sessions, dirtyFiles, unseenFinishedIds),
-      ),
-      ...(insetLayout
+      ...(agentsTitleBar
+        ? []
+        : deckProjectTabs.map((tab) =>
+            toTitleTab(tab, sessions, dirtyFiles, unseenFinishedIds),
+          )),
+      ...(insetLayout && !agentsTitleBar
         ? openAppViews
             .filter((view) => view !== "notes" || notesEnabled)
             .map((view): TitleTab => ({
@@ -12156,9 +12371,12 @@ function Workspace({
         : []),
       ...shownMonoTabs.flatMap((monoId): TitleTab[] => {
         const mono = findMono(monoId);
-        // Like the sidebar's Monos, a Mono's tab shows in the projects it
-        // works on; it keeps its place for when the project comes back.
-        if (!mono || !monoWorksOn(mono, sidebarCwd)) return [];
+        // A bot or group shows only in the Agents zone. Like the sidebar's
+        // Monos, a coding Mono's tab shows in the projects it works on; it
+        // keeps its place for when the project comes back.
+        if (!mono) return [];
+        if (agentsTitleBar ? !isPersonal(mono) : isPersonal(mono)) return [];
+        if (!agentsTitleBar && !monoWorksOn(mono, sidebarCwd)) return [];
         const look = monoLook(mono);
         const session = mono.sessionId
           ? sessions.find((entry) => entry.id === mono.sessionId)
@@ -13507,9 +13725,7 @@ function Workspace({
     [onProjectTerminalSize],
   );
   const dockWasOpen = useRef<{ path: string; open: boolean } | null>(null);
-  const dockAnimation = useRef<{ key: string; stop: () => void } | null>(
-    null,
-  );
+  const dockAnimation = useRef<{ key: string; stop: () => void } | null>(null);
   // The project whose dock stays rendered while it slides shut.
   const [dockClosing, setDockClosing] = useState<string | null>(null);
   const dockClosingShown =
@@ -13543,14 +13759,7 @@ function Workspace({
       insetLayout && !reduceMotion && typeof el.animate === "function";
     // Render the dock once more so it can slide out; the grid keeps its
     // track until then.
-    if (
-      animates &&
-      inPlace &&
-      previous.open &&
-      !open &&
-      dock &&
-      !monoCovers
-    ) {
+    if (animates && inPlace && previous.open && !open && dock && !monoCovers) {
       setDockClosing(projectCwd);
       return;
     }
@@ -13751,10 +13960,10 @@ function Workspace({
 
   // Renames, mascot picks and new projects show up on the rail.
   const monoViewMono = monoViewId ? monoForSession(monoViewId) : undefined;
-  const selectedMonoActivity = resolveMonoActivity(
-    monoActivity,
-    monoViewSession,
-  );
+  // With no turn picked, Activity follows the latest one that did work.
+  const selectedMonoActivity =
+    resolveMonoActivity(monoActivity, monoViewSession) ??
+    latestMonoActivity(monoViewSession);
   // The chat marks the turn whose activity the overview is showing.
   const monoActivityShownTurnId =
     monoOverviewOpen && monoOverviewTab === "activity"
@@ -13933,8 +14142,7 @@ function Workspace({
     const opened = await openMonoSession(memberId);
     if (!opened) throw new Error("Its conversation is not available");
     const current =
-      sessionsRef.current.find((session) => session.id === opened.id) ??
-      opened;
+      sessionsRef.current.find((session) => session.id === opened.id) ?? opened;
     if (current.busy) throw new Error("It is in the middle of something else");
     if (sessionDraftBlock(current))
       throw new Error("It has an unsent draft in its chat");
@@ -13954,7 +14162,11 @@ function Workspace({
       throw new Error("It could not take the call's message");
     return { sessionId: opened.id, outcome };
   };
-  const saveGroupCall = async (groupId: string, title: string, body: string) => {
+  const saveGroupCall = async (
+    groupId: string,
+    title: string,
+    body: string,
+  ) => {
     const opened = await openMonoSession(groupId);
     if (!opened) return;
     const saved = await saveArtifact({
@@ -13966,13 +14178,12 @@ function Workspace({
       sourceCwd: opened.cwd,
     });
     const latest =
-      sessionsRef.current.find((session) => session.id === opened.id) ??
-      opened;
+      sessionsRef.current.find((session) => session.id === opened.id) ?? opened;
     // Documents hang off a turn of the chat; a group that never chatted
     // keeps the transcript in the documents store only.
     const anchor =
-      [...latest.blocks].reverse().find((block) => block.role === "user")
-        ?.id ?? latest.blocks[latest.blocks.length - 1]?.id;
+      [...latest.blocks].reverse().find((block) => block.role === "user")?.id ??
+      latest.blocks[latest.blocks.length - 1]?.id;
     if (!anchor) return;
     const updated = recordArtifactCard(latest, anchor, {
       id: saved.id,
@@ -14037,9 +14248,7 @@ function Workspace({
           monoViewMono.group ? (
             <GroupMembers
               members={monoViewMono.group.members}
-              onChange={(members) =>
-                saveGroupMembers(monoViewMono.id, members)
-              }
+              onChange={(members) => saveGroupMembers(monoViewMono.id, members)}
             />
           ) : undefined
         }
@@ -14255,7 +14464,9 @@ function Workspace({
       "(prefers-reduced-motion: reduce)",
     ).matches;
     const animate =
-      insetRightPanelShown && typeof pane.animate === "function" && !reduceMotion;
+      insetRightPanelShown &&
+      typeof pane.animate === "function" &&
+      !reduceMotion;
     const current = pane.getBoundingClientRect().width;
     const from = rightPanelAnimation.current || !rightPanelOpen ? current : 0;
     rightPanelAnimation.current?.cancel();
@@ -14375,9 +14586,7 @@ function Workspace({
       compactRailShown={!insetLayout && compactRailActive}
       inset={insetLayout}
       rightPanelOpen={rightPanelOpen}
-      onToggleRightPanel={
-        showRightPanelToggle ? onToggleRightPanel : undefined
-      }
+      onToggleRightPanel={showRightPanelToggle ? onToggleRightPanel : undefined}
       rightPanelDot={(rightPanelChanges?.files ?? 0) > 0}
       rightPanelUnavailable={!!activeAppView}
       canGoBack={!!monoViewId || tabVisitNav.canBack}
@@ -14389,7 +14598,10 @@ function Workspace({
       onSelect={onSelectTitleTab}
       onNewTerminal={onNewTerminal}
       onNewSession={
-        insetLayout && !settingsOpen && looksLikeProject(sidebarCwd)
+        insetLayout &&
+        !settingsOpen &&
+        !agentsTitleBar &&
+        looksLikeProject(sidebarCwd)
           ? onNewFromTitleBar
           : undefined
       }
@@ -14568,680 +14780,707 @@ function Workspace({
 
   return (
     <SessionStateContext.Provider value={sessionState}>
-    <OrchestrationActions.Provider value={orchestrationActions}>
-      <OrchestrationWorkers.Provider value={orchestrationWorkers}>
-        <div
-          className={`workspace-background flex h-full flex-col text-content ${
-            insetLayout
-              ? "inset-shell inset-outer"
-              : HAS_NATIVE_GLASS
-                ? "bg-background-base/[var(--window-background-opacity)]"
-                : "bg-background-base"
-          }`}
-        >
-          {titleBarSpansWindow ? workspaceTitleBar : null}
-          <div className="flex min-h-0 min-w-0 flex-1">
-            {insetLayout ? (
-              <div
-                ref={setInsetRailHost}
-                className="inset-rail-host flex h-full shrink-0"
-              >
-                {sessionSidebar}
-              </div>
-            ) : null}
-            {/* `contents` keeps the classic layout's flat row; the inset
+      <OrchestrationActions.Provider value={orchestrationActions}>
+        <OrchestrationWorkers.Provider value={orchestrationWorkers}>
+          <div
+            className={`workspace-background flex h-full flex-col text-content ${
+              insetLayout
+                ? "inset-shell inset-outer"
+                : HAS_NATIVE_GLASS
+                  ? "bg-background-base/[var(--window-background-opacity)]"
+                  : "bg-background-base"
+            }`}
+          >
+            {titleBarSpansWindow ? workspaceTitleBar : null}
+            <PaperViewerHost />
+            <div className="flex min-h-0 min-w-0 flex-1">
+              {insetLayout ? (
+                <div
+                  ref={setInsetRailHost}
+                  className="inset-rail-host flex h-full shrink-0"
+                >
+                  {sessionSidebar}
+                </div>
+              ) : null}
+              {/* `contents` keeps the classic layout's flat row; the inset
                 layout stacks the tabs, the card and the footer. */}
-            <div
-              className={
-                insetLayout
-                  ? "flex min-h-0 min-w-0 flex-1 flex-col"
-                  : "contents"
-              }
-            >
               <div
                 className={
                   insetLayout
-                    ? "inset-card mr-1.5 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-stroke"
+                    ? "flex min-h-0 min-w-0 flex-1 flex-col"
                     : "contents"
                 }
               >
-                {insetLayout ? null : sessionSidebar}
-
                 <div
-                  className={`flex min-h-0 min-w-0 flex-1 flex-col${
-                    insetLayout ? "" : " body-glass"
-                  }`}
+                  className={
+                    insetLayout
+                      ? "inset-card mr-1.5 flex min-h-0 min-w-0 flex-1 overflow-hidden rounded-xl border border-stroke"
+                      : "contents"
+                  }
                 >
-                  <div
-                    className={
-                      searchViewOpen ||
-                      settingsOpen ||
-                      inboxViewOpen ||
-                      notesViewOpen ||
-                      automationsViewOpen
-                        ? "hidden"
-                        : "flex min-h-0 min-w-0 flex-1 flex-col"
-                    }
-                    aria-hidden={
-                      searchViewOpen ||
-                      settingsOpen ||
-                      inboxViewOpen ||
-                      notesViewOpen ||
-                      automationsViewOpen
-                    }
-                    inert={
-                      searchViewOpen ||
-                      settingsOpen ||
-                      inboxViewOpen ||
-                      notesViewOpen ||
-                      automationsViewOpen ||
-                      undefined
-                    }
-                  >
-                    {!IS_MAC ? (
-                      <MenuBar
-                        onNew={onNew}
-                        onNewTerminal={onNewTerminal}
-                        onToggleTerminal={onToggleProjectTerminal}
-                        onGoToFile={onGoToFile}
-                        onToggleSidebar={onToggleSidebar}
-                        onToggleSessionSidebar={
-                          onToggleSessionSidebarShortcut
-                        }
-                        onShowSourceControl={onToggleChanges}
-                        onCloseCurrentTab={
-                          activeTabId
-                            ? () => onCloseTab(activeTabId)
-                            : undefined
-                        }
-                        onCloseOtherTabs={onCloseOtherTabs}
-                        onCloseAllTabs={onCloseAllTabs}
-                        onPickProject={pickProject}
-                        onFindInProject={onFindInProject}
-                        onSearch={onOpenSearch}
-                        onOpenInbox={onOpenInbox}
-                        onOpenNotes={notesEnabled ? onOpenNotes : undefined}
-                        onZoomIn={() => {
-                          const next = saveUiScale(
-                            zoomInUiScale(loadUiScale()),
-                          );
-                          void applyUiScale(next);
-                        }}
-                        onZoomOut={() => {
-                          const next = saveUiScale(
-                            zoomOutUiScale(loadUiScale()),
-                          );
-                          void applyUiScale(next);
-                        }}
-                        onZoomReset={() => {
-                          saveUiScale(UI_SCALE_DEFAULT);
-                          void applyUiScale(UI_SCALE_DEFAULT);
-                        }}
-                      />
-                    ) : null}
-                    <div className="flex min-h-0 min-w-0 flex-1">
-                      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                        {titleBarInBody ? workspaceTitleBar : null}
+                  {insetLayout ? null : sessionSidebar}
 
-                        <main className="relative flex min-h-0 min-w-0 flex-1">
-                          <div
-                            ref={dockGridRef}
-                            className="grid h-full min-h-0 min-w-0 flex-1"
-                          >
-                            {projectTerminals.map((dock) => {
-                              const show =
-                                (dock.open || dockClosingShown) &&
-                                !monoCovers &&
-                                sameProjectPath(dock.projectPath, projectCwd);
-                              return (
-                                <div
-                                  key={dock.projectPath}
-                                  className={
-                                    show
-                                      ? "h-full min-h-0 min-w-0 w-full overflow-hidden"
-                                      : "hidden"
-                                  }
-                                  style={
-                                    show ? { gridArea: "dock" } : undefined
-                                  }
-                                  aria-hidden={!show}
-                                  data-dock-shown={show ? "" : undefined}
-                                >
-                                  <ProjectTerminalDock
-                                    dock={dock}
-                                    focused={show && projectTerminalFocused}
-                                    onFocus={focusProjectTerminal}
-                                    onHide={onHideProjectTerminal}
-                                    onSideChange={onProjectTerminalSide}
-                                    onSizePaint={paintDockSize}
-                                    onSizeCommit={commitDockSize}
-                                    onAddTerminal={onNewTerminal}
-                                    onSelectTerminal={onSelectProjectTerminal}
-                                    onCloseTerminal={onCloseProjectTerminal}
-                                    onCloseOtherTerminals={
-                                      onCloseOtherProjectTerminals
-                                    }
-                                    onReorderTerminals={
-                                      onReorderProjectTerminals
-                                    }
-                                    onTerminalMetaChange={onTerminalMetaChange}
-                                  />
-                                </div>
-                              );
-                            })}
+                  <div
+                    className={`flex min-h-0 min-w-0 flex-1 flex-col${
+                      insetLayout ? "" : " body-glass"
+                    }`}
+                  >
+                    <div
+                      className={
+                        searchViewOpen ||
+                        settingsOpen ||
+                        inboxViewOpen ||
+                        notesViewOpen ||
+                        automationsViewOpen
+                          ? "hidden"
+                          : "flex min-h-0 min-w-0 flex-1 flex-col"
+                      }
+                      aria-hidden={
+                        searchViewOpen ||
+                        settingsOpen ||
+                        inboxViewOpen ||
+                        notesViewOpen ||
+                        automationsViewOpen
+                      }
+                      inert={
+                        searchViewOpen ||
+                        settingsOpen ||
+                        inboxViewOpen ||
+                        notesViewOpen ||
+                        automationsViewOpen ||
+                        undefined
+                      }
+                    >
+                      {!IS_MAC ? (
+                        <MenuBar
+                          onNew={onNew}
+                          onNewTerminal={onNewTerminal}
+                          onToggleTerminal={onToggleProjectTerminal}
+                          onGoToFile={onGoToFile}
+                          onToggleSidebar={onToggleSidebar}
+                          onToggleSessionSidebar={
+                            onToggleSessionSidebarShortcut
+                          }
+                          onShowSourceControl={onToggleChanges}
+                          onCloseCurrentTab={
+                            activeTabId
+                              ? () => onCloseTab(activeTabId)
+                              : undefined
+                          }
+                          onCloseOtherTabs={onCloseOtherTabs}
+                          onCloseAllTabs={onCloseAllTabs}
+                          onPickProject={pickProject}
+                          onFindInProject={onFindInProject}
+                          onSearch={onOpenSearch}
+                          onOpenInbox={onOpenInbox}
+                          onOpenNotes={notesEnabled ? onOpenNotes : undefined}
+                          onZoomIn={() => {
+                            const next = saveUiScale(
+                              zoomInUiScale(loadUiScale()),
+                            );
+                            void applyUiScale(next);
+                          }}
+                          onZoomOut={() => {
+                            const next = saveUiScale(
+                              zoomOutUiScale(loadUiScale()),
+                            );
+                            void applyUiScale(next);
+                          }}
+                          onZoomReset={() => {
+                            saveUiScale(UI_SCALE_DEFAULT);
+                            void applyUiScale(UI_SCALE_DEFAULT);
+                          }}
+                        />
+                      ) : null}
+                      <div className="flex min-h-0 min-w-0 flex-1">
+                        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                          {titleBarInBody ? workspaceTitleBar : null}
+
+                          <main className="relative flex min-h-0 min-w-0 flex-1">
                             <div
-                              className="relative flex min-h-0 min-w-0 flex-row"
-                              style={{ gridArea: "main" }}
+                              ref={dockGridRef}
+                              className="grid h-full min-h-0 min-w-0 flex-1"
                             >
-                              <div className="relative min-h-0 min-w-0 flex-1">
-                                {tabs.map((tab) => (
+                              {projectTerminals.map((dock) => {
+                                const show =
+                                  (dock.open || dockClosingShown) &&
+                                  !monoCovers &&
+                                  sameProjectPath(dock.projectPath, projectCwd);
+                                return (
                                   <div
-                                    key={tab.id}
-                                    data-workspace-tab={tab.id}
-                                    aria-hidden={
-                                      tab.id !== activeTabId || monoCovers
-                                    }
+                                    key={dock.projectPath}
                                     className={
-                                      tab.id === activeTabId && !monoCovers
-                                        ? "absolute inset-0 flex h-full min-h-0 flex-col"
+                                      show
+                                        ? "h-full min-h-0 min-w-0 w-full overflow-hidden"
                                         : "hidden"
                                     }
+                                    style={
+                                      show ? { gridArea: "dock" } : undefined
+                                    }
+                                    aria-hidden={!show}
+                                    data-dock-shown={show ? "" : undefined}
                                   >
-                                    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-                                      <PaneTree
-                                        {...sessionPaneProps}
-                                        visible={
-                                          tab.id === activeTabId &&
-                                          !inboxViewOpen &&
-                                          !monoCovers
-                                        }
-                                        layout={tab.layout}
-                                        sessions={sessions}
-                                        editorPanes={[
-                                          ...tab.editorPanes,
-                                          ...(tab.terminalPanes ?? []),
-                                        ]}
-                                        dirtyFileIds={dirtyFiles}
-                                        fileErrorCounts={fileErrorCounts}
-                                        focusedId={
-                                          tab.id === activeTabId &&
-                                          !monoViewId &&
-                                          !inboxViewOpen &&
-                                          !tab.diffFocused &&
-                                          !projectTerminalFocused
-                                            ? tab.focusedId
-                                            : ""
-                                        }
-                                        addToChatSessionId={
-                                          tab.id === activeTabId
-                                            ? active?.id
-                                            : undefined
-                                        }
-                                        composerFocused={
-                                          composerFocused &&
-                                          !projectTerminalFocused &&
-                                          !monoViewId
-                                        }
-                                        composerFocusToken={composerFocusToken}
-                                        onSelectFile={onSelectFileSurface}
-                                        onCloseFile={onCloseFile}
-                                        onCloseOtherFiles={onCloseOtherFiles}
-                                        onPinFile={onPinFile}
-                                        onReorderFiles={onReorderFiles}
-                                        onFileDirtyChange={onFileDirtyChange}
-                                        onFileErrorCountChange={
-                                          onFileErrorCountChange
-                                        }
-                                        transcriptPool={transcriptPool}
-                                        onRatio={(splitId, index, ratio) =>
-                                          onRatio(tab.id, splitId, index, ratio)
-                                        }
-                                        editorNavigation={editorNavigation}
-                                        onUpdatePlan={onUpdatePlan}
-                                        onMovePane={onMovePane}
-                                        onDetachPane={onDetachPane}
-                                        onTerminalMetaChange={
-                                          onTerminalMetaChange
-                                        }
-                                      />
-                                    </div>
+                                    <ProjectTerminalDock
+                                      dock={dock}
+                                      focused={show && projectTerminalFocused}
+                                      onFocus={focusProjectTerminal}
+                                      onHide={onHideProjectTerminal}
+                                      onSideChange={onProjectTerminalSide}
+                                      onSizePaint={paintDockSize}
+                                      onSizeCommit={commitDockSize}
+                                      onAddTerminal={onNewTerminal}
+                                      onSelectTerminal={onSelectProjectTerminal}
+                                      onCloseTerminal={onCloseProjectTerminal}
+                                      onCloseOtherTerminals={
+                                        onCloseOtherProjectTerminals
+                                      }
+                                      onReorderTerminals={
+                                        onReorderProjectTerminals
+                                      }
+                                      onTerminalMetaChange={
+                                        onTerminalMetaChange
+                                      }
+                                    />
                                   </div>
-                                ))}
-                                {sessions
-                                  .filter((session) =>
-                                    isMonoSession(session.id),
-                                  )
-                                  .map((session) => {
-                                    const visible = monoViewId === session.id;
-                                    return (
-                                      <div
-                                        key={session.id}
-                                        data-mono-view={session.id}
-                                        aria-hidden={!visible}
-                                        inert={!visible || undefined}
-                                        className={
-                                          visible
-                                            ? "absolute inset-0 flex h-full min-h-0 flex-col"
-                                            : "hidden"
-                                        }
-                                      >
-                                        {insetLayout &&
-                                        visible &&
-                                        monoViewMono ? (
-                                          // A row of its own, the height of the
-                                          // overview's header so both share a
-                                          // centre line; over the chat, messages
-                                          // scrolled under the buttons.
-                                          <div
-                                            className="flex h-10 shrink-0 items-center justify-end px-2.5"
-                                            data-tauri-drag-region="deep"
-                                          >
-                                            <MonoViewActions
-                                              name={monoLook(monoViewMono).name}
-                                              overviewOpen={monoOverviewOpen}
-                                              onToggleOverview={
-                                                onToggleMonoOverview
-                                              }
-                                              onOpenSettings={
-                                                onOpenMonoViewSettings
-                                              }
-                                            />
-                                          </div>
-                                        ) : null}
-                                        <SessionPane
+                                );
+                              })}
+                              <div
+                                className="relative flex min-h-0 min-w-0 flex-row"
+                                style={{ gridArea: "main" }}
+                              >
+                                <div className="relative min-h-0 min-w-0 flex-1">
+                                  {tabs.map((tab) => (
+                                    <div
+                                      key={tab.id}
+                                      data-workspace-tab={tab.id}
+                                      aria-hidden={
+                                        tab.id !== activeTabId || monoCovers
+                                      }
+                                      className={
+                                        tab.id === activeTabId && !monoCovers
+                                          ? "absolute inset-0 flex h-full min-h-0 flex-col"
+                                          : "hidden"
+                                      }
+                                    >
+                                      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+                                        <PaneTree
                                           {...sessionPaneProps}
-                                          session={session}
-                                          visible={visible}
-                                          focused={
-                                            visible &&
-                                            !projectTerminalFocused &&
-                                            !monoShownSessionActive
+                                          visible={
+                                            tab.id === activeTabId &&
+                                            !inboxViewOpen &&
+                                            !monoCovers
                                           }
-                                          inSplit={false}
-                                          addToChatTarget={visible}
+                                          layout={tab.layout}
+                                          sessions={sessions}
+                                          editorPanes={[
+                                            ...tab.editorPanes,
+                                            ...(tab.terminalPanes ?? []),
+                                          ]}
+                                          dirtyFileIds={dirtyFiles}
+                                          fileErrorCounts={fileErrorCounts}
+                                          focusedId={
+                                            tab.id === activeTabId &&
+                                            !monoViewId &&
+                                            !inboxViewOpen &&
+                                            !tab.diffFocused &&
+                                            !projectTerminalFocused
+                                              ? tab.focusedId
+                                              : ""
+                                          }
+                                          addToChatSessionId={
+                                            tab.id === activeTabId
+                                              ? active?.id
+                                              : undefined
+                                          }
                                           composerFocused={
-                                            visible &&
                                             composerFocused &&
                                             !projectTerminalFocused &&
-                                            !monoShownSessionActive
+                                            !monoViewId
                                           }
                                           composerFocusToken={
                                             composerFocusToken
                                           }
-                                          onShowMonoActivity={
-                                            onShowMonoActivity
+                                          onSelectFile={onSelectFileSurface}
+                                          onCloseFile={onCloseFile}
+                                          onCloseOtherFiles={onCloseOtherFiles}
+                                          onPinFile={onPinFile}
+                                          onReorderFiles={onReorderFiles}
+                                          onFileDirtyChange={onFileDirtyChange}
+                                          onFileErrorCountChange={
+                                            onFileErrorCountChange
                                           }
-                                          onOpenArtifact={onOpenMonoArtifact}
-                                          onOpenDiff={onOpenMonoDiff}
-                                          onCommitChanges={onCommitMonoChanges}
-                                          monoActivityTurnId={
-                                            monoActivityShownTurnId
+                                          transcriptPool={transcriptPool}
+                                          onRatio={(splitId, index, ratio) =>
+                                            onRatio(
+                                              tab.id,
+                                              splitId,
+                                              index,
+                                              ratio,
+                                            )
                                           }
-                                          onOpenMonoSession={onOpenMonoSession}
-                                          monoLaunchedSessions={
-                                            visible
-                                              ? monoLaunchedSessions
-                                              : undefined
+                                          editorNavigation={editorNavigation}
+                                          onUpdatePlan={onUpdatePlan}
+                                          onMovePane={onMovePane}
+                                          onDetachPane={onDetachPane}
+                                          onTerminalMetaChange={
+                                            onTerminalMetaChange
                                           }
-                                          openMonoSessionId={shownMonoSessionId}
-                                          // The inset footer stays under a
-                                          // Mono and shows its usage.
-                                          monoComposerUsage={!insetLayout}
                                         />
                                       </div>
-                                    );
-                                  })}
+                                    </div>
+                                  ))}
+                                  {sessions
+                                    .filter((session) =>
+                                      isMonoSession(session.id),
+                                    )
+                                    .map((session) => {
+                                      const visible = monoViewId === session.id;
+                                      return (
+                                        <div
+                                          key={session.id}
+                                          data-mono-view={session.id}
+                                          aria-hidden={!visible}
+                                          inert={!visible || undefined}
+                                          className={
+                                            visible
+                                              ? "absolute inset-0 flex h-full min-h-0 flex-col"
+                                              : "hidden"
+                                          }
+                                        >
+                                          {insetLayout &&
+                                          visible &&
+                                          monoViewMono ? (
+                                            // A row of its own, the height of the
+                                            // overview's header so both share a
+                                            // centre line; over the chat, messages
+                                            // scrolled under the buttons.
+                                            <div
+                                              className="flex h-10 shrink-0 items-center justify-end px-2.5"
+                                              data-tauri-drag-region="deep"
+                                            >
+                                              <MonoViewActions
+                                                name={
+                                                  monoLook(monoViewMono).name
+                                                }
+                                                overviewOpen={monoOverviewOpen}
+                                                onToggleOverview={
+                                                  onToggleMonoOverview
+                                                }
+                                                onOpenSettings={
+                                                  onOpenMonoViewSettings
+                                                }
+                                              />
+                                            </div>
+                                          ) : null}
+                                          <SessionPane
+                                            {...sessionPaneProps}
+                                            session={session}
+                                            visible={visible}
+                                            focused={
+                                              visible &&
+                                              !projectTerminalFocused &&
+                                              !monoShownSessionActive
+                                            }
+                                            inSplit={false}
+                                            addToChatTarget={visible}
+                                            composerFocused={
+                                              visible &&
+                                              composerFocused &&
+                                              !projectTerminalFocused &&
+                                              !monoShownSessionActive
+                                            }
+                                            composerFocusToken={
+                                              composerFocusToken
+                                            }
+                                            onShowMonoActivity={
+                                              onShowMonoActivity
+                                            }
+                                            onOpenArtifact={onOpenMonoArtifact}
+                                            onOpenDiff={onOpenMonoDiff}
+                                            onCommitChanges={
+                                              onCommitMonoChanges
+                                            }
+                                            monoActivityTurnId={
+                                              monoActivityShownTurnId
+                                            }
+                                            onOpenMonoSession={
+                                              onOpenMonoSession
+                                            }
+                                            monoLaunchedSessions={
+                                              visible
+                                                ? monoLaunchedSessions
+                                                : undefined
+                                            }
+                                            openMonoSessionId={
+                                              shownMonoSessionId
+                                            }
+                                            // The inset footer stays under a
+                                            // Mono and shows its usage.
+                                            monoComposerUsage={!insetLayout}
+                                          />
+                                        </div>
+                                      );
+                                    })}
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          {[...linkedWorkItemPanels.values()].map((panel) => (
-                            <LinkedWorkItemPanel
-                              repairSessions={repairSessions}
-                              onRepairChecks={onRepairChecks}
-                              onOpenSession={(sessionId) => {
-                                closeLinkedWorkItemPanel(panel.sessionId);
-                                onOpenInboxSession(sessionId);
-                              }}
-                              key={panel.sessionId}
-                              target={panel.item}
-                              cwd={panel.cwd}
-                              recents={recents}
-                              visible={
-                                !searchViewOpen &&
-                                !settingsOpen &&
-                                !inboxViewOpen &&
-                                !notesViewOpen &&
-                                !automationsViewOpen &&
-                                !monoViewId &&
-                                activeLinkedWorkItemPanel?.sessionId ===
-                                  panel.sessionId
-                              }
-                              onClose={() =>
-                                closeLinkedWorkItemPanel(panel.sessionId)
-                              }
-                            />
-                          ))}
-                        </main>
+                            {[...linkedWorkItemPanels.values()].map((panel) => (
+                              <LinkedWorkItemPanel
+                                repairSessions={repairSessions}
+                                onRepairChecks={onRepairChecks}
+                                onOpenSession={(sessionId) => {
+                                  closeLinkedWorkItemPanel(panel.sessionId);
+                                  onOpenInboxSession(sessionId);
+                                }}
+                                key={panel.sessionId}
+                                target={panel.item}
+                                cwd={panel.cwd}
+                                recents={recents}
+                                visible={
+                                  !searchViewOpen &&
+                                  !settingsOpen &&
+                                  !inboxViewOpen &&
+                                  !notesViewOpen &&
+                                  !automationsViewOpen &&
+                                  !monoViewId &&
+                                  activeLinkedWorkItemPanel?.sessionId ===
+                                    panel.sessionId
+                                }
+                                onClose={() =>
+                                  closeLinkedWorkItemPanel(panel.sessionId)
+                                }
+                              />
+                            ))}
+                          </main>
+                        </div>
+                        {monoCovers ? monoOverviewPanel : null}
+                        {monoSettingsDialog}
+                        {workstreamDialog === "intro" ? (
+                          <WorkstreamIntro
+                            onStart={() => {
+                              markWorkstreamIntroSeen();
+                              setWorkstreamDialog("new");
+                            }}
+                            onClose={() => {
+                              markWorkstreamIntroSeen();
+                              setWorkstreamDialog(null);
+                            }}
+                          />
+                        ) : groupDialogOpen ? (
+                          <NewGroupDialog
+                            onCreate={onStartGroup}
+                            onClose={() => setGroupDialogOpen(false)}
+                          />
+                        ) : workstreamDialog === "new" ? (
+                          <NewWorkstreamDialog
+                            cwd={sidebarCwd}
+                            recents={recents}
+                            onCreate={onStartWorkstream}
+                            onClose={() => setWorkstreamDialog(null)}
+                          />
+                        ) : null}
                       </div>
-                      {monoCovers ? monoOverviewPanel : null}
-                      {monoSettingsDialog}
-                      {workstreamDialog === "intro" ? (
-                        <WorkstreamIntro
-                          onStart={() => {
-                            markWorkstreamIntroSeen();
-                            setWorkstreamDialog("new");
-                          }}
-                          onClose={() => {
-                            markWorkstreamIntroSeen();
-                            setWorkstreamDialog(null);
-                          }}
-                        />
-                      ) : groupDialogOpen ? (
-                        <NewGroupDialog
-                          onCreate={onStartGroup}
-                          onClose={() => setGroupDialogOpen(false)}
-                        />
-                      ) : workstreamDialog === "new" ? (
-                        <NewWorkstreamDialog
-                          cwd={sidebarCwd}
-                          recents={recents}
-                          onCreate={onStartWorkstream}
-                          onClose={() => setWorkstreamDialog(null)}
-                        />
-                      ) : null}
                     </div>
-                  </div>
-                  {searchViewOpen ||
-                  (insetLayout && openAppViews.includes("search")) ? (
-                    <AppViewSurface active={searchViewOpen}>
-                      <SearchView
-                        tabbed={insetLayout}
-                        open={searchViewOpen}
-                        cwd={gitCwd}
-                        recents={recents}
-                        history={projectHistory}
-                        sessions={sessions.filter((session) => !session.inboxAsk)}
-                        focusToken={searchViewFocusToken}
-                        besideRail={
-                          insetLayout || projectRailOpen || compactProjectRail
+                    {searchViewOpen ||
+                    (insetLayout && openAppViews.includes("search")) ? (
+                      <AppViewSurface active={searchViewOpen}>
+                        <SearchView
+                          tabbed={insetLayout}
+                          open={searchViewOpen}
+                          cwd={gitCwd}
+                          recents={recents}
+                          history={projectHistory}
+                          sessions={sessions.filter(
+                            (session) => !session.inboxAsk,
+                          )}
+                          focusToken={searchViewFocusToken}
+                          besideRail={
+                            insetLayout || projectRailOpen || compactProjectRail
+                          }
+                          compactRail={!insetLayout && compactRailActive}
+                          onClose={onLeaveSearch}
+                          onToggleSidebar={onToggleSidebar}
+                          onOpenFile={onOpenFile}
+                          onOpenSession={(sessionId, blockId, query) => {
+                            if (blockId)
+                              requestTranscriptJump(sessionId, blockId, query);
+                            void onSelectHistorySession(sessionId);
+                          }}
+                          onOpenProject={onSelectProject}
+                        />
+                      </AppViewSurface>
+                    ) : null}
+                    <div className="hidden" aria-hidden>
+                      {sessions
+                        .filter((session) => session.inboxAsk)
+                        .map((session) => {
+                          const visible =
+                            inboxViewOpen &&
+                            inboxAskPortal?.sessionId === session.id;
+                          return (
+                            <SessionSurface
+                              key={session.id}
+                              host={visible ? inboxAskPortal.host : undefined}
+                            >
+                              <SessionPane
+                                {...sessionPaneProps}
+                                session={session}
+                                visible={visible}
+                                focused={visible}
+                                inSplit={false}
+                                composerFocused={composerFocused}
+                                composerFocusToken={composerFocusToken}
+                              />
+                            </SessionSurface>
+                          );
+                        })}
+                    </div>
+                    {inboxViewOpen ||
+                    (insetLayout && openAppViews.includes("inbox")) ? (
+                      <AppViewSurface active={inboxViewOpen}>
+                        <InboxView
+                          tabbed={insetLayout}
+                          active={inboxViewOpen}
+                          cwd={sidebarCwd}
+                          scopeProject={appViewScope}
+                          recents={recents}
+                          besideRail={
+                            insetLayout || projectRailOpen || compactProjectRail
+                          }
+                          compactRail={!insetLayout && compactRailActive}
+                          onClose={onLeaveInbox}
+                          onToggleSidebar={onToggleSidebar}
+                          onStart={onStartInboxItem}
+                          onAsk={onAskInboxItem}
+                          onAskRestart={onRestartInboxAsk}
+                          onAskMount={setInboxAskPortal}
+                          sessions={inboxRelatedSessions}
+                          repairSessions={repairSessions}
+                          onRepairChecks={onRepairChecks}
+                          onOpenSession={onOpenInboxSession}
+                          onOpenIntegrations={onOpenInboxIntegrations}
+                        />
+                      </AppViewSurface>
+                    ) : null}
+                    {notesViewOpen ||
+                    (insetLayout &&
+                      notesEnabled &&
+                      openAppViews.includes("notes")) ? (
+                      <AppViewSurface active={notesViewOpen}>
+                        <NotesView
+                          tabbed={insetLayout}
+                          active={notesViewOpen}
+                          besideRail={
+                            insetLayout || projectRailOpen || compactProjectRail
+                          }
+                          compactRail={!insetLayout && compactRailActive}
+                          cwd={projectCwd}
+                          scopeProject={appViewScope}
+                          recents={recents}
+                          onClose={onLeaveNotes}
+                          onToggleSidebar={onToggleSidebar}
+                        />
+                      </AppViewSurface>
+                    ) : null}
+                    {automationsViewOpen ||
+                    (insetLayout && openAppViews.includes("automations")) ? (
+                      <AppViewSurface active={automationsViewOpen}>
+                        <AutomationsView
+                          tabbed={insetLayout}
+                          besideRail={
+                            insetLayout || projectRailOpen || compactProjectRail
+                          }
+                          compactRail={!insetLayout && compactRailActive}
+                          cwd={projectCwd}
+                          scopeProject={appViewScope}
+                          recents={recents}
+                          onClose={onLeaveAutomations}
+                          onToggleSidebar={onToggleSidebar}
+                          onLaunch={(automation, run) =>
+                            launchAutomation(automation, run, true)
+                          }
+                          onOpenSession={onOpenAutomationSession}
+                        />
+                      </AppViewSurface>
+                    ) : null}
+                    {settingsOpen ? (
+                      <SettingsView
+                        section={settingsSection}
+                        anchor={settingsAnchor}
+                        notificationProjectPath={notificationProjectPath}
+                        notificationSettingsRequest={
+                          notificationSettingsRequest
                         }
-                        compactRail={!insetLayout && compactRailActive}
-                        onClose={onLeaveSearch}
-                        onToggleSidebar={onToggleSidebar}
-                        onOpenFile={onOpenFile}
-                        onOpenSession={(sessionId, blockId, query) => {
-                          if (blockId)
-                            requestTranscriptJump(sessionId, blockId, query);
-                          void onSelectHistorySession(sessionId);
-                        }}
-                        onOpenProject={onSelectProject}
-                      />
-                    </AppViewSurface>
-                  ) : null}
-                  <div className="hidden" aria-hidden>
-                    {sessions
-                      .filter((session) => session.inboxAsk)
-                      .map((session) => {
-                        const visible =
-                          inboxViewOpen &&
-                          inboxAskPortal?.sessionId === session.id;
-                        return (
-                          <SessionSurface
-                            key={session.id}
-                            host={visible ? inboxAskPortal.host : undefined}
-                          >
-                            <SessionPane
-                              {...sessionPaneProps}
-                              session={session}
-                              visible={visible}
-                              focused={visible}
-                              inSplit={false}
-                              composerFocused={composerFocused}
-                              composerFocusToken={composerFocusToken}
-                            />
-                          </SessionSurface>
-                        );
-                      })}
-                  </div>
-                  {inboxViewOpen ||
-                  (insetLayout && openAppViews.includes("inbox")) ? (
-                    <AppViewSurface active={inboxViewOpen}>
-                      <InboxView
-                        tabbed={insetLayout}
-                        active={inboxViewOpen}
+                        recents={recents}
                         cwd={sidebarCwd}
-                        scopeProject={appViewScope}
-                        recents={recents}
-                        besideRail={
-                          insetLayout || projectRailOpen || compactProjectRail
+                        sessions={sidebarHistory}
+                        liveSessions={sessions}
+                        onRemoveWorktree={onRemoveWorktree}
+                        onCheckWorktreeRemoval={onCheckWorktreeRemoval}
+                        onDeleteWorktreeSessions={onDeleteWorktreeSessions}
+                        besideRail
+                        headerHost={
+                          insetLayout ? settingsHeaderHost : undefined
                         }
-                        compactRail={!insetLayout && compactRailActive}
-                        onClose={onLeaveInbox}
-                        onToggleSidebar={onToggleSidebar}
-                        onStart={onStartInboxItem}
-                        onAsk={onAskInboxItem}
-                        onAskRestart={onRestartInboxAsk}
-                        onAskMount={setInboxAskPortal}
-                        sessions={inboxRelatedSessions}
-                        repairSessions={repairSessions}
-                        onRepairChecks={onRepairChecks}
-                        onOpenSession={onOpenInboxSession}
-                        onOpenIntegrations={onOpenInboxIntegrations}
+                        onClose={onCloseSettings}
+                        onSelectSection={onSelectSettingsSection}
+                        onOpenSession={onOpenArchivedSession}
+                        onArchiveSession={onArchiveHistorySession}
+                        onDeleteSession={onDeleteHistorySession}
+                        onRestoreProject={onRestoreProject}
+                        onDeleteProject={(path) =>
+                          onRemoveProject(path, { purgeData: true })
+                        }
+                        onOpenWhatsNew={onOpenWhatsNew}
+                        collapsedProjectRailMode={collapsedProjectRailMode}
+                        onCollapsedProjectRailModeChange={
+                          setCollapsedProjectRailMode
+                        }
                       />
-                    </AppViewSurface>
-                  ) : null}
-                  {notesViewOpen ||
-                  (insetLayout && notesEnabled && openAppViews.includes("notes")) ? (
-                    <AppViewSurface active={notesViewOpen}>
-                      <NotesView
-                        tabbed={insetLayout}
-                        active={notesViewOpen}
-                        besideRail={
-                          insetLayout || projectRailOpen || compactProjectRail
-                        }
-                        compactRail={!insetLayout && compactRailActive}
-                        cwd={projectCwd}
-                        scopeProject={appViewScope}
-                        recents={recents}
-                        onClose={onLeaveNotes}
-                        onToggleSidebar={onToggleSidebar}
-                      />
-                    </AppViewSurface>
-                  ) : null}
-                  {automationsViewOpen ||
-                  (insetLayout && openAppViews.includes("automations")) ? (
-                    <AppViewSurface active={automationsViewOpen}>
-                      <AutomationsView
-                        tabbed={insetLayout}
-                        besideRail={
-                          insetLayout || projectRailOpen || compactProjectRail
-                        }
-                        compactRail={!insetLayout && compactRailActive}
-                        cwd={projectCwd}
-                        scopeProject={appViewScope}
-                        recents={recents}
-                        onClose={onLeaveAutomations}
-                        onToggleSidebar={onToggleSidebar}
-                        onLaunch={(automation, run) =>
-                          launchAutomation(automation, run, true)
-                        }
-                        onOpenSession={onOpenAutomationSession}
-                      />
-                    </AppViewSurface>
-                  ) : null}
-                  {settingsOpen ? (
-                    <SettingsView
-                      section={settingsSection}
-                      anchor={settingsAnchor}
-                      notificationProjectPath={notificationProjectPath}
-                      notificationSettingsRequest={notificationSettingsRequest}
-                      recents={recents}
-                      cwd={sidebarCwd}
-                      sessions={sidebarHistory}
-                      liveSessions={sessions}
-                      onRemoveWorktree={onRemoveWorktree}
-                      onCheckWorktreeRemoval={onCheckWorktreeRemoval}
-                      onDeleteWorktreeSessions={onDeleteWorktreeSessions}
-                      besideRail
-                      headerHost={insetLayout ? settingsHeaderHost : undefined}
-                      onClose={onCloseSettings}
-                      onSelectSection={onSelectSettingsSection}
-                      onOpenSession={onOpenArchivedSession}
-                      onArchiveSession={onArchiveHistorySession}
-                      onDeleteSession={onDeleteHistorySession}
-                      onRestoreProject={onRestoreProject}
-                      onDeleteProject={(path) =>
-                        onRemoveProject(path, { purgeData: true })
-                      }
-                      onOpenWhatsNew={onOpenWhatsNew}
-                      collapsedProjectRailMode={collapsedProjectRailMode}
-                      onCollapsedProjectRailModeChange={
-                        setCollapsedProjectRailMode
-                      }
-                    />
-                  ) : null}
-                  {insetLayout ? null : usageFooter}
-                </div>
-                {insetLayout ? (
-                  // Part of the card: the project tools beside the
-                  // workspace, behind a hairline.
-                  <div
-                    ref={setRightPanelRef}
-                    inert={rightPanelClosing || undefined}
-                    className={
-                      insetRightPanelShown
-                        ? "relative flex h-full shrink-0 flex-col overflow-hidden border-l border-stroke"
-                        : "hidden"
-                    }
-                  >
-                    <div
-                      ref={setRightPanelHost}
-                      aria-label="Project tools"
-                      className="flex min-h-0 flex-1 flex-col"
-                    />
-                    <div
-                      role="separator"
-                      aria-orientation="vertical"
-                      aria-label="Resize right sidebar"
-                      aria-valuenow={rightPanelResize.width}
-                      aria-valuemin={RIGHT_PANEL_WIDTH_MIN}
-                      aria-valuemax={RIGHT_PANEL_WIDTH_MAX}
-                      className={`absolute inset-y-0 -left-px z-10 w-1.5 cursor-col-resize touch-none ${
-                        rightPanelResize.dragging
-                          ? "bg-content/15"
-                          : "hover:bg-content/10"
-                      }`}
-                      onPointerDown={rightPanelResize.onPointerDown}
-                      onDoubleClick={rightPanelResize.onDoubleClick}
-                    />
+                    ) : null}
+                    {insetLayout ? null : usageFooter}
                   </div>
-                ) : null}
+                  {insetLayout ? (
+                    // Part of the card: the project tools beside the
+                    // workspace, behind a hairline.
+                    <div
+                      ref={setRightPanelRef}
+                      inert={rightPanelClosing || undefined}
+                      className={
+                        insetRightPanelShown
+                          ? "relative flex h-full shrink-0 flex-col overflow-hidden border-l border-stroke"
+                          : "hidden"
+                      }
+                    >
+                      <div
+                        ref={setRightPanelHost}
+                        aria-label="Project tools"
+                        className="flex min-h-0 flex-1 flex-col"
+                      />
+                      <div
+                        role="separator"
+                        aria-orientation="vertical"
+                        aria-label="Resize right sidebar"
+                        aria-valuenow={rightPanelResize.width}
+                        aria-valuemin={RIGHT_PANEL_WIDTH_MIN}
+                        aria-valuemax={RIGHT_PANEL_WIDTH_MAX}
+                        className={`absolute inset-y-0 -left-px z-10 w-1.5 cursor-col-resize touch-none ${
+                          rightPanelResize.dragging
+                            ? "bg-content/15"
+                            : "hover:bg-content/10"
+                        }`}
+                        onPointerDown={rightPanelResize.onPointerDown}
+                        onDoubleClick={rightPanelResize.onDoubleClick}
+                      />
+                    </div>
+                  ) : null}
+                </div>
+                {insetLayout
+                  ? (usageFooter ?? (
+                      // Settings has no footer, so the card runs down to the same
+                      // gutter as its right edge.
+                      <div
+                        className={`${settingsOpen ? "h-1.5" : "h-[30px]"} shrink-0`}
+                      />
+                    ))
+                  : null}
               </div>
-              {insetLayout
-                ? (usageFooter ??
-                  // Settings has no footer, so the card runs down to the same
-                  // gutter as its right edge.
-                  <div
-                    className={`${settingsOpen ? "h-1.5" : "h-[30px]"} shrink-0`}
-                  />)
-                : null}
             </div>
+
+            {filePickerOpen ? (
+              <FilePicker
+                key={filePickerResetToken}
+                open
+                cwd={filesCwd}
+                openPaths={openFilePaths}
+                initialQuery={filePickerInitialQuery}
+                onOpenFile={onOpenFile}
+                onRunAction={(id) => {
+                  if (id === "reload") actions.current.onReload();
+                }}
+                onClose={() => setFilePickerOpen(false)}
+              />
+            ) : null}
+
+            {sessionDeleteDialog && (
+              <DeleteSessionDialog
+                title={sessionDeleteDialog.title}
+                unusedWorktree={sessionDeleteDialog.unusedWorktree}
+                onClose={(choice) => {
+                  sessionDeleteDialog.resolve(choice);
+                  setSessionDeleteDialog(undefined);
+                }}
+              />
+            )}
+            <HarnessUpdateNotice
+              topOffset={
+                12 + (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0)
+              }
+              onHeightChange={setHarnessUpdateHeight}
+            />
+            <NewLayoutNotice
+              topOffset={
+                12 +
+                (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
+                (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0)
+              }
+              onHeightChange={setNewLayoutNoticeHeight}
+            />
+            <ResourcePressureNotice
+              sessions={sessionsRef}
+              onStopAgent={(id) => onStop(id, true)}
+              onStopSession={onStop}
+              onPressureChange={transcriptPool.setResourcePressure}
+              chipHost={pressureChipHost}
+              insetChip={insetLayout}
+            />
+            <ApprovalToasts
+              notices={hiddenApprovalToasts}
+              topOffset={
+                12 +
+                (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
+                (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0) +
+                (newLayoutNoticeHeight ? newLayoutNoticeHeight + 8 : 0)
+              }
+              onFocusSession={onOpenApprovalSession}
+              onApproval={onApproval}
+            />
+            <ReminderNotices
+              reminders={sessionReminders.due}
+              error={sessionReminders.error}
+              onOpen={sessionReminders.open}
+              onSnooze={sessionReminders.schedule}
+              onDismiss={sessionReminders.cancel}
+              onRetry={sessionReminders.refresh}
+              onOpenSettings={() => openSettings("general", "notifications")}
+              onHeightChange={setReminderNoticesHeight}
+            />
+            {whatsNewVersion ? (
+              <WhatsNewDialog
+                version={whatsNewVersion}
+                onClose={() => setWhatsNewVersion(null)}
+              />
+            ) : null}
+            {remoteProjectDialogOpen ? (
+              <AddRemoteProjectDialog
+                onCancel={() => setRemoteProjectDialogOpen(false)}
+                onOpen={(key) => {
+                  setRemoteProjectDialogOpen(false);
+                  onSelectProject(key);
+                }}
+              />
+            ) : null}
+            {providerSignInRequest ? (
+              <ProviderSignInDialog
+                key={providerSignInRequest.key}
+                harness={providerSignInRequest.harness}
+                onClose={() => setProviderSignInRequest(null)}
+              />
+            ) : null}
           </div>
-
-          {filePickerOpen ? (
-            <FilePicker
-              key={filePickerResetToken}
-              open
-              cwd={filesCwd}
-              openPaths={openFilePaths}
-              initialQuery={filePickerInitialQuery}
-              onOpenFile={onOpenFile}
-              onRunAction={(id) => {
-                if (id === "reload") actions.current.onReload();
-              }}
-              onClose={() => setFilePickerOpen(false)}
-            />
-          ) : null}
-
-          {sessionDeleteDialog && (
-            <DeleteSessionDialog
-              title={sessionDeleteDialog.title}
-              unusedWorktree={sessionDeleteDialog.unusedWorktree}
-              onClose={(choice) => {
-                sessionDeleteDialog.resolve(choice);
-                setSessionDeleteDialog(undefined);
-              }}
-            />
-          )}
-          <HarnessUpdateNotice
-            topOffset={
-              12 + (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0)
-            }
-            onHeightChange={setHarnessUpdateHeight}
-          />
-          <NewLayoutNotice
-            topOffset={
-              12 +
-              (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
-              (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0)
-            }
-            onHeightChange={setNewLayoutNoticeHeight}
-          />
-          <ResourcePressureNotice
-            sessions={sessionsRef}
-            onStopAgent={(id) => onStop(id, true)}
-            onStopSession={onStop}
-            onPressureChange={transcriptPool.setResourcePressure}
-            chipHost={pressureChipHost}
-            insetChip={insetLayout}
-          />
-          <ApprovalToasts
-            notices={hiddenApprovalToasts}
-            topOffset={
-              12 +
-              (reminderNoticesHeight ? reminderNoticesHeight + 8 : 0) +
-              (harnessUpdateHeight ? harnessUpdateHeight + 8 : 0) +
-              (newLayoutNoticeHeight ? newLayoutNoticeHeight + 8 : 0)
-            }
-            onFocusSession={onOpenApprovalSession}
-            onApproval={onApproval}
-          />
-          <ReminderNotices
-            reminders={sessionReminders.due}
-            error={sessionReminders.error}
-            onOpen={sessionReminders.open}
-            onSnooze={sessionReminders.schedule}
-            onDismiss={sessionReminders.cancel}
-            onRetry={sessionReminders.refresh}
-            onOpenSettings={() => openSettings("general", "notifications")}
-            onHeightChange={setReminderNoticesHeight}
-          />
-          {whatsNewVersion ? (
-            <WhatsNewDialog
-              version={whatsNewVersion}
-              onClose={() => setWhatsNewVersion(null)}
-            />
-          ) : null}
-          {remoteProjectDialogOpen ? (
-            <AddRemoteProjectDialog
-              onCancel={() => setRemoteProjectDialogOpen(false)}
-              onOpen={(key) => {
-                setRemoteProjectDialogOpen(false);
-                onSelectProject(key);
-              }}
-            />
-          ) : null}
-          {providerSignInRequest ? (
-            <ProviderSignInDialog
-              key={providerSignInRequest.key}
-              harness={providerSignInRequest.harness}
-              onClose={() => setProviderSignInRequest(null)}
-            />
-          ) : null}
-        </div>
-        <TranscriptPoolOutlet pool={transcriptPool} />
-      </OrchestrationWorkers.Provider>
-    </OrchestrationActions.Provider>
+          <TranscriptPoolOutlet pool={transcriptPool} />
+        </OrchestrationWorkers.Provider>
+      </OrchestrationActions.Provider>
     </SessionStateContext.Provider>
   );
 }

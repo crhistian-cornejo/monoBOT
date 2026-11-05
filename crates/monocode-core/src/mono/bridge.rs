@@ -31,6 +31,7 @@ folders.list {project?}
 folders.move {sessionId,folderId?,newFolderName?,project?}
 notes.list {limit?,offset?}; notes.read {id}; notes.write {id?,title?,body?,tags?}
 artifacts.list {kind?,limit?,offset?}; artifacts.read {id}; artifacts.write {id?,kind:"document",title,body,summary?}
+papers.find {query,limit?,fromYear?}; papers.read {ref,pages?,query?,section?,maxChars?}; papers.figure {ref,page}; papers.add {path,ref?,title?}
 soul.read {}; soul.update {text,expectedHash}
 memory.read {topic?}; memory.search {query,since?}; memory.add {fact,topic?,until?}; memory.replace {find,fact,topic?,until?}; memory.remove {find,topic?}
 habits.list {}; habits.add {name,instructions,schedule:{kind,time?,minute?,dayOfWeek?}}; habits.update {id,name?,instructions?,schedule?,enabled?}; habits.run {id}; habits.remove {id}

@@ -10,7 +10,7 @@ export function DictationButton({ dictation }: { dictation: Dictation }) {
   const label = listening
     ? "Stop dictation"
     : phase === "installing"
-      ? "Downloading the speech model"
+      ? "Setting up the speech model"
       : "Dictate";
   return (
     <button
@@ -57,7 +57,7 @@ export function DictationWave({ levels }: { levels: readonly number[] }) {
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
   const { phase, error } = dictation;
-  const offer = modelOffer(dictation.modelBytes, dictation.sharedFrom);
+  const offer = modelOffer(dictation.modelBytes);
   if (error)
     return (
       <div className="flex items-center gap-2 border-t border-stroke px-3 py-1.5 text-xs">

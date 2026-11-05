@@ -8,8 +8,8 @@ const frontmatterName = (content: string) =>
 describe("bundled plugins", () => {
   it("ships the monobot plugin with its manifest and skills", async () => {
     const files = await bundledPluginFiles("monobot");
-    const paths = files.map((file) => file.path);
-    expect(paths).toContain(".claude-plugin/plugin.json");
+    const listed = files.map((file) => file.path);
+    expect(listed).toContain(".claude-plugin/plugin.json");
     const manifest = files.find(
       (file) => file.path === ".claude-plugin/plugin.json",
     )!;
@@ -19,16 +19,44 @@ describe("bundled plugins", () => {
       /^skills\/[^/]+\/SKILL\.md$/.test(file.path),
     );
     expect(skills.map((file) => frontmatterName(file.content)).sort()).toEqual([
+      "animate",
+      "animate-expo",
+      "animation-performance",
+      "animation-vocabulary",
+      "apple-design",
+      "ask-sonner",
+      "break-ui",
+      "choreograph",
+      "emil-design-eng",
       "files",
+      "find-animation-opportunities",
+      "improve-animations",
+      "mobile-native",
+      "pick-ui-library",
+      "prototype",
+      "remove-animations",
       "research",
+      "review-animations",
       "threejs-graphics",
+      "write-swift",
     ]);
+    // Emil Kowalski's design skills ship with their license, and every file
+    // they link to ships beside them.
+    const paths = new Set(files.map((file) => file.path));
+    for (const skill of skills.filter((file) =>
+      paths.has(file.path.replace("SKILL.md", "NOTICE.md")),
+    )) {
+      const folder = skill.path.replace("SKILL.md", "");
+      for (const match of skill.content.matchAll(/\]\(([A-Z-]+\.md)\)/g))
+        expect(paths, `${folder}${match[1]}`).toContain(`${folder}${match[1]}`);
+    }
+    expect(paths).toContain("skills/emil-design-eng/NOTICE.md");
     expect(
-      paths.filter((path) =>
+      listed.filter((path) =>
         path.startsWith("skills/threejs-graphics/references/"),
       ),
     ).toHaveLength(72);
-    expect(paths).toContain("skills/threejs-graphics/NOTICE.md");
+    expect(listed).toContain("skills/threejs-graphics/NOTICE.md");
   });
 
   it("keeps the three.js guides pointing at local references", async () => {

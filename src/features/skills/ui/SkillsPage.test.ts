@@ -417,7 +417,12 @@ describe("Settings skill preview", () => {
       expect(document.querySelector('[aria-label="Skill preview"]')).toBeNull();
       expect(document.activeElement).toBe(opener);
       expect(filter.value).toBe("project");
-      expect(container.querySelectorAll('[role="switch"]')).toHaveLength(1);
+      // The skill packs above the list have switches of their own.
+      expect(
+        [...container.querySelectorAll('[role="switch"]')].filter(
+          (el) => !el.getAttribute("aria-label")?.endsWith("skill pack"),
+        ),
+      ).toHaveLength(1);
     },
   );
 

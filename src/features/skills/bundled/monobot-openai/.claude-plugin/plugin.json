@@ -1,0 +1,5 @@
+{
+  "name": "monobot-openai",
+  "description": "MonoBOT OpenAI media: Images and video with OpenAI's API; needs an OpenAI API key.",
+  "version": "1.0.0"
+}

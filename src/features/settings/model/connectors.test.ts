@@ -3,6 +3,7 @@ import { buildClaudeSpawnArgs } from "../../../integrations/harness/providers/cl
 import {
   CONNECTORS,
   connectorAllowedTools,
+  connectorCodexArgs,
   connectorMcpConfig,
   enabledConnectors,
 } from "./connectors";
@@ -74,5 +75,51 @@ describe("connectors", () => {
       JSON.stringify({ mcpServers: {} }),
     );
     expect(args).not.toContain("--allowedTools");
+  });
+});
+
+describe("more connectors, off until the user turns them on", () => {
+  it("adds Cloudflare Docs, Hugging Face, Exa and Playwright, all off", () => {
+    const added = byId("cloudflare", "huggingface", "exa", "playwright");
+    expect(added.every((connector) => !connector.onByDefault)).toBe(true);
+    expect(enabledConnectors().map((connector) => connector.id)).toEqual([
+      "context7",
+      "xmd",
+    ]);
+  });
+
+  it("runs Playwright locally at a pinned version", () => {
+    const [playwright] = byId("playwright");
+    expect(connectorMcpConfig([playwright])).toEqual({
+      mcpServers: {
+        playwright: {
+          type: "stdio",
+          command: "npx",
+          args: ["-y", "@playwright/mcp@0.0.84"],
+        },
+      },
+    });
+    // Clicking and typing are not pre-approved.
+    expect(connectorAllowedTools([playwright])).not.toContain(
+      "mcp__playwright__browser_click",
+    );
+  });
+
+  it("hands Codex the same servers as -c overrides with their tools", () => {
+    expect(connectorCodexArgs(byId("exa", "playwright"))).toEqual([
+      "-c",
+      'mcp_servers.exa.url="https://mcp.exa.ai/mcp"',
+      "-c",
+      'mcp_servers.exa.enabled_tools=["web_search_exa","web_fetch_exa"]',
+      "-c",
+      'mcp_servers.playwright.command="npx"',
+      "-c",
+      'mcp_servers.playwright.args=["-y","@playwright/mcp@0.0.84"]',
+      "-c",
+      expect.stringMatching(
+        /^mcp_servers\.playwright\.enabled_tools=\["browser_navigate",/,
+      ),
+    ]);
+    expect(connectorCodexArgs([])).toEqual([]);
   });
 });

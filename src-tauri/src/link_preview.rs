@@ -16,13 +16,14 @@ const USER_AGENT: &str = "Mozilla/5.0 (compatible; MonoBOT-LinkPreview/1.0)";
 #[serde(rename_all = "camelCase")]
 pub struct LinkPreviewMetadata {
     title: Option<String>,
+    description: Option<String>,
     favicon_data_url: Option<String>,
 }
 
-struct FetchedResource {
-    final_url: Url,
-    content_type: Option<String>,
-    bytes: Vec<u8>,
+pub(crate) struct FetchedResource {
+    pub(crate) final_url: Url,
+    pub(crate) content_type: Option<String>,
+    pub(crate) bytes: Vec<u8>,
 }
 
 /// Fetch metadata in the native host so the webview's deliberately narrow CSP
@@ -40,12 +41,14 @@ fn fetch_link_preview_sync(raw: &str) -> Result<LinkPreviewMetadata, String> {
     if !is_html(&page.content_type) {
         return Ok(LinkPreviewMetadata {
             title: None,
+            description: None,
             favicon_data_url: None,
         });
     }
 
     let html = String::from_utf8_lossy(&page.bytes);
     let title = document_title(&html);
+    let description = document_description(&html);
     let default_icon = page
         .final_url
         .join("/favicon.ico")
@@ -60,6 +63,7 @@ fn fetch_link_preview_sync(raw: &str) -> Result<LinkPreviewMetadata, String> {
 
     Ok(LinkPreviewMetadata {
         title,
+        description,
         favicon_data_url,
     })
 }
@@ -71,9 +75,20 @@ fn fetch_icon_data_url(url: Url) -> Option<String> {
     Some(format!("data:{mime};base64,{encoded}"))
 }
 
-fn fetch_resource(mut url: Url, accept: &str, max_bytes: usize) -> Result<FetchedResource, String> {
+fn fetch_resource(url: Url, accept: &str, max_bytes: usize) -> Result<FetchedResource, String> {
+    fetch_resource_within(url, accept, max_bytes, HTTP_TIMEOUT)
+}
+
+/// The same checked fetch for callers that need more time or room, such as a
+/// paper's PDF: every hop is still validated as a public address.
+pub(crate) fn fetch_resource_within(
+    mut url: Url,
+    accept: &str,
+    max_bytes: usize,
+    timeout: Duration,
+) -> Result<FetchedResource, String> {
     let agent = monobot_http::agent()
-        .timeout(HTTP_TIMEOUT)
+        .timeout(timeout)
         .redirects(0)
         .build();
 
@@ -139,7 +154,7 @@ fn fetch_resource(mut url: Url, accept: &str, max_bytes: usize) -> Result<Fetche
     Err("Too many link preview redirects".into())
 }
 
-fn parse_public_url(raw: &str) -> Result<Url, String> {
+pub(crate) fn parse_public_url(raw: &str) -> Result<Url, String> {
     let value = raw.trim();
     if value.is_empty() || value.len() > 8192 {
         return Err("Link preview URL is invalid".into());
@@ -275,6 +290,32 @@ fn image_mime(content_type: Option<&str>, bytes: &[u8]) -> Option<&'static str> 
         Some("image/vnd.microsoft.icon") | Some("image/x-icon") => Some("image/x-icon"),
         _ => None,
     }
+}
+
+fn meta_content(html: &str, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| {
+        opening_tags(html, "meta").into_iter().find_map(|tag| {
+            let marker = attribute(tag, "property").or_else(|| attribute(tag, "name"))?;
+            if !marker.eq_ignore_ascii_case(key) {
+                return None;
+            }
+            attribute(tag, "content").and_then(clean_text)
+        })
+    })
+}
+
+/// The page's own summary, for a hover card: social first, then the plain one.
+fn document_description(html: &str) -> Option<String> {
+    let text = meta_content(
+        html,
+        &["og:description", "twitter:description", "description"],
+    )?;
+    const MAX_CHARS: usize = 280;
+    if text.chars().count() <= MAX_CHARS {
+        return Some(text);
+    }
+    let cut: String = text.chars().take(MAX_CHARS).collect();
+    Some(format!("{}…", cut.trim_end()))
 }
 
 fn document_title(html: &str) -> Option<String> {
@@ -486,6 +527,18 @@ mod tests {
             document_icon_href(html).as_deref(),
             Some("/assets/icon.png")
         );
+    }
+
+    #[test]
+    fn reads_the_social_description_before_the_plain_one() {
+        let html = r#"<meta name="description" content="Plain">
+            <meta property="og:description" content="Social &amp; nice">"#;
+        assert_eq!(document_description(html).as_deref(), Some("Social & nice"));
+        assert_eq!(
+            document_description(r#"<meta name="description" content="Plain">"#).as_deref(),
+            Some("Plain")
+        );
+        assert_eq!(document_description("<p>none</p>"), None);
     }
 
     #[test]

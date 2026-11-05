@@ -24,6 +24,7 @@ mod jira;
 mod jsonc;
 mod linear;
 mod link_preview;
+mod papers;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
@@ -65,8 +66,8 @@ mod window;
 mod window_transfer;
 #[cfg(windows)]
 mod windows;
-mod worktree_lifecycle;
 mod workstreams;
+mod worktree_lifecycle;
 mod worktrees;
 
 // Phase 1 seam: spawn / kill harness children per MonoBOT thread.
@@ -290,6 +291,7 @@ pub fn run() {
             mobile_access::init(app.handle())?;
             reminders::init(app.handle());
             checkpoint::init(app.handle())?;
+            dictation::init(app.handle());
             menu::install(app.handle())?;
             #[cfg(target_os = "windows")]
             tray::install(app.handle())?;
@@ -445,6 +447,15 @@ pub fn run() {
             jira::jira_issue_thread,
             jira::jira_issue_comment,
             link_preview::fetch_link_preview,
+            papers::paper_api,
+            papers::paper_pdf,
+            papers::paper_pdf_bytes,
+            papers::paper_pdf_import,
+            papers::paper_pdf_file,
+            papers::paper_export,
+            papers::paper_image_write,
+            papers::paper_text_read,
+            papers::paper_text_write,
             fs::git_branches,
             fs::git_checkout,
             fs::git_create_branch,
@@ -476,6 +487,7 @@ pub fn run() {
             fs::allow_video_stream,
             fs::write_attachment,
             fs::save_generated_image,
+            fs::collect_antigravity_images,
             fs::delete_generated_images,
             fs::read_text_file,
             fs::mobile_list_dir,

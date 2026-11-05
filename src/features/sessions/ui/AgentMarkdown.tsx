@@ -13,7 +13,9 @@ import {
   useState,
   type ComponentProps,
   type CSSProperties,
+  type FocusEvent as ReactFocusEvent,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { harden } from "rehype-harden";
@@ -80,6 +82,7 @@ import { CitationChip } from "./CitationChip";
 import { CitationContext, CitationScope } from "./citationContext";
 import { CitationSources } from "./CitationSources";
 import { CLAIM_HIGHLIGHT_CLASS } from "./citationClaim";
+import { groupedCitations, rehypeCitationGroups } from "./citationGroups";
 import { citationNumber, isCitationHref } from "../model/citations";
 import { TranscriptPacing, TranscriptVisibility } from "./transcriptVisibility";
 import { usePacedReveal } from "../../settings/model/displayPrefs";
@@ -312,19 +315,55 @@ function MarkdownLink({
         number={cited}
         title={props.title}
         dir={dir}
+        more={groupedCitations(
+          (props as Record<string, unknown>)["data-citation-group"],
+        )}
       />
     );
   }
 
+  // A web link in a reply previews the page on hover, as a citation does.
+  const previewsPage = !!citations && !file && isCitationHref(href);
   const link = (
     <a
       href={href}
       className={`text-sky-400/90 hover:text-sky-300 hover:underline ${className ?? ""}`}
       {...props}
       dir={dir ?? "auto"}
+      {...(previewsPage
+        ? {
+            onPointerEnter: (event: ReactPointerEvent<HTMLAnchorElement>) => {
+              if (event.pointerType !== "mouse") return;
+              citations.show(
+                {
+                  id: href,
+                  el: event.currentTarget,
+                  url: href,
+                  link: true,
+                },
+                false,
+              );
+            },
+            onPointerLeave: (event: ReactPointerEvent<HTMLAnchorElement>) => {
+              if (event.pointerType === "mouse") citations.hide(false);
+            },
+            onFocus: (event: ReactFocusEvent<HTMLAnchorElement>) =>
+              citations.show(
+                {
+                  id: href,
+                  el: event.currentTarget,
+                  url: href,
+                  link: true,
+                },
+                true,
+              ),
+            onBlur: () => citations.hide(true),
+          }
+        : {})}
       onClick={(event) => {
         onClick?.(event);
         if (event.defaultPrevented) return;
+        if (previewsPage) citations.hide(true);
         if (file && onOpenFile) {
           event.preventDefault();
           onOpenFile(file.path, file.navigation);
@@ -808,9 +847,13 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   // Hard breaks go last, so nothing after them undoes them, and after the word
   // fade, whose word spans would otherwise hide the newlines from them.
   const rehypePlugins = useMemo(
-    () =>
-      hardBreaks ? [...baseRehypePlugins, rehypeHardBreaks] : baseRehypePlugins,
-    [baseRehypePlugins, hardBreaks],
+    () => [
+      ...baseRehypePlugins,
+      // Side-by-side citations become one chip; only where chips show.
+      ...(citations ? [rehypeCitationGroups] : []),
+      ...(hardBreaks ? [rehypeHardBreaks] : []),
+    ],
+    [baseRehypePlugins, hardBreaks, citations],
   );
 
   const onFileMenuPick = (id: string) => {

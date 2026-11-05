@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 41] = [
+const APP_ACTIONS: [&str; 45] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -102,6 +102,10 @@ const APP_ACTIONS: [&str; 41] = [
     "artifacts.list",
     "artifacts.read",
     "artifacts.write",
+    "papers.find",
+    "papers.read",
+    "papers.figure",
+    "papers.add",
     "soul.read",
     "soul.update",
     "memory.read",
@@ -230,6 +234,33 @@ Actions:
                   repeat the document body in chat. Returns metadata only.
                   To revise, pass {"id":"...","body":"<updated Markdown>"};
                   omitted title stays unchanged. Reuse --request-id on retries.
+  papers.find    {"query":"lumped GR hydrological models","limit":6,"fromYear":2015}
+                  Search scholarly papers (OpenAlex, Crossref): ref, title, authors,
+                  year, citations, whether it is open access.
+  papers.read    {"ref":"10.1016/j.envsoft.2017.05.002"}  A DOI, arXiv id or title.
+                  The abstract, from whichever source has it, and the paper's
+                  text when an open copy exists: it is downloaded to the app's
+                  cache, never to Downloads, and kept, so asking again for a
+                  summary, "pages":"2-4" or a "query" reads from the cache.
+                  "availability" says full-text, abstract-only or metadata-only:
+                  never claim to have read more than it returned. The paper is
+                  saved in your Documents. With a text it also returns the
+                  "outline" (section headings with pages) and the "figures"
+                  (captions with pages): ask for a part of the paper with
+                  "section":"methods" (or results, conclusion, a heading's
+                  words), "pages":"4-6" or "query":"how it was calibrated".
+  papers.figure  {"ref":"10.1016/j.envsoft.2017.05.002","page":4}
+                  Draws that page of a paper you read in full text as an image
+                  in the app's cache. Put the returned "markdown" in your reply
+                  and the image shows in the chat. For a figure or table, take
+                  its page from "figures". It is the whole page, not a crop.
+  papers.add     {"path":"/Users/me/Downloads/paper.pdf","ref":"10.1016/j.x","title":"..."}
+                  Registers a PDF the user gave you (attached, or on disk) as a
+                  paper: kept in the app's cache and read, so it can be read by
+                  sections, drawn, cited and underlined like any other. "ref" is
+                  the paper it is the copy of (a ref from papers.find), for a
+                  paper whose site blocks downloads; without it the PDF's own
+                  DOI names it. Returns what papers.read returns, with a "ref".
   soul.read      {}  Mono's own conversation only. Current SOUL.md text and hash.
   soul.update    {"text":"<complete Markdown>","expectedHash":"<hash from soul.read>"}
                   Update your standing instructions only when the user asks.

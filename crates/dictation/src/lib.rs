@@ -1,11 +1,10 @@
-//! Local dictation for MonoBOT's composer, after Echo's: the microphone feeds
+//! Local dictation for MonoBOT's composer: the microphone feeds
 //! a Silero voice detector, and each phrase it closes is transcribed by
 //! Parakeet v3 while the user keeps talking, so the text is ready the moment
 //! they stop. Everything runs on this machine; nothing is sent anywhere.
 mod capture;
 pub mod model;
 mod session;
-pub mod shared;
 mod text;
 
 use std::path::PathBuf;
@@ -52,14 +51,6 @@ impl Dictation {
 
     pub fn install(&self, progress: impl FnMut(u64, u64)) -> Result<(), Error> {
         model::install(&self.dir, progress)
-    }
-
-    /// Another app on this computer that already has the model, by name.
-    pub fn shared_from(&self) -> Option<&'static str> {
-        if self.installed() {
-            return None;
-        }
-        model::shared_from(&self.dir)
     }
 
     /// Loads the recognizer ahead of the first dictation.

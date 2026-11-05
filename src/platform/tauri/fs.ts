@@ -162,10 +162,13 @@ export type DiscoveredSkill = {
 export function listSkills(
   cwd: string,
   disabledPaths?: readonly string[] | null,
+  /** Installed MonoBOT skill packs to scan after every other root. */
+  packDirs?: readonly string[],
 ): Promise<DiscoveredSkill[]> {
   return invoke<DiscoveredSkill[]>("list_skills", {
     cwd,
     disabledPaths: disabledPaths ?? null,
+    packDirs: packDirs?.length ? packDirs : null,
   });
 }
 
@@ -643,6 +646,13 @@ export function saveGeneratedImage(input: {
   name: string;
 }): Promise<GeneratedImageAsset> {
   return invoke<GeneratedImageAsset>("save_generated_image", input);
+}
+
+/** Pictures Antigravity's Gemini wrote since `sinceMs`, copied into the app's folder. */
+export function collectAntigravityImages(
+  sinceMs: number,
+): Promise<{ path: string; name: string; mimeType: string; size: number }[]> {
+  return invoke("collect_antigravity_images", { sinceMs: Math.floor(sinceMs) });
 }
 
 export function deleteGeneratedImages(paths: string[]): Promise<void> {

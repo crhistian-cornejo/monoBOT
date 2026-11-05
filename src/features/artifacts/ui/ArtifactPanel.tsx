@@ -5,7 +5,11 @@ import { IconButton } from "../../../app/shell/TitleBar";
 import { MonoSidebarHeader } from "../../monos/ui/MonoSidebar";
 import { PageHeader } from "../../monos/ui/monoPanelParts";
 import { artifactLabel, deleteArtifact } from "../artifacts";
-import { ArtifactContent, useArtifact } from "./ArtifactContent";
+import {
+  ArtifactContent,
+  paperKeyOfDocument,
+  useArtifact,
+} from "./ArtifactContent";
 
 /**
  * A document's title, body and actions. With `onBack` it is a page over a
@@ -45,6 +49,9 @@ export function ArtifactReader({
     return () => window.removeEventListener("keydown", escape);
   }, [leave]);
 
+  // A paper fills the panel and scrolls inside itself; other documents scroll.
+  const isPaper =
+    artifact?.kind === "document" && !!paperKeyOfDocument(artifact.body);
   const label = artifact ? artifactLabel(artifact.kind) : "Document";
   const noun = label.toLowerCase();
   const onDelete = async () => {
@@ -95,7 +102,13 @@ export function ArtifactReader({
       ) : (
         <MonoSidebarHeader title={label} onClose={onClose} actions={actions} />
       )}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-none px-4 py-3">
+      <div
+        className={`min-h-0 flex-1 overscroll-none ${
+          isPaper
+            ? "flex flex-col overflow-hidden px-3 py-3"
+            : "overflow-y-auto px-4 py-3"
+        }`}
+      >
         {!loaded ? (
           <p role="status" className="text-[13px] text-content/50">
             Loading document…
@@ -109,8 +122,15 @@ export function ArtifactReader({
             This document is no longer available.
           </p>
         ) : (
-          <article data-artifact-reader={artifact.id}>
-            <ArtifactContent artifact={artifact} onOpenFile={onOpenFile} />
+          <article
+            data-artifact-reader={artifact.id}
+            className={isPaper ? "flex min-h-0 flex-1 flex-col" : undefined}
+          >
+            <ArtifactContent
+              artifact={artifact}
+              onOpenFile={onOpenFile}
+              fill={isPaper}
+            />
             {error ? (
               <p role="alert" className="mt-3 text-[12px] text-content/60">
                 {error}

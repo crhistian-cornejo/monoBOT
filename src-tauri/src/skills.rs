@@ -85,13 +85,24 @@ fn normalize_path_for_compare(path: &str) -> String {
 pub fn list_skills(
     cwd: String,
     disabled_paths: Option<Vec<String>>,
+    pack_dirs: Option<Vec<String>>,
 ) -> Result<Vec<DiscoveredSkill>, String> {
     let project = expand_home(&cwd);
     let home = dirs_home().map(PathBuf::from);
-    Ok(list_skills_from(
+    // MonoBOT's own skill packs, as installed under its data folder. Only
+    // absolute folders count; their skills sit in `<pack>/skills`.
+    let packs: Vec<PathBuf> = pack_dirs
+        .unwrap_or_default()
+        .into_iter()
+        .map(PathBuf::from)
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("skills"))
+        .collect();
+    Ok(list_skills_with(
         &project,
         home.as_deref(),
         disabled_paths.as_deref(),
+        &packs,
     ))
 }
 
@@ -99,6 +110,16 @@ pub(crate) fn list_skills_from(
     project: &Path,
     home: Option<&Path>,
     disabled_paths: Option<&[String]>,
+) -> Vec<DiscoveredSkill> {
+    list_skills_with(project, home, disabled_paths, &[])
+}
+
+/// `packs` come last, so a skill the user installed keeps its name.
+pub(crate) fn list_skills_with(
+    project: &Path,
+    home: Option<&Path>,
+    disabled_paths: Option<&[String]>,
+    packs: &[PathBuf],
 ) -> Vec<DiscoveredSkill> {
     let disabled_filter = DisabledFilter::new(disabled_paths);
     let mut by_name: HashMap<String, DiscoveredSkill> = HashMap::new();
@@ -169,6 +190,9 @@ pub(crate) fn list_skills_from(
             "devin",
         );
         add_root(project.join(".devin/skills"), "project", "devin");
+        for pack in packs {
+            add_root(pack.clone(), "user", "monocode");
+        }
         for (root, scope, namespace) in claude_plugin_skill_roots(home, project) {
             add_namespaced_root(
                 &mut by_name,
@@ -899,6 +923,22 @@ mod tests {
         let skill = skills.iter().find(|s| s.name == "shared-name").unwrap();
         assert_eq!(skill.description, "OMP agent skill");
         assert_eq!(skill.source, "omp");
+    }
+
+    #[test]
+    fn lists_monobot_packs_after_the_users_own_skills() {
+        let project = tmp("pack-proj");
+        let home = tmp("pack-home");
+        let pack = tmp("pack");
+        let skill = |name: &str| format!("---\nname: {name}\ndescription: d\n---\n");
+        write_skill(&pack.0.join("skills"), "impeccable", &skill("impeccable"));
+        write_skill(&pack.0.join("skills"), "brandkit", &skill("brandkit"));
+        write_skill(&home.0.join(".claude/skills"), "brandkit", &skill("brandkit"));
+        let skills =
+            list_skills_with(&project.0, Some(&home.0), None, &[pack.0.join("skills")]);
+        let find = |name: &str| skills.iter().find(|s| s.name == name).unwrap();
+        assert_eq!(find("impeccable").source, "monocode");
+        assert_eq!(find("brandkit").source, "claude");
     }
 
     #[test]

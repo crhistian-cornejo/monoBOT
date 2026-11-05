@@ -286,3 +286,22 @@ it("puts what the app adds ahead of the user's message, marked as its own", () =
   );
   expect(turn.endsWith("</monocode_context>\n\nwhat is this")).toBe(true);
 });
+
+it("tells every agent to read papers through the app, and to say what it could not read", () => {
+  const look = { name: "Research", mascot: "skull", color: "#fff", projects: [] };
+  const full = monoContext(look, files(), { soul: true, memory: true });
+  expect(full).toContain("<paper_rules>");
+  expect(full).toContain("papers.find");
+  expect(full).toContain("papers.read");
+  expect(full).toContain("never read a paper through a doi.org or publisher page");
+  expect(full).toContain("abstract-only means summarise from the abstract");
+  expect(full).toContain("verbatim sentence");
+  expect(full).toContain("papers.figure");
+  expect(full).toContain("papers.add");
+  expect(full).toContain("blocked");
+  expect(full).toContain('"section":"methods"');
+  // Rules are only handed to a session that has not seen this version.
+  expect(
+    monoContext(look, files(), { soul: false, memory: false }),
+  ).not.toContain("<paper_rules>");
+});

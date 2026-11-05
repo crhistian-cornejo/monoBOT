@@ -38,3 +38,17 @@ describe("document references", () => {
     expect(removeArtifactCard(removed, card.id)).toBe(removed);
   });
 });
+
+describe("paperKeyOfDocument", () => {
+  it("reads the paper a dossier stands for, whatever its key holds", async () => {
+    const { paperKeyOfDocument } = await import("./ui/ArtifactContent");
+    const key = "10.1016/j.envsoft.2017.05.002";
+    expect(
+      paperKeyOfDocument(
+        `# Title\n\nAbstract.\n\n[monobot-paper]: paper:${encodeURIComponent(key)}`,
+      ),
+    ).toBe(key);
+    expect(paperKeyOfDocument("# A report\n\nNo marker here.")).toBeUndefined();
+    expect(paperKeyOfDocument("[monobot-paper]: paper:%E0%A4%A")).toBeUndefined();
+  });
+});

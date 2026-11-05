@@ -21,6 +21,8 @@ export type UserMessageLink = {
 
 export type LinkPreviewMetadata = {
   title: string | null;
+  /** The page's own summary (og:description and the like), when it has one. */
+  description?: string | null;
   faviconDataUrl: string | null;
 };
 

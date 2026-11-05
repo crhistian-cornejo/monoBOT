@@ -35,18 +35,11 @@ describe("insertDictated", () => {
 });
 
 describe("modelOffer", () => {
-  it("offers the download when no other app has the model", () => {
-    const offer = modelOffer(671_122_626, null);
-    expect(offer.text).toContain("Download the speech model (671 MB");
+  it("offers a retry that names the size, never another app", () => {
+    const offer = modelOffer(671_122_626);
+    expect(offer.text).toContain("671 MB");
+    expect(offer.text).not.toMatch(/Echo/);
     expect(offer.action).toBe("Download");
-    expect(offer.busy).toBe("Downloading the speech model…");
-  });
-
-  it("offers Echo's copy, with nothing to download", () => {
-    const offer = modelOffer(671_122_626, "Echo");
-    expect(offer.text).toContain("Echo already has the speech model");
-    expect(offer.text).not.toContain("MB");
-    expect(offer.action).toBe("Use it");
-    expect(offer.busy).toBe("Setting up the speech model from Echo…");
+    expect(offer.busy).toBe("Setting up the speech model…");
   });
 });

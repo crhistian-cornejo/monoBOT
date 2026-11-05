@@ -33,8 +33,6 @@ export type Dictation = {
   /** Download progress, 0 to 1, while the model installs. */
   progress: number;
   modelBytes: number;
-  /** Another app on this computer that has the model, to take it from. */
-  sharedFrom?: string;
   error?: string;
   toggle: () => void;
   install: () => void;
@@ -53,7 +51,6 @@ export function useDictation(onText: (text: string) => void): Dictation {
   const [speaking, setSpeaking] = useState(false);
   const [progress, setProgress] = useState(0);
   const [modelBytes, setModelBytes] = useState(0);
-  const [sharedFrom, setSharedFrom] = useState<string>();
   const [error, setError] = useState<string>();
   const listeners = useRef<UnlistenFn[]>([]);
   const onTextRef = useRef(onText);
@@ -107,6 +104,29 @@ export function useDictation(onText: (text: string) => void): Dictation {
     }
   }, []);
 
+  /** The app is already setting the model up: show its progress, then start. */
+  const follow = useCallback(async () => {
+    setError(undefined);
+    setProgress(0);
+    setPhase("installing");
+    const stop = await onDictationInstall(({ done, total }) =>
+      setProgress(total ? done / total : 0),
+    );
+    try {
+      for (;;) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const status = await dictationStatus();
+        if (status.installed && !status.installing) break;
+        if (!status.installing) throw new Error("The speech model could not be set up.");
+      }
+      stop();
+      await start();
+    } catch (reason) {
+      stop();
+      fail(reason);
+    }
+  }, [start]);
+
   const toggle = useCallback(() => {
     const current = phaseRef.current;
     if (current === "listening") return void finish();
@@ -114,13 +134,12 @@ export function useDictation(onText: (text: string) => void): Dictation {
     void dictationStatus()
       .then((status) => {
         setModelBytes(status.bytes);
-        setSharedFrom(status.sharedFrom ?? undefined);
-        if (status.installing) return setPhase("installing");
+        if (status.installing) return void follow();
         if (!status.installed) return setPhase("needs-model");
         return start();
       })
       .catch(fail);
-  }, [finish, start]);
+  }, [finish, start, follow]);
 
   const install = useCallback(() => {
     setError(undefined);
@@ -176,7 +195,6 @@ export function useDictation(onText: (text: string) => void): Dictation {
     speaking,
     progress,
     modelBytes,
-    sharedFrom,
     error,
     toggle,
     install,

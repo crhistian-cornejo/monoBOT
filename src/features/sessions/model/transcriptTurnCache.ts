@@ -92,7 +92,10 @@ export class TranscriptTurnCache {
     if (previous) return previous;
     const visible = (blocks: Block[]) =>
       blocks.filter(
-        (block) => !block.orchestration && (managed || !block.internal),
+        (block) =>
+          !block.orchestration &&
+          !block.imageJob &&
+          (managed || !block.internal),
       );
     // Each run in a merged Mono turn folds on its own: an earlier answer is
     // not narration for the work that the next run went on to do.

@@ -266,3 +266,32 @@ it("opens a document over its tab with a way back", async () => {
   );
   expect(onBackFromDocument).toHaveBeenCalledOnce();
 });
+
+it("keeps the Documents count on its icon while another tab is open", async () => {
+  await render("sessions");
+  const badge = () => tabs()[1].querySelector("[data-tab-badge]");
+  expect(badge()?.getAttribute("data-tab-badge")).toBe("1");
+  expect(badge()?.textContent).toBe("1");
+  // Open, the tab names its count instead.
+  await render("documents");
+  expect(badge()).toBeNull();
+  expect(tabs()[1].textContent).toBe("Documents1");
+  // No documents, no badge.
+  await render("sessions", vi.fn(), { documents: [] });
+  expect(badge()).toBeNull();
+});
+
+it("shows +9 on the folded icon once there are more than nine documents", async () => {
+  const many = (count: number) =>
+    Array.from({ length: count }, (_, index) => ({
+      id: `d${index}`,
+      kind: "document",
+      title: `Paper ${index}`,
+    }));
+  await render("sessions", vi.fn(), { documents: many(9) });
+  expect(tabs()[1].querySelector("[data-tab-badge]")?.textContent).toBe("9");
+  await render("sessions", vi.fn(), { documents: many(10) });
+  expect(tabs()[1].querySelector("[data-tab-badge]")?.textContent).toBe("+9");
+  await render("sessions", vi.fn(), { documents: many(23) });
+  expect(tabs()[1].querySelector("[data-tab-badge]")?.textContent).toBe("+9");
+});

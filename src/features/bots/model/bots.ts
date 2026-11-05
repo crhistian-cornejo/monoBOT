@@ -1,3 +1,4 @@
+import { SKILL_PACKS } from "../../skills/model/skillPacks";
 import type { BundledPlugin } from "../../skills/model/bundledPlugins";
 import type { ConnectorId } from "../../settings/model/connectors";
 
@@ -15,6 +16,7 @@ export type BotRole =
   | "planner"
   | "writer"
   | "analyst"
+  | "images"
   /** Made from scratch: the user writes its soul and picks its tools. */
   | "custom";
 
@@ -22,7 +24,7 @@ export type BotService = "gmail" | "drive" | "notion";
 type Service = BotService;
 
 /** Claude Code's own tools a bot may use, as Echo's permissions group them. */
-export type BotAccess = "web" | "read" | "edit";
+export type BotAccess = "web" | "read" | "edit" | "images";
 
 /** A folder the user opened to a bot, beyond its home folder. */
 export type BotFolder = {
@@ -51,7 +53,9 @@ export type BotTools = {
 const SKILL_NAME = /^[\w.-]+(?::[\w.-]+)?$/;
 
 export function isSkillName(value: unknown): value is string {
-  return typeof value === "string" && value.length <= 120 && SKILL_NAME.test(value);
+  return (
+    typeof value === "string" && value.length <= 120 && SKILL_NAME.test(value)
+  );
 }
 
 /** Whether an installed skill is the one a role or bot names: `xlsx` covers
@@ -75,6 +79,11 @@ export const BOT_ACCESS: readonly {
     access: "edit",
     name: "Change files",
     note: "Create and edit files in folders you allow; never delete",
+  },
+  {
+    access: "images",
+    name: "Images",
+    note: "Make and edit pictures with Gemini's Nano Banana, through Antigravity",
   },
 ];
 
@@ -104,6 +113,13 @@ export const BOT_SKILLS: readonly {
     name: "Finance",
     note: "Expenses, income and budgets",
   },
+  // The optional packs, so a bot can be given one without turning it on
+  // for every session.
+  ...SKILL_PACKS.map((pack) => ({
+    plugin: pack.id,
+    name: pack.name,
+    note: pack.description,
+  })),
 ];
 
 export type BotRoleInfo = {
@@ -172,9 +188,9 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     instructions: `You are the user's inbox bot. Go through their Gmail: say what needs a reply or a decision, what can wait, and what is waiting on someone else, with the sender and date. Summarize long threads in a few lines. You never write, send or archive email; when a reply is needed, say what it should say. ${SAFETY}`,
     services: ["gmail"],
     plugins: [],
-    access: ["read"],
     connectors: [],
     skills: [],
+    access: ["read"],
   },
   {
     role: "planner",
@@ -197,9 +213,9 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     instructions: `You are the user's writer bot. Draft and edit emails, posts, documents and messages in the user's voice: ask for the audience and the goal when they are not clear, keep it short, and offer one version rather than many. Save longer pieces as documents next to the user's files or in Notion. You never send or publish anything yourself. ${SAFETY}`,
     services: ["notion", "drive"],
     plugins: [],
-    access: ["web", "read", "edit"],
     connectors: [],
     skills: ["docx", "doc-coauthoring", "internal-comms"],
+    access: ["web", "read", "edit"],
   },
   {
     role: "analyst",
@@ -210,9 +226,9 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     instructions: `You are the user's analyst bot. Read spreadsheets and CSV files, check the numbers, compute totals, trends and comparisons, and show them as a table or a chart (an html artifact) with a short reading of what they mean. Write new files next to the originals, never over them. ${SAFETY}`,
     services: ["drive"],
     plugins: [],
-    access: ["read", "edit"],
     connectors: [],
     skills: ["xlsx", "data-visualization", "dataviz", "statistical-analysis"],
+    access: ["read", "edit"],
   },
   {
     role: "finance",
@@ -235,9 +251,9 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     instructions: `You are the user's documents bot. You read PDFs and Office files, summarize and compare them, extract data into spreadsheets and write reports or slides. Use the files skill for folders and the document skills (docx, xlsx, pptx, pdf) when they are installed. Write new files next to the originals, never over them. ${SAFETY}`,
     services: ["drive", "notion"],
     plugins: [],
-    access: ["web", "read", "edit"],
     connectors: [],
     skills: ["docx", "xlsx", "pptx", "pdf"],
+    access: ["web", "read", "edit"],
   },
   {
     role: "research",
@@ -245,11 +261,24 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     description: "Reports with sources on any topic",
     specialty:
       "Research: looks things up on the web, in docs and on X, and reports with dated sources",
-    instructions: `You are the user's research bot. Load the research skill: split the question, search the web and the user's files, cite sources with dates and deliver a short report, as a document when it is long. ${SAFETY}`,
+    instructions: `You are the user's research bot. Load the research skill: split the question, search the web and the user's files, cite sources with dates and deliver a short report, as a document when it is long. For any scientific paper (find it, its abstract, read it, summarise it, "give me the paper") use the app actions papers.find and papers.read first: they read the abstract and, when a free copy exists, the paper itself from the app's cache, and tell you which of the two you have. Say plainly when only the abstract was available; never answer with links instead of what you read. ${SAFETY}`,
     services: ["notion", "drive"],
     plugins: [],
     connectors: ["context7", "deepwiki", "mslearn", "xmd", "openalex"],
     skills: ["deep-research"],
+  },
+  {
+    role: "images",
+    name: "Images",
+    description: "Pictures and edits with Gemini's Nano Banana",
+    specialty:
+      "Images: makes and edits pictures (illustrations, icons, logos, mockups, photos) with Gemini's Nano Banana",
+    instructions: `You are the user's image bot. You make and edit pictures with \`app images.generate\` (Gemini's Nano Banana): illustrations, icons, logos, product mockups, photos and edits of an image the user attaches. When the request leaves out something that changes the result a lot (what it is for, the aspect ratio, the style), ask in one line, or find two or three references on the web and ask which is closest; otherwise make it. Write the image prompt in English and in detail: subject, composition, style, light, palette and any text that must appear, spelled exactly. When the user is exploring, ask for up to three takes at once; when they ask for a change, change only that and pass the picture to change as the source. ${SAFETY}`,
+    services: [],
+    plugins: [],
+    connectors: [],
+    skills: [],
+    access: ["web", "read", "images"],
   },
   {
     role: "custom",
@@ -377,7 +406,8 @@ export function deniedSkills(
   if (!allowed) return [];
   return installed.filter(
     (name) =>
-      isSkillName(name) && !allowed.some((wanted) => skillMatches(wanted, name)),
+      isSkillName(name) &&
+      !allowed.some((wanted) => skillMatches(wanted, name)),
   );
 }
 
@@ -469,6 +499,8 @@ const LEAD_DENIED = ["Task", "Agent"] as const;
 const ACCESS_TOOLS: Record<BotAccess, readonly string[]> = {
   web: ["WebSearch", "WebFetch"],
   read: ["Read", "Glob", "Grep"],
+  // An app action, not a Claude tool: nothing to allow or deny.
+  images: [],
   edit: ["Edit", "Write", "MultiEdit", "NotebookEdit"],
 };
 

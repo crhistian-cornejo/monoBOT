@@ -30,6 +30,7 @@ import type {
   BtwMessage,
   BtwThread,
   GeneratedImageMeta,
+  ImageJobMeta,
   HarnessId,
   HandoffMeta,
   HandoffStatus,
@@ -958,8 +959,10 @@ function sanitizeBlock(
     next.attachments = block.attachments.map(persistableAttachment);
   }
   const image = sanitizeGeneratedImage(block.image);
-  if (block.role === "image" && !image) return null;
+  const imageJob = sanitizeImageJob(block.imageJob);
+  if (block.role === "image" && !image && !imageJob) return null;
   if (image) next.image = image;
+  if (imageJob) next.imageJob = imageJob;
   if (block.startedAt != null) next.startedAt = block.startedAt;
   if (block.durationMs != null) next.durationMs = block.durationMs;
   if (
@@ -1223,6 +1226,43 @@ function sanitizeBtwThreads(
     ];
   });
   return threads.length > 0 ? threads : undefined;
+}
+
+const IMAGE_JOB_STATUSES = new Set(["generating", "done", "failed"]);
+
+export function sanitizeImageJob(value: unknown): ImageJobMeta | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return;
+  const record = value as Record<string, unknown>;
+  const { id, prompt, count, status, startedAt, aspect, error } = record;
+  if (
+    typeof id !== "string" ||
+    !id ||
+    typeof prompt !== "string" ||
+    typeof count !== "number" ||
+    !Number.isInteger(count) ||
+    count < 1 ||
+    typeof status !== "string" ||
+    !IMAGE_JOB_STATUSES.has(status) ||
+    typeof startedAt !== "number" ||
+    !Number.isFinite(startedAt)
+  )
+    return;
+  const images = Array.isArray(record.images)
+    ? record.images.flatMap((entry) => {
+        const image = sanitizeGeneratedImage(entry);
+        return image ? [image] : [];
+      })
+    : [];
+  return {
+    id,
+    prompt,
+    count,
+    status: status as ImageJobMeta["status"],
+    startedAt,
+    images,
+    ...(typeof aspect === "string" && aspect ? { aspect } : {}),
+    ...(typeof error === "string" && error ? { error } : {}),
+  };
 }
 
 function sanitizeGeneratedImage(

@@ -12,6 +12,8 @@ import { isLocalProject, normalizeProjectPath } from "../../projects/model/recen
 import { isMarkdownBlockquotePosition } from "../../sessions/model/quoteDraft";
 import type { HarnessId } from "../../sessions/model/session";
 import { getHarness } from "../../../integrations/harness/core/registry";
+import { bundledPluginDirs } from "./bundledPlugins";
+import { enabledSkillPacks } from "./skillPacks";
 import type { NativeCommand } from "../../../integrations/harness/core/nativeCommands";
 import {
   CREATE_SKILL_BODY,
@@ -303,17 +305,41 @@ function startCatalogLoad(
   return promise;
 }
 
+/** Claude loads MonoBOT's skill packs as plugins; any other agent learns a
+ * pack skill only from the body MonoBOT puts in the turn. */
+function packsReachByPrompt(harness: HarnessId): boolean {
+  return harness !== "claude";
+}
+
+async function enabledPackDirs(): Promise<string[]> {
+  const packs = enabledSkillPacks();
+  return packs.length ? bundledPluginDirs(packs) : [];
+}
+
 async function loadCatalog(context: SkillCatalogContext): Promise<Skill[]> {
   const provider = getHarness(context.harness)?.commands;
   if (provider) {
     const commands = await provider.discover(context);
-    return commands.map((command): NativeSkill => ({
+    const native = commands.map((command): NativeSkill => ({
       kind: "native",
       ...command,
     }));
+    if (!packsReachByPrompt(context.harness)) return native;
+    const packDirs = await enabledPackDirs();
+    if (!packDirs.length) return native;
+    // Pack skills join the agent's own commands; its own name wins.
+    const taken = new Set(native.map((skill) => skill.name));
+    const packs = (await listSkills(context.cwd, null, packDirs).catch(() => []))
+      .filter((skill) => skill.source === "monocode" && !taken.has(skill.name))
+      .map(asSkill);
+    return [...native, ...packs];
   }
   const disabledPaths = loadDisabledSkillPaths();
-  const discovered = await listSkills(context.cwd, disabledPaths);
+  const discovered = await listSkills(
+    context.cwd,
+    disabledPaths,
+    await enabledPackDirs(),
+  );
   const disabled = disabledSkillPathSet();
   return mergeCatalog(discovered.filter((skill) => !disabled.has(skill.path)));
 }
@@ -440,13 +466,18 @@ export async function applySkillsToTurn(
   text: string,
   context: SkillCatalogContext,
 ): Promise<string> {
-  if (hasNativeCommands(context.harness)) return text;
+  const native = hasNativeCommands(context.harness);
+  // An agent with its own commands runs those itself; MonoBOT only hands it
+  // the pack skills it cannot see.
+  if (native && !packsReachByPrompt(context.harness)) return text;
   const names = skillNamesInText(text);
   if (names.length === 0) return text;
   const catalog = await loadSkills(context);
   const picked: Array<FileSkill | BuiltinSkill> = [];
   for (const name of names) {
     const skill = catalog.find((item) => item.name === name);
+    if (native && !(skill?.kind === "file" && skill.source === "monocode"))
+      continue;
     if (skill?.kind === "file" || skill?.kind === "builtin") {
       picked.push(skill);
     }

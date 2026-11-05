@@ -1,3 +1,4 @@
+import { Switch } from "../../../shared/ui/Switch";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import {
@@ -382,22 +383,11 @@ function BuiltInConnectors() {
                   {connector.description}
                 </p>
               </div>
-              <button
-                type="button"
-                role="switch"
-                aria-label={`${connector.name} connector`}
-                aria-checked={on}
-                onClick={() => toggle(connector.id, !on)}
-                className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
-                  on ? "bg-accent" : "bg-content/20"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 size-4 rounded-full bg-white transition-[left] ${
-                    on ? "left-4.5" : "left-0.5"
-                  }`}
-                />
-              </button>
+              <Switch
+                label={`${connector.name} connector`}
+                on={on}
+                onChange={(next) => toggle(connector.id, next)}
+              />
             </li>
           );
         })}

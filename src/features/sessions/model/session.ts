@@ -201,6 +201,8 @@ export type ToolPreview = {
   /** Write supplied new contents without the previous file to compare. */
   contentOnly?: boolean;
   query?: string;
+  /** The web page a fetch read; such a preview has no file path. */
+  url?: string;
   lines?: ToolPreviewLine[];
   output?: string;
 };
@@ -245,6 +247,20 @@ export type GeneratedImageMeta = {
   mimeType: string;
   size: number;
   alt?: string;
+};
+
+/** Pictures a Mono asked Gemini for: frames while they are made, then the images. */
+export type ImageJobMeta = {
+  id: string;
+  prompt: string;
+  /** Takes asked for, so the frames match before the images land. */
+  count: number;
+  /** "16:9" and the like; the frames take its shape. Square when unset. */
+  aspect?: string;
+  status: "generating" | "done" | "failed";
+  startedAt: number;
+  images: GeneratedImageMeta[];
+  error?: string;
 };
 
 export type Attachment = {
@@ -318,6 +334,8 @@ export type Block = {
   role: BlockRole;
   text: string;
   image?: GeneratedImageMeta;
+  /** Set on an `image` block that holds a generation in progress or done. */
+  imageJob?: ImageJobMeta;
   attachments?: Attachment[];
   streaming?: boolean;
   /** Epoch ms when this user turn started. */

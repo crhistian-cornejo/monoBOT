@@ -13,6 +13,7 @@ import {
   enabledConnectors,
 } from "../../../../features/settings/model/connectors";
 import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
+import { enabledSkillPacks } from "../../../../features/skills/model/skillPacks";
 import {
   botLaunchForSession,
   installedClaudeSkills,
@@ -566,7 +567,12 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       ],
       disallowedTools: bot?.disallowedTools,
       addDirs: bot?.addDirs,
-      pluginDirs: await bundledPluginDirs(["monobot", ...(bot?.plugins ?? [])]),
+      // A bot's skill packs come with its tools; any other session takes
+      // the ones turned on in Settings.
+      pluginDirs: await bundledPluginDirs([
+        "monobot",
+        ...(bot ? bot.plugins : enabledSkillPacks()),
+      ]),
     }),
     input.cwd,
     { provider: "claude", id: input.providerAccountId ?? "default" },

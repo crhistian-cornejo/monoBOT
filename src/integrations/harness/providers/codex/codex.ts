@@ -1,3 +1,7 @@
+import {
+  connectorCodexArgs,
+  enabledConnectors,
+} from "../../../../features/settings/model/connectors";
 import { TurnNotReadyError } from "../../core/types";
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { sameProviderAccountId } from "../../../../features/providers/model/providerAccounts";
@@ -650,7 +654,9 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   await spawnChild(
     input.sessionId,
     path,
-    ["app-server"],
+    // MonoBOT's connectors join the user's own Codex MCP servers for this
+    // process only; ~/.codex/config.toml is never written.
+    ["app-server", ...connectorCodexArgs(enabledConnectors())],
     input.cwd,
     {
       provider: "codex",

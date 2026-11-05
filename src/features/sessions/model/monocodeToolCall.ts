@@ -24,6 +24,10 @@ const ACTION_LABELS: Record<string, string> = {
   "artifacts.list": "List artifacts",
   "artifacts.read": "Read an artifact",
   "artifacts.write": "Write an artifact",
+  "papers.find": "Search papers",
+  "papers.read": "Read a paper",
+  "papers.figure": "Draw a paper page",
+  "papers.add": "Add a paper PDF",
 };
 
 /** Conservatively parse one shell invocation; compound commands use the shell row. */

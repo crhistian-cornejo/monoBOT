@@ -36,11 +36,30 @@ import {
   type ArtifactKind,
   type ArtifactUpsert,
 } from "../../artifacts/artifacts";
+import {
+  excerpt,
+  figures as paperFigures,
+  outline as paperOutline,
+  section as paperSection,
+} from "../../papers/model/paperText";
+import {
+  paperLabel,
+  parseRef,
+  type Paper,
+  type PaperRef,
+  findPapers,
+} from "../../papers/model/papers";
+import type { LoadedPaper, RenderedPage } from "../../papers/model/paperStore";
+
 import type { QuickLaunch } from "../../quick-composer/model/quickComposer";
 import type { Worktree, Worktrees } from "../../source-control/model/worktrees";
 import { pathKey, projectName } from "../../../shared/lib/paths";
 import type { SplitDir } from "../../workspace/model/layout";
 import { consumeOperatorCommand } from "../../sessions/model/operatorCommand";
+import {
+  parseImageRequest,
+  type ImageRequest,
+} from "../../images/model/generateImages";
 import {
   createMono,
   findMono,
@@ -50,6 +69,7 @@ import {
   monoLook,
   monoSpecialty,
   saveBotTools,
+  saveMonoName,
   saveMonoSpecialty,
   SPECIALTY_MAX,
   type Mono,
@@ -192,6 +212,8 @@ export type AgentAppHost = {
         showStartedSessionsInSidebar?: boolean;
         /** Files the sessions it starts into a folder named after it. */
         folder?: { name: string; color: string };
+        /** Its name, which also names its folder of papers in Documents. */
+        name?: string;
       }
     | undefined;
   /** A hidden run of one of a Mono's habits: it may remember, not schedule. */
@@ -200,6 +222,11 @@ export type AgentAppHost = {
   monoSession?(monoId: string): Promise<string | undefined>;
   /** Puts a card in the Mono's chat, or holds it for a habit run's report. */
   postCard?(sourceSessionId: string, card: MonoCard): void;
+  /**
+   * Puts frames for the pictures in the Mono's chat at once and has Gemini
+   * make them in the background; the pictures replace the frames.
+   */
+  generateImages?(sourceSessionId: string, request: ImageRequest): string;
   habits?: {
     load(monoId: string): Promise<Habit[]>;
     update<T>(
@@ -219,6 +246,25 @@ export type AgentAppHost = {
     text: string,
     hash: string,
   ): Promise<string>;
+  /** Scholarly papers: the open APIs and the cache of papers already read. */
+  papers?: {
+    find(
+      query: string,
+      limit: number,
+      since?: number,
+    ): ReturnType<typeof findPapers>;
+    load(
+      ref: PaperRef,
+      options?: { agent?: string },
+    ): Promise<LoadedPaper | undefined>;
+    /** One page of a cached paper as a PNG in the app's cache folder. */
+    renderPage(key: string, page: number): Promise<RenderedPage>;
+    /** Registers a PDF on this computer as a paper: kept, read, ready to cite. */
+    addPdf(
+      path: string,
+      options: { ref?: PaperRef; title?: string; agent?: string },
+    ): Promise<LoadedPaper>;
+  };
   /** The skills the user installed for Claude Code, by name. */
   installedSkills?(): Promise<string[]>;
   /** The clock entries are dated by; tests pin it. */
@@ -273,6 +319,10 @@ const FIELDS = new Map<string, readonly string[]>([
   ["artifacts.list", ["kind", "limit", "offset"]],
   ["artifacts.read", ["id"]],
   ["artifacts.write", ["id", "kind", "title", "body", "summary"]],
+  ["papers.find", ["query", "limit", "fromYear"]],
+  ["papers.read", ["ref", "pages", "query", "section", "maxChars"]],
+  ["papers.figure", ["ref", "page"]],
+  ["papers.add", ["path", "ref", "title"]],
   ["soul.read", []],
   ["soul.update", ["text", "expectedHash"]],
   ["memory.read", ["topic", "shared"]],
@@ -307,6 +357,8 @@ const FIELDS = new Map<string, readonly string[]>([
   ["agents.message", ["to", "message"]],
   ["wakes.add", ["in", "at", "note"]],
   ["chat.card", [...CARD_FIELDS]],
+  ["images.generate", ["prompt", "count", "aspect", "source"]],
+  ["name.update", ["name"]],
 ]);
 
 function fields(action: string, input: Record<string, unknown>) {
@@ -757,7 +809,11 @@ async function handleMemory(
         const topic = await host.readAgentFile(monoId, path);
         if (topic.text == null && path !== "MEMORY.md")
           throw new Error("No such memory topic");
-        return { file: path, ...(shared ? { shared } : {}), text: topic.text ?? "" };
+        return {
+          file: path,
+          ...(shared ? { shared } : {}),
+          text: topic.text ?? "",
+        };
       }
       const files = await host.agentFiles(monoId);
       const budget = memoryWithinBudget(files.memory);
@@ -952,7 +1008,12 @@ async function handleAgents(
     ...(notify ? [notify] : []),
   );
   if (!result.alreadySubmitted)
-    recordDelegation({ from: sender.id, to: target.id, message, at: Date.now() });
+    recordDelegation({
+      from: sender.id,
+      to: target.id,
+      message,
+      at: Date.now(),
+    });
   return {
     to: monoLook(target).name,
     submitted: true,
@@ -975,7 +1036,9 @@ function agentCard(mono: Mono, recent: readonly Delegation[]) {
     .slice(0, RECENT_WORK)
     .map((entry) => ({
       at: new Date(entry.at).toISOString(),
-      from: findMono(entry.from) ? monoLook(findMono(entry.from)!).name : "an agent",
+      from: findMono(entry.from)
+        ? monoLook(findMono(entry.from)!).name
+        : "an agent",
       message:
         entry.message.length > 160
           ? `${entry.message.slice(0, 159)}…`
@@ -997,7 +1060,10 @@ function agentCard(mono: Mono, recent: readonly Delegation[]) {
       ? {
           tools: {
             accounts: tools.services,
-            skills: [...tools.plugins, ...(tools.skills ?? ["(every installed skill)"])],
+            skills: [
+              ...tools.plugins,
+              ...(tools.skills ?? ["(every installed skill)"]),
+            ],
             access: tools.access,
             connectors: tools.connectors ?? ["(every enabled connector)"],
           },
@@ -1460,6 +1526,289 @@ async function handleArtifacts(
   return { ...card, saved: true, attached: true };
 }
 
+function paperSummary(paper: Paper) {
+  return {
+    ref:
+      paper.doi ??
+      paper.openAlexId ??
+      (paper.key.startsWith("pdf:") ? paper.key : paper.title),
+    label: paperLabel(paper),
+    title: paper.title,
+    authors: paper.authors.slice(0, 4),
+    ...(paper.year ? { year: paper.year } : {}),
+    ...(paper.venue ? { venue: paper.venue } : {}),
+    ...(paper.citedBy !== undefined ? { citedBy: paper.citedBy } : {}),
+    access: paper.access,
+    ...(paper.abstract
+      ? { abstractStart: `${paper.abstract.slice(0, 220)}…` }
+      : {}),
+    ...(paper.doi ? { link: `https://doi.org/${paper.doi}` } : {}),
+  };
+}
+
+const AVAILABILITY_NOTE: Record<LoadedPaper["availability"], string> = {
+  "full-text":
+    "The open copy is in the cache and its text is below. Cite passages by page, and quote the paper's own words.",
+  "abstract-only":
+    "Only the abstract is available: summarise from it and tell the user plainly that the full text was not accessible, and why (`why`). If `blocked` is true the paper may be open access but its site refuses programs: say so, give the paper's link, and tell the user they can download the PDF and either choose Add PDF on the paper's page or send it to you, and you register it with papers.add. Do not describe parts of the paper you have not read.",
+  "metadata-only":
+    "Neither the abstract nor the text could be read: say so, and offer to try another source rather than guessing what the paper says.",
+};
+
+const dossierCards = new Map<string, Set<string>>();
+
+/** The paper's page in the agent's Documents: who wrote it, whether it can be read, its abstract. */
+async function paperDossier(
+  source: Session,
+  loaded: LoadedPaper,
+  host: AgentAppHost,
+) {
+  if (!host.saveArtifact || !host.postArtifact || !host.isMono(source.id))
+    return;
+  const { paper } = loaded;
+  const slug = paper.key.replace(/[^A-Za-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const id = `paper-${slug.slice(0, 100) || "unknown"}`;
+  const status =
+    loaded.availability === "full-text"
+      ? `Full text read${loaded.text ? ` (${loaded.text.pages.length} pages)` : ""}, kept on this computer.`
+      : loaded.availability === "abstract-only"
+        ? `Abstract only. ${loaded.reason ?? ""}`.trim()
+        : `Not readable. ${loaded.reason ?? ""}`.trim();
+  const body = [
+    `# ${paper.title}`,
+    "",
+    paper.authors.length ? `**${paper.authors.join(", ")}**` : "",
+    [paper.venue, paper.year].filter(Boolean).join(", "),
+    paper.doi ? `DOI: [${paper.doi}](https://doi.org/${paper.doi})` : "",
+    paper.citedBy !== undefined ? `Cited by ${paper.citedBy} works.` : "",
+    "",
+    `> ${status}`,
+    "",
+    "## Abstract",
+    "",
+    paper.abstract
+      ? `${paper.abstract}\n\n_Source: ${paper.abstractFrom}._`
+      : "_No source had this paper's abstract._",
+    "",
+    // A reference definition draws nothing: it tells the app which cached
+    // paper this document is, to open it with its PDF.
+    `[monobot-paper]: paper:${encodeURIComponent(paper.key)}`,
+  ]
+    .filter((line, index, all) => line || all[index - 1] !== "")
+    .join("\n");
+  try {
+    const saved = await host.saveArtifact({
+      id,
+      kind: "document",
+      title: `${paperLabel(paper)}: ${paper.title}`.slice(0, 200),
+      body,
+      sourceSessionId: source.id,
+      ...(looksLikeProject(source.cwd) ? { sourceCwd: source.cwd } : {}),
+    });
+    const seen = dossierCards.get(source.id) ?? new Set<string>();
+    dossierCards.set(source.id, seen);
+    if (seen.has(id)) return;
+    seen.add(id);
+    await host.postArtifact(source.id, {
+      id: saved.id,
+      kind: saved.kind,
+      title: saved.title,
+      summary: status.slice(0, 280),
+    });
+  } catch {
+    // The dossier is a convenience: reading the paper must not depend on it.
+  }
+}
+
+/** What the agent gets back for a paper: who it is, what was read, and what is missing. */
+async function paperAnswer(
+  source: Session,
+  host: AgentAppHost,
+  loaded: LoadedPaper,
+  options: {
+    pages?: string;
+    query?: string;
+    section?: string;
+    maxChars: number;
+  },
+) {
+  await paperDossier(source, loaded, host);
+  const { paper } = loaded;
+  return {
+    ...paperSummary(paper),
+    authors: paper.authors,
+    availability: loaded.availability,
+    ...(paper.abstract
+      ? { abstract: paper.abstract, abstractFrom: paper.abstractFrom }
+      : {}),
+    ...(loaded.text
+      ? {
+          fullText: readText(loaded.text, options),
+          outline: paperOutline(loaded.text).map(
+            ({ title, level, page }) =>
+              `${"  ".repeat(level - 1)}${title} (p. ${page})`,
+          ),
+          figures: paperFigures(loaded.text).map(
+            ({ label, page, caption }) =>
+              `${label} (p. ${page}): ${caption.slice(0, 140)}`,
+          ),
+        }
+      : {}),
+    ...(loaded.reason && loaded.availability !== "full-text"
+      ? { why: loaded.reason }
+      : {}),
+    ...(loaded.blocked ? { blocked: true } : {}),
+    note: AVAILABILITY_NOTE[loaded.availability],
+  };
+}
+
+async function handlePapers(
+  source: Session,
+  _requestId: string,
+  action: string,
+  input: Record<string, unknown>,
+  host: AgentAppHost,
+): Promise<unknown> {
+  const papers = host.papers;
+  if (!papers) throw new Error("Papers are unavailable");
+  // The agent's name is its folder of papers in the user's Documents.
+  const agent = host.monoOf?.(source.id)?.name;
+  if (action === "papers.find") {
+    const query = requiredString(input.query, "query", 300);
+    const limit = input.limit ?? 6;
+    if (
+      !Number.isInteger(limit) ||
+      (limit as number) < 1 ||
+      (limit as number) > 10
+    )
+      throw new Error("limit must be an integer from 1 to 10");
+    const fromYear = input.fromYear;
+    if (
+      fromYear !== undefined &&
+      (!Number.isInteger(fromYear) ||
+        (fromYear as number) < 1900 ||
+        (fromYear as number) > 2100)
+    )
+      throw new Error("fromYear must be a year");
+    const found = await papers.find(
+      query,
+      limit as number,
+      fromYear as number | undefined,
+    );
+    return {
+      source: found.source,
+      ...(found.note ? { note: found.note } : {}),
+      papers: found.papers.map(paperSummary),
+      next: found.papers.length
+        ? "Call papers.read with a paper's ref to get its abstract and, when an open copy exists, its text."
+        : "Nothing matched: try other words, or fewer.",
+    };
+  }
+  if (action === "papers.read") {
+    const ref = requiredString(input.ref, "ref", 500);
+    const pages = optionalString(input.pages, "pages", 40);
+    const query = optionalString(input.query, "query", 300);
+    const sectionName = optionalString(input.section, "section", 100);
+    const maxChars = input.maxChars ?? 24_000;
+    if (
+      !Number.isInteger(maxChars) ||
+      (maxChars as number) < 2_000 ||
+      (maxChars as number) > 60_000
+    )
+      throw new Error("maxChars must be an integer from 2000 to 60000");
+    const loaded = await papers.load(parseRef(ref), { agent });
+    if (!loaded)
+      throw new Error(
+        "No paper was found for that ref. Use a DOI, an arXiv id or a title from papers.find.",
+      );
+    return paperAnswer(source, host, loaded, {
+      pages,
+      query,
+      section: sectionName,
+      maxChars: maxChars as number,
+    });
+  }
+  if (action === "papers.add") {
+    const path = requiredString(input.path, "path", 1000);
+    if (!/^(\/|[A-Za-z]:[\\/])/.test(path))
+      throw new Error(
+        "path must be an absolute path to a PDF on this computer",
+      );
+    const ref = optionalString(input.ref, "ref", 500);
+    const title = optionalString(input.title, "title", 300);
+    const loaded = await papers.addPdf(path, {
+      ...(ref ? { ref: parseRef(ref) } : {}),
+      ...(title ? { title } : {}),
+      agent,
+    });
+    return paperAnswer(source, host, loaded, { maxChars: 12_000 });
+  }
+  if (action === "papers.figure") {
+    const ref = requiredString(input.ref, "ref", 500);
+    const page = input.page;
+    if (!Number.isInteger(page) || (page as number) < 1)
+      throw new Error("page must be a page number from 1");
+    const loaded = await papers.load(parseRef(ref), { agent });
+    if (!loaded)
+      throw new Error(
+        "No paper was found for that ref. Use papers.find first.",
+      );
+    if (loaded.availability !== "full-text" || !loaded.text)
+      throw new Error(
+        `There is no PDF of this paper on this computer to draw: ${loaded.reason ?? "only its abstract is available"}.`,
+      );
+    const drawn = await papers.renderPage(loaded.paper.key, page as number);
+    const here = paperFigures(loaded.text).filter(
+      (figure) => figure.page === page,
+    );
+    const label = here[0]?.label ?? `Page ${page}`;
+    return {
+      path: drawn.path,
+      page: drawn.page,
+      pages: drawn.pages,
+      onThisPage: here.map(
+        (figure) => `${figure.label}: ${figure.caption.slice(0, 140)}`,
+      ),
+      markdown: `![${label} of ${paperLabel(loaded.paper)}](<${drawn.path}>)`,
+      note: "Put the markdown in your reply and MonoBOT shows the image in the chat. It is the whole page, not a crop: say which figure or table you mean.",
+    };
+  }
+  throw new Error(`Unknown app action: ${action}`);
+}
+
+/** The paper's words the agent asked for: a section, pages, or what answers a question. */
+function readText(
+  text: Parameters<typeof excerpt>[0],
+  options: {
+    pages?: string;
+    query?: string;
+    section?: string;
+    maxChars: number;
+  },
+) {
+  if (options.section) {
+    const found = paperSection(text, options.section, options.maxChars);
+    if (!found)
+      return {
+        pageCount: text.pages.length,
+        covers: `no section called "${options.section}": pick one from the outline`,
+        text: "",
+        truncated: false,
+      };
+    return {
+      pageCount: text.pages.length,
+      covers: `section "${found.title}", from page ${found.page}${found.truncated ? `, cut at ${options.maxChars} characters` : ""}`,
+      text: found.text,
+      truncated: found.truncated,
+    };
+  }
+  return excerpt(text, {
+    ...(options.pages ? { pages: options.pages } : {}),
+    ...(options.query ? { query: options.query } : {}),
+    maxChars: options.maxChars,
+  });
+}
+
 export async function handleAgentApp(
   source: Session,
   requestId: string,
@@ -1470,6 +1819,8 @@ export async function handleAgentApp(
   fields(action, input);
   if (action.startsWith("artifacts."))
     return handleArtifacts(source, requestId, action, input, host);
+  if (action.startsWith("papers."))
+    return handlePapers(source, requestId, action, input, host);
   if (action.startsWith("soul."))
     return handleSoul(source, action, input, host);
   if (action.startsWith("memory."))
@@ -1483,6 +1834,37 @@ export async function handleAgentApp(
     return handleGroup(source, requestId, action, input, host);
   if (action.startsWith("agents."))
     return handleAgents(source, requestId, action, input, host);
+  if (action === "images.generate") {
+    const mono = monoForSession(source.id);
+    if (!mono || !host.generateImages)
+      throw new Error("Only a Mono's own chat can make pictures");
+    if (
+      isBot(mono) &&
+      !botTools(mono.botRole ?? "assistant", mono.botTools).access.includes(
+        "images",
+      )
+    )
+      throw new Error(
+        "Images is off in your tools. Ask the user to turn it on, or turn it on with tools.update if they asked you to.",
+      );
+    const request = parseImageRequest(input);
+    const job = host.generateImages(source.id, request);
+    return {
+      started: job,
+      takes: request.count,
+      note: "Frames for the pictures are in your chat now and the pictures replace them when Gemini is done, usually within a minute or two. Don't wait or poll for them: end your turn with one short line on what you asked for, and let the user react.",
+    };
+  }
+  if (action === "name.update") {
+    const mono = monoForSession(source.id);
+    if (!mono) throw new Error("Only a Mono's own chat can change its name");
+    const name = requiredString(input.name, "name", 40).replace(/\s+/g, " ");
+    saveMonoName(mono.id, name);
+    return {
+      name,
+      note: "The rail, the tab and the chat show the new name now. Say it in one line.",
+    };
+  }
   if (action === "chat.card") {
     if (
       !host.postCard ||

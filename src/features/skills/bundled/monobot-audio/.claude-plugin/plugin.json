@@ -1,0 +1,5 @@
+{
+  "name": "monobot-audio",
+  "description": "MonoBOT ElevenLabs audio: Speech, voices, sound effects and music; needs an ElevenLabs API key.",
+  "version": "1.0.0"
+}

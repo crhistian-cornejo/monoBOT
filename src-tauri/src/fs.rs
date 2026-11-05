@@ -1198,11 +1198,9 @@ pub struct GitBranchPr {
 /// (a workstream's `ws/<slug>/`), newest first.
 #[tauri::command]
 pub async fn git_branch_prs(cwd: String, prefix: String) -> Result<Vec<GitBranchPr>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        git_branch_prs_for(&expand_home(&cwd), &prefix)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || git_branch_prs_for(&expand_home(&cwd), &prefix))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 fn git_branch_prs_for(root: &Path, prefix: &str) -> Result<Vec<GitBranchPr>, String> {
@@ -5971,6 +5969,156 @@ pub(crate) fn delete_generated_images_sync(
     Ok(())
 }
 
+/// An image Antigravity (Gemini's Nano Banana) wrote during a turn, copied
+/// next to the other generated images so the chat keeps it.
+#[derive(Serialize, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct CollectedImage {
+    path: String,
+    name: String,
+    mime_type: String,
+    size: u64,
+}
+
+const MAX_COLLECTED_IMAGES: usize = 4;
+
+/// Antigravity's `generate_image` saves its pictures in the conversation's
+/// folder under `~/.gemini/antigravity-cli/brain`, not in the reply. Copy the
+/// ones written since `since_ms` (at most four, distinct by content).
+#[tauri::command]
+pub async fn collect_antigravity_images(
+    app: AppHandle,
+    since_ms: u64,
+) -> Result<Vec<CollectedImage>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let home = dirs_home().ok_or("Home directory is unavailable")?;
+        let brain = PathBuf::from(home).join(".gemini/antigravity-cli/brain");
+        let dir = app
+            .path()
+            .app_data_dir()
+            .map_err(|e| e.to_string())?
+            .join(GENERATED_IMAGE_DIR);
+        collect_images_since(&brain, &dir, since_ms)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+fn collected_image_mime(path: &Path) -> Option<&'static str> {
+    match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+pub(crate) fn collect_images_since(
+    brain: &Path,
+    destination: &Path,
+    since_ms: u64,
+) -> Result<Vec<CollectedImage>, String> {
+    let since = UNIX_EPOCH + Duration::from_millis(since_ms);
+    let mut found: Vec<(SystemTime, PathBuf)> = Vec::new();
+    let Ok(conversations) = std::fs::read_dir(brain) else {
+        return Ok(Vec::new());
+    };
+    for conversation in conversations.flatten() {
+        // Only recently touched conversations can hold this turn's images.
+        let touched = conversation.metadata().and_then(|meta| meta.modified());
+        if touched.map(|at| at < since).unwrap_or(true) {
+            continue;
+        }
+        let Ok(files) = std::fs::read_dir(conversation.path()) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let path = file.path();
+            if collected_image_mime(&path).is_none() {
+                continue;
+            }
+            let Ok(meta) = file.metadata() else { continue };
+            if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_GENERATED_IMAGE_BYTES {
+                continue;
+            }
+            if let Ok(modified) = meta.modified() {
+                if modified >= since {
+                    found.push((modified, path));
+                }
+            }
+        }
+    }
+    found.sort();
+    let mut seen: HashSet<Vec<u8>> = HashSet::new();
+    let mut collected = Vec::new();
+    for (_, source) in found {
+        if collected.len() >= MAX_COLLECTED_IMAGES {
+            break;
+        }
+        let Ok(bytes) = std::fs::read(&source) else {
+            continue;
+        };
+        if !seen.insert(bytes.clone()) {
+            continue;
+        }
+        let mime = collected_image_mime(&source).unwrap_or("image/png");
+        let name = source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("image.png")
+            .to_string();
+        std::fs::create_dir_all(destination).map_err(|e| e.to_string())?;
+        let target = destination.join(format!(
+            "{}-{}",
+            Uuid::new_v4(),
+            safe_attachment_name(&name)
+        ));
+        std::fs::write(&target, &bytes).map_err(|e| format!("{}: {e}", target.display()))?;
+        collected.push(CollectedImage {
+            path: target.to_string_lossy().into_owned(),
+            name,
+            mime_type: mime.into(),
+            size: bytes.len() as u64,
+        });
+    }
+    Ok(collected)
+}
+
+#[cfg(test)]
+mod collect_images_tests {
+    use super::*;
+
+    #[test]
+    fn copies_only_new_distinct_images() {
+        let root = std::env::temp_dir().join(format!("monobot-brain-{}", Uuid::new_v4()));
+        let brain = root.join("brain");
+        let conversation = brain.join("conv");
+        std::fs::create_dir_all(&conversation).unwrap();
+        let since = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64
+            - 1_000;
+        std::fs::write(conversation.join("fox.jpg"), b"one").unwrap();
+        std::fs::write(conversation.join("fox_copy.jpg"), b"one").unwrap();
+        std::fs::write(conversation.join("cat.png"), b"two").unwrap();
+        std::fs::write(conversation.join("notes.md"), b"text").unwrap();
+        let out = root.join("out");
+        let images = collect_images_since(&brain, &out, since).unwrap();
+        assert_eq!(images.len(), 2);
+        assert!(images.iter().any(|image| image.mime_type == "image/jpeg"));
+        assert!(images
+            .iter()
+            .all(|image| Path::new(&image.path).starts_with(&out)));
+        // Nothing is new after now.
+        let later = since + 3_600_000;
+        assert!(collect_images_since(&brain, &out, later)
+            .unwrap()
+            .is_empty());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
 fn is_png(bytes: &[u8]) -> bool {
     bytes.len() >= 8 && bytes.starts_with(&[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 }
@@ -6436,7 +6584,10 @@ mod tests {
             {"number":1,"title":"Web","url":"u1","state":"MERGED","isDraft":false,"headRefName":"ws/migrate/web"}
         ]"#;
         let prs = branch_prs_with_prefix(json, "ws/migrate/");
-        assert_eq!(prs.iter().map(|pr| pr.number).collect::<Vec<_>>(), vec![3, 1]);
+        assert_eq!(
+            prs.iter().map(|pr| pr.number).collect::<Vec<_>>(),
+            vec![3, 1]
+        );
         assert!(prs[0].is_draft);
         assert!(branch_prs_with_prefix("not json", "ws/").is_empty());
     }
@@ -9451,16 +9602,31 @@ mod tests {
     #[test]
     fn inbox_follows_origin_unless_gh_has_a_default() {
         let local = tmp("inbox-origin-remote");
-        if !init_git_commit(&local.0, &[("a.txt", "a
-")]) {
+        if !init_git_commit(
+            &local.0,
+            &[(
+                "a.txt", "a
+",
+            )],
+        ) {
             return;
         }
         if !git(
             &local.0,
-            &["remote", "add", "origin", "https://github.com/me/monoBOT.git"],
+            &[
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/me/monoBOT.git",
+            ],
         ) || !git(
             &local.0,
-            &["remote", "add", "upstream", "git@github.com:them/monocode.git"],
+            &[
+                "remote",
+                "add",
+                "upstream",
+                "git@github.com:them/monocode.git",
+            ],
         ) {
             return;
         }

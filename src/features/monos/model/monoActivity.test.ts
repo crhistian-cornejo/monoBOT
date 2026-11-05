@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import type { Block } from "../../sessions/model/session";
 import {
+  latestMonoActivity,
   resolveMonoActivity,
   type MonoActivitySelection,
 } from "./monoActivity";
@@ -100,4 +101,33 @@ it("keeps completion activity separate from the previous reply before any output
     blocks: [notification, step],
     live: true,
   });
+});
+
+it("follows the running turn, or the last one that did work, with none picked", () => {
+  const reply: Block = { id: "reply", role: "assistant", text: "Done" };
+  const chat: Block = { id: "chat", role: "user", text: "Thanks" };
+  const thanks: Block = { id: "thanks", role: "assistant", text: "Anytime" };
+  expect(latestMonoActivity(undefined)).toBeNull();
+  expect(
+    latestMonoActivity({ id: "mono", blocks: [...blocks, reply], busy: true }),
+  ).toEqual({ turnId: "user", blocks: [...blocks, reply], live: true });
+  // A settled chat turn without tools leaves the last working turn in view.
+  expect(
+    latestMonoActivity({
+      id: "mono",
+      blocks: [...blocks, reply, chat, thanks],
+      busy: false,
+    })?.turnId,
+  ).toBe("user");
+  // A new request shows at once, before its first tool call.
+  expect(
+    latestMonoActivity({
+      id: "mono",
+      blocks: [...blocks, reply, chat],
+      busy: true,
+    }),
+  ).toMatchObject({ turnId: "chat", live: true });
+  expect(
+    latestMonoActivity({ id: "mono", blocks: [chat, thanks], busy: false }),
+  ).toBeNull();
 });

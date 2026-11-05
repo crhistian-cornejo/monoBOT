@@ -82,6 +82,7 @@ describe("listSkills", () => {
     expect(invoke).toHaveBeenCalledWith("list_skills", {
       cwd: "/repo",
       disabledPaths: ["/repo/.agents/skills/review/SKILL.md"],
+      packDirs: null,
     });
   });
 
@@ -91,6 +92,7 @@ describe("listSkills", () => {
     expect(invoke).toHaveBeenCalledWith("list_skills", {
       cwd: "/repo",
       disabledPaths: null,
+      packDirs: null,
     });
   });
 });

@@ -351,3 +351,21 @@ describe("agent titles", () => {
     ).toBe("Explore the auth module");
   });
 });
+
+describe("web fetch previews", () => {
+  it("keeps the page's url rather than reading the prompt as a path", () => {
+    const input = {
+      url: "https://doi.org/10.1016/j.envsoft.2017.05.002",
+      prompt: "List titles, authors, journal, year, and DOI for each result.",
+    };
+    expect(
+      extractToolPreview(
+        { title: "WebFetch", kind: "WebFetch", rawInput: input },
+        { title: "WebFetch", kind: "WebFetch", rawInput: input },
+      ),
+    ).toEqual({ kind: "read", title: "WebFetch", url: input.url });
+    expect(titleFromToolInput("WebFetch", "WebFetch", input)).toBe(
+      "Read https://doi.org/10.1016/j.envsoft.2017.05.002",
+    );
+  });
+});

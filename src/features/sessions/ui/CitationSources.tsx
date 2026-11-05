@@ -1,4 +1,5 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { openSource } from "../../papers/model/openPaper";
 import { useContext, useId, useState } from "react";
 import { ChevronDown, ExternalLink } from "../../../shared/ui/icons";
 import { CitationContext } from "./citationContext";
@@ -16,7 +17,7 @@ export function CitationSources() {
   const { sources, setHovered } = citations;
 
   return (
-    <div className="mt-3">
+    <div className="mt-3 font-sans">
       <button
         type="button"
         aria-controls={listId}
@@ -55,7 +56,7 @@ export function CitationSources() {
                 href={source.url}
                 onClick={(event) => {
                   event.preventDefault();
-                  void openUrl(source.url).catch((error) => {
+                  void openSource(source.url, source.snippet, openUrl).catch((error) => {
                     console.error("Failed to open source:", error);
                   });
                 }}

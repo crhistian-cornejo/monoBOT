@@ -4434,3 +4434,72 @@ html.layout-inset.theme-light {
 [data-composer-box] button.bg-selection:hover {
   background: var(--color-selection-subtle);
 }
+
+/* A picture being made: its cells breathe in a diagonal wave, after IVY's
+   grid reveal. */
+@keyframes image-cell-wave {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.image-cell {
+  animation: image-cell-wave 1.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .image-cell {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* A paper's PDF in the viewer: pdf.js draws the page on a canvas and lays its
+   text over it, invisible, so the text can be selected and underlined. */
+.paper-page .textLayer {
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  line-height: 1;
+  text-align: initial;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  z-index: 0;
+}
+.paper-page .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+.paper-page .textLayer span.markedContent {
+  top: 0;
+  height: 0;
+}
+.paper-page .textLayer ::selection {
+  background: color-mix(in srgb, var(--color-accent) 30%, transparent);
+}
+/* The passage an answer cites, underlined where the paper says it. */
+::highlight(paper-cite) {
+  background-color: color-mix(in srgb, var(--color-accent) 38%, transparent);
+  color: transparent;
+}
+/* The passage the chat is talking about right now, over the rest. */
+::highlight(paper-cite-focus) {
+  background-color: color-mix(in srgb, var(--color-accent) 62%, transparent);
+  color: transparent;
+}
+.paper-cite-span {
+  background-color: color-mix(in srgb, var(--color-accent) 38%, transparent);
+  border-radius: 2px;
+}
+mark.paper-cite-mark {
+  background-color: color-mix(in srgb, var(--color-accent) 38%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}

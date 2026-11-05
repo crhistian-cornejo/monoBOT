@@ -13,6 +13,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "folders.move"=>"sessionId folderId newFolderName project",
         "notes.list"=>"limit offset","notes.read"=>"id","notes.write"=>"id title body tags",
         "artifacts.list"=>"kind limit offset","artifacts.read"=>"id","artifacts.write"=>"id kind title body summary",
+        "papers.find"=>"query limit fromYear","papers.read"=>"ref pages query section maxChars","papers.figure"=>"ref page","papers.add"=>"path ref title",
         "soul.update"=>"text expectedHash","memory.read"=>"topic","memory.search"=>"query since",
         "memory.add"=>"fact topic until","memory.replace"=>"find fact topic until","memory.remove"=>"find topic",
         "habits.add"=>"name instructions schedule","habits.update"=>"id name instructions schedule enabled","habits.run"|"habits.remove"=>"id",
@@ -28,7 +29,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         {
             return Err(format!("{key} must be true or false"));
         }
-        if ["limit", "offset", "maxChars", "number"].contains(&key.as_str())
+        if ["limit", "offset", "maxChars", "number", "fromYear", "page"].contains(&key.as_str())
             && value.as_u64().is_none()
         {
             return Err(format!("{key} must be a non-negative integer"));
@@ -53,6 +54,8 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "offset",
             "maxChars",
             "number",
+            "fromYear",
+            "page",
             "id",
             "sessionId",
             "besideSessionId",
@@ -124,6 +127,15 @@ mod tests {
         assert!(validate("sessions.start", &json!({"prompt":"x","draft":"false"})).is_err());
         assert!(validate("sessions.delete", &json!({"sessionId":1,"force":true})).is_err());
         assert!(validate("sessions.start", &json!({"runtimeMode":"unsafe"})).is_err());
+        assert!(validate("papers.find", &json!({"query":"GR4J","limit":5,"fromYear":2015})).is_ok());
+        assert!(validate("papers.find", &json!({"query":"GR4J","fromYear":"2015"})).is_err());
+        assert!(validate("papers.read", &json!({"ref":"10.1016/j.envsoft.2017.05.002","pages":"1-3"})).is_ok());
+        assert!(validate("papers.read", &json!({"ref":"x","download":true})).is_err());
+        assert!(validate("papers.read", &json!({"ref":"x","section":"methods"})).is_ok());
+        assert!(validate("papers.figure", &json!({"ref":"x","page":4})).is_ok());
+        assert!(validate("papers.figure", &json!({"ref":"x","page":"4"})).is_err());
+        assert!(validate("papers.add", &json!({"path":"/Users/me/paper.pdf","ref":"10.1234/x","title":"T"})).is_ok());
+        assert!(validate("papers.add", &json!({"path":"/p.pdf","url":"https://x"})).is_err());
         assert!(validate(
             "sessions.start",
             &json!({"prompt":"x","project":"/code","draft":true})

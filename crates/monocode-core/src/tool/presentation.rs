@@ -399,6 +399,10 @@ pub fn app_activity(action: &str, running: bool) -> (&'static str, &'static str)
         "sessions.stop" | "sessions.archive" | "sessions.delete" => {
             ("Updating", "Updated", "a session")
         }
+        "papers.find" => ("Searching", "Searched", "papers"),
+        "papers.read" => ("Reading", "Read", "a paper"),
+        "papers.figure" => ("Drawing", "Drew", "a paper page"),
+        "papers.add" => ("Adding", "Added", "a paper PDF"),
         "artifacts.write" => ("Writing", "Wrote", "a document"),
         "artifacts.list" | "artifacts.read" => ("Reading", "Read", "documents"),
         "notes.write" => ("Writing", "Wrote", "a note"),

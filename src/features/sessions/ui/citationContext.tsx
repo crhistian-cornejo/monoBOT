@@ -11,10 +11,15 @@ import {
 import { ExternalLink } from "../../../shared/ui/icons";
 import { Popover } from "../../../shared/ui/Popover";
 import {
+  citationHost,
   collectCitations,
   parseCitationTitle,
   type CitationSource,
 } from "../model/citations";
+import {
+  fetchLinkPreviewMetadata,
+  type LinkPreviewMetadata,
+} from "../model/linkPreview";
 import { CitationMonogram } from "./CitationMonogram";
 import { claimRange, paintClaims } from "./citationClaim";
 
@@ -30,6 +35,10 @@ export type CitationPreview = {
   el: HTMLElement;
   url: string;
   title?: string;
+  /** A plain web link rather than a numbered citation: the card reads the page. */
+  link?: boolean;
+  /** Sources cited beside this one for the same claim; the card lists them all. */
+  more?: { href: string; title?: string }[];
 };
 
 export type CitationState = {
@@ -62,6 +71,108 @@ function FadeIn({ children }: { children: ReactNode }) {
       }`}
     >
       {children}
+    </div>
+  );
+}
+
+/** Where a link points, shortened for a card: the path without the scheme. */
+export function linkPathLabel(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = `${parsed.pathname === "/" ? "" : parsed.pathname}${parsed.search}`;
+    return decodeURI(`${parsed.hostname.replace(/^www\./, "")}${path}`);
+  } catch {
+    return url;
+  }
+}
+
+/** A plain link's card: the page's icon, title and summary once they load. */
+function LinkCard({ url }: { url: string }) {
+  const [meta, setMeta] = useState<LinkPreviewMetadata | null>(null);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setMeta(null);
+    setFailed(false);
+    fetchLinkPreviewMetadata(url)
+      .then((next) => live && setMeta(next))
+      .catch(() => live && setFailed(true));
+    return () => {
+      live = false;
+    };
+  }, [url]);
+  const loading = !meta && !failed;
+  return (
+    <div className="p-3">
+      <div className="flex items-center gap-1.5 text-[11px] text-content/55">
+        {meta?.faviconDataUrl ? (
+          <img
+            src={meta.faviconDataUrl}
+            alt=""
+            className="size-4 shrink-0 rounded-sm"
+          />
+        ) : (
+          <CitationMonogram host={url} />
+        )}
+        <span className="min-w-0 flex-1 truncate">{linkPathLabel(url)}</span>
+        <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+      </div>
+      {loading ? (
+        <div aria-hidden className="mt-2 space-y-1.5">
+          <div className="h-3 w-4/5 animate-pulse rounded bg-content/8" />
+          <div className="h-2.5 w-3/5 animate-pulse rounded bg-content/6" />
+        </div>
+      ) : meta?.title ? (
+        <>
+          <p className="mt-1.5 line-clamp-2 text-[13px] font-medium leading-snug text-content">
+            {meta.title}
+          </p>
+          {meta.description ? (
+            <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-content/60">
+              {meta.description}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <p className="mt-1.5 text-[12px] text-content/50">
+          Opens in your browser
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One cited source in the preview: site, number, title and the passage. */
+function SourceCard({
+  url,
+  title,
+  sources,
+}: {
+  url: string;
+  title?: string;
+  sources: CitationSource[];
+}) {
+  const known = sources.find((source) => source.url === url);
+  const card = { ...known, ...(title ? parseCitationTitle(title, url) : {}) };
+  const host = known?.host ?? citationHost(url);
+  return (
+    <div className="p-3">
+      <div className="flex items-center gap-1.5 text-[11px] text-content/55">
+        <CitationMonogram host={host} />
+        <span className="min-w-0 flex-1 truncate">{host}</span>
+        {known ? (
+          <span className="shrink-0 tabular-nums">{known.number}</span>
+        ) : null}
+        <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+      </div>
+      <p className="mt-1.5 text-[13px] font-medium leading-snug text-content">
+        {card.title ?? host}
+      </p>
+      {card.snippet ? (
+        <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-content/60">
+          {card.snippet}
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -117,7 +228,11 @@ export function CitationProvider({
   const show = useCallback(
     (next: CitationPreview, immediate: boolean) => {
       clear();
-      if (immediate || open.current || Date.now() - lastClosed.current < WARM_MS) {
+      if (
+        immediate ||
+        open.current ||
+        Date.now() - lastClosed.current < WARM_MS
+      ) {
         open.current = true;
         setPreview(next);
         return;
@@ -187,22 +302,10 @@ export function CitationProvider({
     [sources, numberOf, preview, previewId, hovered, show, hide, register],
   );
 
-  const known = preview
-    ? sources.find((source) => source.url === preview.url)
-    : undefined;
-  const card = preview
-    ? {
-        ...known,
-        ...(preview.title
-          ? parseCitationTitle(preview.title, preview.url)
-          : {}),
-      }
-    : null;
-
   return (
     <CitationContext.Provider value={value}>
       {children}
-      {preview && card ? (
+      {preview ? (
         <Popover
           anchor={preview.el}
           side="top"
@@ -216,26 +319,26 @@ export function CitationProvider({
           onDismiss={() => hide(true)}
         >
           <FadeIn key={preview.id}>
-            <div className="p-3">
-              <div className="flex items-center gap-1.5 text-[11px] text-content/55">
-                <CitationMonogram host={known?.host ?? preview.url} />
-                <span className="min-w-0 flex-1 truncate">
-                  {known?.host ?? preview.url}
-                </span>
-                {known ? (
-                  <span className="shrink-0 tabular-nums">{known.number}</span>
-                ) : null}
-                <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+            {preview.link ? (
+              <LinkCard url={preview.url} />
+            ) : (
+              <div className="divide-y divide-content/8">
+                {[
+                  { url: preview.url, title: preview.title },
+                  ...(preview.more ?? []).map((entry) => ({
+                    url: entry.href,
+                    title: entry.title,
+                  })),
+                ].map((entry) => (
+                  <SourceCard
+                    key={entry.url}
+                    url={entry.url}
+                    title={entry.title}
+                    sources={sources}
+                  />
+                ))}
               </div>
-              <p className="mt-1.5 text-[13px] font-medium leading-snug text-content">
-                {card.title ?? known?.host}
-              </p>
-              {card.snippet ? (
-                <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-content/60">
-                  {card.snippet}
-                </p>
-              ) : null}
-            </div>
+            )}
           </FadeIn>
         </Popover>
       ) : null}

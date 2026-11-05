@@ -1,26 +1,34 @@
 import { readFlag, writeFlag } from "./storageFlags";
 
-/** Built-in remote MCP servers (Streamable HTTP) that need nothing installed
- * and no account. MonoBOT passes the enabled ones to each Claude turn with
- * `--mcp-config`, so the user's own `~/.claude.json` is never touched. They
- * are network tools: what they return is data, never instructions. */
+/** Built-in MCP servers that need no account: remote ones (Streamable HTTP)
+ * and a few that run locally through `npx`. MonoBOT passes the enabled ones
+ * to each Claude turn with `--mcp-config` and to Codex as `-c` overrides, so
+ * neither CLI's own configuration is touched. What they return is data,
+ * never instructions. */
 export type ConnectorId =
   | "context7"
   | "mslearn"
   | "deepwiki"
   | "xmd"
-  | "openalex";
+  | "openalex"
+  | "cloudflare"
+  | "huggingface"
+  | "exa"
+  | "playwright";
 
 export type Connector = {
   id: ConnectorId;
   name: string;
   description: string;
-  url: string;
   site: string;
   onByDefault: boolean;
   /** Reviewed read-only tools. Never allow a whole server: it may also write. */
   tools: readonly string[];
-};
+} & (
+  | { url: string; command?: never }
+  /** Runs on this machine; the version is pinned so a turn never upgrades it. */
+  | { url?: never; command: string; args: readonly string[] }
+);
 
 export const CONNECTORS: readonly Connector[] = [
   {
@@ -86,6 +94,60 @@ export const CONNECTORS: readonly Connector[] = [
       "openalex_describe_fields",
     ],
   },
+  {
+    id: "cloudflare",
+    name: "Cloudflare Docs",
+    description:
+      "Search Cloudflare's documentation: Workers, Pages, R2, D1 and more.",
+    url: "https://docs.mcp.cloudflare.com/mcp",
+    site: "https://github.com/cloudflare/mcp-server-cloudflare",
+    onByDefault: false,
+    tools: [
+      "search_cloudflare_documentation",
+      "migrate_pages_to_workers_guide",
+    ],
+  },
+  {
+    id: "huggingface",
+    name: "Hugging Face",
+    description: "Search models, datasets and Spaces on the Hugging Face Hub.",
+    url: "https://huggingface.co/mcp",
+    site: "https://huggingface.co/settings/mcp",
+    onByDefault: false,
+    tools: ["hub_repo_search", "hub_repo_details", "hf_fs"],
+  },
+  {
+    id: "exa",
+    name: "Exa",
+    description:
+      "Web search and page reading built for agents. Your queries reach Exa; it limits use without a key.",
+    url: "https://mcp.exa.ai/mcp",
+    site: "https://exa.ai",
+    onByDefault: false,
+    tools: ["web_search_exa", "web_fetch_exa"],
+  },
+  {
+    id: "playwright",
+    name: "Playwright",
+    description:
+      "A real browser on this computer to open, read and screenshot pages. Runs with npx; clicking and typing still ask.",
+    command: "npx",
+    args: ["-y", "@playwright/mcp@0.0.84"],
+    site: "https://github.com/microsoft/playwright-mcp",
+    onByDefault: false,
+    tools: [
+      "browser_navigate",
+      "browser_navigate_back",
+      "browser_snapshot",
+      "browser_take_screenshot",
+      "browser_console_messages",
+      "browser_network_requests",
+      "browser_resize",
+      "browser_tabs",
+      "browser_wait_for",
+      "browser_close",
+    ],
+  },
 ];
 
 const enabledKey = (id: ConnectorId) => `monocode.connector.${id}.enabled`;
@@ -109,7 +171,13 @@ export function connectorMcpConfig(connectors: readonly Connector[]) {
     mcpServers: Object.fromEntries(
       connectors.map((connector) => [
         connector.id,
-        { type: "http", url: connector.url },
+        connector.command
+          ? {
+              type: "stdio",
+              command: connector.command,
+              args: [...connector.args],
+            }
+          : { type: "http", url: connector.url },
       ]),
     ),
   };
@@ -120,4 +188,25 @@ export function connectorAllowedTools(connectors: readonly Connector[]) {
   return connectors.flatMap((connector) =>
     connector.tools.map((tool) => `mcp__${connector.id}__${tool}`),
   );
+}
+
+/**
+ * The same servers as Codex `-c` overrides (`mcp_servers.<id>.url=...`),
+ * each limited to its reviewed tools. Values are TOML, so strings are quoted.
+ */
+export function connectorCodexArgs(connectors: readonly Connector[]): string[] {
+  const toml = (value: string) => JSON.stringify(value);
+  const list = (values: readonly string[]) => `[${values.map(toml).join(",")}]`;
+  return connectors.flatMap((connector) => {
+    const key = `mcp_servers.${connector.id}`;
+    const where = connector.command
+      ? [
+          "-c",
+          `${key}.command=${toml(connector.command)}`,
+          "-c",
+          `${key}.args=${list(connector.args)}`,
+        ]
+      : ["-c", `${key}.url=${toml(connector.url ?? "")}`];
+    return [...where, "-c", `${key}.enabled_tools=${list(connector.tools)}`];
+  });
 }

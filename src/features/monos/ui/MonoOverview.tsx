@@ -605,6 +605,9 @@ function OverviewTabs({
               // Folded tabs dot their icon, as the rail does, when they hold
               // something new.
               dot={id === "changes" && !selected && !!counts[id]}
+              // Documents keep their count on the icon while another tab is
+              // open, so a new paper or report is not missed.
+              badge={id === "documents" && !selected ? counts[id] : undefined}
               role="tab"
               aria-selected={selected}
               aria-label={label}
@@ -614,6 +617,11 @@ function OverviewTabs({
         })}
     </div>
   );
+}
+
+/** The count on a folded tab: its number, or "+9" once there are more than nine. */
+export function tabBadge(count: number): string {
+  return count > 9 ? "+9" : String(count);
 }
 
 /**
@@ -626,6 +634,7 @@ function TabButton({
   selected,
   count,
   dot = false,
+  badge,
   onClick,
   ...aria
 }: {
@@ -634,6 +643,9 @@ function TabButton({
   selected: boolean;
   count?: number;
   dot?: boolean;
+  /** How many it holds, shown over the folded icon. */
+  badge?: number;
+
   onClick: () => void;
   role?: "tab";
   "aria-selected"?: boolean;
@@ -653,7 +665,17 @@ function TabButton({
           : "text-content/45 hover:bg-content/5 hover:text-content/80"
       }`}
     >
-      {dot ? (
+      {badge ? (
+        <span className="relative grid shrink-0" data-tab-badge={badge}>
+          <Icon className="size-3.5" strokeWidth={1.75} />
+          <span
+            aria-hidden
+            className="absolute -top-1.5 left-2 grid h-3.5 min-w-3.5 place-items-center rounded-full bg-accent px-[3px] text-[9px] leading-none font-medium tabular-nums text-white"
+          >
+            {tabBadge(badge)}
+          </span>
+        </span>
+      ) : dot ? (
         <span className="relative grid shrink-0" data-changes-dot>
           <Icon
             className="overview-tab-icon-with-dot size-3.5"

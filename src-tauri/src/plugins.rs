@@ -61,6 +61,13 @@ fn write_plugin(root: &Path, files: &[PluginFile]) -> Result<(), String> {
             std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
         }
         std::fs::write(&target, content).map_err(|e| format!("{}: {e}", target.display()))?;
+        // A skill's launcher (`scripts/impeccable`) is run by path.
+        #[cfg(unix)]
+        if content.starts_with("#!") {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o755))
+                .map_err(|e| format!("{}: {e}", target.display()))?;
+        }
     }
     Ok(())
 }
@@ -109,6 +116,22 @@ mod tests {
         assert!(!valid_name("../evil"));
         assert!(!valid_name("Mono"));
         assert!(!valid_name(""));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn makes_scripts_with_a_shebang_executable() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("monobot-plugin-exec-{}", std::process::id()));
+        let files = [
+            PluginFile { path: "s/run".into(), content: "#!/bin/sh\necho hi\n".into() },
+            PluginFile { path: "s/SKILL.md".into(), content: "# x".into() },
+        ];
+        write_plugin(&dir, &files).unwrap();
+        let mode = |p: &str| std::fs::metadata(dir.join(p)).unwrap().permissions().mode() & 0o111;
+        assert_ne!(mode("s/run"), 0);
+        assert_eq!(mode("s/SKILL.md"), 0);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
