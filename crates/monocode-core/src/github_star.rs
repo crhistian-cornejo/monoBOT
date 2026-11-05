@@ -1,8 +1,8 @@
 //! Whether the active GitHub CLI account has starred MonoBOT, and starring it.
 use std::path::PathBuf;
 
-pub const REPOSITORY_URL: &str = "https://github.com/hardbeat920/monocode";
-const STAR_ENDPOINT: &str = "/user/starred/hardbeat920/monocode";
+pub const REPOSITORY_URL: &str = "https://github.com/crhistian-cornejo/monoBOT";
+const STAR_ENDPOINT: &str = "/user/starred/crhistian-cornejo/monoBOT";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StarStatus {
