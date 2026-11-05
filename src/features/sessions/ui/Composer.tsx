@@ -113,7 +113,8 @@ import {
 } from "../../workspace/ui/WorkspacePicker";
 import type { Worktree } from "../../source-control/model/worktrees";
 import { CwdPicker } from "../../projects/ui/CwdPicker";
-import { FileMentionPicker } from "./FileMentionPicker";
+import { FileMentionPicker, type MentionPerson } from "./FileMentionPicker";
+import { rankMentionPeople } from "../../groups/model/groupMentions";
 import { McpServerPicker } from "./McpServerPicker";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
 import { InboxMiniCard } from "../../inbox/ui/InboxMiniCard";
@@ -236,6 +237,8 @@ type Props = {
   hideTopBar?: boolean;
   /** Keeps local file mentions, skills, and app modes off for host sessions. */
   remoteSession?: boolean;
+  /** A group's lead and members: @ lists them first, to write to one. */
+  mentionPeople?: readonly MentionPerson[];
   remoteFeatures?: { attachments: boolean; plan: boolean; draft: boolean };
   context?: ContextUsage;
   compactSupported?: boolean;
@@ -347,6 +350,7 @@ function ToolButton({
 }
 
 export function Composer({
+  mentionPeople,
   enabled = true,
   focused,
   focusToken,
@@ -558,7 +562,9 @@ export function Composer({
   attachmentsRef.current = attachments;
 
   const mentionOpen =
-    !remote && mention !== null && (looksLikeProject(cwd) || notesEnabled);
+    !remote &&
+    mention !== null &&
+    (looksLikeProject(cwd) || notesEnabled || !!mentionPeople?.length);
   const navigationEmpty =
     draft.length === 0 &&
     attachments.length === 0 &&
@@ -651,6 +657,15 @@ export function Composer({
     const seen = new Set(noteHits.map((file) => file.path));
     return [...noteHits, ...fileHits.filter((file) => !seen.has(file.path))];
   }, [executionCwd, files, mention?.query, mentionOpen, notes, notesEnabled]);
+  // In a group, its people come before its files.
+  const rankedPeople = useMemo(
+    () =>
+      mentionOpen && mentionPeople?.length
+        ? rankMentionPeople(mentionPeople, mention?.query ?? "")
+        : [],
+    [mention?.query, mentionOpen, mentionPeople],
+  );
+  const mentionCount = rankedPeople.length + rankedFiles.length;
 
   const syncHasValue = useCallback(
     (text: string, files: Attachment[]) => {
@@ -931,9 +946,9 @@ export function Composer({
 
   useEffect(() => {
     setMentionActive((index) =>
-      rankedFiles.length === 0 ? 0 : Math.min(index, rankedFiles.length - 1),
+      mentionCount === 0 ? 0 : Math.min(index, mentionCount - 1),
     );
-  }, [rankedFiles.length]);
+  }, [mentionCount]);
 
   useEffect(() => {
     const el = ref.current;
@@ -1178,6 +1193,42 @@ export function Composer({
     },
     [syncHasValue],
   );
+
+  const pickPerson = useCallback(
+    (person: MentionPerson) => {
+      const el = ref.current;
+      const token = mentionRef.current;
+      if (!el || !token) {
+        setMention(null);
+        return;
+      }
+      const next = replaceMentionToken(el.value, token, person.name);
+      el.value = next;
+      resizeComposer(el);
+      let cursor = token.start + person.name.length + 1;
+      if (next[cursor] === " ") cursor += 1;
+      el.setSelectionRange(cursor, cursor);
+      setDraft(next);
+      syncHasValue(next, attachmentsRef.current);
+      setMention(null);
+      el.focus();
+    },
+    [syncHasValue],
+  );
+  /** The highlighted row of the @ list: a person first, then a file. */
+  const pickMentionAt = (index: number) => {
+    const person = rankedPeople[index];
+    if (person) {
+      pickPerson(person);
+      return true;
+    }
+    const file = rankedFiles[index - rankedPeople.length];
+    if (file) {
+      pickMention(file);
+      return true;
+    }
+    return false;
+  };
 
   useEffect(() => {
     if (!focused || disabled) return;
@@ -1554,15 +1605,15 @@ export function Composer({
     if (mentionOpen) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        if (rankedFiles.length === 0) return;
-        setMentionActive((index) => (index + 1) % rankedFiles.length);
+        if (mentionCount === 0) return;
+        setMentionActive((index) => (index + 1) % mentionCount);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
-        if (rankedFiles.length === 0) return;
+        if (mentionCount === 0) return;
         setMentionActive(
-          (index) => (index - 1 + rankedFiles.length) % rankedFiles.length,
+          (index) => (index - 1 + mentionCount) % mentionCount,
         );
         return;
       }
@@ -1573,15 +1624,12 @@ export function Composer({
       }
       if (e.key === "Tab") {
         e.preventDefault();
-        const file = rankedFiles[mentionActive];
-        if (file) pickMention(file);
+        pickMentionAt(mentionActive);
         return;
       }
       if (e.key === "Enter" && !e.shiftKey) {
-        const file = rankedFiles[mentionActive];
-        if (file) {
+        if (pickMentionAt(mentionActive)) {
           e.preventDefault();
-          pickMention(file);
           return;
         }
         setMention(null);
@@ -2062,6 +2110,8 @@ export function Composer({
         {mentionOpen && !pickerOpen ? (
           <div className="absolute inset-x-0 bottom-full z-30 mb-1">
             <FileMentionPicker
+              people={rankedPeople}
+              onPickPerson={pickPerson}
               files={rankedFiles}
               query={mention?.query ?? ""}
               active={mentionActive}

@@ -5,8 +5,22 @@ import { isNoteMentionPath } from "../../notes";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { FileTypeIcon } from "../../files/ui/FileTypeIcon";
 import { MatchText } from "../../../shared/ui/MatchText";
+import { PixelMascot } from "../../projects/ui/PixelMascot";
+
+/** Someone in a group the user can write to alone with @Name. */
+export type MentionPerson = {
+  id: string;
+  name: string;
+  mascot: string;
+  color: string;
+  /** Its part in the group, as the user reads it: «Leads the group». */
+  note?: string;
+};
 
 type Props = {
+  /** Listed before the files; `active` counts them first. */
+  people?: readonly MentionPerson[];
+  onPickPerson?: (person: MentionPerson) => void;
   files: RankedFile[];
   query: string;
   active: number;
@@ -17,6 +31,8 @@ type Props = {
 };
 
 export function FileMentionPicker({
+  people = [],
+  onPickPerson,
   files,
   query,
   active,
@@ -32,7 +48,7 @@ export function FileMentionPicker({
 
   useEffect(() => {
     pointer.current.allow = false;
-  }, [files]);
+  }, [files, people]);
 
   useEffect(() => {
     if (fromPointer.current) {
@@ -61,7 +77,55 @@ export function FileMentionPicker({
       data-mention-picker
       className="overflow-hidden rounded-lg border border-content/10 bg-content/5 backdrop-blur-xl"
     >
-      {files.length === 0 ? (
+      {people.length ? (
+        <div
+          role="listbox"
+          aria-label="Write to one of the group"
+          onMouseMove={onListMouseMove}
+          className="border-b border-content/10 px-1 py-1"
+        >
+          {people.map((person, index) => {
+            const highlighted = index === active;
+            return (
+              <button
+                key={person.id}
+                ref={highlighted ? activeRef : undefined}
+                type="button"
+                role="option"
+                aria-selected={highlighted}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => onRowEnter(index)}
+                onClick={() => onPickPerson?.(person)}
+                className={`flex h-8 w-full items-center gap-2 rounded-md px-2 text-left text-[13px] leading-none ${
+                  highlighted ? "bg-selection text-content" : "text-content"
+                }`}
+              >
+                <span className="grid size-5 shrink-0 place-items-center rounded-full bg-content/[0.07]">
+                  <PixelMascot
+                    name={person.mascot}
+                    color={person.color}
+                    still
+                    className="size-3.5"
+                  />
+                </span>
+                <span
+                  className={`min-w-0 flex-1 truncate ${
+                    highlighted ? "text-mention" : ""
+                  }`}
+                >
+                  {person.name}
+                </span>
+                {person.note ? (
+                  <span className="min-w-0 max-w-[50%] truncate text-[11px] text-content/40">
+                    {person.note}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {files.length === 0 && people.length ? null : files.length === 0 ? (
         <p className="px-3 py-2.5 text-[12px] text-content/50">
             {loading
               ? "Indexing files…"
@@ -81,7 +145,8 @@ export function FileMentionPicker({
           onMouseMove={onListMouseMove}
           className="max-h-[min(240px,40vh)] overflow-y-auto overscroll-none px-1 py-1"
         >
-          {files.map((file, index) => {
+          {files.map((file, at) => {
+            const index = at + people.length;
             const highlighted = index === active;
             const note = isNoteMentionPath(file.path);
             const slash = file.relative.lastIndexOf("/");

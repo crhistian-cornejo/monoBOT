@@ -775,12 +775,12 @@ import {
   groupPostsContext,
   postedGroupRequests,
   unseenGroupPosts,
-  directMember,
   groupRequestPrefix,
   DIRECT_PREFIX,
   ROUND_PREFIX,
   type GroupReply,
 } from "../features/groups/model/groupReplies";
+import { addressedMember } from "../features/groups/model/groupMentions";
 import { GroupMembers } from "../features/groups/ui/GroupMembers";
 import { GroupCall } from "../features/groups/ui/GroupCall";
 import type { MemberAsk } from "../features/groups/ui/useGroupCall";
@@ -9783,8 +9783,16 @@ function Workspace({
       name: monoLook(mono).name,
     }));
     if (!members.length || !text.trim()) return false;
+    const lead = groupLead(group.group);
+    const addressed = addressedMember(
+      text,
+      members,
+      lead ? { id: lead.id, name: monoLook(lead).name } : undefined,
+    );
+    // @Lead: the lead alone answers, as a message to the group's own chat.
+    if (addressed?.kind === "lead") return false;
+    const direct = addressed?.kind === "member" ? addressed : undefined;
     const key = crypto.randomUUID();
-    const direct = directMember(text, members);
     appendToMono(sessionId, {
       id: crypto.randomUUID(),
       role: "user",

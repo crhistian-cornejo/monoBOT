@@ -77,7 +77,12 @@ import { UsageChips } from "../../../app/shell/UsageFooter";
 import type { RateLimitProvider } from "../../providers/model/rateLimits";
 import { MonoUsageLimitNotice } from "../../monos/ui/MonoUsageLimitNotice";
 import { GroupAccessPrompt } from "../../groups/ui/GroupAccessPrompt";
-import { groupLead } from "../../groups/model/groupBrief";
+import {
+  askableMembers,
+  groupLead,
+  memberRole,
+} from "../../groups/model/groupBrief";
+import type { MentionPerson } from "./FileMentionPicker";
 import { QuestionForm } from "./QuestionForm";
 import {
   monoMessageDeliveries,
@@ -434,6 +439,25 @@ const LocalSessionPane = memo(function LocalSessionPane({
   // A group has no voice of its own: its Principal speaks in it.
   const lead = mono?.group ? groupLead(mono.group) : undefined;
   const speaker = lead ? monoLook(lead) : agent;
+  // In a group, @ lists its lead and members: one of them answers alone.
+  const mentionPeople: MentionPerson[] | undefined = mono?.group
+    ? [
+        ...(lead ? [{ mono: lead, note: "Leads the group" }] : []),
+        ...askableMembers(mono.group).map((member) => ({
+          mono: member,
+          note: memberRole(member),
+        })),
+      ].map(({ mono: person, note }) => {
+        const look = monoLook(person);
+        return {
+          id: person.id,
+          name: look.name,
+          mascot: look.mascot,
+          color: look.color,
+          note,
+        };
+      })
+    : undefined;
   // A Mono shows only its own background, never the project's or the app's.
   const projectBackground = mono
     ? monoChatBackground(mono.id)
@@ -664,6 +688,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
   const composer = (
     <Composer
       key={session.id}
+      mentionPeople={mentionPeople}
       disabled={workspaceSwitchingSessionId === session.id}
       remoteSession={remoteSession}
       remoteFeatures={remoteFeatures}
