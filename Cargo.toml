@@ -12,3 +12,12 @@ license = "MIT"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 thiserror = "2"
+
+# Release builds: one codegen unit and thin LTO let rustc inline across crates,
+# which makes the app smaller and faster. Panics keep unwinding because
+# mobile-link's FFI and macos_background catch them, and symbol names stay so
+# panic backtraces remain readable.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"

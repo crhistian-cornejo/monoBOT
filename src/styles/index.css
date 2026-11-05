@@ -1987,6 +1987,15 @@ html.layout-inset [data-composer-box] {
   backdrop-filter: blur(var(--composer-blur));
 }
 
+/* While a turn streams, the text under the box changes on every flush and a
+   backdrop blur would be redrawn each time. A near-opaque fill reads the same
+   and costs nothing. */
+html:not(.theme-light) [data-composer-box][data-composer-busy]::before {
+  background: color-mix(in srgb, var(--color-background-base) 90%, transparent);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+
 /* WebView2 on Windows ignores the rounded clip-path on a backdrop-filter, so
    the bleed shows as square corners past the border. Clip to the box with
    border-radius instead, which it does honor, and give up the edge bleed. */
@@ -2811,7 +2820,8 @@ html:not(.theme-light) .markdown-code-token {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .composer-mode-shimmer {
+  .composer-mode-shimmer,
+  .shimmer-text {
     animation: none;
   }
 }

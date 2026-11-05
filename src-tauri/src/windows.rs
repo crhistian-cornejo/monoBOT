@@ -133,6 +133,42 @@ fn resume_child(pid: u32) -> io::Result<()> {
     }
 }
 
+/// First Windows 11 build, where DWM offers the Mica backdrop.
+const FIRST_MICA_BUILD: u32 = 22_000;
+
+/// True on Windows 11 and later. RtlGetVersion reports the real build, unlike
+/// GetVersionEx, which answers according to the app manifest.
+pub(crate) fn supports_mica() -> bool {
+    static SUPPORTED: OnceLock<bool> = OnceLock::new();
+    *SUPPORTED.get_or_init(|| os_build().is_some_and(|build| build >= FIRST_MICA_BUILD))
+}
+
+fn os_build() -> Option<u32> {
+    #[repr(C)]
+    struct OsVersionInfo {
+        size: u32,
+        major: u32,
+        minor: u32,
+        build: u32,
+        platform: u32,
+        service_pack: [u16; 128],
+    }
+    #[link(name = "ntdll")]
+    extern "system" {
+        fn RtlGetVersion(info: *mut OsVersionInfo) -> i32;
+    }
+    let mut info = OsVersionInfo {
+        size: std::mem::size_of::<OsVersionInfo>() as u32,
+        major: 0,
+        minor: 0,
+        build: 0,
+        platform: 0,
+        service_pack: [0; 128],
+    };
+    // SAFETY: `info` is a correctly sized OSVERSIONINFOW; ntdll only writes it.
+    (unsafe { RtlGetVersion(&mut info) } == 0).then_some(info.build)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -170,7 +170,15 @@ pub fn set_window_glass_enabled(
     {
         if enabled {
             let _ = window.set_background_color(Some(Color(0, 0, 0, 0)));
-            let _ = window.set_effects(EffectsBuilder::new().effect(Effect::Acrylic).build());
+            // Mica samples only the wallpaper, once, so DWM doesn't re-blur
+            // the windows behind on every move and resize as Acrylic does.
+            // Windows 10 has no Mica and keeps Acrylic.
+            let effect = if crate::windows::supports_mica() {
+                Effect::MicaDark
+            } else {
+                Effect::Acrylic
+            };
+            let _ = window.set_effects(EffectsBuilder::new().effect(effect).build());
         } else {
             let _ = window.set_effects(None);
             let _ = window.set_background_color(Some(background.fill()));

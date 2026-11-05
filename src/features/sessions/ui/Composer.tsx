@@ -2128,6 +2128,7 @@ export function Composer({
         <div
           ref={boxRef}
           data-composer-box
+          data-composer-busy={busy ? "" : undefined}
           data-composer-editing={resendEdited ? "" : undefined}
           className={`relative z-10 border ${
             resendEdited

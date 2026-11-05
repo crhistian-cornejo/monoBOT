@@ -4,9 +4,7 @@ use std::io::{Read, Write};
 use std::os::unix::io::AsRawFd;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
-#[cfg(unix)]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -428,19 +426,37 @@ fn spawn_windows(
 
     let data_app = app.clone();
     let data_id = id.clone();
+    // ConPTY pipes can't be polled, so one thread blocks on reads and hands
+    // each chunk to an emitter that gathers them for up to PTY_COALESCE (or a
+    // full chunk) before a single emit, as the Unix reader does.
+    let (chunks, received) = std::sync::mpsc::channel::<Vec<u8>>();
     thread::spawn(move || {
         let mut buf = vec![0_u8; READ_CHUNK];
         loop {
             match reader.read(&mut buf) {
-                Ok(0) => break,
+                Ok(0) | Err(_) => break,
                 Ok(n) => {
-                    // ponytail: caps bridge traffic at 125 emits/s; use a timed
-                    // drain only if sustained PTY throughput becomes limiting.
-                    thread::sleep(PTY_COALESCE);
-                    emit_pty_data(&data_app, &data_id, &buf[..n]);
+                    if chunks.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
                 }
-                Err(_) => break,
             }
+        }
+    });
+    thread::spawn(move || {
+        let mut acc = Vec::with_capacity(READ_CHUNK);
+        while let Ok(first) = received.recv() {
+            acc.extend_from_slice(&first);
+            let started = Instant::now();
+            while !pty_should_flush(acc.len(), started.elapsed()) {
+                let wait = PTY_COALESCE.saturating_sub(started.elapsed());
+                match received.recv_timeout(wait) {
+                    Ok(chunk) => acc.extend_from_slice(&chunk),
+                    Err(_) => break,
+                }
+            }
+            emit_pty_data(&data_app, &data_id, &acc);
+            acc.clear();
         }
     });
 
@@ -679,7 +695,6 @@ fn emit_pty_data(app: &AppHandle, id: &str, bytes: &[u8]) {
     );
 }
 
-#[cfg(unix)]
 fn pty_should_flush(buffered: usize, since: Duration) -> bool {
     buffered >= READ_CHUNK || since >= PTY_COALESCE
 }

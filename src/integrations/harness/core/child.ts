@@ -99,7 +99,7 @@ function listen<T>(
 }
 
 type LinePayload = { sessionId: string; line: string };
-// The desktop batches a frame's stdout lines and SSE events into one event;
+// The desktop batches a frame's stdout/stderr lines and SSE events into one event;
 // the remote host still sends them one at a time.
 type LinesPayload = LinePayload | { sessionId: string; lines: string[] };
 type ExitPayload = { sessionId: string; code: number | null; pid?: number };
@@ -191,9 +191,10 @@ function ensureBridge() {
       }),
     ),
     register(
-      listen<LinePayload>("harness-stderr", (event) => {
-        const { sessionId, line } = event.payload;
-        stderrHandlers.get(sessionId)?.(line);
+      listen<LinesPayload>("harness-stderr", (event) => {
+        const { payload } = event;
+        const lines = "lines" in payload ? payload.lines : [payload.line];
+        for (const line of lines) stderrHandlers.get(payload.sessionId)?.(line);
       }),
     ),
     register(

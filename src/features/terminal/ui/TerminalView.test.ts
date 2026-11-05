@@ -23,6 +23,14 @@ const xterm = vi.hoisted(() => ({
   options: [] as ITerminalOptions[],
   loadAddon: vi.fn(),
 }));
+vi.mock("@xterm/addon-webgl", () => ({
+  WebglAddon: class {
+    onContextLoss() {
+      return { dispose() {} };
+    }
+    dispose() {}
+  },
+}));
 vi.mock("../model/terminalLayout", () => ({
   fitTerminal: () => null,
   applyTerminalChrome: () => {},
@@ -96,7 +104,8 @@ it("detects plain HTTP(S) URLs and opens them through the addon callback", async
         }),
       );
     });
-    expect(xterm.loadAddon).toHaveBeenCalledTimes(1);
+    // Web links, then the WebGL renderer.
+    expect(xterm.loadAddon).toHaveBeenCalledTimes(2);
     addon = xterm.loadAddon.mock.calls[0][0] as WebLinksAddon;
     addon.activate(terminal);
     const urls = [

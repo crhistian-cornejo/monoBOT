@@ -1,4 +1,5 @@
 import { WebLinksAddon } from "@xterm/addon-web-links";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useEffect, useRef } from "react";
@@ -156,6 +157,21 @@ function openTerminalLink(uri: string) {
   void openUrl(uri).catch(() => undefined);
 }
 
+/**
+ * Draw on the GPU instead of with one DOM node per row. Without WebGL2, or
+ * when the browser drops the context (it keeps only a few per page), xterm
+ * falls back to its DOM renderer.
+ */
+function loadWebglRenderer(term: Terminal) {
+  try {
+    const webgl = new WebglAddon();
+    webgl.onContextLoss(() => webgl.dispose());
+    term.loadAddon(webgl);
+  } catch {
+    // The DOM renderer is still attached.
+  }
+}
+
 export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
   const outerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
@@ -188,6 +204,7 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
     });
     term.loadAddon(new WebLinksAddon((_event, uri) => openTerminalLink(uri)));
     term.open(host);
+    loadWebglRenderer(term);
     termRef.current = term;
     let closed = false;
 
@@ -238,6 +255,8 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
     });
 
     let oscBuffer = "";
+    // One streaming decoder keeps a character split across chunks intact.
+    const decoder = new TextDecoder();
 
     let unsubscribe = () => {};
     let didStart = false;
@@ -249,7 +268,7 @@ export function TerminalView({ id, cwd, active, onMetaChange }: Props) {
           if (closed) return;
           const onMeta = onMetaChangeRef.current;
           if (onMeta) {
-            const text = new TextDecoder().decode(data);
+            const text = decoder.decode(data, { stream: true });
             const scanned = scanOscCwd(text, oscBuffer);
             oscBuffer = scanned.rest;
             if (scanned.cwd) {

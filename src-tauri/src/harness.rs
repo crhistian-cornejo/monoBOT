@@ -30,14 +30,8 @@ pub struct HarnessAccount {
     id: String,
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct HarnessLine {
-    session_id: String,
-    line: String,
-}
-
-/// Stdout lines in arrival order; one event carries every line from a window.
+/// Stdout or stderr lines in arrival order; one event carries every line from
+/// a window.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct HarnessLines {
@@ -1087,16 +1081,22 @@ pub fn harness_spawn(
 
     let stderr_app = app.clone();
     let stderr_id = session_id.clone();
+    // Agents can log a line per token on stderr too; batch it like stdout.
+    let (stderr_tx, stderr_drained) = spawn_output_batcher(move |lines| {
+        let _ = stderr_app.emit(
+            STDERR_EVENT,
+            HarnessLines {
+                session_id: stderr_id.clone(),
+                lines,
+            },
+        );
+    });
     thread::spawn(move || {
         for line in BufReader::new(stderr).lines() {
             let Ok(line) = line else { break };
-            let _ = stderr_app.emit(
-                STDERR_EVENT,
-                HarnessLine {
-                    session_id: stderr_id.clone(),
-                    line,
-                },
-            );
+            if stderr_tx.send(line).is_err() {
+                break;
+            }
         }
     });
 
@@ -1106,7 +1106,10 @@ pub fn harness_spawn(
     thread::spawn(move || {
         let code = child.wait().ok().and_then(|status| status.code());
         // Deliver the final batched lines before the exit that follows them.
+        let drain_deadline = Instant::now() + OUTPUT_DRAIN_WAIT;
         let _ = stdout_drained.recv_timeout(OUTPUT_DRAIN_WAIT);
+        let _ = stderr_drained
+            .recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
         if let Some(store) = wait_store {
             store.sync_auth();
         }
