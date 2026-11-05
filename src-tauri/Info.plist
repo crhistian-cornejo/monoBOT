@@ -10,5 +10,7 @@
 	<string>MonoBOT opens project folders you choose, including Documents.</string>
 	<key>NSDownloadsFolderUsageDescription</key>
 	<string>MonoBOT opens project folders you choose, including Downloads.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>MonoBOT turns what you say into text while dictation or a group call is listening. The audio never leaves this Mac.</string>
 </dict>
 </plist>

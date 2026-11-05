@@ -10,7 +10,7 @@ Estado del código revisado: `rebrand` en `4f395546` más `d2432e3d` (descargas 
 
 | # | Qué | Estado en el código | Gravedad |
 |---|-----|---------------------|----------|
-| 1 | Permiso de micrófono | **Falta** `NSMicrophoneUsageDescription` en `src-tauri/Info.plist` y **falta** `com.apple.security.device.audio-input` en `src-tauri/Entitlements.plist` | Bloqueante para el dictado |
+| 1 | Permiso de micrófono | `NSMicrophoneUsageDescription` y `com.apple.security.device.audio-input` añadidos; sin probar en un Mac | Era bloqueante para el dictado |
 | 2 | Certificados en descargas | En Mac se usan las raíces que trae la app, no el llavero (`crates/http/src/lib.rs`) | Bloqueante solo detrás de un proxy que inspecciona TLS |
 | 3 | Compilar sherpa-onnx | Su `build.rs` descarga la librería estática de GitHub | Igual que en Windows: falla detrás del proxy |
 | 4 | Modelos de Echo | Busca en `~/Library/Application Support/Echo*/voice` y `~/.cache/huggingface/hub` | Revisar |
@@ -44,28 +44,28 @@ flowchart LR
 
 Naranja: puntos con comportamiento propio de macOS que hay que revisar.
 
-## 1. Permiso de micrófono (bloqueante)
+## 1. Permiso de micrófono
 
-**Qué pasa.** macOS exige una frase en `NSMicrophoneUsageDescription` antes de dejar que una app
+**Qué pasaba.** macOS exige una frase en `NSMicrophoneUsageDescription` antes de dejar que una app
 abra el micrófono. Sin ella, el sistema cierra la app en cuanto lo intenta. Además, Tauri 2 firma
 con hardened runtime por defecto, y con hardened runtime hace falta el entitlement
 `com.apple.security.device.audio-input`. Sin él, macOS no pide permiso y el micrófono no da audio.
+MonoBOT no tenía ninguna de las dos; Echo tiene ambas (`apps/macos/Resources/Info.plist` y
+`Echo.entitlements`).
 
-`src-tauri/Info.plist` solo tiene las frases de Escritorio, Documentos y Descargas, y
-`src-tauri/Entitlements.plist` solo tiene `allow-jit` y `allow-unsigned-executable-memory`. Echo
-tiene las dos cosas (`apps/macos/Resources/Info.plist` y `Echo.entitlements`).
-
-**Arreglo propuesto** (no aplicado todavía):
+**Arreglo aplicado:**
 
 ```xml
 <!-- src-tauri/Info.plist -->
 <key>NSMicrophoneUsageDescription</key>
-<string>MonoBOT escribe en el chat lo que le dictas mientras el micrófono está encendido. El audio no sale de este Mac.</string>
+<string>MonoBOT turns what you say into text while dictation or a group call is listening. The audio never leaves this Mac.</string>
 
 <!-- src-tauri/Entitlements.plist -->
 <key>com.apple.security.device.audio-input</key>
 <true/>
 ```
+
+La frase va en inglés, como las demás del `Info.plist`.
 
 **Cómo verificar.**
 - [ ] Construir el `.app` (`pnpm tauri build`, ver [building.md](building.md)) y abrirlo desde Finder, no
