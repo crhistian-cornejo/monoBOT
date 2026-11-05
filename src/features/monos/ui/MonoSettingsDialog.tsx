@@ -148,7 +148,8 @@ export function MonoSettingsDialog({
               }`}
             >
               <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
-              {label}
+              {/* A group's soul is its project's instructions. */}
+              {id === "soul" && agent.group ? "Instructions" : label}
             </button>
           ))}
         </nav>

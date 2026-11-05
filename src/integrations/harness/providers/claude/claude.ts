@@ -16,6 +16,7 @@ import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlug
 import { enabledSkillPacks } from "../../../../features/skills/model/skillPacks";
 import {
   botLaunchForSession,
+  groupLaunchForSession,
   installedClaudeSkills,
   isBotSession,
 } from "../../../../features/bots/model/botSession";
@@ -556,6 +557,8 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     input.sessionId,
     isBotSession(input.sessionId) ? await installedClaudeSkills(input.cwd) : [],
   );
+  // A group's chat and the coding Monos in groups get the groups' folders.
+  const group = groupLaunchForSession(input.sessionId);
   await spawnChild(
     input.sessionId,
     path,
@@ -564,9 +567,10 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       allowedTools: [
         ...(launch.allowedTools ?? []),
         ...(bot?.allowedTools ?? []),
+        ...(group?.allowedTools ?? []),
       ],
-      disallowedTools: bot?.disallowedTools,
-      addDirs: bot?.addDirs,
+      disallowedTools: bot?.disallowedTools ?? group?.disallowedTools,
+      addDirs: bot?.addDirs ?? group?.addDirs,
       // A bot's skill packs come with its tools; any other session takes
       // the ones turned on in Settings.
       pluginDirs: await bundledPluginDirs([
@@ -1799,9 +1803,12 @@ function settingsKeyFor(input: HarnessSessionInput): string {
   // resuming the same conversation.
   const bot = botLaunchForSession(input.sessionId);
   const botKey = bot
-    ? `:${JSON.stringify([bot.plugins, bot.allowedTools, bot.addDirs, bot.connectors ?? null, bot.skills ?? null])}`
+    ? `:${JSON.stringify([bot.plugins, bot.allowedTools, bot.disallowedTools, bot.addDirs, bot.connectors ?? null, bot.skills ?? null])}`
     : "";
-  return `${input.providerAccountId ?? "default"}${botKey}:${claudeSettingsKey({
+  // So does a session whose groups open or close a folder.
+  const group = bot ? null : groupLaunchForSession(input.sessionId);
+  const groupKey = group ? `:${JSON.stringify(group)}` : "";
+  return `${input.providerAccountId ?? "default"}${botKey}${groupKey}:${claudeSettingsKey({
     model: nativeModelId(input.model),
     effort: input.modelSettings?.effort,
     fast: input.modelSettings?.fast,

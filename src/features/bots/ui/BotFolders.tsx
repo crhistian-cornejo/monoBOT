@@ -13,16 +13,19 @@ export function BotFolders({
   folders,
   canEdit,
   onChange,
+  pickTitle = "Open folders to this bot",
 }: {
   folders: readonly BotFolder[];
   /** The bot may change files at all; each folder then opts in. */
   canEdit: boolean;
   onChange: (folders: BotFolder[]) => void;
+  /** The system picker's title. */
+  pickTitle?: string;
 }) {
   const [problem, setProblem] = useState<string>();
   const add = async () => {
     setProblem(undefined);
-    const picked = await pickFolders("Open folders to this bot");
+    const picked = await pickFolders(pickTitle);
     const next = [...folders];
     for (const path of picked) {
       const why = folderProblem(path, false);

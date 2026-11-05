@@ -82,7 +82,7 @@ const ACTIONS: [&str; 12] = [
     "list", "delegate", "get", "steer", "message", "retry", "cancel", "wait", "review", "finish",
     "respond", "answer",
 ];
-const APP_ACTIONS: [&str; 50] = [
+const APP_ACTIONS: [&str; 52] = [
     "models.list",
     "sessions.list",
     "sessions.read",
@@ -129,8 +129,10 @@ const APP_ACTIONS: [&str; 50] = [
     "tools.update",
     "group.members",
     "group.ask",
+    "group.access",
     "agents.list",
     "agents.message",
+    "agents.wait",
     "wakes.add",
     "chat.card",
 ];
@@ -351,14 +353,24 @@ Actions:
                   applies from your next turn. Folders are the user's to add.
                   Sending, sharing and deleting stay blocked.
   group.members  {}  Group only. Its members: id, name and role.
-  group.ask      {"member":"Finance","message":"..."}  Group only. Bring a
-                  member in; its answer comes back to you with the others
-                  asked in the same turn.
+  group.ask      {"member":"Finance","message":"...","wait":true}  Group
+                  only. Bring a member in; its answer comes back to you with
+                  the others asked in the same turn, or to this call with
+                  "wait":true (see agents.wait).
+  group.access   {"target":"D:\docs\plan or https://...","reason":"..."}
+                  A group or its member ("group":"<name>" when in several).
+                  Whether the members may open a path or link outside the
+                  group's folders; when nobody asked yet, the user is asked in
+                  the group chat: end your turn until they answer.
   agents.list    {}  The user's other Monos and bots: id, name, role,
                   specialty, tools and what each was asked recently.
-  agents.message {"to":"Finance","message":"..."}  Ask another agent for
-                  something that is its job. Its answer comes back to your
-                  chat; not while you are answering another agent.
+  agents.message {"to":"Finance","message":"...","wait":true}  Ask another
+                  agent for something that is its job. Its answer comes back
+                  to your chat, or to this call with "wait":true; not while
+                  you are answering another agent, unless it is in your group.
+  agents.wait    {"waitId":"..."}  Keep waiting for an answer that a waited
+                  group.ask or agents.message returned as pending (25 s each
+                  call). Do not end your turn while you wait.
   wakes.add      {"in":120,"note":"Check whether the refund arrived"} or
                   {"at":"2026-11-05T09:30","note":"..."}  Mono only. Run once
                   later, like a habit; 5 minutes to 7 days ahead, at most 3

@@ -27,7 +27,11 @@ import {
   type BotRole,
   type BotTools,
 } from "../../bots/model/bots";
-import { parseGroup, type Group } from "../../groups/model/group";
+import {
+  GROUP_MAX_MEMBERS,
+  parseGroup,
+  type Group,
+} from "../../groups/model/group";
 import {
   parseWorkstream,
   type Workstream,
@@ -262,7 +266,23 @@ export function listMonos(): Mono[] {
   const parsed = readJson(ROSTER_KEY);
   if (!Array.isArray(parsed)) return [];
   const monos = parsed.flatMap((entry) => parseMono(entry) ?? []);
-  return migratePrincipalTools(monos);
+  return withGroupLeads(migratePrincipalTools(monos));
+}
+
+/** The Principal is in every group, also in ones made before it led them. */
+function withGroupLeads(monos: Mono[]): Mono[] {
+  if (!principalMono(monos)) return monos;
+  return monos.map((mono) =>
+    mono.kind === "group" && mono.group
+      ? {
+          ...mono,
+          group: {
+            ...mono.group,
+            members: withPrincipal(mono.group.members, monos),
+          },
+        }
+      : mono,
+  );
 }
 
 const PRINCIPAL_TOOLS_KEY = "monocode:principal-tools-reset";
@@ -407,8 +427,34 @@ export function createWorkstreamMono(
   return mono;
 }
 
-/** A group of agents, led by its own chat. */
-export function createGroupMono(name: string, group: Group): Mono {
+/** The Principal bot (IVY), who leads every group. */
+export function principalMono(
+  roster: readonly Mono[] = listMonos(),
+): Mono | undefined {
+  return roster.find(
+    (mono) => mono.kind === "bot" && mono.botRole === "principal",
+  );
+}
+
+/** A group's members with the Principal first: it is in every group. */
+export function withPrincipal(
+  members: readonly string[],
+  roster: readonly Mono[] = listMonos(),
+): string[] {
+  const lead = principalMono(roster)?.id;
+  const rest = members.filter((id) => id !== lead);
+  return (lead ? [lead, ...rest] : rest).slice(0, GROUP_MAX_MEMBERS);
+}
+
+/**
+ * A group of agents, led by its own chat with the Principal in it. Its
+ * instructions seed the chat's soul the first time it opens.
+ */
+export function createGroupMono(
+  name: string,
+  group: Group,
+  instructions?: string,
+): Mono {
   const roster = listMonos();
   const mono: Mono = {
     id: newMonoId(),
@@ -416,10 +462,26 @@ export function createGroupMono(name: string, group: Group): Mono {
     name,
     projects: [],
     kind: "group",
-    group,
+    group: { ...group, members: withPrincipal(group.members, roster) },
+    ...(instructions?.trim() ? { instructions: instructions.trim() } : {}),
   };
   saveRoster([...roster, mono]);
   return mono;
+}
+
+/** Changes a group's settings; the Principal stays in it. */
+export function saveGroup(
+  monoId: string,
+  change: (group: Group) => Group,
+): Mono | undefined {
+  return updateMono(monoId, (mono) => {
+    if (mono.kind !== "group") return mono;
+    const next = change(mono.group ?? { members: [] });
+    return {
+      ...mono,
+      group: { ...next, members: withPrincipal(next.members) },
+    };
+  });
 }
 
 /** Gives a bot its own tools; its role's denied tools still apply. */
@@ -448,10 +510,17 @@ export function monoSpecialty(mono: Mono): string | undefined {
 }
 
 export function saveGroupMembers(monoId: string, members: string[]): void {
-  updateMono(monoId, (mono) => ({
-    ...mono,
-    group: { ...(mono.group ?? { members: [] }), members },
-  }));
+  saveGroup(monoId, (group) => ({ ...group, members }));
+}
+
+/** The groups an agent is a member of. */
+export function groupsOf(
+  monoId: string,
+  roster: readonly Mono[] = listMonos(),
+): Mono[] {
+  return roster.filter(
+    (mono) => mono.kind === "group" && mono.group?.members.includes(monoId),
+  );
 }
 
 /** A new Mono id, for a workstream whose folder is made before it is. */

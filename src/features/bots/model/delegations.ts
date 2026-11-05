@@ -11,6 +11,8 @@ export type Delegation = {
   to: string;
   message: string;
   at: number;
+  /** What it answered, when the asker waited for it. */
+  reply?: string;
 };
 
 const KEY = "monocode.delegations.v1";
@@ -55,11 +57,24 @@ export function subscribeDelegations(listener: () => void): () => void {
 }
 
 /** Newest first. */
-export function recordDelegation(entry: Omit<Delegation, "id">): void {
-  const next = [
-    { ...entry, id: crypto.randomUUID() },
-    ...delegationsSnapshot(),
-  ].slice(0, MAX);
+export function recordDelegation(entry: Omit<Delegation, "id">): string {
+  const id = crypto.randomUUID();
+  save([{ ...entry, id }, ...delegationsSnapshot()].slice(0, MAX));
+  return id;
+}
+
+/** Keeps the answer an agent waited for beside what it asked. */
+export function answerDelegation(id: string, reply: string): void {
+  const list = delegationsSnapshot();
+  if (!list.some((entry) => entry.id === id)) return;
+  save(
+    list.map((entry) =>
+      entry.id === id ? { ...entry, reply: reply.slice(0, 4_000) } : entry,
+    ),
+  );
+}
+
+function save(next: Delegation[]): void {
   cache = next;
   try {
     localStorage.setItem(KEY, JSON.stringify(next));

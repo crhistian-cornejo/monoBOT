@@ -76,6 +76,7 @@ import { ContextMeter } from "./ContextMeter";
 import { UsageChips } from "../../../app/shell/UsageFooter";
 import type { RateLimitProvider } from "../../providers/model/rateLimits";
 import { MonoUsageLimitNotice } from "../../monos/ui/MonoUsageLimitNotice";
+import { GroupAccessPrompt } from "../../groups/ui/GroupAccessPrompt";
 import { QuestionForm } from "./QuestionForm";
 import {
   monoMessageDeliveries,
@@ -1192,6 +1193,12 @@ const LocalSessionPane = memo(function LocalSessionPane({
                       }
                     />
                   ) : null}
+                  {/* A group's Principal asking before a member opens a
+                      path or link outside the group's folders. */}
+                  <GroupAccessPrompt
+                    sessionId={session.id}
+                    onReply={(text) => void onSubmit(session.id, text, [])}
+                  />
                   {session.usageLimit ? (
                     <MonoUsageLimitNotice
                       session={session}
