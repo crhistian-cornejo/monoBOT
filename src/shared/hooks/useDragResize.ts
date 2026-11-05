@@ -47,6 +47,8 @@ export function useDragResize({
   const [dragging, setDragging] = useState(false);
   const paneRef = useRef<HTMLElement | null>(null);
   const widthRef = useRef(width);
+  /** The width the user chose. A narrow window shows less, then gives it back. */
+  const preferredRef = useRef(initial);
   const stopDrag = useRef<(() => void) | null>(null);
 
   const apply = (next: number) => {
@@ -62,10 +64,34 @@ export function useDragResize({
 
   const commit = (next: number) => {
     const value = clamp(next);
+    preferredRef.current = value;
     apply(value);
     setWidth(value);
     onCommitRef.current?.(value);
   };
+
+  // `max` depends on the window. Without this, a pane widened in a large
+  // window kept its width when the window shrank, and spilled past its edge
+  // with its own close button.
+  useEffect(() => {
+    let frame = 0;
+    const fit = () => {
+      frame = 0;
+      if (stopDrag.current) return;
+      const value = clamp(preferredRef.current);
+      if (value === widthRef.current) return;
+      apply(value);
+      setWidth(value);
+    };
+    const onResize = () => {
+      if (!frame) frame = requestAnimationFrame(fit);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      if (frame) cancelAnimationFrame(frame);
+    };
+  }, [clamp]);
 
   const onPointerDown = (event: ReactPointerEvent<HTMLElement>) => {
     if (event.button !== 0) return;
@@ -139,6 +165,7 @@ export function useDragResize({
   const setPaneWidth = useCallback(
     (next: number) => {
       const value = clamp(next);
+      preferredRef.current = next;
       apply(value);
       setWidth(value);
     },

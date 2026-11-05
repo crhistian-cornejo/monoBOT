@@ -9,6 +9,7 @@ import {
   titleTabDropFromPoint,
 } from "../../features/workspace/model/paneDrop";
 import { TitleBar, type Tab } from "./TitleBar";
+import { IS_MAC } from "../../platform/tauri/platform";
 
 vi.mock("./WindowControls", () => ({ WindowControls: () => null }));
 vi.mock("../../platform/tauri/useTrafficLightsVisible", () => ({
@@ -100,12 +101,15 @@ describe("title tab pane drops", () => {
       Array.from(nav.querySelectorAll("button"), (button) =>
         button.getAttribute("aria-label")?.replace(/ \(.+\)$/, ""),
       ),
-    ).toEqual(["Back", "Forward"]);
+      // Windows and Linux keep File, View and Terminal behind a menu button.
+    ).toEqual([...(IS_MAC ? [] : ["Menu"]), "Back", "Forward"]);
     expect(nav.nextElementSibling?.querySelector("[data-title-tab-strip]")).not
       .toBeNull;
     expect(container.textContent).not.toContain("Development");
 
-    act(() => nav.querySelector<HTMLButtonElement>("button")!.click());
+    act(() =>
+      nav.querySelector<HTMLButtonElement>('button[aria-label^="Back"]')!.click(),
+    );
     expect(onGoBack).toHaveBeenCalledOnce();
   });
 

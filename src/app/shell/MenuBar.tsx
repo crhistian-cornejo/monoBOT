@@ -38,7 +38,8 @@ type Props = {
   onZoomReset?: () => void;
 };
 
-export function MenuBar({
+/** The File, View and Terminal menus, opened by a hamburger or by tapping Alt. */
+export function AppMenu({
   onNew,
   onNewTerminal,
   onToggleTerminal,
@@ -58,14 +59,24 @@ export function MenuBar({
   onZoomOut,
   onZoomReset,
 }: Props) {
-  const [open, setOpen] = useState(false);
-  const [activeMenu, setActiveMenu] = useState<MenuKey | null>(null);
-  const [menuAnchor, setMenuAnchor] = useState<{ x: number; y: number } | null>(
-    null,
-  );
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
   const [, refreshShortcuts] = useState(loadKeybindingOverrides);
   const [autosave, setAutosave] = useState(loadAutosave);
-  const barRef = useRef<HTMLDivElement>(null);
+
+  // Pressing the hamburger while the menu is open first closes it as an
+  // outside click; the click that follows must not open it again.
+  const closedAt = useRef(0);
+
+  // A hamburger asks for the menu under itself; a second click closes it.
+  useEffect(() => {
+    const onOpen = (event: Event) => {
+      const at = (event as CustomEvent<MenuAnchor>).detail;
+      if (Date.now() - closedAt.current < 300) return;
+      setAnchor((open) => (open ? null : at));
+    };
+    window.addEventListener(OPEN_APP_MENU_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_APP_MENU_EVENT, onOpen);
+  }, []);
 
   useEffect(
     () =>
@@ -95,14 +106,7 @@ export function MenuBar({
 
     const onKeyUp = (e: KeyboardEvent) => {
       if (e.key === "Alt" && altPressedAlone) {
-        setOpen((prev) => {
-          if (prev) {
-            setActiveMenu(null);
-            setMenuAnchor(null);
-            return false;
-          }
-          return true;
-        });
+        setAnchor((open) => (open ? null : visibleButtonAnchor()));
         altPressedAlone = false;
       }
     };
@@ -121,21 +125,14 @@ export function MenuBar({
     };
   }, []);
 
-  const openDropdown = useCallback((key: MenuKey, target: HTMLElement) => {
-    const rect = target.getBoundingClientRect();
-    setActiveMenu(key);
-    setMenuAnchor({ x: rect.left, y: rect.bottom + 2 });
-  }, []);
-
   const closeMenu = useCallback(() => {
-    setActiveMenu(null);
-    setMenuAnchor(null);
+    closedAt.current = Date.now();
+    setAnchor(null);
   }, []);
 
   const handlePick = useCallback(
     (id: string) => {
       closeMenu();
-      setOpen(false);
 
       switch (id) {
         case "new_tab":
@@ -384,62 +381,54 @@ export function MenuBar({
     }
   };
 
-  if (!open && !activeMenu) {
-    return null;
-  }
+  if (!anchor) return null;
 
+  // A hamburger has no room for a bar, so File, View and Terminal open to the side.
   const MENUS: { key: MenuKey; label: string }[] = [
     { key: "file", label: "File" },
     { key: "view", label: "View" },
     { key: "terminal", label: "Terminal" },
   ];
-
   return (
-    <div
-      ref={barRef}
-      className="flex h-7 shrink-0 items-center gap-0.5 border-b border-stroke bg-content/5 px-2 text-[12px]"
-      data-tauri-drag-region="false"
-    >
-      {MENUS.map(({ key, label }) => {
-        const isActive = activeMenu === key;
-        return (
-          <button
-            key={key}
-            type="button"
-            data-tauri-drag-region="false"
-            onClick={(e) => {
-              if (isActive) {
-                closeMenu();
-              } else {
-                openDropdown(key, e.currentTarget);
-              }
-            }}
-            onMouseEnter={(e) => {
-              if (activeMenu && activeMenu !== key) {
-                openDropdown(key, e.currentTarget);
-              }
-            }}
-            className={`rounded px-2 py-0.5 transition-colors ${
-              isActive
-                ? "bg-selection-hover text-content"
-                : "text-content/70 hover:bg-content/10 hover:text-content"
-            }`}
-          >
-            {label}
-          </button>
-        );
-      })}
-
-      {activeMenu && menuAnchor ? (
-        <ExplorerMenu
-          x={menuAnchor.x}
-          y={menuAnchor.y}
-          items={getMenuItems(activeMenu)}
-          ariaLabel={`${activeMenu} menu`}
-          onPick={handlePick}
-          onClose={closeMenu}
-        />
-      ) : null}
-    </div>
+    <ExplorerMenu
+      x={anchor.x}
+      y={anchor.y}
+      width={180}
+      ariaLabel="Application menu"
+      items={MENUS.map(({ key, label }) => ({
+        kind: "item" as const,
+        id: `menu:${key}`,
+        label,
+        submenu: getMenuItems(key).flatMap((item) =>
+          item.kind === "item" ? [item] : [],
+        ),
+      }))}
+      onPick={handlePick}
+      onClose={closeMenu}
+    />
   );
+}
+
+type MenuAnchor = { x: number; y: number };
+
+const OPEN_APP_MENU_EVENT = "monocode:open-app-menu";
+
+/** Ask the one AppMenu to open under `button`, or to close if it's open. */
+export function openAppMenu(button: HTMLElement) {
+  const rect = button.getBoundingClientRect();
+  window.dispatchEvent(
+    new CustomEvent<MenuAnchor>(OPEN_APP_MENU_EVENT, {
+      detail: { x: rect.left, y: rect.bottom + 4 },
+    }),
+  );
+}
+
+/** Alt opens the menu under whichever hamburger is on screen. */
+function visibleButtonAnchor(): MenuAnchor {
+  const button = [
+    ...document.querySelectorAll<HTMLElement>("[data-app-menu-button]"),
+  ].find((element) => element.getClientRects().length > 0);
+  if (!button) return { x: 8, y: 44 };
+  const rect = button.getBoundingClientRect();
+  return { x: rect.left, y: rect.bottom + 4 };
 }

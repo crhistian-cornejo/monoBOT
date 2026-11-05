@@ -159,7 +159,7 @@ import {
   resolveMonoActivity,
   type MonoActivitySelection,
 } from "../features/monos/model/monoActivity";
-import { MenuBar } from "./shell/MenuBar";
+import { AppMenu } from "./shell/MenuBar";
 import { FilePicker } from "../features/files/ui/FilePicker";
 import {
   DeleteSessionDialog,
@@ -15080,7 +15080,7 @@ function Workspace({
                       }
                     >
                       {!IS_MAC ? (
-                        <MenuBar
+                        <AppMenu
                           onNew={onNew}
                           onNewTerminal={onNewTerminal}
                           onToggleTerminal={onToggleProjectTerminal}

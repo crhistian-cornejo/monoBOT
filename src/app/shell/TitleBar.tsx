@@ -5,6 +5,7 @@ import {
   Code,
   DashboardSquare,
   Inbox,
+  Menu,
   PanelLeft,
   GitBranch,
   Plus,
@@ -43,6 +44,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TerminalSpinner } from "../../features/sessions/ui/TerminalSpinner";
 import { TabLabel } from "../../shared/ui/TabLabel";
 import { WindowControls } from "./WindowControls";
+import { openAppMenu } from "./MenuBar";
 import { PixelMascot } from "../../features/projects/ui/PixelMascot";
 import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
 import {
@@ -724,6 +726,31 @@ export function MonoViewActions({
   );
 }
 
+/**
+ * The File, View and Terminal menus on Windows and Linux, beside the sidebar
+ * toggle. macOS has them in its own menu bar. Tapping Alt opens them here too.
+ */
+export function AppMenuButton({
+  className = "flex shrink-0",
+}: {
+  className?: string;
+}) {
+  const ref = useRef<HTMLSpanElement>(null);
+  if (IS_MAC) return null;
+  return (
+    <span ref={ref} data-app-menu-button className={className}>
+      <IconButton
+        label="Menu (Alt)"
+        onClick={() => {
+          if (ref.current) openAppMenu(ref.current);
+        }}
+      >
+        <Menu className="size-3.5" strokeWidth={1.75} />
+      </IconButton>
+    </span>
+  );
+}
+
 /** Back + rail toggle for overlay surfaces when the project rail is closed. */
 export function OverlayNav({
   onBack,
@@ -1156,6 +1183,7 @@ function TitleBarComponent({
             // Center the toggle over the sidebar's project icon.
             className={`shrink-0 ${trafficLightsVisible ? "w-[78px]" : "w-2.5"}`}
           />
+          <AppMenuButton />
           {onToggleSessionSidebar ? (
             // Hovering the toggle peeks a collapsed sidebar out.
             <span data-sidebar-peek-trigger className="flex">
@@ -1186,6 +1214,7 @@ function TitleBarComponent({
             trafficLightsVisible ? (mono ? "pl-[22px]" : "pl-[70px]") : "pl-1.5"
           }`}
         >
+          <AppMenuButton />
           <TabVisitNav
             canGoBack={canGoBack}
             canGoForward={canGoForward}
@@ -1200,6 +1229,7 @@ function TitleBarComponent({
         <>
           {trafficLightsVisible ? <div className="w-[78px] shrink-0" /> : null}
           <div className="flex shrink-0 items-center px-1.5">
+            <AppMenuButton />
             <IconButton
               label={`Toggle Sidebar (${MOD}B)`}
               onClick={onToggleSidebar}
@@ -1217,6 +1247,8 @@ function TitleBarComponent({
           {trafficLightsVisible && railClosed && !compactRail && !inset ? (
             <div className="w-[70px] shrink-0" />
           ) : null}
+          {/* The compact rail's nav already holds the menu. */}
+          {compactRail ? null : <AppMenuButton />}
           <IconButton
             label={`Toggle Session Sidebar (${MOD}${SHIFT}B)`}
             onClick={onToggleSessionSidebar}

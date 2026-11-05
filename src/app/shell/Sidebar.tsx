@@ -193,7 +193,12 @@ import { PersonalRail, RailZoneSwitch } from "./PersonalRail";
 import { InboxNotificationMenu } from "../../features/inbox/ui/InboxNotificationMenu";
 import { RailAction, RailSearch } from "./RailAction";
 import { TerminalSpinner } from "../../features/sessions/ui/TerminalSpinner";
-import { DevModeSlot, IconButton, TabVisitNav } from "./TitleBar";
+import {
+  AppMenuButton,
+  DevModeSlot,
+  IconButton,
+  TabVisitNav,
+} from "./TitleBar";
 import { ProjectSearch } from "../../features/projects/ui/ProjectSearch";
 import { Popover } from "../../shared/ui/Popover";
 import {
@@ -2600,6 +2605,7 @@ function SidebarComponent({
               data-tauri-drag-region="deep"
             >
               {trafficLightsVisible ? <div className="w-[78px] shrink-0" /> : null}
+              <AppMenuButton className="flex shrink-0 pl-1.5" />
               <DevModeSlot />
               <TabVisitNav
                 canGoBack={canGoBack}
