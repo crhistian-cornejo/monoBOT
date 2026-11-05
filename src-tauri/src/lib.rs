@@ -25,6 +25,7 @@ mod jsonc;
 mod keep_awake;
 mod linear;
 mod link_preview;
+mod mail;
 mod papers;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -453,6 +454,18 @@ pub fn run() {
             web::web_page,
             web::web_download,
             web::web_keep,
+            mail::mail_accounts,
+            mail::mail_add_account,
+            mail::mail_remove_account,
+            mail::mail_overview,
+            mail::mail_archive_more,
+            mail::mail_open,
+            mail::mail_act,
+            mail::mail_interesting,
+            mail::mail_draft,
+            mail::mail_send,
+            mail::mail_image,
+            mail::mail_attachment,
             papers::paper_api,
             papers::paper_pdf,
             papers::paper_pdf_bytes,

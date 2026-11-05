@@ -18,6 +18,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 monobot-dictation = { path = "../crates/dictation" }
 monobot-http = { path = "../crates/http" }
+monobot-email = { path = "../crates/email" }
 monobot-voice = { path = "../crates/voice" }
 monocode-mobile-link = { path = "../crates/mobile-link" }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }

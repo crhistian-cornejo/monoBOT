@@ -17,6 +17,7 @@ import {
   GitPullRequestClosed,
   GitPullRequestDraft,
   Inbox,
+  Mail,
   MessageSquare,
   ListFilter,
   LoaderCircle,
@@ -27,6 +28,8 @@ import {
   Search,
   type IconComponent,
 } from "../../../shared/ui/icons";
+import { MailInbox } from "../../mail/ui/MailInbox";
+import { loadEmailTabOpen, saveEmailTabOpen } from "../../mail/model/mail";
 import {
   useCallback,
   useEffect,
@@ -458,6 +461,8 @@ export function InboxView({
   const [source, setSource] = useState(() =>
     resolveInboxSource(loadInboxSource(), connections),
   );
+  /** The Email tab, beside GitHub and the trackers. */
+  const [emailOpen, setEmailOpen] = useState(loadEmailTabOpen);
   const [connectMenuOpen, setConnectMenuOpen] = useState(false);
   const connectButtonRef = useRef<HTMLButtonElement | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ x: number; y: number } | null>(
@@ -919,6 +924,8 @@ export function InboxView({
   const onSourceChange = (next: InboxSource) => {
     setSource(next);
     saveInboxSource(next);
+    setEmailOpen(false);
+    saveEmailTabOpen(false);
   };
 
   const onFilterButtonClick = (event: ReactMouseEvent<HTMLButtonElement>) => {
@@ -933,49 +940,69 @@ export function InboxView({
     });
   };
 
+  // The source tabs: GitHub and the trackers, then the user's email.
+  const sourceTabs = (
+  <div className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
+    <div
+      role="tablist"
+      aria-label="Inbox source"
+      className="flex min-w-0 basis-0 items-center gap-px"
+      style={{ flexGrow: visibleSources.length + 1 }}
+    >
+      {visibleSources.map((option) => (
+        <InboxSourceTab
+          key={option}
+          source={option}
+          selected={!emailOpen && source === option}
+          onSelect={onSourceChange}
+        />
+      ))}
+      <button
+        type="button"
+        role="tab"
+        aria-selected={emailOpen}
+        onClick={() => {
+          setEmailOpen(true);
+          saveEmailTabOpen(true);
+        }}
+        className={`flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[12px] leading-none ${
+          emailOpen
+            ? "bg-selection text-content"
+            : "text-content/50 hover:bg-content/5 hover:text-content"
+        }`}
+      >
+        <Mail className="size-3.5 shrink-0" strokeWidth={1.75} />
+        <span className="leading-none">Email</span>
+      </button>
+    </div>
+    {connectableSources.length > 0 ? (
+      <button
+        ref={connectButtonRef}
+        type="button"
+        aria-label="Connect an inbox source"
+        aria-haspopup="menu"
+        aria-expanded={connectMenuOpen}
+        title="Connect an inbox source"
+        onClick={() => setConnectMenuOpen((open) => !open)}
+        className={`flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[12px] leading-none ${
+          connectMenuOpen
+            ? "bg-selection text-content"
+            : "text-content/40 hover:bg-content/5 hover:text-content"
+        }`}
+      >
+        <Plus className="size-3.5 shrink-0" strokeWidth={1.75} />
+        <span className="min-w-0 truncate">Add connection</span>
+      </button>
+    ) : null}
+  </div>
+  );
+
   const list = (
     <div
       ref={resize.setPaneRef}
       className="relative flex h-full min-h-0 shrink-0 flex-col border-r border-stroke"
     >
-      <div className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
-        {visibleSources.length > 0 ? (
-          <div
-            role="tablist"
-            aria-label="Inbox source"
-            className="flex min-w-0 basis-0 items-center gap-px"
-            style={{ flexGrow: visibleSources.length }}
-          >
-            {visibleSources.map((option) => (
-              <InboxSourceTab
-                key={option}
-                source={option}
-                selected={source === option}
-                onSelect={onSourceChange}
-              />
-            ))}
-          </div>
-        ) : null}
-        {connectableSources.length > 0 ? (
-          <button
-            ref={connectButtonRef}
-            type="button"
-            aria-label="Connect an inbox source"
-            aria-haspopup="menu"
-            aria-expanded={connectMenuOpen}
-            title="Connect an inbox source"
-            onClick={() => setConnectMenuOpen((open) => !open)}
-            className={`flex h-6 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-2 text-[12px] leading-none ${
-              connectMenuOpen
-                ? "bg-selection text-content"
-                : "text-content/40 hover:bg-content/5 hover:text-content"
-            }`}
-          >
-            <Plus className="size-3.5 shrink-0" strokeWidth={1.75} />
-            <span className="min-w-0 truncate">Add connection</span>
-          </button>
-        ) : null}
-      </div>
+      {sourceTabs}
       {noSourcesConnected ? null : (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-2">
           <div className="relative flex h-7 min-w-0 flex-1 items-center">
@@ -1194,6 +1221,12 @@ export function InboxView({
         </div>
       ) : null}
 
+      {emailOpen ? (
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {sourceTabs}
+          <MailInbox />
+        </div>
+      ) : (
       <div className="flex min-h-0 min-w-0 flex-1">
         {list}
         <div className="relative flex min-h-0 min-w-0 flex-1">
@@ -1226,6 +1259,7 @@ export function InboxView({
           ) : null}
         </div>
       </div>
+      )}
       {filtersPortal}
       {connectPortal}
     </div>
