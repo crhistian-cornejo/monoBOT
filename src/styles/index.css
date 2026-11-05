@@ -2729,17 +2729,10 @@ html:not(.theme-light) .markdown-code-token {
 }
 
 /*
- * A field AI is writing into: a light in the accent colour runs round its
- * border, with a soft halo behind it. Put it on a `relative` wrapper with the
- * field's radius; the field keeps its own background so the halo shows only
- * outside it.
+ * A field AI is writing into: its border in the accent colour, with the light
+ * falling a few pixels inward and breathing. Nothing moves round it. Put it on
+ * a `relative` wrapper with the field's radius and a transparent border.
  */
-@property --ai-glow-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
-}
-
 .ai-glow {
   isolation: isolate;
 }
@@ -2751,39 +2744,19 @@ html:not(.theme-light) .markdown-code-token {
   inset: 0;
   border-radius: inherit;
   pointer-events: none;
-  background: conic-gradient(
-    from var(--ai-glow-angle),
-    color-mix(in srgb, var(--color-accent) 25%, transparent),
-    var(--color-accent) 12%,
-    color-mix(in srgb, var(--color-accent) 55%, white) 18%,
-    var(--color-accent) 24%,
-    color-mix(in srgb, var(--color-accent) 25%, transparent) 40%,
-    color-mix(in srgb, var(--color-accent) 25%, transparent) 60%,
-    var(--color-accent) 74%,
-    color-mix(in srgb, var(--color-accent) 25%, transparent) 88%
-  );
-  animation: ai-glow-spin 2.8s linear infinite;
 }
 
-/* The ring: the gradient with its middle cut out, over the field's border. */
+/* The border, over the field's own. */
 .ai-glow::before {
   z-index: 1;
-  padding: 1.5px;
-  -webkit-mask:
-    linear-gradient(#000 0 0) content-box,
-    linear-gradient(#000 0 0);
-  -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#000 0 0) content-box exclude,
-    linear-gradient(#000 0 0);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-accent) 60%, transparent);
 }
 
-/* The halo: the same light, blurred, behind the field. */
+/* The light inside it, behind the text. */
 .ai-glow::after {
   z-index: -1;
-  inset: -2px;
-  filter: blur(10px);
-  opacity: 0.45;
+  box-shadow: inset 0 0 12px 1px color-mix(in srgb, var(--color-accent) 22%, transparent);
+  animation: ai-glow-breathe 2.4s ease-in-out infinite;
 }
 
 /* The mail reply card rising into place over the message as it opens. */
@@ -2798,9 +2771,9 @@ html:not(.theme-light) .markdown-code-token {
   }
 }
 
-@keyframes ai-glow-spin {
-  to {
-    --ai-glow-angle: 360deg;
+@keyframes ai-glow-breathe {
+  50% {
+    opacity: 0.45;
   }
 }
 

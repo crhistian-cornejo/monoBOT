@@ -22,11 +22,14 @@ export function StreamedPlainText({
   streaming,
   className = "",
   onSettled,
+  onRevealing,
 }: {
   text: string;
   streaming: boolean;
   className?: string;
   onSettled?: () => void;
+  /** Whether the words on screen are still catching up with `text`. */
+  onRevealing?: (revealing: boolean) => void;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const pacingEnabled = usePacedReveal();
@@ -46,6 +49,12 @@ export function StreamedPlainText({
     staggerNewWords(box.current, pacedReveal ? PACED_STAGGER_CAP_MS : Math.round(fadeMs / 2));
     box.current.scrollTop = box.current.scrollHeight;
   });
+
+  const revealingChanged = useRef(onRevealing);
+  revealingChanged.current = onRevealing;
+  useEffect(() => {
+    revealingChanged.current?.(shown.revealing);
+  }, [shown.revealing]);
 
   const settled = useRef(onSettled);
   settled.current = onSettled;

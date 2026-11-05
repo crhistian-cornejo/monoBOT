@@ -51,6 +51,8 @@ async function writeWithAI(input: {
   draftSubject?: string;
   signal: AbortSignal;
   onText: (text: string) => void;
+  /** The model finished its message (the agent may take a moment more to exit), or started another. */
+  onArrived?: (arrived: boolean) => void;
 }): Promise<string> {
   const harness = pickTextHarness();
   if (!canRunHarnessTextPrompt(harness))
@@ -74,11 +76,15 @@ async function writeWithAI(input: {
     signal: input.signal,
     onEvent: (event) => {
       if (input.signal.aborted) return;
-      if (event.type === "message.completed") closed = true;
+      if (event.type === "message.completed") {
+        closed = true;
+        input.onArrived?.(true);
+      }
       if (event.type !== "message.delta") return;
       if (closed) {
         streamed = "";
         closed = false;
+        input.onArrived?.(false);
       }
       // Some agents resend the whole message so far: join, don't append.
       streamed = joinStreamText(streamed, event.text);
@@ -120,6 +126,10 @@ export function MailReply({
   const [streamText, setStreamText] = useState<string>();
   /** The streamed text stays up until its last word has settled. */
   const [streamShown, setStreamShown] = useState(false);
+  /** The model finished its message, though its agent may not have exited yet. */
+  const [arrived, setArrived] = useState(false);
+  /** Words of the streamed text still coming onto the screen. */
+  const [revealing, setRevealing] = useState(false);
   /** What the box and the subject held before AI last wrote in them, to undo to. */
   const [before, setBefore] = useState<{ text: string; subject: string }>();
   /** The request AI last wrote for, to try again with. */
@@ -181,6 +191,7 @@ export function MailReply({
     abort.current = controller;
     const original = retry && before !== undefined ? before : { text, subject };
     setWriting(true);
+    setArrived(false);
     setStreamText("");
     setStreamShown(true);
     setStatus(undefined);
@@ -203,6 +214,9 @@ export function MailReply({
         draftSubject: original.subject,
         signal: controller.signal,
         onText: paint,
+        onArrived: (on) => {
+          if (!controller.signal.aborted) setArrived(on);
+        },
       });
       if (controller.signal.aborted) return;
       cancelPaint();
@@ -266,6 +280,9 @@ export function MailReply({
   };
 
   const busy = writing || streamShown;
+  /** The border lights while words are still coming, and goes out with the last of them. */
+  const glowing = writing && !(arrived && !revealing);
+  const aiWrote = before !== undefined && !busy && countdown == null && !status;
 
   const send = () => {
     if (!text.trim() || countdown != null || busy) return;
@@ -305,27 +322,6 @@ export function MailReply({
     if (status)
       return (
         <span className={status.error ? "text-red-400" : "text-content/50"}>{status.text}</span>
-      );
-    if (before !== undefined && !busy)
-      return (
-        <span className="flex items-center gap-1 text-content/50">
-          <Sparkles className="size-3 text-accent" />
-          Written with AI
-          <button
-            type="button"
-            onClick={undoAI}
-            className="ml-1 flex items-center gap-1 rounded-md px-1.5 py-0.5 text-content/70 hover:bg-content/8 hover:text-content"
-          >
-            <Undo2 className="size-3" /> Undo
-          </button>
-          <button
-            type="button"
-            onClick={() => void write(lastAsk, true)}
-            className="rounded-md px-1.5 py-0.5 text-content/70 hover:bg-content/8 hover:text-content"
-          >
-            Try again
-          </button>
-        </span>
       );
     return null;
   };
@@ -395,7 +391,7 @@ export function MailReply({
 
       <div
         className={`relative rounded-md border ${
-          writing ? "ai-glow border-transparent" : "border-content/10 focus-within:border-content/25"
+          glowing ? "ai-glow border-transparent" : "border-content/10 focus-within:border-content/25"
         }`}
       >
         {streamShown ? (
@@ -420,6 +416,7 @@ export function MailReply({
               text={streamed.body}
               streaming={writing}
               onSettled={settle}
+              onRevealing={setRevealing}
               className={`${FIELD_TEXT} overflow-y-auto text-content/90`}
             />
           </>
@@ -465,19 +462,45 @@ export function MailReply({
               }}
               rows={3}
               placeholder="Write your reply, or let AI draft it"
-              className={`${FIELD_TEXT} block resize-none bg-transparent outline-none`}
+              className={`${FIELD_TEXT} block resize-none bg-transparent outline-none ${
+                aiWrote || gaps.length ? "pb-10" : ""
+              }`}
             />
           </>
         )}
-        {gaps.length ? (
-          <button
-            type="button"
-            onClick={selectNextGap}
-            title="Select the next blank to fill in"
-            className="absolute bottom-1.5 right-1.5 rounded-md border border-accent/30 bg-background-base px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/10"
-          >
-            {gaps.length} to fill
-          </button>
+        {aiWrote || gaps.length ? (
+          <div className="pointer-events-none absolute inset-x-1.5 bottom-1.5 flex items-end gap-2">
+            {aiWrote ? (
+              <div className="pointer-events-auto flex min-w-0 items-center gap-0.5 rounded-md border border-content/10 bg-background-base py-0.5 pl-1.5 pr-0.5 text-[11px] text-content/55">
+                <Sparkles className="size-3 shrink-0 text-accent" />
+                <span className="mx-1 truncate">Written with AI</span>
+                <button
+                  type="button"
+                  onClick={undoAI}
+                  className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-content/70 hover:bg-content/8 hover:text-content"
+                >
+                  <Undo2 className="size-3" /> Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void write(lastAsk, true)}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-content/70 hover:bg-content/8 hover:text-content"
+                >
+                  Try again
+                </button>
+              </div>
+            ) : null}
+            {gaps.length ? (
+              <button
+                type="button"
+                onClick={selectNextGap}
+                title="Select the next blank to fill in"
+                className="pointer-events-auto ml-auto shrink-0 rounded-md border border-accent/30 bg-background-base px-1.5 py-0.5 text-[11px] text-accent hover:bg-accent/10"
+              >
+                {gaps.length} to fill
+              </button>
+            ) : null}
+          </div>
         ) : null}
       </div>
 

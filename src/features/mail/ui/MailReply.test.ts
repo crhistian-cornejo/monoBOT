@@ -167,6 +167,13 @@ describe("MailReply", () => {
     act(() => emit({ type: "message.delta", text: whole }));
     await flush();
     expect(streamed()?.textContent).toBe("Hola Jorge,\n\nGracias por [fact].");
+    expect(container.querySelector(".ai-glow")).not.toBeNull();
+
+    // The message is whole: the border goes out with it, not when the agent exits.
+    act(() => emit({ type: "message.completed" } as HarnessEvent));
+    await flush();
+    expect(container.querySelector(".ai-glow")).toBeNull();
+    expect(button("Stop")).toBeDefined();
 
     await act(async () => finish(`${whole}\n\nSaludos`));
     await flush();
