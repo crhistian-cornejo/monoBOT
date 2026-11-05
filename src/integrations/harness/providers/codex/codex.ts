@@ -1,6 +1,6 @@
 import {
   connectorCodexArgs,
-  enabledConnectors,
+  sessionConnectors,
 } from "../../../../features/settings/model/connectors";
 import { TurnNotReadyError } from "../../core/types";
 import { nativeModelId } from "../../../../features/sessions/model/models";
@@ -655,8 +655,10 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     input.sessionId,
     path,
     // MonoBOT's connectors join the user's own Codex MCP servers for this
-    // process only; ~/.codex/config.toml is never written.
-    ["app-server", ...connectorCodexArgs(enabledConnectors())],
+    // process only; ~/.codex/config.toml is never written. Codex sessions
+    // are never bots, so a connector the user grants per bot (the iPhone)
+    // stays out.
+    ["app-server", ...connectorCodexArgs(sessionConnectors())],
     input.cwd,
     {
       provider: "codex",

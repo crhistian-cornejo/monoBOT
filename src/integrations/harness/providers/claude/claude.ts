@@ -8,9 +8,11 @@ import type {
 } from "../../../../features/sessions/model/session";
 import { loadClaudeHooks } from "../../../../features/settings/model/settings";
 import {
+  askingPermissionMode,
   connectorAllowedTools,
+  connectorAskTools,
   connectorMcpConfig,
-  enabledConnectors,
+  sessionConnectors,
 } from "../../../../features/settings/model/connectors";
 import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
 import { enabledSkillPacks } from "../../../../features/skills/model/skillPacks";
@@ -1835,9 +1837,9 @@ function launchOptions(
 } {
   const native = nativeModelId(input.model);
   // A bot may narrow the app's connectors to the ones its job needs.
-  const only = botLaunchForSession(input.sessionId)?.connectors;
-  const connectors = enabledConnectors().filter(
-    (connector) => !only || only.includes(connector.id),
+  // One that acts (the user's iPhone) reaches only a bot the user gave it.
+  const connectors = sessionConnectors(
+    botLaunchForSession(input.sessionId)?.connectors,
   );
   const effortRaw = input.modelSettings?.effort;
   const context = input.modelSettings?.context;
@@ -1854,13 +1856,19 @@ function launchOptions(
   if (!loadClaudeHooks()) {
     settings.disableAllHooks = true;
   }
+  // Its acting tools ask every time, even where the user once said "always".
+  const ask = connectorAskTools(connectors);
+  if (ask.length) settings.permissions = { ask };
   return {
     model: resolveClaudeApiModelId(native, context),
     effort: normalizeClaudeCliEffort(effortRaw, native),
     permissionMode:
       input.intent === "plan"
         ? "plan"
-        : runtimeModeToPermission(input.runtimeMode),
+        : askingPermissionMode(
+            runtimeModeToPermission(input.runtimeMode),
+            connectors,
+          ),
     resume,
     sessionId: resume ? undefined : sessionId,
     settings: Object.keys(settings).length > 0 ? settings : undefined,

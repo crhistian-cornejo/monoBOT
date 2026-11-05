@@ -27,11 +27,14 @@ import {
 } from "../../../shared/ui/icons";
 import { MCP_PROVIDER_LABELS, type McpConnection } from "../model/mcp";
 import {
+  availableConnectors,
   CONNECTORS,
-  enabledConnectors,
+  isConnectorEnabled,
   setConnectorEnabled,
   type ConnectorId,
 } from "../model/connectors";
+import { BetaBadge } from "../../../shared/ui/BetaBadge";
+import { PokiSetup } from "./PokiSetup";
 import {
   getCachedMcpSettings,
   loadMcpSettings,
@@ -337,7 +340,10 @@ export function McpSettings({
  * user's servers, without touching any CLI configuration. */
 function BuiltInConnectors() {
   const [enabled, setEnabled] = useState(
-    () => new Set(enabledConnectors().map((connector) => connector.id)),
+    () =>
+      new Set(
+        CONNECTORS.filter(isConnectorEnabled).map((connector) => connector.id),
+      ),
   );
   const toggle = (id: ConnectorId, on: boolean) => {
     setConnectorEnabled(id, on);
@@ -363,31 +369,39 @@ function BuiltInConnectors() {
         </p>
       </div>
       <ul className="divide-y divide-stroke border border-stroke">
-        {CONNECTORS.map((connector) => {
+        {/* Ones this computer cannot run (the iPhone off a Mac) are not listed. */}
+        {availableConnectors().map((connector) => {
           const on = enabled.has(connector.id);
           return (
-            <li
-              key={connector.id}
-              className="flex items-center justify-between gap-4 px-3 py-2.5"
-            >
-              <div className="min-w-0">
-                <a
-                  href={connector.site}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-[13px] font-medium hover:underline"
-                >
-                  {connector.name}
-                </a>
-                <p className="truncate text-xs text-content/55">
-                  {connector.description}
-                </p>
+            <li key={connector.id}>
+              <div className="flex items-center justify-between gap-4 px-3 py-2.5">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <a
+                      href={connector.site}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="truncate text-[13px] font-medium hover:underline"
+                    >
+                      {connector.name}
+                    </a>
+                    {connector.experimental ? (
+                      <BetaBadge label="Experimental" />
+                    ) : null}
+                  </div>
+                  <p
+                    className={`text-xs text-content/55 ${connector.checkout ? "" : "truncate"}`}
+                  >
+                    {connector.description}
+                  </p>
+                </div>
+                <Switch
+                  label={`${connector.name} connector`}
+                  on={on}
+                  onChange={(next) => toggle(connector.id, next)}
+                />
               </div>
-              <Switch
-                label={`${connector.name} connector`}
-                on={on}
-                onChange={(next) => toggle(connector.id, next)}
-              />
+              {connector.id === "poki" && on ? <PokiSetup /> : null}
             </li>
           );
         })}

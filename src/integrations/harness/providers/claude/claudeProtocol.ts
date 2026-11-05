@@ -73,6 +73,8 @@ export type ClaudeCliSettings = {
   fastMode?: boolean;
   ultracode?: boolean;
   disableAllHooks?: boolean;
+  /** Rules for this session only; `ask` beats any allow rule or mode. */
+  permissions?: { ask?: string[] };
 };
 
 export function asRecord(value: unknown): Record<string, unknown> | null {

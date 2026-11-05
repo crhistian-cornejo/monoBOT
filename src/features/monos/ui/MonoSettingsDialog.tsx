@@ -28,8 +28,12 @@ import {
 import { userInstalledSkills } from "../../bots/model/botSession";
 import { BotFolders } from "../../bots/ui/BotFolders";
 import {
+  availableConnectors,
   CONNECTORS,
+  connectorInList,
   isConnectorEnabled,
+  isConnectorReady,
+  type Connector,
 } from "../../settings/model/connectors";
 import {
   defaultMonoName,
@@ -780,13 +784,13 @@ function BotToolsGroup({ monoId }: { monoId: string }) {
     saveBotTools(monoId, { ...tools, ...change });
   const flip = <T extends string>(list: readonly T[], item: T, on: boolean) =>
     on ? [...list, item] : list.filter((entry) => entry !== item);
-  const connectorOn = (id: string) =>
-    !tools.connectors || tools.connectors.includes(id);
+  const connectorOn = (connector: Connector) =>
+    connectorInList(connector, tools.connectors);
   return (
     <>
       <GroupHeading
         title="Tools"
-        description="What it can use, picked for its specialty. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat, except folders."
+        description="What it can use, picked for its specialty. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat, except folders and the iPhone."
       />
       <SettingGroup>
         <SettingRow
@@ -867,20 +871,27 @@ function BotToolsGroup({ monoId }: { monoId: string }) {
         description="The app's connectors it may use, among the ones on in Settings › Connectors."
       />
       <SettingGroup>
-        {CONNECTORS.map((connector) => (
+        {availableConnectors().map((connector) => (
           <SwitchRow
             key={connector.id}
             label={connector.name}
             description={
-              isConnectorEnabled(connector)
+              isConnectorReady(connector)
                 ? connector.description
-                : "Off in Settings › Connectors"
+                : isConnectorEnabled(connector)
+                  ? "Not set up yet: Settings › Connectors"
+                  : "Off in Settings › Connectors"
             }
-            disabled={!isConnectorEnabled(connector)}
-            on={isConnectorEnabled(connector) && connectorOn(connector.id)}
+            disabled={!isConnectorReady(connector)}
+            on={isConnectorReady(connector) && connectorOn(connector)}
             onChange={(on) => {
-              const all = CONNECTORS.map((entry) => entry.id as string);
-              const current = tools.connectors ?? all;
+              // Without a list it had every connector but the ones the user
+              // grants by name; the list keeps exactly that.
+              const current =
+                tools.connectors ??
+                CONNECTORS.filter((entry) =>
+                  connectorInList(entry, undefined),
+                ).map((entry) => entry.id as string);
               save({ connectors: flip(current, connector.id, on) });
             }}
           />

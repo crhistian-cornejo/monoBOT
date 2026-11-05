@@ -4592,3 +4592,146 @@ mark.paper-cite-mark {
   color: inherit;
   border-radius: 2px;
 }
+
+/* The iPhone setup tutorial: each mock-up plays once when its step opens.
+   Every rule's resting state is the finished picture, so without motion the
+   step still shows where it ends. */
+.poki-pop {
+  animation: poki-pop 360ms var(--poki-delay, 0ms) ease-out both;
+}
+
+.poki-tick {
+  animation: poki-tick 320ms var(--poki-delay, 0ms) cubic-bezier(0.3, 1.6, 0.6, 1) both;
+}
+
+.poki-type {
+  display: inline-block;
+  overflow: hidden;
+  white-space: nowrap;
+  vertical-align: bottom;
+  width: calc(var(--poki-chars) * 1ch);
+  animation: poki-type var(--poki-duration, 600ms) var(--poki-delay, 0ms)
+    steps(var(--poki-chars)) both;
+}
+
+.poki-caret {
+  animation:
+    poki-pop 1ms var(--poki-delay, 0ms) both,
+    poki-blink 1s var(--poki-delay, 0ms) step-end infinite;
+}
+
+.poki-current {
+  stroke-dasharray: 14 86;
+  animation: poki-current 1.6s linear infinite;
+}
+
+.poki-alert {
+  animation: poki-pop 400ms 500ms ease-out both;
+}
+
+.poki-tap {
+  transform-box: fill-box;
+  transform-origin: center;
+  opacity: 0;
+  animation: poki-tap 1.4s 1.2s ease-out infinite;
+}
+
+.poki-toggle {
+  background: var(--color-accent);
+  animation: poki-toggle 240ms var(--poki-delay, 0ms) ease-out both;
+}
+
+.poki-knob {
+  transform: translateX(10px);
+  animation: poki-knob 240ms var(--poki-delay, 0ms) ease-out both;
+}
+
+.poki-out {
+  opacity: 0;
+  animation: poki-out 200ms 1100ms ease-in both;
+}
+
+.poki-in {
+  animation: poki-pop 260ms 1300ms ease-out both;
+}
+
+.poki-press {
+  animation: poki-press 420ms var(--poki-delay, 0ms) ease-in-out both;
+}
+
+@keyframes poki-pop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes poki-tick {
+  from {
+    transform: scale(0);
+  }
+}
+
+@keyframes poki-type {
+  from {
+    width: 0;
+  }
+}
+
+@keyframes poki-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes poki-current {
+  from {
+    stroke-dashoffset: 100;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes poki-tap {
+  0% {
+    opacity: 0.9;
+    transform: scale(0.6);
+  }
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+@keyframes poki-toggle {
+  from {
+    background: color-mix(in srgb, var(--color-content) 20%, transparent);
+  }
+}
+
+@keyframes poki-knob {
+  from {
+    transform: translateX(0);
+  }
+}
+
+@keyframes poki-out {
+  from {
+    opacity: 1;
+  }
+}
+
+@keyframes poki-press {
+  50% {
+    transform: scale(0.92);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .poki-stage *,
+  .poki-stage {
+    animation: none !important;
+  }
+}
