@@ -32,6 +32,8 @@ import {
 import { AgentTabView } from "../../sessions/ui/AgentTabView";
 import { MarkdownPreview } from "../../sessions/ui/AgentMarkdown";
 import { BinaryFileView } from "./BinaryFileView";
+import { SpreadsheetView } from "./SpreadsheetView";
+import { isWorkbookPath } from "../model/spreadsheet";
 import { ReleaseNotesSurface } from "../../../app/ui/ReleaseNotesSurface";
 import { WorkingTreeDiffSurface as WorkingTreeDiff } from "../../source-control/ui/workingTreeDiffSurface";
 import { isRemoteProjectPath } from "../../projects/model/recents";
@@ -200,6 +202,8 @@ function FilePaneComponent({
                     onTerminalMetaChange?.(file.id, patch)
                   }
                 />
+              ) : isWorkbookPath(file.path) ? (
+                <SpreadsheetView path={file.path} cwd={file.cwd} />
               ) : isImagePath(file.path) || isVideoPath(file.path) ? (
                 <BinaryFileView
                   path={file.path}

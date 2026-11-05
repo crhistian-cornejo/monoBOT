@@ -592,7 +592,8 @@ function ZoomButton({
   );
 }
 
-function FileCard({
+/** A file that has no preview, or failed to open: what happened and what to do. */
+export function FileCard({
   path,
   cwd,
   title,

@@ -14,6 +14,7 @@ import {
   Bell,
   Folder,
   GitPullRequest,
+  PanelRightToggle,
 } from "../../../shared/ui/icons";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { artifactLabel, type ArtifactCard } from "../../artifacts/artifacts";
@@ -33,7 +34,9 @@ import {
   MonoSessionList,
   type ShownMonoSession,
 } from "./MonoSessionList";
-import { EmptyState } from "./monoPanelParts";
+import { EmptyState, PageHeader } from "./monoPanelParts";
+import { SpreadsheetView } from "../../files/ui/SpreadsheetView";
+import { basename } from "../../../platform/tauri/fs";
 import { PanelStack, type StackPage } from "./PanelStack";
 import { SessionFiltersMenu } from "../../sessions/ui/SessionFiltersMenu";
 import {
@@ -133,6 +136,9 @@ type Props = {
   /** A document it wrote, open over the list until Back. */
   shownDocumentId?: string;
   onBackFromDocument?: () => void;
+  /** A spreadsheet an agent pointed to, open over the list until Back. */
+  shownFile?: { path: string; cwd: string };
+  onBackFromFile?: () => void;
   onOpenFile?: (path: string) => void;
   onOpenDocument: (id: string) => void;
   onClose: () => void;
@@ -189,6 +195,8 @@ export function MonoOverview({
   onOpenSessionInWorkspace = () => {},
   shownDocumentId,
   onBackFromDocument = () => {},
+  shownFile,
+  onBackFromFile = () => {},
   onOpenFile,
   onOpenDocument,
   onClose,
@@ -301,6 +309,22 @@ export function MonoOverview({
             onClose={onClose}
             onOpenFile={onOpenFile}
           />
+        </div>
+      ),
+    });
+  if (shownFile)
+    pages.push({
+      key: `file:${shownFile.path}`,
+      node: (
+        <div className="flex min-h-0 flex-1 flex-col" data-mono-file-page>
+          <PageHeader title={basename(shownFile.path)} onBack={onBackFromFile}>
+            <IconButton label="Hide overview" active onClick={onClose}>
+              <PanelRightToggle className="size-3.5" strokeWidth={1.75} />
+            </IconButton>
+          </PageHeader>
+          <div className="min-h-0 flex-1">
+            <SpreadsheetView path={shownFile.path} cwd={shownFile.cwd} />
+          </div>
         </div>
       ),
     });

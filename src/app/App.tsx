@@ -256,6 +256,7 @@ import {
   homeDir,
   notifyGitChanged,
   pickFolders,
+  statFiles,
   type GitFileDiffKind,
   type GitHistoryCommit,
 } from "../platform/tauri/fs";
@@ -266,6 +267,11 @@ import {
   resolveFileOpenRequest,
   resolveOpenablePath,
 } from "../features/files/model/fileIndex";
+import { isSpreadsheetPath } from "../features/files/model/spreadsheet";
+import {
+  collectTexts,
+  locateReferencedFile,
+} from "../features/files/model/referencedFile";
 import {
   closeLeaf,
   closeSurfacePanes,
@@ -1352,6 +1358,7 @@ function Workspace({
   const onOpenMonoArtifact = useCallback((_sessionId: string, id: string) => {
     touchPanel();
     setMonoShownSession(null);
+    setMonoOverviewFile(null);
     setMonoOverviewDocument(id);
     setMonoOverviewTab("documents");
     setMonoOverviewOpen(true);
@@ -1386,9 +1393,17 @@ function Workspace({
   const [monoOverviewDocument, setMonoOverviewDocument] = useState<
     string | null
   >(null);
+  // A spreadsheet an agent pointed to, open over the overview the same way;
+  // it belongs to the Mono whose chat opened it.
+  const [monoOverviewFile, setMonoOverviewFile] = useState<{
+    path: string;
+    cwd: string;
+    monoSessionId: string;
+  } | null>(null);
   useEffect(() => {
     if (monoOverviewOpen) return;
     setMonoShownSession(null);
+    setMonoOverviewFile(null);
     setMonoOverviewDocument(null);
   }, [monoOverviewOpen]);
   // Whether the shown session, rather than the Mono's chat, holds focus.
@@ -1407,6 +1422,7 @@ function Workspace({
         monoOverviewOpenRef.current &&
         monoOverviewTabRef.current === "activity";
       setMonoShownSession(null);
+      setMonoOverviewFile(null);
       setMonoOverviewDocument(null);
       setMonoOverviewTab("activity");
       setMonoOverviewOpen(true);
@@ -4707,6 +4723,7 @@ function Workspace({
   // overview's Changes tab instead of in a project tab hidden behind it.
   const openMonoChanges = useCallback((request: MonoChangesRequest) => {
     setMonoShownSession(null);
+    setMonoOverviewFile(null);
     setMonoOverviewDocument(null);
     setMonoChangesRequest(request);
     setMonoOverviewTab("changes");
@@ -5288,6 +5305,7 @@ function Workspace({
       if (monoViewIdRef.current !== session.id) {
         setMonoShownSession(null);
         setMonoShownSessionFocused(false);
+        setMonoOverviewFile(null);
         setMonoOverviewDocument(null);
       }
       // A bot belongs to the Personal zone and opens on what a person checks
@@ -5667,6 +5685,7 @@ function Workspace({
       const session = await ensureOpenSession(launchedId).catch(() => null);
       if (monoViewIdRef.current !== monoSessionId) return;
       setMonoOverviewTab("sessions");
+      setMonoOverviewFile(null);
       setMonoOverviewDocument(null);
       setMonoOverviewOpen(true);
       // One that is gone leaves the sessions list open, which says so.
@@ -7220,6 +7239,54 @@ function Workspace({
 
   const onOpenFile = useCallback<OpenFileFn>(
     (path, navigation, options) => {
+      // In the agents' view a spreadsheet opens beside the chat, on the
+      // overview, instead of leaving for a code tab.
+      const monoSessionId = monoViewIdRef.current;
+      if (monoSessionId && isSpreadsheetPath(path)) {
+        const monoSession = sessionsRef.current.find(
+          (session) => session.id === monoSessionId,
+        );
+        const monoCwd = monoSession?.cwd ?? gitCwdRef.current;
+        // A group's members write in folders of their own, and an agent
+        // often names a file it wrote with its full path earlier on.
+        const mono = monoForSession(monoSessionId);
+        const agents = [
+          mono,
+          ...(mono?.group?.members ?? []).map((id) => findMono(id)),
+        ];
+        const agentSessions = agents
+          .map((agent) =>
+            sessionsRef.current.find(
+              (session) => session.id === agent?.sessionId,
+            ),
+          )
+          .filter((session) => !!session);
+        const folders = [
+          monoCwd,
+          ...agentSessions.map((session) => session.cwd),
+          ...agents.flatMap((agent) => agent?.projects ?? []),
+        ];
+        const texts = agentSessions.flatMap((session) =>
+          collectTexts(session.blocks),
+        );
+        void locateReferencedFile(path, folders, texts, statFiles)
+          .then(
+            (found) => found ?? resolveFileOpenRequest(monoCwd, path, options),
+          )
+          .then((resolved) => {
+            if (monoViewIdRef.current !== monoSessionId) return;
+            touchPanel();
+            setMonoShownSession(null);
+            setMonoOverviewDocument(null);
+            setMonoOverviewFile({
+              path: resolved,
+              cwd: monoCwd,
+              monoSessionId,
+            });
+            setMonoOverviewOpen(true);
+          });
+        return;
+      }
       closeMonoView();
       void (async () => {
         const fileCwd = gitCwdRef.current;
@@ -7297,7 +7364,7 @@ function Workspace({
         setComposerFocused(false);
       })();
     },
-    [activateTab, insertBesideActive, closeMonoView],
+    [activateTab, insertBesideActive, closeMonoView, touchPanel],
   );
 
   const onOpenPlan = useCallback(
@@ -14780,6 +14847,7 @@ function Workspace({
     panelFollowRef.current = { monoId: monoViewId, state };
     if (!move) return;
     setMonoShownSession(null);
+    setMonoOverviewFile(null);
     setMonoOverviewDocument(
       move.tab === "documents" ? (move.document ?? null) : null,
     );
@@ -14798,6 +14866,7 @@ function Workspace({
     groupFollowRef.current = { id: monoViewId, busy: monoViewBusy };
     if (!was || was.id !== monoViewId || was.busy || !monoViewBusy) return;
     setMonoShownSession(null);
+    setMonoOverviewFile(null);
     setMonoOverviewDocument(null);
     setMonoOverviewTab("activity");
     setMonoOverviewOpen(true);
@@ -15145,10 +15214,17 @@ function Workspace({
         onOpenDocument={(id) => {
           touchPanel();
           setMonoShownSession(null);
+          setMonoOverviewFile(null);
           setMonoOverviewDocument(id);
         }}
         shownDocumentId={monoOverviewDocument ?? undefined}
         onBackFromDocument={() => setMonoOverviewDocument(null)}
+        shownFile={
+          monoOverviewFile?.monoSessionId === monoViewSession.id
+            ? monoOverviewFile
+            : undefined
+        }
+        onBackFromFile={() => setMonoOverviewFile(null)}
         onOpenFile={onOpenFile}
         onClose={() => setMonoOverviewOpen(false)}
         // Classic, the overview runs the window's full height, so it carries
