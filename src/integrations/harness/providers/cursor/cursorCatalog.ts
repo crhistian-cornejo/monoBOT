@@ -4,6 +4,7 @@ import {
   type AgentModel,
   type ModelSetting,
   type ModelSettingChoice,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import { AcpClient } from "../../core/acp";
 import {
@@ -35,6 +36,7 @@ export function refreshCursorCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] cursor catalog", error);
+      reportCatalogError("cursor", error);
     })
     .finally(() => {
       inflight = null;

@@ -1,5 +1,7 @@
 import { homeDir } from "../../../../platform/tauri/fs";
-import { setHarnessModels } from "../../../../features/sessions/model/models";
+import { setHarnessModels,
+  reportCatalogError,
+} from "../../../../features/sessions/model/models";
 import { execChild, resolveFxBinary } from "../../core/child";
 import {
   mergeFxCatalogModels,
@@ -17,6 +19,7 @@ export function refreshFxCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] fx catalog", error);
+      reportCatalogError("fx", error);
     })
     .finally(() => {
       inflight = null;

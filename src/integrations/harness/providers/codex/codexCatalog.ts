@@ -4,6 +4,7 @@ import {
   type AgentModel,
   type ModelSetting,
   type ModelSettingChoice,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import {
   killChild,
@@ -40,6 +41,7 @@ export function refreshCodexCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] codex catalog", error);
+      reportCatalogError("codex", error);
     })
     .finally(() => {
       inflight = null;

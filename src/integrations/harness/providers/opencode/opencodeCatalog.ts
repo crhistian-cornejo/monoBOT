@@ -4,6 +4,7 @@ import {
   type AgentModel,
   type ModelSetting,
   type ModelSettingChoice,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import { execChild, resolveOpenCodeBinary } from "../../core/child";
 import { OpenCodeClient } from "./opencodeClient";
@@ -54,6 +55,7 @@ export function refreshOpenCodeCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] opencode catalog", error);
+      reportCatalogError("opencode", error);
     })
     .finally(() => {
       inflight = null;

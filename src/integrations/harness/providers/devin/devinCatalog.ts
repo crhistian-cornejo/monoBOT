@@ -2,6 +2,7 @@ import { homeDir } from "../../../../platform/tauri/fs";
 import {
   setHarnessModels,
   type AgentModel,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import { killChild, unwatchChild, watchChild } from "../../core/child";
 import { JsonRpcClient } from "../../core/jsonRpc";
@@ -31,6 +32,7 @@ export function refreshDevinCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] devin catalog", error);
+      reportCatalogError("devin", error);
     })
     .finally(() => {
       inflight = null;

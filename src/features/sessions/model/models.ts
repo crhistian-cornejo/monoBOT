@@ -293,10 +293,74 @@ export function hasLiveCatalog(harness: HarnessId): boolean {
   return overlays[harness] != null;
 }
 
+/**
+ * Whether a provider's models were read from its CLI. The picker lists only
+ * models that were: the built-in fallback names models the CLI may not have.
+ */
+export type CatalogStatus =
+  | { status: "live" }
+  | { status: "loading" }
+  | { status: "failed"; error: string };
+
+const catalogLoading = new Set<HarnessId>();
+let catalogErrors: Partial<Record<HarnessId, string>> = {};
+
+/** A catalog read is under way. */
+export function markCatalogLoading(harness: HarnessId) {
+  if (catalogLoading.has(harness)) return;
+  catalogLoading.add(harness);
+  emit();
+}
+
+/** Why a provider's catalog could not be read, for the picker to say. */
+export function reportCatalogError(harness: HarnessId, error: unknown) {
+  const text = (error instanceof Error ? error.message : String(error ?? ""))
+    .replace(/\s+/g, " ")
+    .trim();
+  catalogErrors = {
+    ...catalogErrors,
+    [harness]: text.length > 240 ? `${text.slice(0, 239)}…` : text,
+  };
+}
+
+/** The read finished: live if it brought models, else failed with why. */
+export function finishCatalog(harness: HarnessId) {
+  catalogLoading.delete(harness);
+  if (overlays[harness]) {
+    const { [harness]: _, ...rest } = catalogErrors;
+    catalogErrors = rest;
+  } else if (!catalogErrors[harness]) {
+    catalogErrors = { ...catalogErrors, [harness]: "It listed no models." };
+  }
+  emit();
+}
+
+export function catalogStatus(harness: HarnessId): CatalogStatus {
+  if (overlays[harness]) return { status: "live" };
+  // A read in flight wins over an older failure: the retry is showing.
+  if (catalogLoading.has(harness)) return { status: "loading" };
+  const error = catalogErrors[harness];
+  if (error != null) return { status: "failed", error };
+  // Not read yet: the picker asks for it as it opens.
+  return { status: "loading" };
+}
+
+/** The models read from the provider's CLI; none until a read succeeds. */
+export function liveModelsFor(harness: HarnessId): AgentModel[] {
+  return overlays[harness] ?? EMPTY_MODELS;
+}
+
+/** Whether this model came from a provider's own catalog. */
+export function isLiveModel(model: AgentModel): boolean {
+  return overlays[model.harness]?.some((entry) => entry.id === model.id) ?? false;
+}
+
 /** Test seam. */
 export function resetHarnessModelOverlays() {
   overlays = {};
   overlayDefaults = {};
+  catalogLoading.clear();
+  catalogErrors = {};
   emit();
 }
 

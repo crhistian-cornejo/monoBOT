@@ -65,10 +65,17 @@ vi.mock("../../../shared/ui/Popover", () => ({
 
 import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import {
+  finishCatalog,
+  modelsFor,
+  reportCatalogError,
   resetHarnessModelOverlays,
   saveRecentModelChoice,
   setHarnessModels,
 } from "../model/models";
+
+/** As if the provider's CLI listed exactly its built-in models. */
+const readBuiltIn = (harness: "grok" | "claude") =>
+  setHarnessModels(harness, modelsFor(harness));
 
 let container: HTMLDivElement;
 let root: Root;
@@ -129,6 +136,7 @@ function inputText(input: HTMLInputElement, value: string) {
 
 describe("model picker", () => {
   it("shows the model name and effort in the combined picker", () => {
+    readBuiltIn("grok");
     const onChange = vi.fn();
     const onSettingsChange = vi.fn();
     act(() =>
@@ -254,7 +262,51 @@ describe("model picker", () => {
     expect(trigger.title).toContain(name);
   });
 
+  it("lists only models a provider's CLI listed, and says why when none", () => {
+    act(() =>
+      root.render(
+        createElement(ModelPicker, {
+          harness: "grok",
+          model: "grok:grok-4.6",
+          values: {},
+          onChange: vi.fn(),
+          onSettingsChange: vi.fn(),
+        }),
+      ),
+    );
+    const open = () => {
+      act(() =>
+        container
+          .querySelector<HTMLButtonElement>('button[aria-haspopup="menu"]')!
+          .click(),
+      );
+      const modelRow = [
+        ...container.querySelectorAll<HTMLButtonElement>("button"),
+      ].find((button) => button.textContent?.startsWith("Model"));
+      if (modelRow) hover(modelRow);
+    };
+    open();
+    // Not read yet: the built-in names are not offered as if they were real.
+    expect(container.querySelectorAll('[role="option"]')).toHaveLength(0);
+    expect(container.textContent).toContain("Reading Grok Build models…");
+    act(() => {
+      reportCatalogError("grok", new Error("grok: not logged in"));
+      finishCatalog("grok");
+    });
+    expect(container.textContent).toContain(
+      "Couldn't read Grok Build's models.",
+    );
+    expect(container.querySelector("[data-catalog-error]")?.textContent).toBe(
+      "grok: not logged in",
+    );
+    act(() => readBuiltIn("grok"));
+    expect(
+      container.querySelectorAll('[role="option"]').length,
+    ).toBeGreaterThan(0);
+  });
+
   it("lists Claude Opus 5.5 after Opus 5 in the built-in Claude catalog", () => {
+    readBuiltIn("claude");
     act(() =>
       root.render(
         createElement(ModelPicker, {
@@ -476,13 +528,11 @@ describe("model picker", () => {
     const options = [
       ...container.querySelectorAll<HTMLButtonElement>('[role="option"]'),
     ];
-    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual(
-      [
-        "Claude Sonnet 5, Anthropic",
-        "Claude Opus 5, Anthropic",
-        "Claude Sonnet 5, GitHub Copilot",
-      ],
-    );
+    expect(options.map((option) => option.getAttribute("aria-label"))).toEqual([
+      "Claude Sonnet 5, Anthropic",
+      "Claude Opus 5, Anthropic",
+      "Claude Sonnet 5, GitHub Copilot",
+    ]);
     // The next row down is the next visible row, not the next catalog entry.
     options[0].focus();
     keyDown(options[0], "ArrowDown");

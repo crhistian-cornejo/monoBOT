@@ -43,7 +43,12 @@ import {
   subscribeHarnessAvailability,
   getHarnessAvailabilitySnapshot,
 } from "../../../integrations/harness/core/availability";
-import { useModelSource, type ModelSource } from "./modelSource";
+import {
+  isPickable,
+  pickerModels,
+  useModelSource,
+  type ModelSource,
+} from "./modelSource";
 import { HARNESSES, HARNESS_TITLE, type HarnessId } from "../model/session";
 import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { LAYER } from "../../../shared/lib/layers";
@@ -437,9 +442,11 @@ export function ModelPicker({
             .map((id) => source.find(id))
             .filter(
               (item): item is AgentModel =>
-                item != null && pickerHarnesses.includes(item.harness),
+                item != null &&
+                pickerHarnesses.includes(item.harness) &&
+                isPickable(source, item),
             )
-        : source.modelsFor(visibleTab);
+        : pickerModels(source, visibleTab);
     const matches = needle
       ? pool.filter((item) =>
           `${item.name} ${HARNESS_TITLE[item.harness]} ${item.provider?.name ?? ""} ${item.provider?.id ?? ""}`
@@ -1651,15 +1658,30 @@ function ModelFlyout({
           className="min-h-0 flex-1 overflow-y-auto overscroll-none p-1"
         >
           {models.length === 0 ? (
-            <div className="px-2 py-3 text-[12px] text-content/50">
-              {tab === "favorites" && !query.trim()
-                ? "No favorite models"
-                : tab !== "favorites" && !source.available(tab)
-                  ? harnessUnavailableHint(tab)
-                  : tab === "codex" && !query.trim()
-                    ? "Loading Codex models…"
-                    : "No matching models"}
-            </div>
+            tab !== "favorites" &&
+            source.available(tab) &&
+            source.catalog?.(tab).status === "failed" ? (
+              <CatalogFailure
+                harness={tab}
+                error={
+                  (source.catalog(tab) as { error: string }).error
+                }
+                onRetry={() => source.refresh([tab])}
+              />
+            ) : (
+              <div className="px-2 py-3 text-[12px] text-content/50">
+                {tab === "favorites" && !query.trim()
+                  ? "No favorite models"
+                  : tab !== "favorites" && !source.available(tab)
+                    ? harnessUnavailableHint(tab)
+                    : tab !== "favorites" &&
+                        source.catalog?.(tab).status === "loading"
+                      ? `Reading ${HARNESS_TITLE[tab]} models…`
+                      : tab === "codex" && !query.trim()
+                        ? "Loading Codex models…"
+                        : "No matching models"}
+              </div>
+            )
           ) : (
             groups.map((group) => (
               <div
@@ -1799,5 +1821,35 @@ function ProviderTabButton({
     >
       <span className="shrink-0">{children}</span>
     </button>
+  );
+}
+
+/** A provider whose models could not be read: why, and a way to try again.
+ * Its built-in fallback names are not listed, since the CLI may lack them. */
+function CatalogFailure({
+  harness,
+  error,
+  onRetry,
+}: {
+  harness: HarnessId;
+  error: string;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-start gap-2 px-2 py-3 text-[12px]">
+      <p className="text-content/70">
+        Couldn&apos;t read {HARNESS_TITLE[harness]}&apos;s models.
+      </p>
+      <p className="break-words text-content/45" data-catalog-error>
+        {error}
+      </p>
+      <button
+        type="button"
+        onClick={onRetry}
+        className="rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8"
+      >
+        Try again
+      </button>
+    </div>
   );
 }

@@ -3,6 +3,7 @@ import {
   setHarnessModels,
   type AgentModel,
   type ModelSetting,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import {
   execChild,
@@ -226,6 +227,7 @@ export function refreshClaudeCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] claude catalog", error);
+      reportCatalogError("claude", error);
     })
     .finally(() => {
       inflight = null;

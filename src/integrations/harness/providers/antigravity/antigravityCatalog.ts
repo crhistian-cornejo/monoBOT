@@ -1,5 +1,7 @@
 import { homeDir } from "../../../../platform/tauri/fs";
-import { setHarnessModels } from "../../../../features/sessions/model/models";
+import { setHarnessModels,
+  reportCatalogError,
+} from "../../../../features/sessions/model/models";
 import { AcpClient } from "../../core/acp";
 import {
   killChild,
@@ -26,6 +28,7 @@ export function refreshAntigravityCatalog(): Promise<void> {
     .catch((error: unknown) => {
       // Preserve the last live catalog (or startup seeds) when offline/logged out.
       console.debug("[monocode] antigravity catalog", error);
+      reportCatalogError("antigravity", error);
     })
     .finally(() => {
       inflight = null;

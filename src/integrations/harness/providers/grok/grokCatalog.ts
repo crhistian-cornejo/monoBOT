@@ -1,5 +1,7 @@
 import { homeDir } from "../../../../platform/tauri/fs";
-import { setHarnessModels } from "../../../../features/sessions/model/models";
+import { setHarnessModels,
+  reportCatalogError,
+} from "../../../../features/sessions/model/models";
 import { AcpClient } from "../../core/acp";
 import {
   execChild,
@@ -37,6 +39,7 @@ export function refreshGrokCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] grok catalog", error);
+      reportCatalogError("grok", error);
     })
     .finally(() => {
       inflight = null;

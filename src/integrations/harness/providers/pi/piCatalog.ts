@@ -2,6 +2,7 @@ import { homeDir } from "../../../../platform/tauri/fs";
 import {
   setHarnessModels,
   type AgentModel,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import {
   killChild,
@@ -32,6 +33,7 @@ function refreshCatalog(flavor: PiFlavor): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug(`[monocode] ${flavor.id} catalog`, error);
+      reportCatalogError(flavor.id, error);
     })
     .finally(() => {
       inflight.delete(flavor.id);

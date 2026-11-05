@@ -8,7 +8,12 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { transferProviderSession } from "./child";
 import type { GeneratedSessionTitle } from "../../../features/sessions/model/sessionTitle";
 import type { PrContent } from "../../../features/source-control/model/gitText";
-import { hasLiveCatalog } from "../../../features/sessions/model/models";
+import {
+  finishCatalog,
+  hasLiveCatalog,
+  markCatalogLoading,
+  reportCatalogError,
+} from "../../../features/sessions/model/models";
 import type { UserQuestionReply } from "../../../features/sessions/model/userQuestion";
 import type { NativeCommandProvider } from "./nativeCommands";
 import type {
@@ -497,9 +502,13 @@ export async function refreshHarnessCatalogs(
         // `force` marks an explicit user action (opening the model dropdown);
         // routine refreshes keep skipping adapters with a live catalog.
         if (!options?.force && hasLiveCatalog(adapter.id)) return;
+        // The picker lists only what a read brought, and says why when none.
+        markCatalogLoading(adapter.id);
         await adapter.refreshCatalog().catch((error: unknown) => {
           console.debug(`[monocode] ${adapter.id} catalog`, error);
+          reportCatalogError(adapter.id, error);
         });
+        finishCatalog(adapter.id);
       }),
   );
 }

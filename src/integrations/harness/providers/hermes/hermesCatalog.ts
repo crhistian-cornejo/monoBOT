@@ -2,6 +2,7 @@ import { homeDir } from "../../../../platform/tauri/fs";
 import {
   setHarnessModels,
   type AgentModel,
+  reportCatalogError,
 } from "../../../../features/sessions/model/models";
 import { AcpClient } from "../../core/acp";
 import {
@@ -27,6 +28,7 @@ export function refreshHermesCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       console.debug("[monocode] hermes catalog", error);
+      reportCatalogError("hermes", error);
     })
     .finally(() => {
       inflight = null;
