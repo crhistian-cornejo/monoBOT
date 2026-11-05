@@ -465,6 +465,7 @@ pub fn run() {
             mail::mail_open,
             mail::mail_act,
             mail::mail_interesting,
+            mail::mail_recipients,
             mail::mail_draft,
             mail::mail_send,
             mail::mail_image,

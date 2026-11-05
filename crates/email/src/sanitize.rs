@@ -48,7 +48,8 @@ pub fn clean(html: &str, pictures: Pictures) -> Cleaned {
             .generic_attributes(ATTRIBUTES.iter().copied().collect())
             .add_tag_attributes("img", ["src"])
             .add_tag_attributes("a", ["href"])
-            .url_schemes(["https", "mailto", "data", "cid"].into_iter().collect())
+            // `http` only reaches the filter, which asks for a picture over https and drops a link.
+            .url_schemes(["https", "http", "mailto", "data", "cid"].into_iter().collect())
             .url_relative(UrlRelative::Deny)
             .link_rel(Some("noopener noreferrer nofollow"))
             .attribute_filter({
@@ -72,13 +73,22 @@ fn filter<'a>(element: &str, attribute: &str, value: &str, pictures: &Pictures, 
 }
 
 /// A picture the message carries (`cid:`) becomes a data URL. One on the web stays as it is and is listed, so the
-/// frame (which loads nothing) can wait for the owner; a `data:` picture of a known type stays; anything else goes.
+/// frame (which loads nothing) gets it from the app (`remote.rs`); one on plain `http` is asked for over `https`, the
+/// only way the app fetches. A `data:` picture of a known type stays; anything else goes.
 fn picture(value: &str, pictures: &Pictures, remote: &Mutex<Vec<String>>) -> Option<String> {
     let value = value.trim();
     if let Some(id) = value.strip_prefix("cid:") {
         let (kind, bytes) = pictures.get(id)?;
         return PICTURE_TYPES.contains(&kind.as_str()).then(|| format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)));
     }
+    let secured;
+    let value = match value.get(..7) {
+        Some(scheme) if scheme.eq_ignore_ascii_case("http://") => {
+            secured = format!("https://{}", &value[7..]);
+            secured.as_str()
+        }
+        _ => value,
+    };
     if is_https(value) {
         let mut listed = remote.lock().unwrap_or_else(|p| p.into_inner());
         if !listed.iter().any(|url| url == value) {
@@ -143,6 +153,8 @@ mod tests {
         assert!(cleaned.html.contains(r##"href="https://ejemplo.test/factura""##), "{}", cleaned.html);
         assert!(cleaned.html.contains("mailto:ayuda@ejemplo.test"), "{}", cleaned.html);
         assert!(!cleaned.html.contains("javascript:") && !cleaned.html.contains("data:text"), "{}", cleaned.html);
+        let plain = clean(r##"<a href="http://ejemplo.test/x">sin cifrar</a>"##, Pictures::new());
+        assert!(!plain.html.contains("href"), "{}", plain.html);
     }
 
     #[test]
@@ -150,7 +162,7 @@ mod tests {
         let cleaned = clean(r##"<img src="cid:logo@echo.test" alt="Logo"><img src="https://imagenes.ejemplo.test/a.png"><img src="cid:otra"><img src="http://ejemplo.test/espia.png">"##, pictures());
         assert!(cleaned.html.contains("data:image/png;base64,AQID"), "{}", cleaned.html);
         assert!(cleaned.html.contains("https://imagenes.ejemplo.test/a.png"), "{}", cleaned.html);
-        assert_eq!(cleaned.remote, vec!["https://imagenes.ejemplo.test/a.png"]);
+        assert_eq!(cleaned.remote, vec!["https://imagenes.ejemplo.test/a.png", "https://ejemplo.test/espia.png"], "plain http is asked for over https");
         for gone in ["cid:", "http://ejemplo.test"] {
             assert!(!cleaned.html.contains(gone), "{gone} survived: {}", cleaned.html);
         }

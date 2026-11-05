@@ -1,6 +1,6 @@
 //! A small SMTP client over TLS, for one thing: the reply the owner sends with their own press. It never talks in the clear
 //! after the greeting: a server that offers no TLS gets no password and no message. It logs in with the same app password as
-//! IMAP and has no way to choose a recipient but the one it is given.
+//! IMAP and has no way to choose a recipient but the ones it is given.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
@@ -72,17 +72,26 @@ fn plain_address(address: &str) -> Result<&str, String> {
     valid.then_some(address).ok_or_else(|| "Ese correo no tiene una dirección a la que responder.".to_string())
 }
 
-/// From the login to the end, over a stream already secured (its greeting read). The password goes nowhere else.
-pub(crate) fn deliver(stream: impl Read + Write, login: &str, password: &str, to: &str, message: &str) -> Result<(), String> {
+/// The most people one reply goes to: a reply to all of a long list is still a reply, not a mailing.
+pub(crate) const MAX_RECIPIENTS: usize = 50;
+
+/// From the login to the end, over a stream already secured (its greeting read). The password goes nowhere else. Every
+/// address in `to` is checked before anything is sent: one bad one and none of them gets the message.
+pub(crate) fn deliver(stream: impl Read + Write, login: &str, password: &str, to: &[String], message: &str) -> Result<(), String> {
     use base64::Engine;
-    let to = plain_address(to)?;
+    if to.is_empty() || to.len() > MAX_RECIPIENTS {
+        return Err("Ese correo no tiene una dirección a la que responder.".into());
+    }
+    let to = to.iter().map(|address| plain_address(address)).collect::<Result<Vec<_>, _>>()?;
     let from = plain_address(login)?;
     let mut stream = BufReader::new(stream);
     command(&mut stream, "EHLO echo.local", 2)?;
     let token = base64::engine::general_purpose::STANDARD.encode(format!("\0{login}\0{password}"));
     command(&mut stream, &format!("AUTH PLAIN {token}"), 2)?;
     command(&mut stream, &format!("MAIL FROM:<{from}>"), 2)?;
-    command(&mut stream, &format!("RCPT TO:<{to}>"), 2)?;
+    for to in to {
+        command(&mut stream, &format!("RCPT TO:<{to}>"), 2)?;
+    }
     command(&mut stream, "DATA", 3)?;
     stream.get_mut().write_all(dot_stuffed(message).as_bytes()).map_err(|_| "Se cortó la conexión con el servidor de correo.".to_string())?;
     stream.get_mut().flush().map_err(|_| "Se cortó la conexión con el servidor de correo.".to_string())?;
@@ -117,7 +126,7 @@ fn start_tls(stream: &mut BufReader<impl Read + Write>) -> Result<(), String> {
 }
 
 /// Connects to the account's server, secures the connection and delivers the message.
-pub(crate) fn send(account: &Account, password: &str, to: &str, message: &str) -> Result<(), String> {
+pub(crate) fn send(account: &Account, password: &str, to: &[String], message: &str) -> Result<(), String> {
     let (host, port, implicit) = server_of(account);
     let offline = || "No hay conexión con el servidor de envío. Revisa tu internet.".to_string();
     let address = (host.as_str(), port).to_socket_addrs().map_err(|_| offline())?.next().ok_or_else(offline)?;
@@ -176,6 +185,10 @@ mod tests {
         (TcpStream::connect(("127.0.0.1", port)).unwrap(), handle)
     }
 
+    fn to(addresses: &[&str]) -> Vec<String> {
+        addresses.iter().map(|a| a.to_string()).collect()
+    }
+
     fn account(provider: &str, host: &str) -> Account {
         Account { id: "a".into(), name: "Ana".into(), address: "ana@ejemplo.test".into(), provider: provider.into(), host: host.into(), port: 993 }
     }
@@ -183,7 +196,7 @@ mod tests {
     #[test]
     fn delivers_to_the_one_recipient_with_the_message_stuffed() {
         let (stream, heard) = server(vec!["250-hola\r\n250 AUTH PLAIN\r\n", "235 ok\r\n", "250 ok\r\n", "250 ok\r\n", "354 sigue\r\n", "250 aceptado\r\n", "221 adiós\r\n"]);
-        deliver(stream, "ana@ejemplo.test", "clave", "lucia@ejemplo.test", "Subject: Hola\r\n\r\nUno\r\n.punto\r\n").unwrap();
+        deliver(stream, "ana@ejemplo.test", "clave", &to(&["lucia@ejemplo.test"]), "Subject: Hola\r\n\r\nUno\r\n.punto\r\n").unwrap();
         let heard = heard.join().unwrap();
         assert!(heard.contains(&"MAIL FROM:<ana@ejemplo.test>".to_string()));
         assert_eq!(heard.iter().filter(|l| l.starts_with("RCPT TO:")).collect::<Vec<_>>(), [&"RCPT TO:<lucia@ejemplo.test>".to_string()]);
@@ -194,7 +207,7 @@ mod tests {
     #[test]
     fn says_when_the_password_is_refused_and_sends_no_message() {
         let (stream, heard) = server(vec!["250 hola\r\n", "535 no\r\n"]);
-        let said = deliver(stream, "ana@ejemplo.test", "clave", "lucia@ejemplo.test", "x").unwrap_err();
+        let said = deliver(stream, "ana@ejemplo.test", "clave", &to(&["lucia@ejemplo.test"]), "x").unwrap_err();
         assert!(said.contains("contraseña de aplicación"));
         assert!(!heard.join().unwrap().iter().any(|l| l.starts_with("MAIL FROM")));
     }
@@ -202,13 +215,25 @@ mod tests {
     #[test]
     fn says_when_the_server_refuses_the_recipient() {
         let (stream, _heard) = server(vec!["250 hola\r\n", "235 ok\r\n", "250 ok\r\n", "550 no existe\r\n"]);
-        assert!(deliver(stream, "ana@ejemplo.test", "clave", "x@ejemplo.test", "x").unwrap_err().contains("550"));
+        assert!(deliver(stream, "ana@ejemplo.test", "clave", &to(&["x@ejemplo.test"]), "x").unwrap_err().contains("550"));
     }
 
     #[test]
     fn an_address_cannot_carry_another_command() {
         let (stream, _heard) = server(vec![]);
-        assert!(deliver(stream, "ana@ejemplo.test", "clave", "a@b.test>\r\nRCPT TO:<c@d.test", "x").is_err());
+        assert!(deliver(stream, "ana@ejemplo.test", "clave", &to(&["a@b.test>\r\nRCPT TO:<c@d.test"]), "x").is_err());
+    }
+
+    #[test]
+    fn delivers_to_each_recipient_and_to_none_if_one_is_bad() {
+        let (stream, heard) = server(vec!["250 hola\r\n", "235 ok\r\n", "250 ok\r\n", "250 ok\r\n", "250 ok\r\n", "354 sigue\r\n", "250 aceptado\r\n", "221 adiós\r\n"]);
+        deliver(stream, "ana@ejemplo.test", "clave", &to(&["lucia@ejemplo.test", "luis@ejemplo.test"]), "x").unwrap();
+        assert_eq!(heard.join().unwrap().iter().filter(|l| l.starts_with("RCPT TO:")).count(), 2);
+        let (stream, heard) = server(vec![]);
+        assert!(deliver(stream, "ana@ejemplo.test", "clave", &to(&["lucia@ejemplo.test", "a b@c.test"]), "x").is_err());
+        drop(heard);
+        let (stream, _heard) = server(vec![]);
+        assert!(deliver(stream, "ana@ejemplo.test", "clave", &[], "x").is_err());
     }
 
     #[test]

@@ -43,6 +43,7 @@ import { HarnessIcon } from "../../features/sessions/ui/HarnessIcon";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { TerminalSpinner } from "../../features/sessions/ui/TerminalSpinner";
 import { TabLabel } from "../../shared/ui/TabLabel";
+import { stripOverflow } from "../../shared/ui/stripOverflow";
 import { WindowControls } from "./WindowControls";
 import { openAppMenu } from "./MenuBar";
 import { PixelMascot } from "../../features/projects/ui/PixelMascot";
@@ -238,18 +239,7 @@ export function tabCopy(tab: Tab): {
 }
 
 /** Which tab-strip edges still have overflow to scroll toward. */
-export function tabStripOverflow(
-  scrollLeft: number,
-  clientWidth: number,
-  scrollWidth: number,
-): { left: boolean; right: boolean } {
-  const maxScroll = scrollWidth - clientWidth;
-  if (maxScroll <= 1) return { left: false, right: false };
-  return {
-    left: scrollLeft > 1,
-    right: scrollLeft < maxScroll - 1,
-  };
-}
+export const tabStripOverflow = stripOverflow;
 
 export function titleTabClosable(tab: Tab, tabCount: number): boolean {
   return tabCount > 1 || !tab.blank;

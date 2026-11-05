@@ -19,6 +19,10 @@ pub struct Parsed {
     /// The first recipient, for what the owner sent or is writing.
     pub to_name: String,
     pub to_address: String,
+    /// Where the sender asks replies to go (`Reply-To`), when it says, as (name, address).
+    pub reply_to: Vec<(String, String)>,
+    /// Everyone else it went to, in `To` and then `Cc`, as (name, address): who a reply to all copies.
+    pub others: Vec<(String, String)>,
     pub subject: String,
     pub message_id: String,
     pub text: String,
@@ -39,11 +43,15 @@ pub fn parse(header: &[u8], body: &[u8]) -> Parsed {
     let precedence = field("precedence").to_ascii_lowercase();
     let auto = field("auto-submitted").to_ascii_lowercase();
     let auth = header_fields(&header, "authentication-results").to_ascii_lowercase();
+    let mut others = address_list(&to);
+    others.extend(address_list(&decode_words(&field("cc"))));
     Parsed {
         from_name,
         from_address,
         to_name,
         to_address,
+        reply_to: address_list(&decode_words(&field("reply-to"))),
+        others,
         subject: one_line(&decode_words(&field("subject")), 240),
         message_id: field("message-id").chars().filter(|c| !c.is_whitespace() && !c.is_control()).take(300).collect(),
         text: part_text(&field("content-type"), &field("content-transfer-encoding"), body, 0),
@@ -81,6 +89,39 @@ fn split_from(from: &str) -> (String, String) {
     }
     let address = from.to_lowercase();
     (address.clone(), address)
+}
+
+/// The most people kept of one address list.
+const MAX_PEOPLE: usize = 50;
+
+/// The people of an address list, «Ana <a@x.test>, "Prado, Luis" <l@x.test>; b@x.test», as (name, address). A comma
+/// inside quotes or angle brackets does not split; a piece with no address (a group's «undisclosed-recipients:;») is
+/// left out.
+pub fn address_list(list: &str) -> Vec<(String, String)> {
+    let mut people = Vec::new();
+    let mut add = |piece: &str| {
+        let (name, address) = split_from(piece);
+        if address.contains('@') && people.len() < MAX_PEOPLE {
+            people.push((name, address));
+        }
+    };
+    let (mut piece, mut quoted, mut angled) = (String::new(), false, false);
+    for c in list.chars() {
+        match c {
+            '"' if !angled => quoted = !quoted,
+            '<' if !quoted => angled = true,
+            '>' if !quoted => angled = false,
+            ',' | ';' if !quoted && !angled => {
+                add(&piece);
+                piece.clear();
+                continue;
+            }
+            _ => {}
+        }
+        piece.push(c);
+    }
+    add(&piece);
+    people
 }
 
 /// The readable text of a MIME part: `text/plain` first, else `text/html` without its tags.
@@ -204,13 +245,28 @@ fn is_file(leaf: &Leaf) -> bool {
     leaf.attachment || (!leaf.name.is_empty() && leaf.content_id.is_empty()) || leaf.kind.starts_with("application/") || leaf.kind == "message/rfc822"
 }
 
-/// The attachments listed, and the place of each among the leaves (so `attachment_at` finds its bytes).
+/// The biggest picture shown in place, and the most bytes all of one message's pictures may take.
+const MAX_PREVIEW: usize = 4 * 1024 * 1024;
+const MAX_PREVIEWS: usize = 12 * 1024 * 1024;
+
+/// The attachments listed, each looked at (`inspect.rs`) and a picture shown in place, and the place of each among the
+/// leaves (so `attachment_at` finds its bytes). Everything stays in memory.
 fn attachments_of(leaves: &[Leaf]) -> (Vec<Attachment>, Vec<usize>) {
+    use base64::Engine;
     let mut list = Vec::new();
     let mut places = Vec::new();
+    let mut shown = 0;
     for (place, leaf) in leaves.iter().enumerate().filter(|(_, leaf)| is_file(leaf)) {
         let name = if leaf.name.is_empty() { format!("adjunto{}", extension_of(&leaf.kind)) } else { leaf.name.clone() };
-        list.push(Attachment { index: list.len(), name, kind: leaf.kind.clone(), size: leaf.bytes.len() });
+        let risk = crate::inspect::inspect(&name, &leaf.kind, &leaf.bytes);
+        // Only a picture its bytes prove (never SVG), with nothing found against it.
+        let preview = crate::inspect::picture_type(&leaf.bytes)
+            .filter(|_| risk.level == crate::inspect::Level::Safe && leaf.bytes.len() <= MAX_PREVIEW && shown + leaf.bytes.len() <= MAX_PREVIEWS)
+            .map(|kind| {
+                shown += leaf.bytes.len();
+                format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(&leaf.bytes))
+            });
+        list.push(Attachment { index: list.len(), name, kind: leaf.kind.clone(), size: leaf.bytes.len(), risk, preview });
         places.push(place);
     }
     (list, places)
@@ -510,6 +566,17 @@ From: a@b.test
     }
 
     #[test]
+    fn it_reads_who_replies_go_to_and_everyone_the_message_went_to() {
+        let header = b"From: Tienda <noreply@tienda.test>\r\nReply-To: \"Soporte, Tienda\" <Ayuda@Tienda.test>\r\nTo: Ana <ana@ejemplo.test>, \"Prado, Luis\" <luis@ejemplo.test>\r\nCc: marta@ejemplo.test;\r\n undisclosed-recipients:;\r\n";
+        let parsed = parse(header, b"hola");
+        assert_eq!(parsed.reply_to, [("Soporte, Tienda".to_string(), "ayuda@tienda.test".to_string())]);
+        let others: Vec<&str> = parsed.others.iter().map(|(_, address)| address.as_str()).collect();
+        assert_eq!(others, ["ana@ejemplo.test", "luis@ejemplo.test", "marta@ejemplo.test"]);
+        assert_eq!(parsed.others[1].0, "Prado, Luis");
+        assert!(parse(b"From: a@b.test\r\n", b"").reply_to.is_empty());
+    }
+
+    #[test]
     fn a_plain_message_has_none_of_the_flags() {
         let parsed = parse(b"From: ana@ejemplo.test\r\nSubject: Hola\r\nAuthentication-Results: mx; spf=softfail; dkim=pass\r\n", b"Hola\r\n");
         assert_eq!((parsed.from_name.as_str(), parsed.from_address.as_str()), ("ana@ejemplo.test", "ana@ejemplo.test"));
@@ -545,6 +612,18 @@ From: a@b.test
         assert_eq!(whole.attachments[0].size, 3);
         assert_eq!(attachment_at(message, 1).map(|(info, bytes)| (info.index, bytes)), Some((1, vec![4, 5, 6])));
         assert!(attachment_at(message, 3).is_none());
+    }
+
+    #[test]
+    fn each_file_is_looked_at_and_a_picture_is_shown_in_place_from_memory() {
+        // A PNG's signature, then a program dressed as a PDF.
+        let message = b"Content-Type: multipart/mixed; boundary=\"m\"\r\n\r\n--m\r\nContent-Type: text/plain\r\n\r\nFotos\r\n--m\r\nContent-Type: image/png\r\nContent-Disposition: attachment; filename=\"foto.png\"\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgoAAAA=\r\n--m\r\nContent-Type: application/pdf\r\nContent-Disposition: attachment; filename=\"factura.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nTVqQAAMAAAA=\r\n--m--\r\n";
+        let whole = parse_whole(message);
+        let (photo, bill) = (&whole.attachments[0], &whole.attachments[1]);
+        assert_eq!(photo.risk.level, crate::inspect::Level::Safe);
+        assert!(photo.preview.as_deref().is_some_and(|p| p.starts_with("data:image/png;base64,")), "{photo:?}");
+        assert_eq!(bill.risk.level, crate::inspect::Level::Danger);
+        assert!(bill.preview.is_none());
     }
 
     #[test]

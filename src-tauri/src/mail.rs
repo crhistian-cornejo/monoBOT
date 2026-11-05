@@ -11,7 +11,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use monobot_email::{Account, Action, Heard, Mail, Opened, Overview, Triage, MAX_ACCOUNTS};
+use monobot_email::{Account, Action, Heard, Mail, Opened, Overview, Recipients, Triage, MAX_ACCOUNTS};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -353,26 +353,35 @@ fn may_answer(id: &str) -> Result<(), String> {
     }
 }
 
+/// Who a reply goes to: whom the message asks replies to go to, else its sender, and with `all` a copy to everyone
+/// else it went to. The page shows them; it cannot add anyone.
+#[tauri::command]
+pub async fn mail_recipients(app: AppHandle, id: String, all: bool) -> Result<Recipients, String> {
+    tauri::async_runtime::spawn_blocking(move || mail().recipients(&load(&app).accounts, &id, all))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Saves the reply as a draft on the account's server.
 #[tauri::command]
-pub async fn mail_draft(app: AppHandle, id: String, text: String) -> Result<(), String> {
+pub async fn mail_draft(app: AppHandle, id: String, text: String, all: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         may_answer(&id)?;
-        mail().draft(&load(&app).accounts, &id, &text, now_ms())
+        mail().draft(&load(&app).accounts, &id, &text, all, now_ms())
     })
     .await
     .map_err(|e| e.to_string())?
 }
 
-/// Sends the reply to the message's sender. Only the user's own press calls this.
+/// Sends the reply to the people `mail_recipients` names. Only the user's own press calls this.
 #[tauri::command]
-pub async fn mail_send(app: AppHandle, id: String, text: String) -> Result<(), String> {
+pub async fn mail_send(app: AppHandle, id: String, text: String, all: bool) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         may_answer(&id)?;
         if text.trim().is_empty() {
             return Err("Write the reply first.".into());
         }
-        mail().send(&load(&app).accounts, &id, &text, now_ms())
+        mail().send(&load(&app).accounts, &id, &text, all, now_ms())
     })
     .await
     .map_err(|e| e.to_string())?

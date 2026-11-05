@@ -63,6 +63,19 @@ export type OpenedMail = {
 
 export type MailAction = "read" | "star" | "unstar" | "archive";
 
+export type MailPerson = { name: string; address: string };
+
+/** Who a reply goes to (`to`) and who gets a copy (`cc`), as Rust decides. */
+export type MailRecipients = { to: MailPerson[]; cc: MailPerson[] };
+
+/** How a person reads in a list of recipients: their name, else their address. */
+export function personLabel(person: MailPerson): string {
+  const name = person.name.trim();
+  return name && name.toLowerCase() !== person.address.toLowerCase()
+    ? name
+    : person.address;
+}
+
 /** What the list shows. Priority, Starred and Held are views over the inbox. */
 export type MailView =
   | "inbox"
@@ -223,6 +236,25 @@ export function cleanReply(output: string): string | undefined {
   if (text.endsWith("```")) text = text.slice(0, -3);
   text = text.trim();
   return text || undefined;
+}
+
+/**
+ * The [gaps] a drafted reply leaves for the user to fill, such as [fact] or
+ * [name], in the order they appear.
+ */
+export function replyGaps(text: string): { start: number; end: number }[] {
+  return Array.from(text.matchAll(/\[[^[\]\n]{1,80}\]/g), (match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+}
+
+/** The gap to select next: the first after the caret, else the first. */
+export function nextGap(
+  gaps: { start: number; end: number }[],
+  caret: number,
+): { start: number; end: number } | undefined {
+  return gaps.find((gap) => gap.start >= caret) ?? gaps[0];
 }
 
 /** Quick changes to a draft, asked of the model like a request. */

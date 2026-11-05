@@ -4,6 +4,7 @@ import type {
   MailAccount,
   MailAction,
   MailOverview,
+  MailRecipients,
   OpenedMail,
 } from "./mail";
 
@@ -36,9 +37,17 @@ export const mailApi = {
     invoke<void>("mail_act", { id, action }),
   interesting: (address: string, on: boolean) =>
     invoke<void>("mail_interesting", { address, on }),
-  draft: (id: string, text: string) => invoke<void>("mail_draft", { id, text }),
+  /**
+   * Who a reply goes to: whom the message asks replies to go to, else its
+   * sender; with `all`, a copy to everyone else it went to. Only Rust decides.
+   */
+  recipients: (id: string, all: boolean) =>
+    invoke<MailRecipients>("mail_recipients", { id, all }),
+  draft: (id: string, text: string, all = false) =>
+    invoke<void>("mail_draft", { id, text, all }),
   /** Only the user's own press on Send calls this. */
-  send: (id: string, text: string) => invoke<void>("mail_send", { id, text }),
+  send: (id: string, text: string, all = false) =>
+    invoke<void>("mail_send", { id, text, all }),
   image: (id: string, url: string) => invoke<string>("mail_image", { id, url }),
   attachment: (id: string, index: number) =>
     invoke<string>("mail_attachment", { id, index }),

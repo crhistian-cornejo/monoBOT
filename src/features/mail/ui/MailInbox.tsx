@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Modal } from "../../../shared/ui/Modal";
+import { ScrollStrip } from "../../../shared/ui/ScrollStrip";
 import { Mail, RefreshCw, Search, Settings, Star } from "../../../shared/ui/icons";
 import {
   MAIL_VIEWS,
@@ -161,13 +162,15 @@ export function MailInbox() {
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
       <div className="flex min-h-0 w-[340px] shrink-0 flex-col border-r border-stroke">
-        <div className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-stroke px-2 py-1.5">
+        <div className="shrink-0 border-b border-stroke">
+        <ScrollStrip activeKey={view} label="folders" className="gap-1 px-2 py-1.5">
           {MAIL_VIEWS.map((option) => {
             const count = unreadCount(messages, option.view);
             return (
               <button
                 key={option.view}
                 type="button"
+                data-active={view === option.view ? "" : undefined}
                 onClick={() => {
                   setView(option.view);
                   setSelectedId(undefined);
@@ -185,6 +188,7 @@ export function MailInbox() {
               </button>
             );
           })}
+        </ScrollStrip>
         </div>
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-stroke px-2">
           <div className="relative flex h-7 min-w-0 flex-1 items-center">

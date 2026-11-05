@@ -247,7 +247,7 @@ impl Imap {
     /// What a list reading asks of each message: flags, date, the headers the rules read and the first bytes of the text.
     fn list_items(gmail: bool) -> String {
         let labels = if gmail { " X-GM-LABELS" } else { "" };
-        format!("(UID FLAGS INTERNALDATE{labels} BODY.PEEK[HEADER.FIELDS (FROM TO SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING LIST-UNSUBSCRIBE PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)")
+        format!("(UID FLAGS INTERNALDATE{labels} BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING LIST-UNSUBSCRIBE PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)")
     }
 
     /// The newest `count` messages of the open mailbox, with no message marked as read.

@@ -148,7 +148,10 @@ export function MailReader({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* A column at least as tall as the pane, so the reply floats at its foot
+          and stays there (sticky) while the message scrolls under it. */}
+      <div className="flex min-h-full flex-col px-5 pt-4">
         <h2 className="text-[16px] font-medium">{message.subject || "(no subject)"}</h2>
         <p className="mt-1 text-[12px] text-content/60">
           {message.from} &lt;{message.address}&gt; ·{" "}
@@ -215,21 +218,22 @@ export function MailReader({
           )}
         </div>
         {notice ? <p role="alert" className="mt-2 text-xs text-red-400">{notice}</p> : null}
+        <div className="min-h-4 flex-1" />
+        {replying ? (
+          <div className="mail-reply-float sticky bottom-3 z-10 mx-auto mb-3 w-full max-w-[560px]">
+            <MailReply
+              message={message}
+              opened={opened}
+              onClose={() => setReplying(false)}
+              onSent={() => {
+                setReplying(false);
+                setNotice(undefined);
+              }}
+            />
+          </div>
+        ) : null}
       </div>
-
-      {replying ? (
-        <div className="shrink-0 border-t border-stroke p-3">
-          <MailReply
-            message={message}
-            opened={opened}
-            onClose={() => setReplying(false)}
-            onSent={() => {
-              setReplying(false);
-              setNotice(undefined);
-            }}
-          />
-        </div>
-      ) : null}
+      </div>
     </article>
   );
 }

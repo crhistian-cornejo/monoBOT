@@ -5,6 +5,8 @@ import {
   cleanReply,
   dayLabel,
   mailDocument,
+  nextGap,
+  replyGaps,
   replyPrompt,
   visibleMessages,
   type MailMessage,
@@ -123,5 +125,29 @@ describe("the reader's document", () => {
     expect(doc).toContain("default-src 'none'; img-src data:");
     expect(doc).toContain('<img src="data:image/png;base64,AAA">');
     expect(doc).not.toContain("https://x.org/a.png");
+  });
+});
+
+describe("replyGaps", () => {
+  const text = "Hola,\n\nLo uso en [fact: tienda o marca]?\n\nSaludos,\n[nombre]";
+
+  it("finds each bracketed gap in order", () => {
+    const gaps = replyGaps(text);
+    expect(gaps.map((gap) => text.slice(gap.start, gap.end))).toEqual([
+      "[fact: tienda o marca]",
+      "[nombre]",
+    ]);
+  });
+
+  it("ignores brackets that span lines or nest", () => {
+    expect(replyGaps("[a\nb] [[x]")).toEqual([{ start: 7, end: 10 }]);
+  });
+
+  it("picks the gap after the caret, then wraps to the first", () => {
+    const gaps = replyGaps(text);
+    expect(nextGap(gaps, 0)).toBe(gaps[0]);
+    expect(nextGap(gaps, gaps[0].end)).toBe(gaps[1]);
+    expect(nextGap(gaps, text.length)).toBe(gaps[0]);
+    expect(nextGap([], 0)).toBeUndefined();
   });
 });

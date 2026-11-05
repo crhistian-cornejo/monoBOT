@@ -132,6 +132,11 @@ pub struct Attachment {
     pub name: String,
     pub kind: String,
     pub size: usize,
+    /// What a look at its bytes found (`inspect.rs`): nothing, something to be careful with, or a file not to open.
+    pub risk: crate::inspect::Risk,
+    /// A picture's own bytes as a data URL, for the reader to show in place: nothing is saved to disk.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview: Option<String>,
 }
 
 /// What the owner does to a message on its server.

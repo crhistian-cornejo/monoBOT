@@ -33,13 +33,54 @@ pub const PREFETCH_MAX: usize = 6;
 const OPENED_BYTES: usize = 24 * 1024 * 1024;
 const PICTURES_BYTES: usize = 32 * 1024 * 1024;
 
-/// Which message of which server an id of the page is.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Which message of which server an id of the page is, and who a reply to it goes to.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Entry {
     pub(crate) account_id: String,
+    pub(crate) from_name: String,
     pub(crate) from_address: String,
+    /// Where the sender asks replies to go (`Reply-To`); empty when it does not say.
+    pub(crate) reply_to: Vec<(String, String)>,
+    /// Everyone else the message went to (`To`, `Cc`): the copies of a reply to all.
+    pub(crate) others: Vec<(String, String)>,
     pub(crate) subject: String,
     pub(crate) message_id: String,
+}
+
+/// Who a reply goes to: `to` gets it, `cc` a copy.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Recipients {
+    pub to: Vec<Person>,
+    pub cc: Vec<Person>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct Person {
+    pub name: String,
+    pub address: String,
+}
+
+/// Who a reply to `entry` goes to, for the account `own`: whom the message asks replies to go to (its `Reply-To`),
+/// else its sender, and, `all`, a copy to everyone else it went to. Never the account itself, never anyone twice. A
+/// message the account sent itself is answered to the people it went to.
+pub(crate) fn recipients_of(entry: &Entry, own: &str, all: bool) -> Recipients {
+    let mut seen = HashSet::from([own.trim().to_lowercase()]);
+    let mut take = |people: &[(String, String)]| -> Vec<Person> {
+        people
+            .iter()
+            .filter(|(_, address)| address.contains('@') && seen.insert(address.trim().to_lowercase()))
+            .map(|(name, address)| Person { name: name.clone(), address: address.clone() })
+            .collect()
+    };
+    let from = [(entry.from_name.clone(), entry.from_address.clone())];
+    let to = take(if entry.reply_to.is_empty() { &from } else { &entry.reply_to });
+    if to.is_empty() {
+        // The account wrote it: the reply goes on to the people it was for.
+        return Recipients { to: take(&entry.others), cc: Vec::new() };
+    }
+    let cc = if all { take(&entry.others) } else { Vec::new() };
+    Recipients { to, cc }
 }
 
 /// Opens the connection to an account's server, before logging in.
@@ -138,7 +179,15 @@ pub(crate) fn message_from(account: &Account, folder: Folder, raw: &Raw, interes
         reason,
         auth_failed: parsed.auth_failed,
     };
-    let entry = Entry { account_id: account.id.clone(), from_address: parsed.from_address, subject: parsed.subject, message_id: parsed.message_id };
+    let entry = Entry {
+        account_id: account.id.clone(),
+        from_name: parsed.from_name,
+        from_address: parsed.from_address,
+        reply_to: parsed.reply_to,
+        others: parsed.others,
+        subject: parsed.subject,
+        message_id: parsed.message_id,
+    };
     (message, entry)
 }
 
@@ -198,6 +247,10 @@ impl Mail {
         let raw = imap.fetch_message(uid)?;
         imap.logout();
         let (info, bytes) = mime::attachment_at(&raw, index).ok_or("Ese correo ya no trae ese archivo.")?;
+        // What the look at its bytes blocked is never handed over to be opened, whatever the page asks.
+        if info.risk.level == crate::inspect::Level::Danger {
+            return Err(format!("MonoBOT won't open this file. {}", info.risk.reasons.join(" ")));
+        }
         Ok((info.name, bytes))
     }
 
@@ -221,7 +274,8 @@ impl Mail {
         let cleaned = sanitize::clean(&whole.html, whole.pictures);
         self.remember_named(id, &cleaned.remote);
         let opened = Opened { id: id.to_string(), html: cleaned.html, text: mime::paragraphs(&whole.text), remote: cleaned.remote, images_allowed: false, attachments: whole.attachments };
-        let size = opened.html.len() + opened.text.iter().map(String::len).sum::<usize>();
+        let previews: usize = opened.attachments.iter().filter_map(|a| a.preview.as_ref()).map(String::len).sum();
+        let size = opened.html.len() + opened.text.iter().map(String::len).sum::<usize>() + previews;
         self.opened.lock().unwrap_or_else(|p| p.into_inner()).put(id.to_string(), opened.clone(), size);
         opened
     }
@@ -463,7 +517,7 @@ impl Mail {
         }
         let mut entries = self.entries();
         for message in &overview.messages {
-            entries.entry(message.id.clone()).or_insert_with(|| Entry { account_id: message.account_id.clone(), from_address: message.address.clone(), subject: message.subject.clone(), message_id: String::new() });
+            entries.entry(message.id.clone()).or_insert_with(|| Entry { account_id: message.account_id.clone(), from_name: message.from.clone(), from_address: message.address.clone(), subject: message.subject.clone(), ..Entry::default() });
         }
         *last = Some(overview);
     }
@@ -486,6 +540,13 @@ impl Mail {
         if let Some(overview) = last.as_mut() {
             overview.messages.sort_by(|a, b| b.at.cmp(&a.at));
         }
+    }
+
+    /// Who a reply to a message of the last reading goes to: only to whom it asks, or `all`.
+    pub fn recipients(&self, accounts: &[Account], id: &str, all: bool) -> Result<Recipients, String> {
+        let entry = self.entries().get(id).cloned().ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
+        let account = accounts.iter().find(|a| a.id == entry.account_id).ok_or("Esa cuenta ya no está conectada.")?;
+        Ok(recipients_of(&entry, &account.address, all))
     }
 
     /// The address a message of the last reading came from.
@@ -543,24 +604,27 @@ impl Mail {
     }
 
     /// Saves `text` as a draft of a reply to a message of the last reading.
-    pub fn draft(&self, accounts: &[Account], id: &str, text: &str, now_ms: i64) -> Result<(), String> {
+    pub fn draft(&self, accounts: &[Account], id: &str, text: &str, all: bool, now_ms: i64) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
+        let people = recipients_of(&entry, &account.address, all);
         let password = secrets::get(&account.address)?;
         let mut imap = connect(&self.open, &account, &password)?;
         let drafts = boxes_of(&imap.mailboxes()?).drafts.ok_or("Esta cuenta no tiene carpeta de borradores.")?;
-        imap.save_draft(&drafts, &compose_reply(&account, &entry, &text, now_ms))?;
+        imap.save_draft(&drafts, &compose_reply(&account, &entry, &people, &text, now_ms))?;
         imap.logout();
         Ok(())
     }
 
-    /// Sends `text` as the reply to a message of the last reading, to its sender and no one else. Only the owner's press gets
-    /// here. Gmail keeps its own copy of what it sends; any other account gets one in its sent folder, and a failure there does
+    /// Sends `text` as the reply to a message of the last reading, to the people `recipients_of` names and no one else.
+    /// Only the owner's press gets here. Gmail keeps its own copy of what it sends; any other account gets one in its sent folder, and a failure there does
     /// not undo what already left.
-    pub fn send(&self, accounts: &[Account], id: &str, text: &str, now_ms: i64) -> Result<(), String> {
+    pub fn send(&self, accounts: &[Account], id: &str, text: &str, all: bool, now_ms: i64) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
+        let people = recipients_of(&entry, &account.address, all);
+        let addresses: Vec<String> = people.to.iter().chain(&people.cc).map(|p| p.address.clone()).collect();
         let password = secrets::get(&account.address)?;
-        let message = compose_reply(&account, &entry, &text, now_ms);
-        crate::smtp::send(&account, &password, &entry.from_address, &message)?;
+        let message = compose_reply(&account, &entry, &people, &text, now_ms);
+        crate::smtp::send(&account, &password, &addresses, &message)?;
         if !account.is_gmail() {
             if let Ok(mut imap) = connect(&self.open, &account, &password) {
                 if let Some(sent) = imap.mailboxes().ok().and_then(|list| boxes_of(&list).sent) {
@@ -625,12 +689,29 @@ fn safe(text: &str) -> String {
     text.chars().filter(|c| !c.is_control()).collect()
 }
 
-/// The reply as a message: to the sender, in reply to theirs, its text in base64 so no server can alter it.
-fn compose_reply(account: &Account, entry: &Entry, text: &str, now_ms: i64) -> String {
+/// People as a header names them, «Ana Pérez <ana@x.test>, luis@x.test»: each name encoded, nothing that ends the line.
+fn header_people(people: &[Person]) -> String {
+    people
+        .iter()
+        .map(|p| {
+            let address = safe(&p.address);
+            let name = safe(&p.name);
+            if name.is_empty() || name.eq_ignore_ascii_case(&address) { address } else { format!("{} <{address}>", mime::encode_word(&name.replace('"', ""))) }
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// The reply as a message: to `people`, in reply to theirs, its text in base64 so no server can alter it.
+fn compose_reply(account: &Account, entry: &Entry, people: &Recipients, text: &str, now_ms: i64) -> String {
     use base64::Engine;
     let subject = safe(&entry.subject);
     let subject = if subject.to_ascii_lowercase().starts_with("re:") { subject } else { format!("Re: {subject}") };
-    let mut message = format!("From: {} <{}>\r\nTo: {}\r\nSubject: {}\r\nDate: {}\r\n", mime::encode_word(&safe(&account.name)), account.address, safe(&entry.from_address), mime::encode_word(&subject), rfc2822(now_ms));
+    let mut message = format!("From: {} <{}>\r\nTo: {}\r\n", mime::encode_word(&safe(&account.name)), account.address, header_people(&people.to));
+    if !people.cc.is_empty() {
+        message.push_str(&format!("Cc: {}\r\n", header_people(&people.cc)));
+    }
+    message.push_str(&format!("Subject: {}\r\nDate: {}\r\n", mime::encode_word(&subject), rfc2822(now_ms)));
     if !entry.message_id.is_empty() {
         message.push_str(&format!("In-Reply-To: {0}\r\nReferences: {0}\r\n", safe(&entry.message_id)));
     }
@@ -734,9 +815,33 @@ mod tests {
     }
 
     #[test]
+    fn a_reply_goes_where_the_message_asks_and_to_all_only_when_asked() {
+        let person = |name: &str, address: &str| (name.to_string(), address.to_string());
+        let entry = Entry {
+            from_name: "Tienda".into(),
+            from_address: "noreply@tienda.test".into(),
+            reply_to: vec![person("Soporte", "ayuda@tienda.test")],
+            others: vec![person("Ana", "Ana@Ejemplo.test"), person("Luis", "luis@ejemplo.test"), person("Soporte", "ayuda@tienda.test")],
+            ..Entry::default()
+        };
+        let addresses = |people: &[Person]| people.iter().map(|p| p.address.clone()).collect::<Vec<_>>();
+        let one = recipients_of(&entry, "ana@ejemplo.test", false);
+        assert_eq!((addresses(&one.to), addresses(&one.cc)), (vec!["ayuda@tienda.test".to_string()], vec![]));
+        let all = recipients_of(&entry, "ana@ejemplo.test", true);
+        assert_eq!(addresses(&all.cc), ["luis@ejemplo.test"], "never the account, never anyone twice");
+        let plain = Entry { reply_to: vec![], ..entry.clone() };
+        assert_eq!(addresses(&recipients_of(&plain, "ana@ejemplo.test", false).to), ["noreply@tienda.test"]);
+        let mine = Entry { from_address: "ana@ejemplo.test".into(), reply_to: vec![], others: vec![person("Luis", "luis@ejemplo.test")], ..Entry::default() };
+        assert_eq!(addresses(&recipients_of(&mine, "Ana@ejemplo.test", false).to), ["luis@ejemplo.test"]);
+        let message = compose_reply(&account(), &entry, &all, "Hola", 1_792_231_200_000);
+        assert!(message.contains("To: Soporte <ayuda@tienda.test>\r\nCc: Luis <luis@ejemplo.test>\r\n"), "{message}");
+    }
+
+    #[test]
     fn a_reply_names_its_recipient_and_cannot_add_headers() {
-        let entry = Entry { account_id: "a".into(), from_address: "lucia@ejemplo.test\r\nBcc: x@y.test".into(), subject: "Cena del sábado".into(), message_id: "<abc@ejemplo.test>".into() };
-        let reply = compose_reply(&account(), &entry, "Gracias, ¡nos vemos!", 1_792_231_200_000);
+        let entry = Entry { account_id: "a".into(), from_address: "lucia@ejemplo.test\r\nBcc: x@y.test".into(), subject: "Cena del sábado".into(), message_id: "<abc@ejemplo.test>".into(), ..Entry::default() };
+        let people = recipients_of(&entry, "ana@ejemplo.test", false);
+        let reply = compose_reply(&account(), &entry, &people, "Gracias, ¡nos vemos!", 1_792_231_200_000);
         assert!(reply.contains("To: lucia@ejemplo.testBcc: x@y.test\r\n"), "{reply}");
         assert!(!reply.contains("\r\nBcc:"));
         assert!(reply.contains("Subject: =?UTF-8?B?"));
@@ -1038,7 +1143,7 @@ mod tests {
         ]);
         let mail = mail_on(port);
         let message_id = id(&a.id, Folder::Inbox, 7);
-        mail.entries().insert(message_id.clone(), Entry { account_id: a.id.clone(), from_address: "x@y.test".into(), subject: "S".into(), message_id: String::new() });
+        mail.entries().insert(message_id.clone(), Entry { account_id: a.id.clone(), from_address: "x@y.test".into(), subject: "S".into(), ..Entry::default() });
         mail.act(std::slice::from_ref(&a), &message_id, Action::Archive).unwrap();
         handle.join().unwrap();
         assert_eq!(mail.sender_of(&message_id), None);
@@ -1084,7 +1189,7 @@ mod tests {
         let mail = Mail::new();
         assert!(mail.act(&[account()], "basura", Action::Read).is_err());
         assert!(mail.act(&[], &id(&account().id, Folder::Inbox, 1), Action::Read).unwrap_err().contains("ya no está conectada"));
-        assert!(mail.draft(&[account()], "x", "  ", 0).is_err());
-        assert!(mail.draft(&[account()], &id(&account().id, Folder::Inbox, 1), "hola", 0).unwrap_err().contains("Actualiza"));
+        assert!(mail.draft(&[account()], "x", "  ", false, 0).is_err());
+        assert!(mail.draft(&[account()], &id(&account().id, Folder::Inbox, 1), "hola", false, 0).unwrap_err().contains("Actualiza"));
     }
 }
