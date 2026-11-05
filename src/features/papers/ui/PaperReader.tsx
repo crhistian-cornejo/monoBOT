@@ -1,9 +1,24 @@
 import { open as chooseFile } from "@tauri-apps/plugin-dialog";
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { ExternalLink, Loader } from "../../../shared/ui/icons";
+import { createNote } from "../../notes";
+import { requestAddToChat } from "../../sessions/model/quoteDraft";
+import { TranscriptSelectionMenu } from "../../sessions/ui/TranscriptSelectionMenu";
+import {
+  loadNotesEnabled,
+  subscribeNotesEnabled,
+} from "../../settings/model/settings";
 import { locateInItems, locatePage } from "../model/locate";
+import { paperQuote } from "../model/paperQuote";
 import {
   announcePaperShown,
   FOCUS_PAPER_EVENT,
@@ -145,6 +160,40 @@ export function PaperReader({
   const [addError, setAddError] = useState<string>();
   const scroller = useRef<HTMLDivElement>(null);
   const ranges = useRef(new Map<string, Range>());
+  // Words the user selected in the paper, offered to the chat or to notes.
+  const [selection, setSelection] = useState<{
+    text: string;
+    rect: DOMRect;
+    page?: number;
+  } | null>(null);
+  const notesEnabled = useSyncExternalStore(
+    subscribeNotesEnabled,
+    loadNotesEnabled,
+    () => true,
+  );
+  const readSelection = useCallback(() => {
+    const el = scroller.current;
+    const picked = window.getSelection();
+    if (!el || !picked || picked.isCollapsed || !picked.rangeCount)
+      return setSelection(null);
+    const range = picked.getRangeAt(0);
+    const text = picked.toString().trim();
+    if (!text || !el.contains(range.commonAncestorContainer))
+      return setSelection(null);
+    const start =
+      range.startContainer instanceof Element
+        ? range.startContainer
+        : range.startContainer.parentElement;
+    const page = Number(
+      start?.closest("[data-paper-page]")?.getAttribute("data-paper-page"),
+    );
+    setSelection({
+      text,
+      rect: range.getBoundingClientRect(),
+      ...(page > 0 ? { page } : {}),
+    });
+  }, []);
+  useEffect(() => setSelection(null), [paperKey]);
 
   // Tell citations in the chat that this viewer shows the paper, and follow
   // them: hovering one brings its passage into view here.
@@ -341,6 +390,13 @@ export function PaperReader({
 
   const { paper } = view;
   const link = paper.doi ? `https://doi.org/${paper.doi}` : paper.landing;
+  const quoteOf = (text: string, page?: number) =>
+    paperQuote(text, {
+      ...(paper.authors.length ? { label: paperLabel(paper) } : {}),
+      title: paper.title,
+      ...(page ? { page } : {}),
+      ...(link ? { link } : {}),
+    });
   const abstractMode = !view.pdf;
   const isFound = (quoted: string) =>
     abstractMode
@@ -515,7 +571,29 @@ export function PaperReader({
           </div>
         ) : null}
       </header>
-      <div ref={scroller} className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+      <TranscriptSelectionMenu
+        selection={selection}
+        onAddToChat={(text) =>
+          requestAddToChat(quoteOf(text, selection?.page), "quote")
+        }
+        onAddToNotes={
+          notesEnabled
+            ? async (text) => {
+                await createNote({
+                  title: paper.title,
+                  body: quoteOf(text, selection?.page),
+                });
+              }
+            : undefined
+        }
+        onDismiss={() => setSelection(null)}
+      />
+      <div
+        ref={scroller}
+        onMouseUp={readSelection}
+        onKeyUp={readSelection}
+        className="min-h-0 flex-1 overflow-y-auto px-4 py-4 select-text"
+      >
         {view.pdf ? (
           failed ? (
             <p className="text-[13px] text-content/60">

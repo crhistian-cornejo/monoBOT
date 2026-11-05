@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Paper, PaperDeps, PaperRef } from "./papers";
 import { findPapers, paperLabel, resolvePaper } from "./papers";
+import { rememberPaperSource } from "./paperSources";
 import {
   detectDoi,
   guessAbstract,
@@ -379,7 +380,13 @@ async function fingerprint(bytes: Uint8Array): Promise<string> {
  */
 export async function addPaperPdf(
   path: string,
-  options: { ref?: PaperRef; title?: string; agent?: string } = {},
+  options: {
+    ref?: PaperRef;
+    title?: string;
+    agent?: string;
+    /** The links it was downloaded from: a citation of one opens this PDF. */
+    sources?: readonly string[];
+  } = {},
   deps: PaperDeps = nativePaperDeps,
 ): Promise<LoadedPaper> {
   const bytes = new Uint8Array(
@@ -415,6 +422,8 @@ export async function addPaperPdf(
       pdfUrls: [],
       access: "unknown",
       ...(abstract ? { abstract, abstractFrom: "the PDF" } : {}),
+      // Where it was found is its link: the viewer's button and citations.
+      ...(options.sources?.[0] ? { landing: options.sources[0] } : {}),
     };
   } else if (options.title?.trim()) {
     paper = { ...paper, title: options.title.trim() };
@@ -436,5 +445,7 @@ export async function addPaperPdf(
       };
   await exportCopy(loaded, options.agent);
   await remember(loaded, options.agent).catch(() => undefined);
+  if (options.sources?.length && paper.key.startsWith("pdf:"))
+    rememberPaperSource(options.sources, paper.key);
   return loaded;
 }

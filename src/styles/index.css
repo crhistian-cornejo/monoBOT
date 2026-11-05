@@ -4616,6 +4616,9 @@ html.layout-inset.theme-light {
   white-space: pre;
   cursor: text;
   transform-origin: 0% 0%;
+  /* The app turns selection off everywhere; a paper's words can be selected. */
+  -webkit-user-select: text;
+  user-select: text;
 }
 .paper-page .textLayer span.markedContent {
   top: 0;

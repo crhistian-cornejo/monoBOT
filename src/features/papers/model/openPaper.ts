@@ -1,4 +1,5 @@
 import { arxivId, normalizeDoi } from "./papers";
+import { paperKeyOfSource } from "./paperSources";
 import { paperKnown } from "./paperStore";
 
 /** Asks the app to show a paper it has read, at a cited passage. */
@@ -53,12 +54,16 @@ export function openPaper(request: OpenPaperRequest) {
   );
 }
 
-/** The cache key a citation's link names: its DOI, or the arXiv DOI. */
+/**
+ * The cache key a citation's link names: its DOI, the arXiv DOI, or the PDF
+ * without a DOI that the app downloaded from that link.
+ */
 export function paperKeyOf(href: string): string | undefined {
   const doi = normalizeDoi(href);
   if (doi) return doi;
   const arxiv = arxivId(href);
-  return arxiv ? `10.48550/arxiv.${arxiv.toLowerCase()}` : undefined;
+  if (arxiv) return `10.48550/arxiv.${arxiv.toLowerCase()}`;
+  return paperKeyOfSource(href);
 }
 
 /**

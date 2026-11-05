@@ -118,12 +118,31 @@ or a close paraphrase):
 
 - The number is the order of first citation: 1, 2, 3… The same source keeps its number everywhere. Two sources for
   one claim are two links side by side: `[2](…)[3](…)`.
-- For a paper, the passage is a **verbatim** sentence from the abstract or text that `papers.read` returned: the app
-  finds it again in the paper to show where it comes from, so a paraphrase would not match. Use the paper's DOI link.
+- For a paper or any PDF, the passage is a **verbatim** sentence from the abstract or text that `papers.read` or
+  `web.download` returned: the app finds it again in the PDF, shows that part of the page when the user rests on the
+  chip, and opens the PDF beside the chat with it painted on a click. A paraphrase would not match. Use the `link`
+  that `papers.read` or `web.download` gave: the DOI link for a paper, and for a PDF without a DOI (a report, a
+  guide, a thesis) the address it was downloaded from.
 - The link text is only the number. MonoBOT shows it as a chip with the site's name and a preview of the title and
   passage; in a docx, PDF or any other viewer it is still a plain link.
-- Cite only pages and papers you actually opened (for a paper, those `papers.read` returned text for). Use the paper's own link (DOI, arXiv or publisher), never a search
+- Cite only pages and papers you actually opened (for a paper, those `papers.read` returned text for). Use the paper's own link (DOI, arXiv, publisher, or where its PDF was downloaded), never a search
   page, and never invent a title or a passage.
+- A message the user pasted from a paper ends with `— Author (year), “Title”, p. N (link)`: that is where the quote
+  is. Answer about that passage, read more of that paper with `papers.read` (its `query` or `pages`) when you need
+  the context, and cite it with the same link.
+
+### Several PDFs: write the synthesis, not a list
+
+When you read two or more papers or PDFs for one question, write as a thesis student writes the state of the art:
+
+- Organise by **theme or question** (methods, data, results, limits), never one paragraph per paper.
+- Under each theme, say where the sources **agree, differ or leave a gap**, and cite each claim to the PDF and passage
+  it comes from: `GR4J needs four parameters [1](…) while HBV needs about fifteen [2](…).` Each source keeps its number.
+- Read each PDF for what the theme needs: `papers.read` with `"section":"methods"`, `"query":"…"` or `"pages"`,
+  not the whole text every time.
+- Add a comparison table when there are three or more sources (source, method, data, main result, limits), and cite
+  in its cells too.
+- Finish with what the sources together answer, what they do not, and which one to read first and why.
 - In the chat, the chips are the sources: do not repeat them as a list. In a document, finish with a `Sources`
   section: number, title, author, date, link.
 

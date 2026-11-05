@@ -10,6 +10,7 @@ import {
 } from "react";
 import { ExternalLink } from "../../../shared/ui/icons";
 import { Popover } from "../../../shared/ui/Popover";
+import { PaperPassagePreview } from "../../papers/ui/PaperPassagePreview";
 import {
   citationHost,
   collectCitations,
@@ -173,6 +174,12 @@ function SourceCard({
           {card.snippet}
         </p>
       ) : null}
+      {/* A paper's passage also shows where it is on the page. */}
+      <PaperPassagePreview
+        href={url}
+        passage={card.snippet}
+        width={CARD_WIDTH - 24}
+      />
     </div>
   );
 }

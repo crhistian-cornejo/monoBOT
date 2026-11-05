@@ -313,7 +313,13 @@ export type AgentAppHost = {
     /** Registers a PDF on this computer as a paper: kept, read, ready to cite. */
     addPdf(
       path: string,
-      options: { ref?: PaperRef; title?: string; agent?: string },
+      options: {
+        ref?: PaperRef;
+        title?: string;
+        agent?: string;
+        /** The links it was downloaded from, which its citations will name. */
+        sources?: readonly string[];
+      },
     ): Promise<LoadedPaper>;
   };
   /** The user's mail, as the Inbox's Email tab reads it. Never sends. */
@@ -1862,7 +1868,11 @@ function paperSummary(paper: Paper) {
     ...(paper.abstract
       ? { abstractStart: `${paper.abstract.slice(0, 220)}…` }
       : {}),
-    ...(paper.doi ? { link: `https://doi.org/${paper.doi}` } : {}),
+    ...(paper.doi
+      ? { link: `https://doi.org/${paper.doi}` }
+      : paper.key.startsWith("pdf:") && paper.landing
+        ? { link: paper.landing }
+        : {}),
   };
 }
 
@@ -2276,7 +2286,11 @@ async function handleWeb(
     const kept = await web.keep(file.path, agent);
     return { path: kept, url: file.finalUrl, bytes: file.bytes };
   }
-  const loaded = await papers.addPdf(file.path, agent ? { agent } : {});
+  const loaded = await papers.addPdf(file.path, {
+    ...(agent ? { agent } : {}),
+    // Its answer cites the link: that opens this PDF, underlined.
+    sources: [...new Set([file.finalUrl, url])],
+  });
   const kept =
     loaded.file ?? (await web.keep(file.path, agent).catch(() => undefined));
   return {

@@ -138,9 +138,13 @@ describe("web.download", () => {
     const result = (await call(host, source, "web.download", {
       url: "https://dnr.example/guide.pdf",
     })) as Record<string, unknown>;
+    // Where it was found is kept, so a citation of that link opens the PDF.
     expect(host.papers!.addPdf).toHaveBeenCalledWith(
       "/cache/papers/downloads/guide.pdf",
-      { agent: "Research" },
+      {
+        agent: "Research",
+        sources: ["https://dnr.example/guide.pdf"],
+      },
     );
     // A scan isn't exported as a paper, so the download is kept as is.
     expect(host.web!.keep).toHaveBeenCalledWith(
