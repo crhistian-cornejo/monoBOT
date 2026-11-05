@@ -1,4 +1,5 @@
 import type { BundledPlugin } from "../../skills/model/bundledPlugins";
+import type { ConnectorId } from "../../settings/model/connectors";
 
 /** Bots are Monos for personal productivity rather than code: same soul,
  * memory, habits and chat, but listed in their own sidebar section and given
@@ -10,6 +11,10 @@ export type BotRole =
   | "finance"
   | "documents"
   | "research"
+  | "inbox"
+  | "planner"
+  | "writer"
+  | "analyst"
   /** Made from scratch: the user writes its soul and picks its tools. */
   | "custom";
 
@@ -35,7 +40,25 @@ export type BotTools = {
   folders?: BotFolder[];
   /** The app's MCP connectors it may use; unset, every enabled one. */
   connectors?: string[];
+  /**
+   * Skills the user installed (in ~/.claude/skills or a plugin) it may use,
+   * by name; a plugin's may be named without its prefix. Unset, every one.
+   */
+  skills?: string[];
 };
+
+/** A skill name as Claude Code invokes it: `pdf`, `document-skills:xlsx`. */
+const SKILL_NAME = /^[\w.-]+(?::[\w.-]+)?$/;
+
+export function isSkillName(value: unknown): value is string {
+  return typeof value === "string" && value.length <= 120 && SKILL_NAME.test(value);
+}
+
+/** Whether an installed skill is the one a role or bot names: `xlsx` covers
+ * `document-skills:xlsx`, so a hint holds whichever plugin ships it. */
+export function skillMatches(wanted: string, installed: string): boolean {
+  return installed === wanted || installed.endsWith(`:${wanted}`);
+}
 
 export const BOT_ACCESS: readonly {
   access: BotAccess;
@@ -87,10 +110,21 @@ export type BotRoleInfo = {
   role: BotRole;
   name: string;
   description: string;
+  /**
+   * What a bot of this role takes on, in one line: the orchestrator reads it
+   * to pick who gets each job. The user can rewrite it per bot.
+   */
+  specialty: string;
   /** Seeds the bot's SOUL.md the first time it is opened. */
   instructions: string;
   services: readonly Service[];
   plugins: readonly BundledPlugin[];
+  /** Claude's own tools; unset, web and reading files. */
+  access?: readonly BotAccess[];
+  /** The app's connectors its job needs; unset, every enabled one. */
+  connectors?: readonly ConnectorId[];
+  /** Installed skills its job needs, when the user has them; unset, all. */
+  skills?: readonly string[];
   /** Not offered in the new-bot menu: there is one, at the top of the rail. */
   hidden?: boolean;
 };
@@ -105,48 +139,123 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
   {
     role: "principal",
     name: "Principal",
-    description: "Your main bot: plans, delegates and creates bots",
-    instructions: `You are the user's Principal bot, the lead of their personal bots. Talk with the user, plan, and hand each part to the bot whose job it is with the app action agents.message (agents.list names them); send independent parts at once and merge what they answer. You do not do their work and you do not launch subagents yourself. When the user wants a bot that keeps doing something (finances, documents, research, a daily digest), create it with the app action bots.create (run bots.list first to avoid duplicates), then suggest a habit for it. You may read Notion, Gmail and Drive to answer. ${SAFETY}`,
+    description: "Your orchestrator: does its own job and leads the others",
+    specialty:
+      "Personal assistant and orchestrator: plans with the user and handles everyday questions, notes and tasks itself, and hands specialist work to the agent whose specialty fits",
+    instructions: `You are the user's Principal bot: their personal assistant and the orchestrator of their other agents. Do the work of your own specialty yourself; for anything that is another agent's specialty, hand that part with the app action agents.message (agents.list shows each one's specialty, tools and recent work); send independent parts at once and merge what they answer. You do not launch subagents yourself. When the user wants a bot that keeps doing something (finances, documents, research, a daily digest), create it with the app action bots.create (run bots.list first to avoid duplicates), give it a specialty and only the tools its job needs, then suggest a habit for it. ${SAFETY}`,
+    // Its own job needs the everyday accounts; specialist connectors and
+    // skills belong to the agents that do that work.
     services: ["notion", "gmail", "drive"],
     plugins: [],
+    connectors: [],
+    skills: [],
     hidden: true,
   },
   {
     role: "assistant",
     name: "Assistant",
     description: "Notion, Gmail and Drive for everyday tasks",
+    specialty:
+      "Everyday tasks across Notion, Gmail and Drive: find things, organize notes and tasks, summarize files",
     instructions: `You are the user's personal productivity assistant. You organize their notes and tasks in Notion, find things in their Gmail and Google Drive, and turn files into summaries, documents and lists. Be brief and concrete. ${SAFETY}`,
     services: ["notion", "gmail", "drive"],
     plugins: [],
+    connectors: [],
+    skills: [],
+  },
+  {
+    role: "inbox",
+    name: "Inbox",
+    description: "Triage and summarize your Gmail",
+    specialty:
+      "Email: triages the inbox, summarizes threads, finds what needs a reply and tracks what is waiting on others",
+    instructions: `You are the user's inbox bot. Go through their Gmail: say what needs a reply or a decision, what can wait, and what is waiting on someone else, with the sender and date. Summarize long threads in a few lines. You never write, send or archive email; when a reply is needed, say what it should say. ${SAFETY}`,
+    services: ["gmail"],
+    plugins: [],
+    access: ["read"],
+    connectors: [],
+    skills: [],
+  },
+  {
+    role: "planner",
+    name: "Planner",
+    description: "Tasks, plans and schedules in Notion",
+    specialty:
+      "Planning: turns goals into tasks with dates, keeps the task lists in Notion current and says what is due or late",
+    instructions: `You are the user's planner bot. Turn what the user wants to get done into concrete tasks with dates and owners in Notion, keep them current, and when asked, say what is due today, this week and what is late. Keep plans short and realistic. ${SAFETY}`,
+    services: ["notion"],
+    plugins: [],
+    connectors: [],
+    skills: [],
+  },
+  {
+    role: "writer",
+    name: "Writer",
+    description: "Drafts emails, posts and documents",
+    specialty:
+      "Writing: drafts and edits emails, posts, documents and messages in the user's voice",
+    instructions: `You are the user's writer bot. Draft and edit emails, posts, documents and messages in the user's voice: ask for the audience and the goal when they are not clear, keep it short, and offer one version rather than many. Save longer pieces as documents next to the user's files or in Notion. You never send or publish anything yourself. ${SAFETY}`,
+    services: ["notion", "drive"],
+    plugins: [],
+    access: ["web", "read", "edit"],
+    connectors: [],
+    skills: ["docx", "doc-coauthoring", "internal-comms"],
+  },
+  {
+    role: "analyst",
+    name: "Analyst",
+    description: "Spreadsheets, numbers and charts",
+    specialty:
+      "Data: reads spreadsheets and CSVs, computes totals and trends, and shows them as tables and charts",
+    instructions: `You are the user's analyst bot. Read spreadsheets and CSV files, check the numbers, compute totals, trends and comparisons, and show them as a table or a chart (an html artifact) with a short reading of what they mean. Write new files next to the originals, never over them. ${SAFETY}`,
+    services: ["drive"],
+    plugins: [],
+    access: ["read", "edit"],
+    connectors: [],
+    skills: ["xlsx", "data-visualization", "dataviz", "statistical-analysis"],
   },
   {
     role: "finance",
     name: "Finance",
     description: "Expenses, income and budgets in Notion",
+    specialty:
+      "Money: logs expenses, income and vouchers, reviews the bank's emails, and keeps totals and budgets",
     instructions: `You are the user's finance bot. Load the finance skill for anything about money: logging expenses, income and vouchers, reviewing the bank's emails, totals and budgets. Amounts are in soles (PEN) unless the user says dollars, and the time zone is Lima. ${SAFETY}`,
     services: ["notion", "gmail"],
     plugins: ["monobot-finance"],
+    connectors: [],
+    skills: ["xlsx"],
   },
   {
     role: "documents",
     name: "Documents",
     description: "Read and write PDFs, Word, Excel and slides",
+    specialty:
+      "Documents: reads, compares and summarizes PDFs and Office files, and writes reports, spreadsheets and slides",
     instructions: `You are the user's documents bot. You read PDFs and Office files, summarize and compare them, extract data into spreadsheets and write reports or slides. Use the files skill for folders and the document skills (docx, xlsx, pptx, pdf) when they are installed. Write new files next to the originals, never over them. ${SAFETY}`,
     services: ["drive", "notion"],
     plugins: [],
+    access: ["web", "read", "edit"],
+    connectors: [],
+    skills: ["docx", "xlsx", "pptx", "pdf"],
   },
   {
     role: "research",
     name: "Research",
     description: "Reports with sources on any topic",
+    specialty:
+      "Research: looks things up on the web, in docs and on X, and reports with dated sources",
     instructions: `You are the user's research bot. Load the research skill: split the question, search the web and the user's files, cite sources with dates and deliver a short report, as a document when it is long. ${SAFETY}`,
     services: ["notion", "drive"],
     plugins: [],
+    connectors: ["context7", "deepwiki", "mslearn", "xmd", "openalex"],
+    skills: ["deep-research"],
   },
   {
     role: "custom",
     name: "Custom",
     description: "Yours from scratch: name, soul and tools",
+    specialty: "Whatever its soul says",
     instructions: BLANK_BOT_SOUL,
     services: ["notion", "gmail", "drive"],
     plugins: [],
@@ -242,15 +351,34 @@ function toolNames(service: Service, tools: readonly string[]): string[] {
 export function botTools(
   role: BotRole,
   own?: BotTools,
-): Required<Omit<BotTools, "connectors">> & Pick<BotTools, "connectors"> {
+): Required<Omit<BotTools, "connectors" | "skills">> &
+  Pick<BotTools, "connectors" | "skills"> {
   const info = botRole(role);
+  const connectors = own?.connectors ?? info.connectors;
+  const skills = own?.skills ?? info.skills;
   return {
     services: [...(own?.services ?? info.services)],
     plugins: [...(own?.plugins ?? info.plugins)],
-    access: [...(own?.access ?? DEFAULT_ACCESS)],
+    access: [...(own?.access ?? info.access ?? DEFAULT_ACCESS)],
     folders: [...(own?.folders ?? [])],
-    ...(own?.connectors ? { connectors: [...own.connectors] } : {}),
+    ...(connectors ? { connectors: [...connectors] } : {}),
+    ...(skills ? { skills: [...skills] } : {}),
   };
+}
+
+/**
+ * The installed skills a bot may not use: every one its list leaves out. A
+ * bot without a list keeps them all, as before bots had one.
+ */
+export function deniedSkills(
+  allowed: readonly string[] | undefined,
+  installed: readonly string[],
+): string[] {
+  if (!allowed) return [];
+  return installed.filter(
+    (name) =>
+      isSkillName(name) && !allowed.some((wanted) => skillMatches(wanted, name)),
+  );
 }
 
 /** Keeps only what MonoBOT knows; anything else is dropped. */
@@ -293,6 +421,9 @@ export function parseBotTools(value: unknown): BotTools | undefined {
             (id): id is string => typeof id === "string",
           ),
         }
+      : {}),
+    ...(Array.isArray(entry.skills)
+      ? { skills: [...new Set(entry.skills.filter(isSkillName))] }
       : {}),
   };
 }
@@ -341,10 +472,15 @@ const ACCESS_TOOLS: Record<BotAccess, readonly string[]> = {
   edit: ["Edit", "Write", "MultiEdit", "NotebookEdit"],
 };
 
-/** What MonoBOT adds to a bot's Claude session. */
+/**
+ * What MonoBOT adds to a bot's Claude session. `installed` are the skills
+ * Claude Code would load from the user's folders and plugins; the ones the
+ * bot was not given are denied. MonoBOT's own plugins are never among them.
+ */
 export function botLaunch(
   role: BotRole,
   own?: BotTools,
+  installed: readonly string[] = [],
 ): {
   plugins: BundledPlugin[];
   allowedTools: string[];
@@ -353,8 +489,10 @@ export function botLaunch(
   addDirs: string[];
   /** The app connectors it may use; unset, every enabled one. */
   connectors?: string[];
+  /** The installed skills it may use; unset, every one. */
+  skills?: string[];
 } {
-  const { services, plugins, access, folders, connectors } = botTools(
+  const { services, plugins, access, folders, connectors, skills } = botTools(
     role,
     own,
   );
@@ -382,6 +520,7 @@ export function botLaunch(
     ],
     addDirs: folders.map((folder) => folder.path),
     ...(connectors ? { connectors } : {}),
+    ...(skills ? { skills } : {}),
     disallowedTools: [
       // Claude's own tools the bot was not given.
       ...(["web", "read", "edit"] as const).flatMap((kind) =>
@@ -393,6 +532,8 @@ export function botLaunch(
       ...unused.map((service) => PREFIX[service].replace(/__$/, "")),
       ...DESTRUCTIVE_COMMANDS,
       ...(role === "principal" ? LEAD_DENIED : []),
+      // Installed skills outside its job stay closed to it.
+      ...deniedSkills(skills, installed).map((name) => `Skill(${name})`),
     ],
   };
 }

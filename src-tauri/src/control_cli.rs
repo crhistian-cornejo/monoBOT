@@ -250,6 +250,9 @@ Actions:
                   Strike the one entry containing find through and add fact.
   memory.remove  {"find":"text of the entry","topic":"..."}
                   Delete the one entry containing find, for a wrong entry.
+                  Add "shared":true to memory.read, add, replace or remove to
+                  use the team's memory, which every agent reads: facts all
+                  of them should know. memory.search covers it too.
   habits.list    {}  Mono only. Your habits: what each does, when it runs
                   next, and how its last run went.
   habits.add     {"name":"Morning CI check","instructions":"...",
@@ -264,13 +267,18 @@ Actions:
   habits.run     {"id":"..."}  Run one within a minute, to try it out.
   habits.remove  {"id":"..."}
   bots.list      {}  Principal bot only. The user's personal bots.
-  bots.create    {"name":"Daily digest","role":"research","instructions":"...",
-                  "services":["notion"],"skills":[]}  Principal bot only. role
-                  is assistant, finance, documents, research or custom;
-                  instructions seed its soul; services and skills pick its
-                  tools (all optional).
-  tools.read     {}  Bot only. Your services, skills, access (web, read,
-                  edit), connectors and folders, on or off.
+  bots.create    {"name":"Daily digest","role":"research",
+                  "specialty":"One line: what it takes on","instructions":"...",
+                  "services":["notion"],"skills":[],"access":["web","read"],
+                  "connectors":[]}  Principal bot only. role is assistant,
+                  inbox, planner, writer, analyst, finance, documents,
+                  research or custom; specialty is what the orchestrator
+                  reads to pick it; instructions seed its soul; services,
+                  skills, access and connectors pick its tools (all optional;
+                  each role has its own).
+  tools.read     {}  Bot only. Your services, skills (MonoBOT's and the ones
+                  the user installed), access (web, read, edit), connectors
+                  and folders, on or off.
   tools.update   {"services":["gmail","notion"],"skills":["monobot-finance"],
                   "access":["web","read"],"connectors":["context7"]}
                   Bot only. Each list given is the complete one you keep;
@@ -280,7 +288,8 @@ Actions:
   group.ask      {"member":"Finance","message":"..."}  Group only. Bring a
                   member in; its answer comes back to you with the others
                   asked in the same turn.
-  agents.list    {}  The user's other Monos and bots: id, name and role.
+  agents.list    {}  The user's other Monos and bots: id, name, role,
+                  specialty, tools and what each was asked recently.
   agents.message {"to":"Finance","message":"..."}  Ask another agent for
                   something that is its job. Its answer comes back to your
                   chat; not while you are answering another agent.

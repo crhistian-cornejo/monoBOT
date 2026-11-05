@@ -19,9 +19,12 @@ import {
   BOT_ACCESS,
   BOT_SERVICES,
   BOT_SKILLS,
+  botRole,
   botTools,
+  skillMatches,
   type BotTools,
 } from "../../bots/model/bots";
+import { userInstalledSkills } from "../../bots/model/botSession";
 import { BotFolders } from "../../bots/ui/BotFolders";
 import {
   CONNECTORS,
@@ -31,9 +34,12 @@ import {
   defaultMonoName,
   findMono,
   isBot,
+  resetBotTools,
   saveBotTools,
   saveMonoMascot,
   saveMonoName,
+  saveMonoSpecialty,
+  SPECIALTY_MAX,
   subscribeMonos,
   updateMono,
   type MonoLook,
@@ -177,7 +183,29 @@ function GeneralSection({
       <div className="flex flex-col items-center pb-6 pt-4">
         <LookButton monoId={monoId} agent={agent} />
         <NameField key={monoId} monoId={monoId} fallback={agent.mascot} />
+        {agent.principal ? (
+          <span
+            className="mt-1 rounded px-1.5 text-[11px] font-medium leading-4 bg-accent/10 text-accent"
+            title="It does its own job and hands the rest to the agent whose specialty fits."
+          >
+            Orchestrator
+          </span>
+        ) : null}
       </div>
+
+      {agent.group || agent.workstream ? null : (
+        <>
+          <GroupHeading
+            title="Specialty"
+            description={
+              agent.principal
+                ? "What it does itself. Everything else it hands to the agent whose specialty fits."
+                : "What it takes on, in one line. The orchestrator reads it to pick who gets each job."
+            }
+          />
+          <SpecialtyField key={monoId} monoId={monoId} />
+        </>
+      )}
 
       <GroupHeading title="Model" />
       <SettingGroup>
@@ -452,6 +480,126 @@ function NameField({ monoId, fallback }: { monoId: string; fallback: string }) {
   );
 }
 
+/** The agent's one-line specialty, saved on blur; empty goes back to its
+ * role's, shown as the placeholder. */
+function SpecialtyField({ monoId }: { monoId: string }) {
+  const own = () => findMono(monoId)?.specialty ?? "";
+  const roleLine = () => {
+    const mono = findMono(monoId);
+    return mono && isBot(mono)
+      ? botRole(mono.botRole ?? "assistant").specialty
+      : "What it is best at: frontend, releases, reviews…";
+  };
+  const [draft, setDraft] = useState(own);
+  const save = () => {
+    const line = draft.replace(/\s+/g, " ").trim();
+    if (line !== own()) saveMonoSpecialty(monoId, line);
+    setDraft(line);
+  };
+  return (
+    <textarea
+      aria-label="Specialty"
+      value={draft}
+      placeholder={roleLine()}
+      maxLength={SPECIALTY_MAX}
+      rows={2}
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={save}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !isImeComposition(event.nativeEvent)) {
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
+        if (event.key === "Escape") {
+          setDraft(own());
+          event.currentTarget.blur();
+        }
+      }}
+      className="w-full resize-none rounded-md border border-content/10 bg-background-base px-2.5 py-2 text-[13px] leading-5 text-content outline-none placeholder:text-content/40 focus:border-content/25"
+    />
+  );
+}
+
+/** The skills installed for Claude Code that a bot may use: all of them, or
+ * the ones its list names, found with a filter when there are many. */
+function InstalledSkills({
+  allowed,
+  onChange,
+}: {
+  allowed: readonly string[] | undefined;
+  onChange: (skills: string[] | undefined) => void;
+}) {
+  const [installed, setInstalled] = useState<string[] | null>(null);
+  const [query, setQuery] = useState("");
+  useEffect(() => {
+    let live = true;
+    void userInstalledSkills().then((names) => {
+      if (live) setInstalled([...names].sort());
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  if (!installed) return null;
+  if (installed.length === 0)
+    return (
+      <p className="px-3 py-2 text-[12px] text-content/40">
+        No skills installed for Claude Code.
+      </p>
+    );
+  const on = (name: string) =>
+    !allowed || allowed.some((wanted) => skillMatches(wanted, name));
+  const needle = query.trim().toLowerCase();
+  const shown = installed
+    .filter((name) => !needle || name.toLowerCase().includes(needle))
+    // The ones it has first, so they are never lost below the cut.
+    .sort((a, b) => Number(on(b)) - Number(on(a)))
+    .slice(0, 40);
+  const count = installed.filter(on).length;
+  return (
+    <>
+      <SwitchRow
+        label="Every installed skill"
+        description={
+          allowed
+            ? `${count} of ${installed.length} picked for its job`
+            : `All ${installed.length} are open to it`
+        }
+        on={!allowed}
+        onChange={(all) => onChange(all ? undefined : [])}
+      />
+      {allowed ? (
+        <>
+          <div className="px-3 py-2">
+            <input
+              aria-label="Filter skills"
+              value={query}
+              placeholder={`Filter ${installed.length} skills`}
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-9 w-full rounded-md border border-content/10 bg-background-base px-2.5 text-[13px] outline-none focus:border-content/25"
+            />
+          </div>
+          {shown.map((name) => (
+            <SwitchRow
+              key={name}
+              label={name}
+              description={on(name) ? "It may use this skill" : "Closed to it"}
+              on={on(name)}
+              onChange={(next) =>
+                onChange(
+                  next
+                    ? [...allowed, name]
+                    : allowed.filter((wanted) => !skillMatches(wanted, name)),
+                )
+              }
+            />
+          ))}
+        </>
+      ) : null}
+    </>
+  );
+}
+
 /** A bot's tools in its settings: the user's accounts, Claude's own tools,
  * folders, the app's connectors and MonoBOT's skills. Sending, sharing and
  * deleting stay blocked whatever is on. */
@@ -475,9 +623,21 @@ function BotToolsGroup({ monoId }: { monoId: string }) {
     <>
       <GroupHeading
         title="Tools"
-        description="What it can use. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat, except folders."
+        description="What it can use, picked for its specialty. Sending, sharing and deleting stay blocked. It can also change these when you ask it in its chat, except folders."
       />
       <SettingGroup>
+        <SettingRow
+          label="Its role's tools"
+          description="Go back to what its role starts with; folders stay."
+        >
+          <button
+            type="button"
+            onClick={() => resetBotTools(monoId)}
+            className="rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8"
+          >
+            Use role&apos;s
+          </button>
+        </SettingRow>
         {BOT_ACCESS.map((info) => (
           <SwitchRow
             key={info.access}
@@ -511,6 +671,20 @@ function BotToolsGroup({ monoId }: { monoId: string }) {
             }
           />
         ))}
+      </SettingGroup>
+
+      <GroupHeading
+        title="Installed skills"
+        description="Skills you installed for Claude Code. The ones it is not given stay closed to it."
+      />
+      <SettingGroup>
+        <InstalledSkills
+          allowed={tools.skills}
+          onChange={(skills) => {
+            const { skills: _, ...rest } = tools;
+            saveBotTools(monoId, skills ? { ...rest, skills } : rest);
+          }}
+        />
       </SettingGroup>
 
       <GroupHeading

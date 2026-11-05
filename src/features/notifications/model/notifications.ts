@@ -6,7 +6,34 @@ import {
   type NotificationSubject,
 } from "./notificationPreferences";
 import { monoReplyText } from "../../monos/model/monoReaction";
-import { knownNotificationProject } from "./notificationProjects";
+import { monoForSession, monoLook } from "../../monos/model/mono";
+import {
+  knownNotificationProject,
+  type NotificationProject,
+} from "./notificationProjects";
+
+/**
+ * Agents (Monos and bots) chat from the home folder, which is no project, so
+ * their approvals and questions would never alert. They alert under this one
+ * entry instead, which the user can mute as a whole.
+ */
+export const AGENTS_NOTIFICATION_PROJECT: NotificationProject = {
+  id: "agents",
+  name: "Agents",
+  detail: "Your Monos and bots",
+  kind: "local",
+  paths: [],
+};
+
+/** The project a session's alerts belong to, if it has one. */
+export function notificationProjectFor(
+  session: Pick<Session, "id" | "cwd">,
+): NotificationProject | undefined {
+  return (
+    knownNotificationProject(session.cwd) ??
+    (monoForSession(session.id) ? AGENTS_NOTIFICATION_PROJECT : undefined)
+  );
+}
 
 const KEY = "monocode.notifications";
 
@@ -171,7 +198,11 @@ export function notificationText(
   event: NotificationEvent,
 ): NotificationText {
   const title = "MonoBOT";
-  const subtitle = sessionDisplayTitle(session.title, session.harness);
+  // An agent's chat is named after the agent, as the rail shows it.
+  const agent = monoForSession(session.id);
+  const subtitle = agent
+    ? monoLook(agent).name
+    : sessionDisplayTitle(session.title, session.harness);
   const harness = HARNESS_TITLE[session.harness];
   if (event !== "finished") {
     if (event.kind === "question") {
@@ -232,7 +263,7 @@ export async function notifySession(
 ): Promise<boolean> {
   if (session.inboxAsk) return false;
   const occurredAt = Date.now();
-  const project = knownNotificationProject(session.cwd);
+  const project = notificationProjectFor(session);
   if (!project) return false;
   return notifyProjectSession(session, event, sessionVisible, {
     projectId: project.id,
@@ -298,7 +329,7 @@ async function announceSession(
 ): Promise<void> {
   if (session.inboxAsk) return;
   const occurredAt = Date.now();
-  const project = knownNotificationProject(session.cwd);
+  const project = notificationProjectFor(session);
   if (!project) return;
   const finished = event === "finished";
   const subject: NotificationSubject = {

@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { newSession } from "../../sessions/model/session";
 import {
   MonoFileConflict,
+  TEAM_MEMORY_ID,
   type AgentFilePath,
 } from "../../monos/model/monoFiles";
 import {
@@ -16,23 +17,28 @@ function fixture(agent = true) {
   const source = newSession("codex", "/tmp/project", "codex:test");
   source.id = "agent";
   const files = new Map<string, string>([["MEMORY.md", ""]]);
+  // The team's memory is another agent folder.
+  const team = new Map<string, string>();
+  const folderOf = (monoId: string) => (monoId === TEAM_MEMORY_ID ? team : files);
   const versions = new Map<string, number>();
-  const hash = (path: string) => `${path}@${versions.get(path) ?? 0}`;
+  const hash = (path: string, monoId = "mono-1") =>
+    `${monoId}/${path}@${versions.get(`${monoId}/${path}`) ?? 0}`;
   const write = vi.fn(
-    async (_monoId: string, path: AgentFilePath, text: string, expected: string) => {
-      if (expected !== hash(path)) throw new MonoFileConflict();
-      files.set(path, text);
-      versions.set(path, (versions.get(path) ?? 0) + 1);
-      return hash(path);
+    async (monoId: string, path: AgentFilePath, text: string, expected: string) => {
+      if (expected !== hash(path, monoId)) throw new MonoFileConflict();
+      folderOf(monoId).set(path, text);
+      const key = `${monoId}/${path}`;
+      versions.set(key, (versions.get(key) ?? 0) + 1);
+      return hash(path, monoId);
     },
   );
   const host = {
     isMono: (id: string) => agent && id === "agent",
     monoOf: (id: string) =>
       agent && id === "agent" ? { id: "mono-1", projects: [] } : undefined,
-    readAgentFile: async (_monoId: string, path: AgentFilePath) => ({
-      text: files.get(path) ?? null,
-      hash: hash(path),
+    readAgentFile: async (monoId: string, path: AgentFilePath) => ({
+      text: folderOf(monoId).get(path) ?? null,
+      hash: hash(path, monoId),
     }),
     writeAgentFile: write,
     agentFiles: async () => ({
@@ -51,7 +57,7 @@ function fixture(agent = true) {
   } as unknown as AgentAppHost;
   const run = (action: string, input: Record<string, unknown> = {}) =>
     handleAgentApp(source, `req-${Math.random()}`, action, input, host);
-  return { files, write, versions, run };
+  return { files, team, write, versions, run };
 }
 
 it("adds, supersedes and removes dated entries in MEMORY.md", async () => {
@@ -88,7 +94,7 @@ it("retries over an edit the user saved in between", async () => {
   write.mockImplementationOnce(async (...args) => {
     // The user saves from the details panel just before the agent's write.
     files.set("MEMORY.md", "User note\n");
-    versions.set("MEMORY.md", 9);
+    versions.set("mono-1/MEMORY.md", 9);
     return original(...args);
   });
   await run("memory.add", { fact: "uses pnpm" });
@@ -116,6 +122,29 @@ it("searches MEMORY.md, topics and the archive", async () => {
   expect(await run("memory.search", { query: "fly" })).toMatchObject({
     hits: [{ file: "MEMORY.md" }, { file: "memory/infra.md" }],
   });
+});
+
+it("keeps facts every agent should know in the team's memory", async () => {
+  const { files, team, run } = fixture();
+  expect(
+    await run("memory.add", { fact: "The user is 28", shared: true }),
+  ).toMatchObject({ file: "MEMORY.md", shared: true });
+  expect(team.get("MEMORY.md")).toBe("- 2026-10-04 · The user is 28\n");
+  // Its own memory is untouched.
+  expect(files.get("MEMORY.md")).toBe("");
+  expect(await run("memory.read", { shared: true })).toMatchObject({
+    shared: true,
+    text: "- 2026-10-04 · The user is 28\n",
+  });
+  // Search covers the team's memory alongside its own.
+  expect(await run("memory.search", { query: "user" })).toMatchObject({
+    hits: [{ file: "team:MEMORY.md" }],
+  });
+  await run("memory.remove", { find: "is 28", shared: true });
+  expect(team.get("MEMORY.md")).toBe("");
+  await expect(
+    run("memory.add", { fact: "x", shared: "yes" }),
+  ).rejects.toThrow("shared must be true or false");
 });
 
 function habitsFixture(mono = true) {

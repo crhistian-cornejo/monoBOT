@@ -48,7 +48,10 @@ import {
   listMonos,
   monoForSession,
   monoLook,
+  monoSpecialty,
   saveBotTools,
+  saveMonoSpecialty,
+  SPECIALTY_MAX,
   type Mono,
 } from "../../monos/model/mono";
 import {
@@ -63,12 +66,18 @@ import {
   botRole,
   botTools,
   isBotRole,
+  isSkillName,
+  skillMatches,
   type BotTools,
 } from "../../bots/model/bots";
 import { groupMessage } from "../../groups/model/group";
 import { groupMembers, memberRole } from "../../groups/model/groupBrief";
 import { agentMessage, isAnswering, markAnswering } from "./agentMessages";
-import { recordDelegation } from "../../bots/model/delegations";
+import {
+  delegationsSnapshot,
+  recordDelegation,
+  type Delegation,
+} from "../../bots/model/delegations";
 import {
   sessionConversationPage,
   type SessionReadOptions,
@@ -95,6 +104,7 @@ import {
 import {
   memoryWithinBudget,
   MonoFileConflict,
+  TEAM_MEMORY_ID,
   type AgentFilePath,
   type MonoFiles,
 } from "../../monos/model/monoFiles";
@@ -209,9 +219,20 @@ export type AgentAppHost = {
     text: string,
     hash: string,
   ): Promise<string>;
+  /** The skills the user installed for Claude Code, by name. */
+  installedSkills?(): Promise<string[]>;
   /** The clock entries are dated by; tests pin it. */
   now?(): Date;
 };
+
+/** The installed skills, or none when the host cannot list them. */
+async function installedSkillsFor(host: AgentAppHost): Promise<string[]> {
+  try {
+    return (await host.installedSkills?.()) ?? [];
+  } catch {
+    return [];
+  }
+}
 
 const FIELDS = new Map<string, readonly string[]>([
   ["models.list", []],
@@ -254,18 +275,30 @@ const FIELDS = new Map<string, readonly string[]>([
   ["artifacts.write", ["id", "kind", "title", "body", "summary"]],
   ["soul.read", []],
   ["soul.update", ["text", "expectedHash"]],
-  ["memory.read", ["topic"]],
+  ["memory.read", ["topic", "shared"]],
   ["memory.search", ["query", "since"]],
-  ["memory.add", ["fact", "topic", "until"]],
-  ["memory.replace", ["find", "fact", "topic", "until"]],
-  ["memory.remove", ["find", "topic"]],
+  ["memory.add", ["fact", "topic", "until", "shared"]],
+  ["memory.replace", ["find", "fact", "topic", "until", "shared"]],
+  ["memory.remove", ["find", "topic", "shared"]],
   ["habits.list", []],
   ["habits.add", ["name", "instructions", "schedule"]],
   ["habits.update", ["id", "name", "instructions", "schedule", "enabled"]],
   ["habits.run", ["id"]],
   ["habits.remove", ["id"]],
   ["bots.list", []],
-  ["bots.create", ["name", "role", "instructions", "services", "skills"]],
+  [
+    "bots.create",
+    [
+      "name",
+      "role",
+      "specialty",
+      "instructions",
+      "services",
+      "skills",
+      "access",
+      "connectors",
+    ],
+  ],
   ["tools.read", []],
   ["tools.update", ["services", "skills", "access", "connectors"]],
   ["group.members", []],
@@ -649,8 +682,13 @@ async function handleMemory(
   input: Record<string, unknown>,
   host: AgentAppHost,
 ): Promise<unknown> {
-  const monoId = host.monoOf?.(source.id)?.id;
-  if (!monoId) throw new Error("Memory belongs to the Mono's conversation");
+  const ownId = host.monoOf?.(source.id)?.id;
+  if (!ownId) throw new Error("Memory belongs to the Mono's conversation");
+  if (input.shared !== undefined && typeof input.shared !== "boolean")
+    throw new Error("shared must be true or false");
+  const shared = input.shared === true;
+  // The team's memory is one more agent folder, owned by none of them.
+  const monoId = shared ? TEAM_MEMORY_ID : ownId;
   const path = memoryPath(input.topic);
   const date = memoryDate(host.now?.() ?? new Date());
   const until = optionalString(input.until, "until", 10);
@@ -661,6 +699,7 @@ async function handleMemory(
         : [];
     return {
       file: path,
+      ...(shared ? { shared } : {}),
       ...result,
       ...(moved.length
         ? { movedToArchive: moved.length, moved: moved.slice(0, 5) }
@@ -680,7 +719,7 @@ async function handleMemory(
               requiredString(input.since, "since", 20),
               host.now?.() ?? new Date(),
             );
-      const files = await host.agentFiles(monoId);
+      const files = await host.agentFiles(ownId);
       const paths: AgentFilePath[] = [
         "MEMORY.md",
         ...files.topics.map((topic) => `memory/${topic}.md` as const),
@@ -692,10 +731,20 @@ async function handleMemory(
           text:
             file === "MEMORY.md"
               ? files.memory
-              : ((await host.readAgentFile(monoId, file)).text ?? ""),
+              : ((await host.readAgentFile(ownId, file)).text ?? ""),
         })),
       );
-      const hits = searchMemory(texts, query, { since });
+      // The team's memory and its archive, which every agent shares.
+      const team = await Promise.all(
+        (["MEMORY.md", "memory/archive.md"] as const).map(async (file) => ({
+          file: `team:${file}`,
+          text: await host
+            .readAgentFile(TEAM_MEMORY_ID, file)
+            .then((read) => read.text ?? "")
+            .catch(() => ""),
+        })),
+      );
+      const hits = searchMemory([...texts, ...team], query, { since });
       return hits.length
         ? { hits }
         : {
@@ -704,10 +753,11 @@ async function handleMemory(
           };
     }
     case "memory.read": {
-      if (path !== "MEMORY.md") {
+      if (path !== "MEMORY.md" || shared) {
         const topic = await host.readAgentFile(monoId, path);
-        if (topic.text == null) throw new Error("No such memory topic");
-        return { file: path, text: topic.text };
+        if (topic.text == null && path !== "MEMORY.md")
+          throw new Error("No such memory topic");
+        return { file: path, ...(shared ? { shared } : {}), text: topic.text ?? "" };
       }
       const files = await host.agentFiles(monoId);
       const budget = memoryWithinBudget(files.memory);
@@ -869,14 +919,13 @@ async function handleAgents(
   const others = listMonos().filter(
     (mono) => mono.id !== sender.id && mono.kind !== "group",
   );
-  if (action === "agents.list")
+  if (action === "agents.list") {
+    const recent = delegationsSnapshot();
     return {
-      agents: others.map((mono) => ({
-        id: mono.id,
-        name: monoLook(mono).name,
-        role: memberRole(mono),
-      })),
+      agents: others.map((mono) => agentCard(mono, recent)),
+      note: "Pick by specialty first, then by tools; recent shows what each was asked lately, so you do not ask twice.",
     };
+  }
   if (isAnswering(source.id))
     throw new Error(
       "You are answering another agent: reply to it instead of messaging others",
@@ -912,6 +961,52 @@ async function handleAgents(
   };
 }
 
+/** How many recent requests to an agent agents.list shows. */
+const RECENT_WORK = 3;
+
+/**
+ * One agent as the orchestrator reads it: what it takes on, what it can use
+ * and what it was asked lately.
+ */
+function agentCard(mono: Mono, recent: readonly Delegation[]) {
+  const look = monoLook(mono);
+  const asked = recent
+    .filter((entry) => entry.to === mono.id)
+    .slice(0, RECENT_WORK)
+    .map((entry) => ({
+      at: new Date(entry.at).toISOString(),
+      from: findMono(entry.from) ? monoLook(findMono(entry.from)!).name : "an agent",
+      message:
+        entry.message.length > 160
+          ? `${entry.message.slice(0, 159)}…`
+          : entry.message,
+    }));
+  const tools = isBot(mono)
+    ? botTools(mono.botRole ?? "assistant", mono.botTools)
+    : undefined;
+  return {
+    id: mono.id,
+    name: look.name,
+    role: memberRole(mono),
+    ...(look.principal ? { orchestrator: true } : {}),
+    ...(look.specialty ? { specialty: look.specialty } : {}),
+    ...(look.projects.length
+      ? { projects: look.projects.map((project) => project.name) }
+      : {}),
+    ...(tools
+      ? {
+          tools: {
+            accounts: tools.services,
+            skills: [...tools.plugins, ...(tools.skills ?? ["(every installed skill)"])],
+            access: tools.access,
+            connectors: tools.connectors ?? ["(every enabled connector)"],
+          },
+        }
+      : {}),
+    ...(asked.length ? { recent: asked } : {}),
+  };
+}
+
 /** The Principal bot creates and lists the user's personal bots. */
 function handleBots(
   source: { id: string },
@@ -925,6 +1020,7 @@ function handleBots(
     id: mono.id,
     name: monoLook(mono).name,
     role: mono.botRole ?? "assistant",
+    ...(monoSpecialty(mono) ? { specialty: monoSpecialty(mono) } : {}),
   });
   if (action === "bots.list")
     return { bots: listMonos().filter(isBot).map(view) };
@@ -942,13 +1038,23 @@ function handleBots(
     input.instructions === undefined
       ? botRole(role).instructions
       : requiredString(input.instructions, "instructions", 4_000);
+  const specialty =
+    input.specialty === undefined
+      ? undefined
+      : requiredString(input.specialty, "specialty", SPECIALTY_MAX);
   const tools =
-    input.services === undefined && input.skills === undefined
+    input.services === undefined &&
+    input.skills === undefined &&
+    input.access === undefined &&
+    input.connectors === undefined
       ? undefined
       : requiredTools(input, botTools(role));
   const bot = createMono([], { role, name, instructions });
   if (tools) saveBotTools(bot.id, tools);
-  return { bot: view(bot) };
+  if (specialty) saveMonoSpecialty(bot.id, specialty);
+  return {
+    bot: { ...view(bot), specialty: specialty ?? botRole(role).specialty },
+  };
 }
 
 /**
@@ -981,12 +1087,12 @@ function requiredTools(
       BOT_SERVICES.map((info) => info.service),
       current.services,
     ),
-    plugins: list(
-      input.skills,
-      "skills",
-      BOT_SKILLS.map((info) => info.plugin),
-      current.plugins,
-    ),
+    // "skills" names MonoBOT's own (monobot-finance) and the ones the user
+    // installed alike; each goes to its own list.
+    plugins:
+      input.skills === undefined
+        ? current.plugins
+        : bundledSkills(input.skills),
     access: list(
       input.access,
       "access",
@@ -1005,15 +1111,46 @@ function requiredTools(
             current.connectors ?? CONNECTORS.map((connector) => connector.id),
           ),
         }),
+    ...(input.skills === undefined
+      ? current.skills
+        ? { skills: current.skills }
+        : {}
+      : { skills: installedSkillList(input.skills) }),
   };
 }
 
+const BUNDLED_SKILLS = BOT_SKILLS.map((info) => info.plugin as string);
+
+function skillList(value: unknown): string[] {
+  if (!Array.isArray(value)) throw new Error("skills must be an array");
+  for (const item of value)
+    if (!isSkillName(item))
+      throw new Error(
+        `Unknown skill ${JSON.stringify(item)}; name it as tools.read lists it`,
+      );
+  return [...new Set(value as string[])];
+}
+
+/** MonoBOT's own skills among the names given. */
+function bundledSkills(value: unknown): BotTools["plugins"] {
+  const names = skillList(value);
+  return BOT_SKILLS.map((info) => info.plugin).filter((plugin) =>
+    names.includes(plugin),
+  );
+}
+
+/** The skills the user installed among the names given. */
+function installedSkillList(value: unknown): string[] {
+  return skillList(value).filter((name) => !BUNDLED_SKILLS.includes(name));
+}
+
 /** A bot reads and changes its own services and skills. */
-function handleTools(
+async function handleTools(
   source: { id: string },
   action: string,
   input: Record<string, unknown>,
-): unknown {
+  host: AgentAppHost,
+): Promise<unknown> {
   const mono = monoForSession(source.id);
   if (!mono || !isBot(mono))
     throw new Error("Only a bot's own conversation can manage its tools");
@@ -1028,12 +1165,23 @@ function handleTools(
       does: info.note,
       on: tools.services.includes(info.service),
     })),
-    skills: BOT_SKILLS.map((info) => ({
-      name: info.plugin,
-      label: info.name,
-      does: info.note,
-      on: tools.plugins.includes(info.plugin),
-    })),
+    skills: [
+      ...BOT_SKILLS.map((info) => ({
+        name: info.plugin,
+        label: info.name,
+        does: info.note,
+        on: tools.plugins.includes(info.plugin),
+      })),
+      ...(await installedSkillsFor(host)).map((name) => ({
+        name,
+        on:
+          !tools.skills ||
+          tools.skills.some((wanted) => skillMatches(wanted, name)),
+      })),
+    ],
+    ...(tools.skills
+      ? {}
+      : { skillsNote: "No list yet: every installed skill is open to you." }),
     access: BOT_ACCESS.map((info) => ({
       name: info.access,
       label: info.name,
@@ -1329,7 +1477,8 @@ export async function handleAgentApp(
   if (action.startsWith("habits.") || action === "wakes.add")
     return handleHabits(source, action, input, host);
   if (action.startsWith("bots.")) return handleBots(source, action, input);
-  if (action.startsWith("tools.")) return handleTools(source, action, input);
+  if (action.startsWith("tools."))
+    return handleTools(source, action, input, host);
   if (action.startsWith("group."))
     return handleGroup(source, requestId, action, input, host);
   if (action.startsWith("agents."))

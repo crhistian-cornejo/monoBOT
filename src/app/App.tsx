@@ -633,6 +633,7 @@ import {
   monoLook,
   monosSnapshot,
   monoState,
+  agentsNeedingYou,
   removeMono,
   saveOpenMono,
   subscribeMonos,
@@ -650,6 +651,7 @@ import {
   shouldAlertNews,
 } from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
+import { installedClaudeSkills } from "../features/bots/model/botSession";
 import { createWorkstream } from "../features/workstreams/model/workstreamApi";
 import {
   markWorkstreamIntroSeen,
@@ -8545,7 +8547,10 @@ function Workspace({
               ...agentFiles,
               soulHash: `${agentFiles.soulHash}:${agentLook.name}:${agentLook.projects
                 .map((project) => project.path)
-                .join("|")}:${MONO_PROMPT_VERSION}`,
+                .join("|")}:${agentLook.specialty ?? ""}:${MONO_PROMPT_VERSION}`,
+              // The team's memory loads with its own: a change to either is
+              // handed over again.
+              memoryHash: `${agentFiles.memoryHash}:${agentFiles.teamHash ?? ""}`,
             };
           const agentPlan = handedFiles
             ? planAgentContext(
@@ -11887,6 +11892,8 @@ function Workspace({
             },
             habits: { load: loadHabits, update: updateHabits },
             agentFiles: (monoId) => loadMonoFiles(monoId),
+            installedSkills: async () =>
+              installedClaudeSkills(await homeDir()),
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
             writeAgentFile: (monoId, path, text, hash) =>
               writeAgentFile(monoId, path, text, hash),
@@ -13991,7 +13998,11 @@ function Workspace({
         : undefined;
       if (count) unseen.set(mono.id, count);
     }
-    return { states, unseen };
+    // Every agent waiting on an approval or an answer, for the "Needs you" list.
+    const waiting = agentsNeedingYou(listMonos(), (id) =>
+      sessions.find((entry) => entry.id === id),
+    );
+    return { states, unseen, waiting };
     // The roster is read through its snapshot.
   }, [monosSnap, sessions, monoReplies.counts]);
   const monoRail = useStableValue(monoRailState);
@@ -14064,6 +14075,7 @@ function Workspace({
             <BotNewsList
               onOpenBot={(monoId) => void onOpenMono(monoId)}
               notes={notesEnabled}
+              waiting={monoRail.waiting}
             />
           ) : undefined
         }

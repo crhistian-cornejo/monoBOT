@@ -13,7 +13,11 @@ import {
   enabledConnectors,
 } from "../../../../features/settings/model/connectors";
 import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
-import { botLaunchForSession } from "../../../../features/bots/model/botSession";
+import {
+  botLaunchForSession,
+  installedClaudeSkills,
+  isBotSession,
+} from "../../../../features/bots/model/botSession";
 import {
   killChild,
   resolveClaudeBinary,
@@ -546,7 +550,11 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     },
   );
 
-  const bot = botLaunchForSession(input.sessionId);
+  // A bot's installed skills outside its job are denied, so list them first.
+  const bot = botLaunchForSession(
+    input.sessionId,
+    isBotSession(input.sessionId) ? await installedClaudeSkills(input.cwd) : [],
+  );
   await spawnChild(
     input.sessionId,
     path,
@@ -1782,7 +1790,7 @@ function settingsKeyFor(input: HarnessSessionInput): string {
   // resuming the same conversation.
   const bot = botLaunchForSession(input.sessionId);
   const botKey = bot
-    ? `:${JSON.stringify([bot.plugins, bot.allowedTools, bot.addDirs, bot.connectors ?? null])}`
+    ? `:${JSON.stringify([bot.plugins, bot.allowedTools, bot.addDirs, bot.connectors ?? null, bot.skills ?? null])}`
     : "";
   return `${input.providerAccountId ?? "default"}${botKey}:${claudeSettingsKey({
     model: nativeModelId(input.model),

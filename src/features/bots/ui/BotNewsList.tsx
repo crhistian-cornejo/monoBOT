@@ -11,6 +11,7 @@ import {
   markBotNewsSeen,
   subscribeBotNews,
 } from "../model/botNews";
+import type { AgentNeedingYou } from "../../monos/model/mono";
 
 const STATUS_LABEL = {
   done: "Done",
@@ -38,24 +39,85 @@ function when(at: number): string {
 export function BotNewsList({
   onOpenBot,
   notes = false,
+  waiting = [],
 }: {
   onOpenBot: (monoId: string) => void;
   /** Notes are turned on, so a report can be saved as one. */
   notes?: boolean;
+  /** Agents waiting on an approval or an answer right now. */
+  waiting?: readonly AgentNeedingYou[];
 }) {
   const items = useSyncExternalStore(subscribeBotNews, botNewsSnapshot);
   useEffect(() => {
     markBotNewsSeen();
   }, [items]);
 
-  if (items.length === 0)
+  if (items.length === 0 && waiting.length === 0)
     return (
       <EmptyState icon={Bell}>
-        When a bot&apos;s habit has something to tell you, like a digest, a
-        budget alert or a finished report, it shows up here.
+        When an agent waits for your approval, or a bot&apos;s habit has
+        something to tell you, like a digest, a budget alert or a finished
+        report, it shows up here.
       </EmptyState>
     );
 
+  return (
+    <div className="flex flex-col gap-3">
+      {waiting.length ? <NeedsYouList waiting={waiting} onOpenBot={onOpenBot} /> : null}
+      {items.length ? <NewsItems items={items} notes={notes} onOpenBot={onOpenBot} /> : null}
+    </div>
+  );
+}
+
+/** Agents waiting on the user, live: each opens its chat to answer. */
+function NeedsYouList({
+  waiting,
+  onOpenBot,
+}: {
+  waiting: readonly AgentNeedingYou[];
+  onOpenBot: (monoId: string) => void;
+}) {
+  return (
+    <section aria-label="Needs you" data-needs-you>
+      <h3 className="px-2 pb-1 text-[11px] font-medium uppercase tracking-wide text-accent">
+        Needs you
+      </h3>
+      <ul className="flex flex-col gap-px">
+        {waiting.map((agent) => (
+          <li key={agent.monoId}>
+            <button
+              type="button"
+              onClick={() => onOpenBot(agent.monoId)}
+              title={`Open ${agent.name}`}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-content/5"
+            >
+              <span
+                aria-hidden
+                className="size-1.5 shrink-0 rounded-full bg-accent"
+              />
+              <span className="shrink-0 text-[13px] font-medium text-content/85">
+                {agent.name}
+              </span>
+              <span className="min-w-0 truncate text-[12px] text-content/55">
+                {agent.activity}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function NewsItems({
+  items,
+  notes,
+  onOpenBot,
+}: {
+  items: ReturnType<typeof botNewsSnapshot>;
+  notes: boolean;
+  onOpenBot: (monoId: string) => void;
+}) {
   return (
     <ul className="flex flex-col gap-px" data-bot-news>
       {items.map((item) => (

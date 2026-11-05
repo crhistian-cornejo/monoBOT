@@ -17,6 +17,8 @@ import {
   monoTurn,
   recordAgentContext,
   resetMonoDefaults,
+  TEAM_MEMORY_MAX_LINES,
+  teamMemoryWithinBudget,
 } from "./monoFiles";
 
 beforeEach(() => {
@@ -167,6 +169,47 @@ it("says how to keep memory and update the soul only at the user's request", () 
   expect(alone).toContain("has not given you any projects yet");
 });
 
+it("tells an agent its specialty and the team's memory", () => {
+  const look = {
+    name: "Ledger",
+    mascot: "cat",
+    color: "#fff",
+    projects: [],
+    bot: true,
+    specialty: "Money: expenses and budgets",
+  };
+  const withTeam = { ...files(), team: "- 2026-10-04 · The user is 28\n" };
+  const full = monoContext(look, withTeam, { soul: true, memory: true });
+  expect(full).toContain("<specialty>\nYour specialty: Money: expenses and budgets.");
+  expect(full).toContain("<team_memory>");
+  expect(full).toContain("The user is 28");
+  expect(full).toContain('"shared":true');
+  // The orchestrator does its own specialty and leads the rest.
+  const lead = monoContext(
+    { ...look, principal: true, specialty: "Personal assistant" },
+    withTeam,
+    { soul: true, memory: false },
+  );
+  expect(lead).toContain("Your own specialty: Personal assistant. This part you do yourself.");
+  expect(lead).toContain("besides your own specialty, you lead the user's agents");
+  expect(lead).not.toContain("<team_memory>");
+  // No team memory, no block.
+  expect(monoContext(look, files(), { soul: false, memory: true })).not.toContain(
+    "<team_memory>",
+  );
+});
+
+it("loads the newest lines of the team's memory", () => {
+  const memory = Array.from(
+    { length: TEAM_MEMORY_MAX_LINES + 3 },
+    (_, index) => `- fact ${index}`,
+  ).join("\n");
+  const budget = teamMemoryWithinBudget(memory);
+  expect(budget.droppedLines).toBe(3);
+  expect(budget.text.split("\n")[0]).toBe("- fact 3");
+  expect(teamMemoryWithinBudget("")).toEqual({ text: "", droppedLines: 0 });
+});
+
 it("seeds SOUL.md once, moving the old instructions into it", async () => {
   const { id } = createMono(["/code/app"]);
   updateMono(id, (mono) => ({ ...mono, instructions: "Ship on Fridays" }));
@@ -218,13 +261,16 @@ it("reads a migrated Mono's old project folder once, then its own", async () => 
   updateMono(id, (mono) => ({ ...mono, legacyProject: "/code/app" }));
   invoke.mockImplementation(async () => ({ ...files(), soul: "# Soul" }));
   await loadMonoFiles(id);
-  expect(invoke.mock.calls[0]).toEqual([
+  // The team's memory is read alongside; only the agent's own loads count.
+  const loads = () =>
+    invoke.mock.calls.filter(([command]) => command === "mono_load");
+  expect(loads()[0]).toEqual([
     "mono_load",
     { mono: id, legacyProject: "/code/app" },
   ]);
   expect(findMono(id)?.legacyProject).toBeUndefined();
   await loadMonoFiles(id);
-  expect(invoke.mock.calls[1]).toEqual([
+  expect(loads()[1]).toEqual([
     "mono_load",
     { mono: id, legacyProject: null },
   ]);

@@ -2,7 +2,7 @@ import { CircleAlert } from "../../../shared/ui/icons";
 import { useState } from "react";
 import { createPortal } from "react-dom";
 import { allowsProjectNotification } from "../../notifications/model/notificationPreferences";
-import { knownNotificationProject } from "../../notifications/model/notificationProjects";
+import { notificationProjectFor } from "../../notifications/model/notifications";
 import { useProjectNotificationPreferences } from "../../notifications/hooks/useProjectNotificationPreferences";
 import type { ApprovalDecision } from "../../../integrations/harness";
 import type { PendingApprovalNotice } from "../../notifications/model/approvalToast";
@@ -60,11 +60,10 @@ function ProjectApprovalToast(props: {
   onFocusSession: Props["onFocusSession"];
   onApproval: Props["onApproval"];
 }) {
-  const path = props.notice.session.cwd;
   // The keyed gate stays mounted even while hidden. Resuming notifications
   // must not turn a pending request into a new popup.
   const [occurredAt] = useState(Date.now);
-  const project = knownNotificationProject(path);
+  const project = notificationProjectFor(props.notice.session);
 
   if (
     !project ||

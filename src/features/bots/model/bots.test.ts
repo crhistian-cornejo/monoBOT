@@ -3,10 +3,13 @@ import { buildClaudeSpawnArgs } from "../../../integrations/harness/providers/cl
 import {
   BOT_ROLES,
   botLaunch,
+  botTools,
+  deniedSkills,
   folderProblem,
   isBotRole,
   parseBotTools,
   rulePath,
+  skillMatches,
 } from "./bots";
 
 describe("bots", () => {
@@ -14,11 +17,19 @@ describe("bots", () => {
     expect(BOT_ROLES.map((info) => info.role)).toEqual([
       "principal",
       "assistant",
+      "inbox",
+      "planner",
+      "writer",
+      "analyst",
       "finance",
       "documents",
       "research",
       "custom",
     ]);
+    // Every role says what it takes on, for the orchestrator to pick by.
+    expect(BOT_ROLES.every((info) => info.specialty.trim().length > 0)).toBe(
+      true,
+    );
     // The Principal has its own row; a custom bot comes from "Blank bot".
     expect(
       BOT_ROLES.filter((info) => info.hidden).map((info) => info.role),
@@ -175,5 +186,65 @@ describe("bots", () => {
     expect(args[args.indexOf("--disallowedTools") + 1]).toBe(
       disallowedTools.join(","),
     );
+  });
+
+  it("gives each role the connectors and skills of its job, not all of them", () => {
+    // The orchestrator does its own everyday job with the user's accounts,
+    // without the specialists' connectors and skills.
+    expect(botTools("principal")).toMatchObject({
+      services: ["notion", "gmail", "drive"],
+      connectors: [],
+      skills: [],
+    });
+    expect(botTools("research").connectors).toEqual([
+      "context7",
+      "deepwiki",
+      "mslearn",
+      "xmd",
+      "openalex",
+    ]);
+    expect(botTools("documents").skills).toEqual(["docx", "xlsx", "pptx", "pdf"]);
+    expect(botTools("inbox")).toMatchObject({ services: ["gmail"], access: ["read"] });
+    // A custom bot keeps every connector and skill until the user picks.
+    expect(botTools("custom").connectors).toBeUndefined();
+    expect(botTools("custom").skills).toBeUndefined();
+    // Its own list wins over the role's.
+    expect(botTools("documents", { services: [], plugins: [], skills: ["pdf"] }).skills).toEqual(["pdf"]);
+  });
+
+  it("denies the installed skills a bot was not given", () => {
+    const installed = ["pdf", "document-skills:xlsx", "deploy", "anthropic-skills:docx"];
+    // A role's hint covers the plugin that ships the skill.
+    expect(skillMatches("xlsx", "document-skills:xlsx")).toBe(true);
+    expect(skillMatches("xlsx", "xlsx-helper")).toBe(false);
+    expect(deniedSkills(["docx", "xlsx", "pdf"], installed)).toEqual(["deploy"]);
+    expect(deniedSkills(undefined, installed)).toEqual([]);
+    expect(botLaunch("documents", undefined, installed).disallowedTools).toEqual(
+      expect.arrayContaining(["Skill(deploy)"]),
+    );
+    expect(botLaunch("documents", undefined, installed).disallowedTools).not.toContain(
+      "Skill(pdf)",
+    );
+    // The orchestrator keeps none of them; a custom bot keeps all.
+    expect(
+      botLaunch("principal", undefined, installed).disallowedTools.filter((tool) =>
+        tool.startsWith("Skill("),
+      ),
+    ).toHaveLength(4);
+    expect(
+      botLaunch("custom", undefined, installed).disallowedTools.some((tool) =>
+        tool.startsWith("Skill("),
+      ),
+    ).toBe(false);
+  });
+
+  it("keeps only skill names Claude could invoke", () => {
+    expect(
+      parseBotTools({
+        services: [],
+        plugins: [],
+        skills: ["pdf", "pdf", "a b", "plugin:xlsx", 4],
+      }),
+    ).toEqual({ services: [], plugins: [], skills: ["pdf", "plugin:xlsx"] });
   });
 });

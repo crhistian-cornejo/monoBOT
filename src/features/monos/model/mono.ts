@@ -20,6 +20,7 @@ import {
 } from "../../projects/model/projectMascots";
 import { removeMonoBackground } from "./monoBackground";
 import {
+  botRole,
   isBotRole,
   parseBotTools,
   type BotRole,
@@ -58,6 +59,11 @@ export type Mono = {
   useSidebarFolders?: boolean;
   /** Superseded by SOUL.md; only read once, to seed it. */
   instructions?: string;
+  /**
+   * What it takes on, in one line, in place of its role's: the orchestrator
+   * reads it to pick who gets each job.
+   */
+  specialty?: string;
   /**
    * A productivity bot, or a workstream's orchestrator, rather than a coding
    * Mono: each kind has its own sidebar section and overview tabs.
@@ -176,6 +182,7 @@ function parseMono(value: unknown): Mono | undefined {
   const sessionId = text("sessionId");
   const name = text("name");
   const instructions = text("instructions");
+  const specialty = text("specialty")?.trim().slice(0, SPECIALTY_MAX);
   const legacyProject = text("legacyProject");
   return {
     id: entry.id,
@@ -193,6 +200,7 @@ function parseMono(value: unknown): Mono | undefined {
       : {}),
     ...(entry.useSidebarFolders === true ? { useSidebarFolders: true } : {}),
     ...(instructions ? { instructions } : {}),
+    ...(specialty ? { specialty } : {}),
     ...(legacyProject ? { legacyProject } : {}),
     ...(entry.kind === "bot"
       ? {
@@ -240,7 +248,65 @@ export function listMonos(): Mono[] {
   migrateLegacyMonoStorage();
   const parsed = readJson(ROSTER_KEY);
   if (!Array.isArray(parsed)) return [];
-  return parsed.flatMap((entry) => parseMono(entry) ?? []);
+  const monos = parsed.flatMap((entry) => parseMono(entry) ?? []);
+  return migratePrincipalTools(monos);
+}
+
+const PRINCIPAL_TOOLS_KEY = "monocode:principal-tools-reset";
+
+/**
+ * The Principal used to start with every account and connector; now it only
+ * coordinates. Once, a Principal's saved tools go back to its role's, keeping
+ * the folders the user opened to it.
+ */
+function migratePrincipalTools(monos: Mono[]): Mono[] {
+  try {
+    if (localStorage.getItem(PRINCIPAL_TOOLS_KEY)) return monos;
+    localStorage.setItem(PRINCIPAL_TOOLS_KEY, "1");
+  } catch {
+    return monos;
+  }
+  const principal = monos.find(
+    (mono) => mono.botRole === "principal" && mono.botTools,
+  );
+  if (!principal) return monos;
+  const next = monos.map((mono) =>
+    mono === principal ? withRoleTools(mono) : mono,
+  );
+  saveRoster(next);
+  return next;
+}
+
+/** Back to its role's tools; the folders the user opened stay open. */
+function withRoleTools(mono: Mono): Mono {
+  const { botTools: own, ...rest } = mono;
+  const folders = own?.folders ?? [];
+  return folders.length
+    ? {
+        ...rest,
+        botTools: {
+          ...botRoleTools(mono.botRole ?? "assistant"),
+          folders,
+        },
+      }
+    : rest;
+}
+
+/** The tools a role starts with, as a bot's own list. */
+function botRoleTools(role: BotRole): BotTools {
+  const info = botRole(role);
+  return {
+    services: [...info.services],
+    plugins: [...info.plugins],
+    ...(info.access ? { access: [...info.access] } : {}),
+    ...(info.connectors ? { connectors: [...info.connectors] } : {}),
+    ...(info.skills ? { skills: [...info.skills] } : {}),
+  };
+}
+
+/** Gives the bot its role's tools back, keeping the folders it was given. */
+export function resetBotTools(monoId: string): void {
+  updateMono(monoId, withRoleTools);
 }
 
 function saveRoster(roster: readonly Mono[]): void {
@@ -348,6 +414,26 @@ export function saveBotTools(monoId: string, tools: BotTools): void {
   updateMono(monoId, (mono) => ({ ...mono, botTools: tools }));
 }
 
+/** A specialty is one line the orchestrator reads, not a soul. */
+export const SPECIALTY_MAX = 200;
+
+/** Its own specialty; empty goes back to its role's. */
+export function saveMonoSpecialty(monoId: string, specialty: string): void {
+  const line = specialty.replace(/\s+/g, " ").trim().slice(0, SPECIALTY_MAX);
+  updateMono(monoId, (mono) => ({ ...mono, specialty: line }));
+}
+
+/**
+ * What the agent takes on: its own line, else its role's for a bot. A coding
+ * Mono without one works on its projects, which say enough.
+ */
+export function monoSpecialty(mono: Mono): string | undefined {
+  const own = mono.specialty?.trim();
+  if (own) return own;
+  if (mono.kind === "bot") return botRole(mono.botRole ?? "assistant").specialty;
+  return undefined;
+}
+
 export function saveGroupMembers(monoId: string, members: string[]): void {
   updateMono(monoId, (mono) => ({
     ...mono,
@@ -400,6 +486,7 @@ export function updateMono(
   const next = change(roster[index]);
   if (!next.name?.trim()) delete next.name;
   if (!next.instructions?.trim()) delete next.instructions;
+  if (!next.specialty?.trim()) delete next.specialty;
   next.projects = uniqueProjects(next.projects);
   roster[index] = next;
   saveRoster(roster);
@@ -501,6 +588,8 @@ export type MonoLook = {
   bot?: boolean;
   /** The bot that leads the others. */
   principal?: boolean;
+  /** What it takes on, in one line. */
+  specialty?: string;
   /** A workstream's orchestrator. */
   workstream?: Workstream;
   /** A group of agents, led by this chat. */
@@ -516,6 +605,7 @@ export function monoLook(mono: Mono): MonoLook {
     color: mono.color,
     ...(isBot(mono) ? { bot: true } : {}),
     ...(mono.botRole === "principal" ? { principal: true } : {}),
+    ...(monoSpecialty(mono) ? { specialty: monoSpecialty(mono) } : {}),
     ...(mono.workstream ? { workstream: mono.workstream } : {}),
     ...(mono.group ? { group: mono.group } : {}),
     projects: mono.projects.map((path) => ({
@@ -602,6 +692,44 @@ export function monoState(
     }
   }
   return { status: "working", activity: "Thinking" };
+}
+
+/** An agent waiting on the user: an approval, a question or a usage limit. */
+export type AgentNeedingYou = {
+  monoId: string;
+  name: string;
+  /** What it waits for: "Approve Read …", the question, "Usage limit reached". */
+  activity: string;
+};
+
+/**
+ * Every agent whose chat is waiting on the user right now, in rail order, so
+ * one place lists them all instead of each chat holding its own card.
+ */
+export function agentsNeedingYou(
+  monos: readonly Mono[],
+  sessionOf: (
+    sessionId: string,
+  ) =>
+    | Pick<
+        Session,
+        "blocks" | "busy" | "pendingQuestion" | "worktreeRemoved" | "usageLimit"
+      >
+    | undefined,
+): AgentNeedingYou[] {
+  return monos.flatMap((mono) => {
+    const session = mono.sessionId ? sessionOf(mono.sessionId) : undefined;
+    if (!session) return [];
+    const state = monoState(session);
+    if (state.status !== "needs-you") return [];
+    return [
+      {
+        monoId: mono.id,
+        name: monoLook(mono).name,
+        activity: state.activity || "Waiting for you",
+      },
+    ];
+  });
 }
 
 function latest(
