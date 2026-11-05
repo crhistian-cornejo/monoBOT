@@ -1078,6 +1078,7 @@ function sanitizeBlock(
           ...(typeof card.summary === "string" && card.summary.trim()
             ? { summary: card.summary.slice(0, 280) }
             : {}),
+          ...(card.final === true ? { final: true } : {}),
         },
       ];
     });

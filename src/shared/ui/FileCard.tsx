@@ -3,8 +3,8 @@ import type { ReactNode } from "react";
 /**
  * A small page for a file, with its format on a banner and a few lines that
  * suggest what is inside (text, a table, slides, code). It stands for a file
- * the user can open, in lists and headers. Colours are the app's tokens, so it
- * follows the theme and the accent the user picked.
+ * the user can open, in lists and headers. The page follows the theme; the
+ * banner of an office format keeps that format's own colour.
  */
 
 export type FileFormat =
@@ -88,11 +88,23 @@ export function fileFormatOf(name: string): FileFormat {
   return ALIASES[extension] ?? "txt";
 }
 
-/** The PDF takes the accent; the rest read as quieter ink on the theme. */
+/**
+ * Each office format keeps the colour people know it by, so a PDF reads as a
+ * PDF whatever accent the user picked: red PDF, blue Word, green sheet, orange
+ * slides. Everything else is quieter ink on the theme.
+ */
+const BANNERS: Partial<Record<FileFormat, string>> = {
+  pdf: "bg-red-600 text-white",
+  doc: "bg-blue-600 text-white",
+  xls: "bg-emerald-600 text-white",
+  xlsx: "bg-emerald-600 text-white",
+  csv: "bg-emerald-600 text-white",
+  ppt: "bg-orange-600 text-white",
+  pptx: "bg-orange-600 text-white",
+};
+
 function banner(format: FileFormat): string {
-  return format === "pdf"
-    ? "bg-accent text-white"
-    : "bg-content/65 text-background-base";
+  return BANNERS[format] ?? "bg-content/65 text-background-base";
 }
 
 function Bar({ className }: { className: string }) {

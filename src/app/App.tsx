@@ -689,6 +689,7 @@ import {
 } from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
 import { BotNewsToasts } from "../features/bots/ui/BotNewsToasts";
+import { documentGroups } from "../features/artifacts/documentGroups";
 import { installedClaudeSkills } from "../features/bots/model/botSession";
 import { createWorkstream } from "../features/workstreams/model/workstreamApi";
 import {
@@ -12333,12 +12334,12 @@ function Workspace({
               renderPage: (key, page) => renderPaperPage(key, page),
               addPdf: (path, options) => addPaperPdf(path, options),
             },
-            installedSkills: async () => installedClaudeSkills(await homeDir()),
             web: {
               page: (url) => fetchWebPage(url),
               download: (url, options) => downloadWebFile(url, options),
               keep: (path, agent) => keepDownload(path, agent),
             },
+            installedSkills: async () => installedClaudeSkills(await homeDir()),
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
             writeAgentFile: (monoId, path, text, hash) =>
               writeAgentFile(monoId, path, text, hash),
@@ -14235,6 +14236,10 @@ function Workspace({
     () => (monoViewBlocks ? artifactCards(monoViewBlocks) : []),
     [monoViewBlocks],
   );
+  const monoDocumentGroups = useMemo(
+    () => (monoViewBlocks ? documentGroups(monoViewBlocks) : []),
+    [monoViewBlocks],
+  );
   // A personal bot's subagents: every delegated run in its chat, newest first.
   const monoViewIsBot = !!monoViewMono && isBot(monoViewMono);
   const botSubagentRuns = useMemo(
@@ -14468,6 +14473,7 @@ function Workspace({
         sessions={sessions}
         history={history}
         documents={monoDocuments}
+        documentGroups={monoDocumentGroups}
         activity={monoActivityView}
         changes={
           monoViewIsBot
@@ -14688,6 +14694,7 @@ function Workspace({
     !settingsOpen &&
     !monoCovers &&
     !activeAppView &&
+    !agentsTitleBar &&
     looksLikeProject(sidebarCwd);
   // The right panel grows from the card's edge and pushes the workspace. Its
   // own contents keep their full width and ride its edge.
@@ -14758,9 +14765,13 @@ function Workspace({
     }
   }, [rightPanelClosing, rightPanelOpen]);
   // The same shared stats the sidebar's Changes tab reads, so the toggle
-  // that opens it can carry its dot.
+  // that opens it can carry its dot. The Agents zone has no project tools to
+  // open, so it has no toggle either.
   const showRightPanelToggle =
-    insetLayout && !settingsOpen && looksLikeProject(sidebarCwd);
+    insetLayout &&
+    !settingsOpen &&
+    !agentsTitleBar &&
+    looksLikeProject(sidebarCwd);
   rightPanelToggleRef.current =
     showRightPanelToggle && !(monoCovers && monoViewMono) && !activeAppView
       ? onToggleRightPanel

@@ -213,3 +213,26 @@ describe("AgentMarkdown document images", () => {
     expect(markup).not.toContain("data-image-alt");
   });
 });
+
+describe("AgentMarkdown math", () => {
+  it("renders $$...$$ with KaTeX and leaves single dollars as text", () => {
+    const markup = renderToStaticMarkup(
+      createElement(AgentMarkdown, {
+        text: [
+          String.raw`El caudal es $$Q = C \cdot i \cdot A$$ por hectárea.`,
+          "",
+          "$$",
+          String.raw`V = \frac{Q \, t}{1000}`,
+          "$$",
+          "",
+          "Cuesta $17B y luego $895B.",
+        ].join("\n"),
+        streaming: false,
+      }),
+    );
+
+    expect(markup).toContain('class="katex"');
+    expect(markup).toContain("katex-display");
+    expect(markup).toContain("Cuesta $17B y luego $895B.");
+  });
+});

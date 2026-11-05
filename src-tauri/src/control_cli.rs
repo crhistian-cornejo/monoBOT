@@ -231,8 +231,12 @@ Actions:
                    "summary":"Merge queue and blockers",
                    "body":"<complete Markdown>"}
                   Save a document and attach its card below your chat reply.
-                  Artifacts are separate from Notes. Currently only kind "document"
-                  (Markdown) is supported. Reply briefly; do not
+                  Artifacts are separate from Notes. Kind "document" is
+                  Markdown (LaTeX math in $$...$$ renders, inline or as a
+                  block; a single $ stays text); kind
+                  "html" is a visual. Add "final":true to the report that
+                  closes a piece of work, so its card stands out from the
+                  papers and drafts gathered on the way. Reply briefly; do not
                   repeat the document body in chat. Returns metadata only.
                   To revise, pass {"id":"...","body":"<updated Markdown>"};
                   omitted title stays unchanged. Reuse --request-id on retries.
@@ -263,10 +267,6 @@ Actions:
                   the paper it is the copy of (a ref from papers.find), for a
                   paper whose site blocks downloads; without it the PDF's own
                   DOI names it. Returns what papers.read returns, with a "ref".
-  soul.read      {}  Mono's own conversation only. Current SOUL.md text and hash.
-  soul.update    {"text":"<complete Markdown>","expectedHash":"<hash from soul.read>"}
-                  Update your standing instructions only when the user asks.
-                  Preserve the other instructions. If the file changed since
   web.read       {"url":"https://example.org/article","query":"retention time"}
                   Reads a web page through the app, for any agent: its main
                   text as Markdown (no menus or ads), title, site, author,
@@ -281,6 +281,10 @@ Actions:
                   a paper: you get its "ref", text and outline, like
                   papers.read. Returns the file's "path". A site that blocks
                   programs is reported; never try to get past it.
+  soul.read      {}  Mono's own conversation only. Current SOUL.md text and hash.
+  soul.update    {"text":"<complete Markdown>","expectedHash":"<hash from soul.read>"}
+                  Update your standing instructions only when the user asks.
+                  Preserve the other instructions. If the file changed since
                   soul.read, read it again and reapply the requested changes.
                   Habit runs and other sessions cannot change a Mono's soul.
   memory.read    {"topic":"releases"}  Mono only. Without topic:

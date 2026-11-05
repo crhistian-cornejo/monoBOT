@@ -7,6 +7,7 @@ import {
   MAX_EMBED_BYTES,
 } from "../../features/sessions/model/attachments";
 import type { Attachment } from "../../features/sessions/model/session";
+import { cleanText } from "../../shared/lib/textHygiene";
 
 type CopiedFile = { name: string; mimeType: string; data: string };
 
@@ -71,7 +72,8 @@ export async function copyMessage(
       throw new Error(`Could not copy ${attachment.name}: ${reason}`);
     }
   }
-  const payload = textWithFolderPaths(text, folderPaths);
+  // A message is copied as a person would have typed it: no invisible marks.
+  const payload = textWithFolderPaths(cleanText(text), folderPaths);
   if (!files.length) {
     if (!payload) throw new Error("No copyable content is available.");
     return copyText(payload);

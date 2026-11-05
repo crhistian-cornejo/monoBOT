@@ -60,7 +60,7 @@ import { HandoffButton, SecondOpinionButton } from "./SecondOpinionButton";
 import { SecondOpinionCard } from "./SecondOpinionCard";
 import { NoteMiniCard } from "../../notes/ui/NoteMiniCard";
 import { ArtifactCard } from "../../artifacts/ui/ArtifactCard";
-import { artifactCards } from "../../artifacts/artifacts";
+import { artifactCards, finalFirst } from "../../artifacts/artifacts";
 
 import { TerminalSpinner } from "./TerminalSpinner";
 import { Popover } from "../../../shared/ui/Popover";
@@ -1230,7 +1230,7 @@ function AgentTranscriptComponent({
             firstVisibleTurn + turnIndex === activeTurnIndex
           );
           const proposals = turn.filter((block) => block.orchestration);
-          const artifacts = artifactCards(turn);
+          const artifacts = finalFirst(artifactCards(turn));
           // Pictures the agent asked for show from the moment it asks.
           const imageJobs = turn.filter((block) => block.imageJob);
           // Proposals are turn results, like the changes card. Keep them out

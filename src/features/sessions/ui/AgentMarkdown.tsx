@@ -19,6 +19,8 @@ import {
   type ReactNode,
 } from "react";
 import { harden } from "rehype-harden";
+import { math } from "@streamdown/math";
+import "katex/dist/katex.min.css";
 import {
   Block,
   CodeBlock,
@@ -104,7 +106,11 @@ const mermaid = createLazyMermaidPlugin({
   },
 });
 
-const MARKDOWN_PLUGINS = { code: boundedCode, mermaid };
+/**
+ * Math in $$...$$, inline or as a block, renders with KaTeX. A single dollar
+ * stays text, so prices like $17B in a report do not turn into formulas.
+ */
+const MARKDOWN_PLUGINS = { code: boundedCode, mermaid, math };
 
 const MARKDOWN_HARDEN: Pluggable = [
   harden,

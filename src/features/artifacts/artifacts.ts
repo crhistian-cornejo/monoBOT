@@ -17,6 +17,11 @@ export type Artifact = {
 export type ArtifactUpsert = Omit<Artifact, "createdAt" | "updatedAt">;
 export type ArtifactCard = Pick<Artifact, "id" | "kind" | "title"> & {
   summary?: string;
+  /**
+   * The document that closes a piece of work, a research's final report: its
+   * card stands out from the papers and notes gathered on the way.
+   */
+  final?: boolean;
 };
 export const ARTIFACTS_CHANGED_EVENT = "monocode:artifacts-changed";
 export const ARTIFACT_DELETED_EVENT = "monocode:artifact-deleted";
@@ -58,12 +63,31 @@ export function artifactCards(blocks: readonly Block[]): ArtifactCard[] {
   return [...cards.values()];
 }
 
-/** Retries and edits update the existing reference instead of adding a card. */
+/** The final report leads; the rest keep the order they were made in. */
+export function finalFirst(cards: readonly ArtifactCard[]): ArtifactCard[] {
+  return [
+    ...cards.filter((card) => card.final),
+    ...cards.filter((card) => !card.final),
+  ];
+}
+
+/**
+ * Retries and edits update the existing reference instead of adding a card. A
+ * revision that does not say whether the document is final keeps what it was.
+ */
 export function recordArtifactCard(
   session: Session,
   turnId: string,
   card: ArtifactCard,
 ): Session {
+  const previous = session.blocks
+    .flatMap((block) => block.artifactCards ?? [])
+    .find((entry) => entry.id === card.id);
+  const { final, ...rest } = card;
+  const next: ArtifactCard = {
+    ...rest,
+    ...((final ?? previous?.final) ? { final: true } : {}),
+  };
   return {
     ...session,
     blocks: session.blocks.map((block) =>
@@ -74,7 +98,7 @@ export function recordArtifactCard(
               ...(block.artifactCards ?? []).filter(
                 (entry) => entry.id !== card.id,
               ),
-              card,
+              next,
             ],
           }
         : block,

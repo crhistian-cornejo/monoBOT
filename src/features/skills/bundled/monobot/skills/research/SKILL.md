@@ -129,10 +129,34 @@ or a close paraphrase):
 
 ## 6. Deliver
 
-- A 3-line summary on top, then findings by section with their citations, and a table when comparing. Say what you
-  could not find or verify.
-- When it is long or the user asks for it, write it as a document (an artifact, or a file with the docx skill, or a
-  PDF with the pdf skill if they want to send it).
+- In the chat: a 3-line summary, then the main findings with their citations, and a table when comparing. Say what
+  you could not find or verify. Do not paste the report into the chat.
+- Close every research with **one final report**: `artifacts.write` with `"final":true`. Its card stands out from the
+  papers you read on the way, and the user finds it on top of that request's folder in Documents. Revise the same
+  report (pass its `id`) instead of writing a second one.
+- The final report is a technical document, in this order (leave out a section only when it has nothing):
+  1. **Resumen**: the question and the answer in five lines.
+  2. **Introducción**: why it matters and the scope.
+  3. **Marco teórico**: the concepts, norms and criteria the sources agree on.
+  4. **Metodología**: how you searched (sources, dates, filters) and how the design or analysis is done.
+  5. **Cálculos**: the formulas in LaTeX (`$$Q = C \, i \, A$$`, a block for long ones), each symbol with its unit,
+     and a worked example with numbers when the sources give one.
+  6. **Resultados**: what the sources find, with tables for criteria and values.
+  7. **Conclusiones y recomendaciones**.
+  8. **Referencias**: numbered, author, year, title, publisher, link, in the style the user asked for (APA by default).
+  9. **Anexos**: the spreadsheets, PDFs and design sheets you found, each as a link with what it holds.
+- Write the headings in the user's language. Formulas go only between `$$`; a single `$` stays text, so prices do not
+  turn into math.
+- When the user wants the report as Word, PDF or a spreadsheet, ask the Documents agent (`agents.list`, then
+  `agents.message` with the report's artifact id and the format). Without one, use the docx, pdf or xlsx skill
+  yourself if you have it, or say which agent to create.
+
+## Writing
+
+- Plain, specific sentences in the user's language; numbers with their units; correct accents and punctuation.
+- No filler that marks text as machine-made: "cabe destacar", "en resumen", "es importante señalar", "profundizar en",
+  "it is worth noting", "delve into". Few dashes, no decorative emoji.
+- A table or a short list over a long paragraph. Say what a number means for the design, not that it is "key".
 
 ## 7. Safety
 

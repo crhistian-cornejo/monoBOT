@@ -26,6 +26,8 @@ import { NewHabitPage } from "./NewHabitPage";
 import { habitActions, HabitsList, useHabits } from "./MonoHabits";
 import { ArtifactReader } from "../../artifacts/ui/ArtifactPanel";
 import { ArtifactIcon } from "../../artifacts/ui/ArtifactCard";
+import { DocumentFolders } from "../../artifacts/ui/DocumentFolders";
+import type { DocumentGroup } from "../../artifacts/documentGroups";
 import {
   LaunchedSessionPage,
   MonoSessionList,
@@ -115,6 +117,8 @@ type Props = {
   history?: readonly SessionSummary[];
   /** Documents it has written, oldest first. */
   documents: readonly ArtifactCard[];
+  /** The same documents by the request that made them, as folders. */
+  documentGroups?: readonly DocumentGroup[];
   changes?: MonoOverviewChanges;
   /** The steps of the turn picked from the chat, if one is. */
   activity?: ReactNode;
@@ -163,6 +167,7 @@ export function MonoOverview({
   sessions,
   history,
   documents,
+  documentGroups,
   changes,
   activity,
   tab: requestedTab,
@@ -469,6 +474,8 @@ export function MonoOverview({
                 </EmptyState>
               }
             />
+          ) : documentGroups?.length ? (
+            <DocumentFolders groups={documentGroups} onOpen={onOpenDocument} />
           ) : documents.length ? (
             <ul className="flex flex-col gap-px">
               {[...documents].reverse().map((card) => (
