@@ -852,17 +852,17 @@ import {
   removeArtifactCard,
   ARTIFACT_DELETED_EVENT,
 } from "../features/artifacts/artifacts";
+import {
+  parseVisualDocument,
+  recordVisual,
+  visualAnchor,
+} from "../features/visuals/model/visual";
 import type { MonoChangesRequest } from "../features/monos/ui/MonoChangesView";
 import {
   claimDueAutomations,
   listAutomations,
   recoverAutomationRuns,
   updateAutomationRun,
-import {
-  parseVisualDocument,
-  recordVisual,
-  visualAnchor,
-} from "../features/visuals/model/visual";
   type Automation,
   type AutomationRun,
 } from "../features/automations/model/automations";
@@ -12381,6 +12381,24 @@ function Workspace({
             payload.input,
           );
         }
+        if (payload.namespace === "visual") {
+          // A visual the agent published goes on its turn's message.
+          const document = parseVisualDocument(payload.input);
+          const latest = sessionsRef.current.find(
+            (session) => session.id === payload.sessionId,
+          );
+          const anchor = latest && visualAnchor(latest);
+          if (!document) throw new Error("Invalid visual");
+          if (!latest || !anchor)
+            throw new Error("The visual's conversation is no longer open");
+          const updated = recordVisual(latest, anchor, document);
+          sessionsRef.current = sessionsRef.current.map((session) =>
+            session.id === latest.id ? updated : session,
+          );
+          setSessions(sessionsRef.current);
+          if (!isHabitRun(latest.id)) await upsertSession(updated);
+          return { id: document.id };
+        }
         if (payload.namespace !== "app")
           throw new Error("Unknown CLI namespace");
         const source = sessionsRef.current.find(
@@ -12428,24 +12446,6 @@ function Workspace({
               (session, index) => session === sessionsRef.current[index],
             )
           )
-        if (payload.namespace === "visual") {
-          // A visual the agent published goes on its turn's message.
-          const document = parseVisualDocument(payload.input);
-          const latest = sessionsRef.current.find(
-            (session) => session.id === payload.sessionId,
-          );
-          const anchor = latest && visualAnchor(latest);
-          if (!document) throw new Error("Invalid visual");
-          if (!latest || !anchor)
-            throw new Error("The visual's conversation is no longer open");
-          const updated = recordVisual(latest, anchor, document);
-          sessionsRef.current = sessionsRef.current.map((session) =>
-            session.id === latest.id ? updated : session,
-          );
-          setSessions(sessionsRef.current);
-          if (!isHabitRun(latest.id)) await upsertSession(updated);
-          return { id: document.id };
-        }
             return;
           sessionsRef.current = next;
           setSessions(next);
