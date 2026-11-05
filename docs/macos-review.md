@@ -167,6 +167,15 @@ sobre el contenido. Cambios recientes tocaron la barra de título y los controle
 
 - [ ] Si se distribuye universal: el build termina y la app arranca en Apple Silicon y en Intel (o con Rosetta).
 
+## 9. Mantener el equipo despierto
+
+`src-tauri/src/keep_awake.rs` declara a mano las funciones de IOKit (`IOPMAssertionCreateWithName`,
+`IOPMAssertionRelease`) y de CoreFoundation. Solo se ha compilado y probado en Windows.
+
+- [ ] `cargo test -p monocode --lib keep_awake` compila, enlaza IOKit y pasa.
+- [ ] Con un agente trabajando, `pmset -g assertions` muestra `PreventUserIdleSystemSleep` con el nombre "MonoBOT has agents working".
+- [ ] Al terminar el turno, la aserción desaparece. También desaparece al desactivar Ajustes → General → "Keep computer awake".
+
 ## Tests a correr en el Mac
 
 ```bash

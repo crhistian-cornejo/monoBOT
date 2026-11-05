@@ -19,6 +19,12 @@ MonoBOT ya cubre buena parte de lo que bb ofrece: automatizaciones, memoria comp
 - UI: `src/features/sessions/ui/SendLaterButton.tsx`. El formulario de fecha y hora está en `src/shared/ui/DateTimeForm.tsx`, compartido con el silencio de notificaciones.
 - Diferencias con bb: se envía con el modelo y los permisos que tenga la sesión al llegar la hora, no con los del momento de programarlo, porque cambiar de modelo tiene su propio flujo de handoff. Solo se ofrece en sesiones que se guardan: no en una sesión vacía (para empezar algo a una hora, usa Automatizaciones), ni en remotas, ni en chats de Mono. Los mensajes programados solo salen con la app abierta.
 
+**keep-awake** (5 de noviembre de 2026). Mientras hay trabajo en marcha, el equipo no entra en reposo por inactividad: un agente trabajando, un reintento de provider-retry o una reanudación de límite de uso esperando, o un mensaje de Send later pendiente. La pantalla sí puede apagarse, y cerrar la tapa o suspender a mano duermen el equipo igual. Se desactiva en Ajustes → General → "Keep computer awake" (activado por defecto).
+
+- Qué cuenta como trabajo en marcha: `src/features/sessions/model/keepAwake.ts`. Las sesiones remotas no cuentan, porque su trabajo corre en el host. `App.tsx` llama a `keep_awake_set` solo cuando eso cambia.
+- Sistema: `src-tauri/src/keep_awake.rs`. En Windows, `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` desde un hilo propio, porque la petición pertenece al hilo que la hace. En macOS, una aserción de IOKit `PreventUserIdleSystemSleep`, como `caffeinate -i`. En Linux todavía no hace nada.
+- Diferencia con bb: también cubre lo que espera su hora (reintentos, reanudaciones y Send later), no solo los agentes trabajando.
+
 ## Ideas, por prioridad
 
 | Idea de bb | Qué aporta a MonoBOT | Esfuerzo |
@@ -26,11 +32,10 @@ MonoBOT ya cubre buena parte de lo que bb ofrece: automatizaciones, memoria comp
 | **secrets** | El agente pide una API key y el usuario la escribe en un formulario oculto del hilo. El valor se guarda directo en un `.env` con permisos `0600`, actualizando las líneas existentes y añadiendo las nuevas; nunca aparece en el transcript. El agente solo recibe la ruta y qué nombres se añadieron o cambiaron. | Medio |
 | **concurrency-limit** | Limita los agentes que corren a la vez: por defecto uno por CPU, con un límite global opcional. Los turnos que superan el límite esperan en cola y el hilo dice por qué. Un mensaje a un hilo que ya está corriendo no se retiene. | Medio |
 | **prompt-library** | Historial de los prompts enviados, con búsqueda y favoritos, para reinsertarlos en el composer. | Bajo |
-| **keep-awake** | Impide que el Mac entre en reposo mientras hay agentes trabajando. | Bajo |
 | **agent-annotations** | En el navegador integrado, haces clic en un elemento, escribes una nota y se añade al prompt con la URL, el selector, el texto, los estilos clave y los nombres de componentes de React. Muy útil para iterar UI. | Medio-alto |
 | **account-pool** | Rota entre varias cuentas de Claude o Codex cuando una llega a su límite, y se combina con provider-retry para saber cuándo vuelve a haber una cuenta disponible. | Alto |
 
-Siguiente recomendación: **keep-awake**, que encaja con scheduled-send (los mensajes programados solo salen si el equipo no está en reposo), o **prompt-library**. **account-pool** ya puede apoyarse en provider-retry.
+Siguiente recomendación: **prompt-library**, por su bajo esfuerzo. **account-pool** ya puede apoyarse en provider-retry.
 
 ## Prácticas de su repo que nos sirven
 

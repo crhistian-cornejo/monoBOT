@@ -343,6 +343,8 @@ import {
   loadClaudeHooks,
   loadIdleAgentLimit,
   loadCloseToTray,
+  loadKeepAwake,
+  KEEP_AWAKE_AVAILABLE,
   loadCollapsedProjectRailMode,
   loadComposerRunner,
   loadDiffViewer,
@@ -366,6 +368,7 @@ import {
   IDLE_AGENT_LIMITS,
   type IdleAgentLimit,
   saveCloseToTray,
+  saveKeepAwake,
   saveCollapsedProjectRailMode,
   saveComposerRunner,
   saveDiffViewer,
@@ -857,6 +860,7 @@ function GeneralPage({
     loadTabAnimationsEnabled,
   );
   const [closeToTray, setCloseToTray] = useState(loadCloseToTray);
+  const [keepAwake, setKeepAwake] = useState(loadKeepAwake);
   const [quickComposerEnabled, setQuickComposerEnabled] = useState(
     loadQuickComposerEnabled,
   );
@@ -922,6 +926,11 @@ function GeneralPage({
   const onCloseToTray = (next: boolean) => {
     saveCloseToTray(next);
     setCloseToTray(next);
+  };
+
+  const onKeepAwake = (next: boolean) => {
+    saveKeepAwake(next);
+    setKeepAwake(next);
   };
 
   return (
@@ -1038,6 +1047,19 @@ function GeneralPage({
               label="Close to tray"
               on={closeToTray}
               onChange={onCloseToTray}
+            />
+          </Row>
+        )}
+        {KEEP_AWAKE_AVAILABLE && (
+          <Row
+            id="keep-awake"
+            label="Keep computer awake"
+            description="While an agent works, or a retry, a resume or a message sent later is waiting, the computer doesn't go to sleep on its own. The screen can still turn off, and closing the lid still puts it to sleep."
+          >
+            <Toggle
+              label="Keep computer awake"
+              on={keepAwake}
+              onChange={onKeepAwake}
             />
           </Row>
         )}

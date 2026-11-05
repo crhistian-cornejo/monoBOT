@@ -555,6 +555,10 @@ import {
   queuedMessageForSubmit,
 } from "../features/sessions/model/messageQueue";
 import {
+  hasWorkUnderway,
+  setKeepAwake,
+} from "../features/sessions/model/keepAwake";
+import {
   nextScheduledSendAt,
   releaseDueScheduledMessages,
   releaseScheduledMessages,
@@ -849,6 +853,9 @@ import {
   peekAzureDevOpsWorkItemDetails,
 } from "../features/inbox/model/azureDevOps";
 import {
+  KEEP_AWAKE_AVAILABLE,
+  loadKeepAwake,
+  subscribeKeepAwake,
   loadCloseToTray,
   loadAutosave,
   loadCollapsedProjectRailMode,
@@ -10344,6 +10351,21 @@ function Workspace({
     );
     return () => window.clearTimeout(timer);
   }, [sessions, scheduledSendTick]);
+
+  // Hold off idle sleep while work is under way, or it stalls until the
+  // computer wakes. See keepAwake.ts and src-tauri/src/keep_awake.rs.
+  const [keepAwakeEnabled, setKeepAwakeEnabled] = useState(loadKeepAwake);
+  useEffect(
+    () => subscribeKeepAwake(() => setKeepAwakeEnabled(loadKeepAwake())),
+    [],
+  );
+  const holdAwake = keepAwakeEnabled && hasWorkUnderway(sessions);
+  useEffect(() => {
+    if (!KEEP_AWAKE_AVAILABLE) return;
+    void Promise.resolve()
+      .then(() => setKeepAwake(holdAwake))
+      .catch((error) => console.warn("Could not change keep-awake", error));
+  }, [holdAwake]);
 
   const onSendQueuedMessageNow = useCallback(
     (sessionId: string, messageId: string) => {

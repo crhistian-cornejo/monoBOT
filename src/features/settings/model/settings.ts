@@ -287,6 +287,17 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
         },
       ]
     : []),
+  // Same platforms as KEEP_AWAKE_AVAILABLE, which is declared further down.
+  ...(IS_WIN || IS_MAC
+    ? [
+        {
+          id: "keep-awake",
+          section: "general" as const,
+          label: "Keep computer awake",
+          keywords: "sleep power caffeinate idle suspend battery overnight",
+        },
+      ]
+    : []),
   {
     id: "theme",
     section: "appearance",
@@ -985,6 +996,33 @@ export function loadCloseToTray(): boolean {
 
 export function saveCloseToTray(value: boolean) {
   writeFlag(CLOSE_TO_TRAY_KEY, value);
+}
+
+const KEEP_AWAKE_KEY = "monocode.keepAwake";
+
+export const KEEP_AWAKE_DEFAULT = true;
+
+/** Fired on `window` when "Keep computer awake" flips. */
+export const KEEP_AWAKE_CHANGE_EVENT = "monocode:keep-awake-change";
+
+/** Only Windows and macOS can hold off sleep for now. */
+export const KEEP_AWAKE_AVAILABLE = IS_WIN || IS_MAC;
+
+export function loadKeepAwake(): boolean {
+  if (!KEEP_AWAKE_AVAILABLE) return false;
+  return readFlag(KEEP_AWAKE_KEY) ?? KEEP_AWAKE_DEFAULT;
+}
+
+export function saveKeepAwake(value: boolean) {
+  writeFlag(KEEP_AWAKE_KEY, value);
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(KEEP_AWAKE_CHANGE_EVENT));
+}
+
+export function subscribeKeepAwake(onStoreChange: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener(KEEP_AWAKE_CHANGE_EVENT, onStoreChange);
+  return () => window.removeEventListener(KEEP_AWAKE_CHANGE_EVENT, onStoreChange);
 }
 
 const GRID_ARCADE_ENABLED_KEY = "monocode.gridArcadeEnabled";

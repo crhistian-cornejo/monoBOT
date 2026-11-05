@@ -22,6 +22,7 @@ mod harness_updates;
 mod inbox_media;
 mod jira;
 mod jsonc;
+mod keep_awake;
 mod linear;
 mod link_preview;
 mod papers;
@@ -351,6 +352,7 @@ pub fn run() {
             notifications::request_notification_permission,
             notifications::show_notification,
             notifications::open_notification_settings,
+            keep_awake::keep_awake_set,
             reminders::reminder_list,
             reminders::reminder_set,
             reminders::reminder_clear,
