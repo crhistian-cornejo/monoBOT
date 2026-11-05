@@ -1,5 +1,5 @@
 import { useMemo, useSyncExternalStore } from "react";
-import { Users } from "../../shared/ui/icons";
+import { Bot, Code, Users } from "../../shared/ui/icons";
 import { MonoRailMascot } from "../../features/monos/ui/MonoRailMascot";
 import {
   listMonos,
@@ -34,8 +34,9 @@ export function saveRailZone(zone: RailZone) {
   }
 }
 
-/** Code holds projects, Monos and workstreams; Personal holds the user's
- * bots. Each zone has its own rail below this switch. */
+/** Code holds projects, Monos and workstreams; Agents (the "personal" zone)
+ * holds the user's bots and groups. Each zone has its own rail below this
+ * switch. */
 export function RailZoneSwitch({
   zone,
   onChange,
@@ -46,19 +47,20 @@ export function RailZoneSwitch({
   className?: string;
 }) {
   // The segmented control Settings uses, so both layouts read the same.
-  const option = (value: RailZone, label: string) => (
+  const option = (value: RailZone, label: string, Icon: typeof Code) => (
     <button
       type="button"
       role="tab"
       aria-selected={zone === value}
       onClick={() => onChange(value)}
-      className={`min-w-0 rounded-sm px-2.5 py-1 ${
+      className={`flex min-w-0 items-center justify-center gap-1.5 rounded-sm px-2.5 py-1 ${
         zone === value
           ? "bg-selection text-content"
           : "text-content/50 hover:text-content"
       }`}
     >
-      {label}
+      <Icon className="size-3.5 shrink-0" strokeWidth={1.75} />
+      <span className="truncate">{label}</span>
     </button>
   );
   return (
@@ -67,8 +69,9 @@ export function RailZoneSwitch({
       aria-label="Sidebar zone"
       className={`grid shrink-0 grid-cols-2 gap-0.5 rounded-md border border-content/10 p-0.5 text-[12px] ${className}`}
     >
-      {option("code", "Code")}
-      {option("personal", "Personal")}
+      {option("code", "Code", Code)}
+      {/* The bots and groups: the user's agents. */}
+      {option("personal", "Agents", Bot)}
     </div>
   );
 }

@@ -2409,7 +2409,7 @@ function SidebarComponent({
           />
         ) : (
           <span className="min-w-0 truncate text-sm font-medium leading-tight">
-            {insetPersonal ? "Personal" : "Workspace"}
+            {insetPersonal ? "Agents" : "Workspace"}
           </span>
         )}
       </div>
@@ -3724,7 +3724,7 @@ function CompactProjectRail({
         {expandInTitleRow ? null : expand}
         {monos?.onZoneChange ? (
           <CompactRailAction
-            label={personal ? "Switch to Code" : "Switch to Personal"}
+            label={personal ? "Switch to Code" : "Switch to Agents"}
             icon={personal ? Code : Bot}
             onClick={() =>
               monos.onZoneChange?.(personal ? "code" : "personal")
