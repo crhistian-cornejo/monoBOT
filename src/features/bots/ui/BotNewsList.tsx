@@ -1,12 +1,21 @@
 import {
+  useCallback,
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
 } from "react";
 import { Bell, MessageSquare } from "../../../shared/ui/icons";
 import { CollapsibleBody } from "../../../shared/ui/CollapsibleBody";
+import { Popover } from "../../../shared/ui/Popover";
+import { scrollParent } from "../../../shared/lib/scrollParent";
+import {
+  TranscriptJumpToBottom,
+  useTranscriptJumpVisibility,
+} from "../../sessions/ui/TranscriptJumpToBottom";
 import { AgentMarkdown } from "../../sessions/ui/AgentMarkdown";
 import { createNote } from "../../notes";
 import { EmptyState } from "../../monos/ui/monoPanelParts";
@@ -17,17 +26,17 @@ import {
 import {
   botNewsSnapshot,
   markBotNewsSeen,
+  newsPreview,
   subscribeBotNews,
+  type BotNewsItem,
 } from "../model/botNews";
 import {
   findMono,
   monosSnapshot,
   subscribeMonos,
   type AgentNeedingYou,
-  type MonoState,
 } from "../../monos/model/mono";
 import { MonoRailMascot } from "../../monos/ui/MonoRailMascot";
-import { useMonoCardPreview } from "../../monos/ui/MonoCardPreview";
 
 /** Where a report was posted: its bot's chat and the message there. */
 export type NewsPlace = { sessionId: string; blockId: string };
@@ -83,9 +92,57 @@ export function BotNewsList({
     );
 
   return (
-    <div className="flex flex-col gap-3">
+    <JumpToEnd>
       {waiting.length ? <NeedsYouList waiting={waiting} onOpenBot={onOpenBot} /> : null}
       {items.length ? <NewsItems items={items} notes={notes} onOpenBot={onOpenBot} /> : null}
+    </JumpToEnd>
+  );
+}
+
+/** How close to the end the panel counts as at the bottom. */
+const END_SLACK_PX = 24;
+
+/**
+ * The feed with a button on the panel's bottom edge while more reports wait
+ * below, which scrolls to the last one.
+ */
+function JumpToEnd({ children }: { children: ReactNode }) {
+  const root = useRef<HTMLDivElement>(null);
+  const visibility = useTranscriptJumpVisibility();
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  useEffect(() => {
+    const parent = scrollParent(root.current);
+    setScroller(parent);
+    if (!parent) return;
+    const update = () =>
+      visibility.setVisible(
+        parent.scrollHeight - parent.scrollTop - parent.clientHeight >
+          END_SLACK_PX,
+      );
+    update();
+    parent.addEventListener("scroll", update, { passive: true });
+    const observer =
+      typeof ResizeObserver === "undefined" ? null : new ResizeObserver(update);
+    observer?.observe(parent);
+    if (root.current) observer?.observe(root.current);
+    return () => {
+      parent.removeEventListener("scroll", update);
+      observer?.disconnect();
+    };
+  }, [visibility]);
+  return (
+    <div ref={root} className="flex flex-col gap-3">
+      {children}
+      {/* Sticks to the panel's bottom edge; the button floats just above. */}
+      <div className="sticky bottom-0 -mt-3 h-0">
+        <TranscriptJumpToBottom
+          visibility={visibility}
+          label="Go to the end"
+          onJump={() =>
+            scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })
+          }
+        />
+      </div>
     </div>
   );
 }
@@ -161,7 +218,91 @@ function BotFace({ monoId, size }: { monoId: string; size: string }) {
   );
 }
 
-const NO_STATES: ReadonlyMap<string, MonoState> = new Map<string, MonoState>();
+/** How long the pointer rests on a report before its summary shows. */
+const SUMMARY_OPEN_MS = 250;
+const SUMMARY_CLOSE_MS = 120;
+const SUMMARY_MAX = 220;
+
+/**
+ * The hover summary of a report: `bind` goes on each report's header, `card`
+ * renders the one under the pointer, which the pointer may cross into.
+ */
+function useNewsSummary() {
+  const id = useId();
+  const [shown, setShown] = useState<{
+    item: BotNewsItem;
+    anchor: HTMLElement;
+  }>();
+  const timer = useRef<number | null>(null);
+  const cancel = useCallback(() => {
+    if (timer.current != null) window.clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  const close = useCallback(() => {
+    cancel();
+    setShown(undefined);
+  }, [cancel]);
+  const later = useCallback(
+    (run: () => void, ms: number) => {
+      cancel();
+      timer.current = window.setTimeout(run, ms);
+    },
+    [cancel],
+  );
+  useEffect(() => cancel, [cancel]);
+  useEffect(() => {
+    if (!shown) return;
+    const onScroll = () => close();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("blur", close);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("blur", close);
+    };
+  }, [shown, close]);
+  const bind = (item: BotNewsItem) => ({
+    "aria-describedby": shown?.item.id === item.id ? id : undefined,
+    onPointerEnter: (event: React.PointerEvent<HTMLElement>) => {
+      if (event.pointerType === "touch") return;
+      const anchor = event.currentTarget;
+      if (shown) {
+        cancel();
+        setShown({ item, anchor });
+      } else later(() => setShown({ item, anchor }), SUMMARY_OPEN_MS);
+    },
+    onPointerLeave: () => later(close, SUMMARY_CLOSE_MS),
+  });
+  const card = shown ? (
+    <Popover
+      anchor={shown.anchor}
+      side="left"
+      align="start"
+      gap={8}
+      width={280}
+      role="tooltip"
+      id={id}
+      data-news-summary={shown.item.id}
+      onDismiss={close}
+      onPointerEnter={cancel}
+      onPointerLeave={() => later(close, SUMMARY_CLOSE_MS)}
+      className="px-3 py-2.5"
+    >
+      <div className="flex items-center gap-1.5 text-[11px] text-content/55">
+        <BotFace monoId={shown.item.monoId} size="size-3.5" />
+        <span className="min-w-0 truncate">
+          {shown.item.botName} · {shown.item.source}
+        </span>
+        <span className="ml-auto shrink-0 tabular-nums text-content/40">
+          {when(shown.item.at)}
+        </span>
+      </div>
+      <p className="mt-1.5 text-[12px] leading-[18px] text-content/80">
+        {newsPreview(shown.item.text, SUMMARY_MAX) || "No text"}
+      </p>
+    </Popover>
+  ) : null;
+  return { bind, card };
+}
 
 function NewsItems({
   items,
@@ -179,20 +320,22 @@ function NewsItems({
   const shown = filter
     ? items.filter((item) => item.monoId === filter)
     : items;
-  // A bot's face and name show its card on hover, as in the rail.
-  const preview = useMonoCardPreview(NO_STATES);
+  // A report's header shows a short summary of it on hover.
+  const summary = useNewsSummary();
   return (
     <section aria-label="News" className="flex flex-col gap-2">
       {bots.length > 1 ? (
+        // Faces and counts only, so every bot fits on one row.
         <div
           role="toolbar"
           aria-label="Show news from"
-          className="flex flex-wrap gap-1"
+          className="flex flex-nowrap gap-1 overflow-x-auto [scrollbar-width:none]"
         >
           <FilterChip
             active={!filter}
             onClick={() => setOnly(undefined)}
-            label={`All · ${items.length}`}
+            name="All"
+            count={items.length}
           />
           {bots.map((bot) => (
             <FilterChip
@@ -201,7 +344,8 @@ function NewsItems({
               onClick={() =>
                 setOnly(filter === bot.monoId ? undefined : bot.monoId)
               }
-              label={`${bot.name} · ${bot.count}`}
+              name={bot.name}
+              count={bot.count}
               face={<BotFace monoId={bot.monoId} size="size-3.5" />}
             />
           ))}
@@ -224,7 +368,7 @@ function NewsItems({
                   type="button"
                   onClick={() => onOpenBot(item.monoId)}
                   aria-label={`Open ${item.botName}`}
-                  {...preview.bind(item.monoId)}
+                  {...summary.bind(item)}
                   className="flex min-w-0 items-center gap-2 rounded-sm text-left outline-none hover:text-content/80 focus-visible:ring-1 focus-visible:ring-accent/50"
                 >
                   <span className="relative grid shrink-0 place-items-center">
@@ -297,19 +441,23 @@ function NewsItems({
           );
         })}
       </ul>
-      {preview.card}
+      {summary.card}
     </section>
   );
 }
 
+/** A filter: the bot's face (or "All") and how many reports it posted. The
+ * name stays in the tooltip and the label. */
 function FilterChip({
   active,
-  label,
+  name,
+  count,
   face,
   onClick,
 }: {
   active: boolean;
-  label: string;
+  name: string;
+  count: number;
   face?: ReactNode;
   onClick: () => void;
 }) {
@@ -317,17 +465,19 @@ function FilterChip({
     <button
       type="button"
       aria-pressed={active}
+      aria-label={`${name} · ${count}`}
+      title={name}
       onClick={onClick}
-      className={`flex h-6 items-center gap-1.5 rounded-full border text-[12px] ${
-        face ? "pl-1 pr-2.5" : "px-2.5"
+      className={`flex h-6 shrink-0 items-center gap-1.5 rounded-full border text-[12px] tabular-nums ${
+        face ? "pl-1 pr-2" : "px-2.5"
       } ${
         active
           ? "border-content/20 bg-content/8 text-content"
           : "border-content/8 text-content/55 hover:bg-content/5 hover:text-content"
       }`}
     >
-      {face}
-      {label}
+      {face ?? <span>{name}</span>}
+      <span className={face ? "" : "text-content/45"}>{count}</span>
     </button>
   );
 }

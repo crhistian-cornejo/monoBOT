@@ -25,9 +25,11 @@ export function useTranscriptJumpVisibility() {
 export function TranscriptJumpToBottom({
   visibility,
   onJump,
+  label = "Jump to latest",
 }: {
   visibility: ReturnType<typeof useTranscriptJumpVisibility>;
   onJump: () => void;
+  label?: string;
 }) {
   const visible = useSyncExternalStore(
     visibility.subscribe,
@@ -39,8 +41,8 @@ export function TranscriptJumpToBottom({
     <div className="pointer-events-none absolute inset-x-0 bottom-2 z-30 flex justify-center">
       <button
         type="button"
-        title="Jump to latest"
-        aria-label="Jump to latest"
+        title={label}
+        aria-label={label}
         data-jump-to-bottom
         onClick={onJump}
         className="pointer-events-auto grid size-6 place-items-center rounded-md [[data-floating-mono]_&]:rounded-none border border-content/15 bg-content/10 text-content shadow-md hover:bg-content/5 backdrop-blur-md"

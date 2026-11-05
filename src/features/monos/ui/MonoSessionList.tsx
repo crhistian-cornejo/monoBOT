@@ -34,6 +34,7 @@ import {
 import { SessionCard } from "../../../app/shell/Sidebar";
 import type { MonoLook } from "../model/mono";
 import { EmptyState, PageHeader } from "./monoPanelParts";
+import { scrollParent } from "../../../shared/lib/scrollParent";
 
 /** A launched session open over the overview, live and fully usable. */
 export type ShownMonoSession = {
@@ -414,15 +415,6 @@ export function MonoSessionList({
 }
 
 const AGENT_GROUPS = ["Waiting on you", "Working", "Idle"] as const;
-
-/** The nearest ancestor that scrolls, which the list pages against. */
-function scrollParent(node: HTMLElement | null): HTMLElement | null {
-  for (let el = node?.parentElement; el; el = el.parentElement) {
-    const { overflowY } = getComputedStyle(el);
-    if (overflowY === "auto" || overflowY === "scroll") return el;
-  }
-  return null;
-}
 
 /** A launched session open over the overview, live and fully usable. */
 export function LaunchedSessionPage({

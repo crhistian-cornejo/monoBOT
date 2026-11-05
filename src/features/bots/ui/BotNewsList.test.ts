@@ -55,14 +55,41 @@ it("signs each report with its bot and opens it where it was posted", () => {
   act(() => root.unmount());
 });
 
-it("filters the feed to one bot", () => {
+const chip = (label: string) =>
+  host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
+
+it("filters the feed to one bot, its chip only its face and count", () => {
   const root = createRoot(host);
   act(() => root.render(createElement(BotNewsList, { onOpenBot: () => {} })));
-  act(() => buttons("Finance · 1")[0]!.click());
+  const finance = chip("Finance · 1");
+  expect(finance.title).toBe("Finance");
+  expect(finance.textContent).toBe("1");
+  act(() => finance.click());
   const items = host.querySelectorAll("[data-bot-news] li");
   expect(items).toHaveLength(1);
   expect(items[0]!.textContent).toContain("Two Netflix charges");
-  act(() => buttons("All · 2")[0]!.click());
+  act(() => chip("All · 2").click());
   expect(host.querySelectorAll("[data-bot-news] li")).toHaveLength(2);
   act(() => root.unmount());
+});
+
+it("shows a short summary of a report when its header is hovered", () => {
+  vi.useFakeTimers();
+  const root = createRoot(host);
+  act(() => root.render(createElement(BotNewsList, { onOpenBot: () => {} })));
+  const header = host.querySelector<HTMLButtonElement>(
+    'button[aria-label="Open Finance"]',
+  )!;
+  act(() => {
+    header.dispatchEvent(
+      new PointerEvent("pointerover", { bubbles: true, pointerType: "mouse" }),
+    );
+    vi.advanceTimersByTime(300);
+  });
+  const card = document.querySelector("[data-news-summary]");
+  expect(card?.textContent).toContain("Two Netflix charges");
+  // Not the bot's own card any more.
+  expect(document.querySelector("[data-mono-preview]")).toBeNull();
+  act(() => root.unmount());
+  vi.useRealTimers();
 });
