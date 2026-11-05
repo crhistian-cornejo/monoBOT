@@ -2379,6 +2379,7 @@ const TranscriptBlock = memo(function TranscriptBlock({
         cwd={cwd}
         onOpenFile={onOpenFile}
         localMedia={localMedia}
+        citations="sources"
       />
     </div>
   );

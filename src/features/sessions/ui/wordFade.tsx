@@ -1,7 +1,14 @@
 import type { Element, ElementContent, Root } from "hast";
 import { useEffect, useReducer, useRef, useState } from "react";
 import { loadPacedReveal } from "../../settings/model/displayPrefs";
+import {
+  revealEnd,
+  WORD_FOCUS_MS,
+  wordFadeLingerMs,
+  wordStaggerMs,
+} from "../model/wordMotion";
 export { PACED_REVEAL_KEY } from "../../settings/model/displayPrefs";
+export { revealEnd } from "../model/wordMotion";
 
 /*
  * Smooth uneven provider bursts locally, independently of app-shell updates.
@@ -9,8 +16,8 @@ export { PACED_REVEAL_KEY } from "../../settings/model/displayPrefs";
  * available with localStorage["monocode.pacedReveal"] = "0".
  */
 
-/** How long one word takes to fade in while paced. */
-export const WORD_FADE_MS = 320;
+/** How long one word takes to come into focus while paced. */
+export const WORD_FADE_MS = WORD_FOCUS_MS;
 
 /**
  * Fade length tracks an average of the gaps between bursts: three gaps long,
@@ -98,25 +105,6 @@ const REVEAL_HOLD_MS = 150;
 // Parsing is CPU work, unlike compositor word fades. Cap commits on high
 // refresh displays; advance by elapsed time when the main thread stalls.
 export const REVEAL_FRAME_MS = 30;
-
-/**
- * Where to stop revealing `text` for a reveal that has reached `at`: the end
- * of the word `at` falls in, so a word is never shown half written. A stream
- * still mid-word holds back at the last whole word; a finished one runs out.
- */
-export function revealEnd(
-  text: string,
-  at: number,
-  streaming: boolean,
-): number {
-  for (let i = Math.max(0, Math.ceil(at)); i < text.length; i++) {
-    if (isSpace(text.charCodeAt(i))) return i;
-  }
-  if (!streaming) return text.length;
-  let end = text.length;
-  while (end > 0 && !isSpace(text.charCodeAt(end - 1))) end--;
-  return end;
-}
 
 function isSpace(code: number): boolean {
   return code === 32 || code === 10 || code === 9 || code === 13;
@@ -262,14 +250,19 @@ export function usePacedText(
 
 /**
  * Whether a reply's words may fade: while it streams or is being let out, and
- * for one fade after, so the last word finishes. Outside that the fade is off
+ * for `lingerMs` after (by default one fade and its colour trail), so the
+ * last word finishes. Outside that the fade is off
  * — an animation replays whenever its element is hidden and shown again, and
  * a finished reply folded away and reopened must not fade in all over again.
  */
-export function useWordFading(active: boolean, fadeMs = WORD_FADE_MS): boolean {
+export function useWordFading(
+  active: boolean,
+  fadeMs = WORD_FADE_MS,
+  lingerMs = wordFadeLingerMs(fadeMs),
+): boolean {
   const [lingering, setLingering] = useState(false);
-  const lastFadeMs = useRef(fadeMs);
-  lastFadeMs.current = fadeMs;
+  const lastLingerMs = useRef(lingerMs);
+  lastLingerMs.current = lingerMs;
 
   useEffect(() => {
     if (active) {
@@ -278,7 +271,7 @@ export function useWordFading(active: boolean, fadeMs = WORD_FADE_MS): boolean {
     }
     const timer = window.setTimeout(
       () => setLingering(false),
-      lastFadeMs.current,
+      lastLingerMs.current,
     );
     return () => window.clearTimeout(timer);
   }, [active]);
@@ -326,6 +319,23 @@ export function settleCatchUpFades(root: ParentNode & Node): () => void {
   return stop;
 }
 
+/**
+ * Staggers the words just added under `block`: the ones a single paint lets
+ * out start a little apart, so a burst still reads a word at a time. Only the
+ * block that changed is looked at, and each word once. Called only while
+ * the reply's words are fading.
+ */
+export function staggerNewWords(block: ParentNode, capMs: number) {
+  let index = 0;
+  for (const word of block.querySelectorAll<HTMLElement>(
+    "[data-word-fade]:not([data-word-born]):not([data-word-settled])",
+  )) {
+    word.setAttribute("data-word-born", "");
+    const delay = wordStaggerMs(index++, capMs);
+    if (delay > 0) word.style.animationDelay = `${delay}ms`;
+  }
+}
+
 /** The longest a returning tab waits for its catch-up render to land. */
 const CATCH_UP_LIMIT_MS = 500;
 
@@ -334,6 +344,13 @@ const CATCH_UP_LIMIT_MS = 500;
  * component that renders it (links).
  */
 const UNFADED_TAGS = new Set(["a", "code", "pre", "svg", "math", "kbd"]);
+
+/**
+ * Of those, the ones set in a line of prose: their text stays whole, and the
+ * element itself comes in as one word, so it does not appear ahead of the
+ * words around it. (Code inside `pre` is never reached: `pre` is not walked.)
+ */
+const WHOLE_WORD_TAGS = new Set(["a", "code", "kbd"]);
 
 /**
  * Wraps every word in a span that fades in as it is added to the page. The
@@ -380,8 +397,10 @@ export function rehypeWordFade() {
       for (const child of parent.children) {
         if (child.type === "text") children.push(...wrap(child.value));
         else {
-          if (child.type === "element" && !UNFADED_TAGS.has(child.tagName)) {
-            walk(child);
+          if (child.type === "element") {
+            if (!UNFADED_TAGS.has(child.tagName)) walk(child);
+            else if (WHOLE_WORD_TAGS.has(child.tagName))
+              child.properties.dataWordFade = "";
           }
           children.push(child);
         }

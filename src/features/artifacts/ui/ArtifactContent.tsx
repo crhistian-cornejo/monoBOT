@@ -62,6 +62,7 @@ export function ArtifactContent({
           cwd={artifact.sourceCwd}
           onOpenFile={onOpenFile}
           hardBreaks
+          citations="chips"
         />
       );
     case "html":

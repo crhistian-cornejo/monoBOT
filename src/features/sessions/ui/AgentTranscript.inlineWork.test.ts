@@ -49,7 +49,7 @@ beforeEach(() => {
   resultStyles = document.createElement("style");
   resultStyles.textContent = [
     ...readFileSync("src/styles/index.css", "utf8").matchAll(
-      /\.transcript-turn(?::has\(\[data-artifact-results\]\)|\s*>\s*\[data-history-content\]\s*>\s*:has\(\.word-fading\)\s*~\s*\[data-launched-sessions\])[^{]*\{[^}]+\}/g,
+      /\.transcript-turn(?::has\(\[data-artifact-results\]\)|\s*>\s*\[data-history-content\]\s*>\s*:has\(\.word-focusing\)\s*~\s*\[data-launched-sessions\])[^{]*\{[^}]+\}/g,
     ),
   ]
     .map((rule) => rule[0])
@@ -496,7 +496,8 @@ it("waits for the final reply's reveal, then shows its artifact before the actio
   expect(answer.textContent).toBe(reply.text);
   expect(getComputedStyle(cards).display).toBe("none");
   act(() => vi.advanceTimersByTime(WORD_FADE_MS));
-  expect(container.querySelector(".word-fading")).toBeNull();
+  // The cards wait for the last word's focus, not for its colour trail.
+  expect(container.querySelector(".word-focusing")).toBeNull();
   // happy-dom caches :has matches after descendant changes; evaluate the
   // finished DOM afresh to check the shipped rule after the fade ends.
   const finished = cards.parentElement!.cloneNode(true) as HTMLElement;

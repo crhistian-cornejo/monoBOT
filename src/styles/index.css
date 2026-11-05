@@ -1693,8 +1693,9 @@ html.has-user-accent .user-message-bubble[data-draft="true"] {
 }
 
 /* A finished run can still be revealing its reply. Artifacts and actions wait
-   for the final word's fade, using the reply's actual animation state. */
-.transcript-turn:has([data-artifact-results]):has(.word-fading)
+   for the final word to come into focus (not for its colour trail), using the
+   reply's actual animation state. */
+.transcript-turn:has([data-artifact-results]):has(.word-focusing)
   > [data-history-content]
   > :is([data-artifact-results], [data-turn-actions]) {
   display: none;
@@ -1703,7 +1704,7 @@ html.has-user-accent .user-message-bubble[data-draft="true"] {
    above a later reply, such as a report back, stay where they are. */
 .transcript-turn
   > [data-history-content]
-  > :has(.word-fading)
+  > :has(.word-focusing)
   ~ [data-launched-sessions] {
   display: none;
 }
@@ -3672,25 +3673,38 @@ html.theme-light .mono-pill {
 }
 
 /*
- * A streamed word fading in as it is shown (wordFade.tsx).
- * Opacity only: a word that moved would jostle the line it is set on. The
- * fade plays as a word's span is added, and words already on screen keep
- * theirs while the reply is coming in. The spans come off once the fade
- * ends, so a finished reply hidden and shown again never replays. One still
- * fading when its tab hides would replay every word on return, since showing
- * a `display: none` subtree restarts its animations, so the transcript marks
- * the words already shown as settled before that first paint.
+ * A streamed word coming into focus as it is shown (wordFade.tsx,
+ * model/wordMotion.ts for the numbers). Opacity and a small blur, nothing that
+ * moves: a word that moved would jostle the line it is set on. Each word also
+ * arrives in the accent colour and turns into the colour of its text, so the
+ * eye finds where the reply is being written. The fade plays as a word's span
+ * is added, and words already on screen keep theirs while the reply is coming
+ * in. The spans come off once the trail ends, so a finished reply hidden and
+ * shown again never replays. One still fading when its tab hides would replay
+ * every word on return, since showing a `display: none` subtree restarts its
+ * animations, so the transcript marks the words already shown as settled
+ * before that first paint.
  */
 @keyframes word-fade-in {
   from {
     opacity: 0;
+    filter: blur(4px);
   }
 }
 
-/* Unpaced replies set the timing from the stream's cadence (AgentMarkdown). */
+@keyframes word-trail {
+  from,
+  30% {
+    color: var(--color-accent);
+  }
+}
+
+/* Unpaced replies set the fade from the stream's cadence (AgentMarkdown). */
 .agent-markdown.word-fading [data-word-fade]:not([data-word-settled]) {
-  animation: word-fade-in var(--word-fade-ms, 320ms)
-    var(--word-fade-ease, ease-out) both;
+  animation:
+    word-fade-in var(--word-fade-ms, 560ms)
+      var(--word-fade-ease, cubic-bezier(0.22, 1, 0.36, 1)) both,
+    word-trail 1120ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes zen-thinking-pulse {

@@ -10,8 +10,8 @@ import {
   nextCadence,
   PACED_REVEAL_KEY,
   revealEnd,
-  WORD_FADE_MS,
 } from "./wordFade";
+import { WORD_TRAIL_MS } from "../model/wordMotion";
 
 describe("reveal preference", () => {
   afterEach(() => {
@@ -213,7 +213,7 @@ describe("paced streaming", () => {
     render("I will review the diff and **recent** commits", false);
     // The last word is still fading, so the spans already on screen stay put.
     expect(word("I")).toBe(first);
-    act(() => vi.advanceTimersByTime(WORD_FADE_MS));
+    act(() => vi.advanceTimersByTime(WORD_TRAIL_MS));
     expect(shown()).toBe("I will review the diff and recent commits");
     expect(fading()).toBe(false);
     expect(container.querySelector("[data-word-fade]")).toBeNull();
@@ -249,7 +249,7 @@ describe("paced streaming", () => {
     expect(container.querySelector("[data-word-fade]")).not.toBeNull();
 
     render(text, false);
-    act(() => vi.advanceTimersByTime(WORD_FADE_MS));
+    act(() => vi.advanceTimersByTime(WORD_TRAIL_MS));
 
     expect(fading()).toBe(false);
     expect(container.querySelector("[data-word-fade]")).toBeNull();
@@ -267,7 +267,7 @@ describe("paced streaming", () => {
 
     act(() => vi.advanceTimersByTime(2_000));
     expect(shown()).toBe(reply);
-    act(() => vi.advanceTimersByTime(WORD_FADE_MS));
+    act(() => vi.advanceTimersByTime(WORD_TRAIL_MS));
     // A finished reply drops its word spans, so hiding and showing it cannot
     // replay the fade.
     expect(fading()).toBe(false);
@@ -282,12 +282,50 @@ describe("paced streaming", () => {
     expect(container.querySelector("[data-word-fade]")).toBeNull();
   });
 
+  it("staggers the words one paint lets out, each word once", () => {
+    render("", true);
+    render("Alpha beta gamma delta epsilon zeta eta theta ", true);
+    act(() => vi.advanceTimersByTime(2_000));
+    const words = [
+      ...container.querySelectorAll<HTMLElement>("[data-word-fade]"),
+    ];
+    expect(words.length).toBe(8);
+    expect(words.every((word) => word.hasAttribute("data-word-born"))).toBe(
+      true,
+    );
+    const delays = words.map((word) =>
+      parseInt(word.style.animationDelay || "0"),
+    );
+    expect(Math.max(...delays)).toBeGreaterThan(0);
+    expect(Math.max(...delays)).toBeLessThanOrEqual(60);
+  });
+
+  it("holds a table back until its header and delimiter are in", () => {
+    render("", true);
+    render("Sizes:\n\n| Name | Size |\n", true);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(shown()).toBe("Sizes:");
+    expect(container.querySelector("table")).toBeNull();
+
+    render("Sizes:\n\n| Name | Size |\n| --- | --- |\n| app | 4 MB |\n", true);
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(container.querySelector("table")).not.toBeNull();
+    expect(shown()).toContain("app");
+  });
+
   it("leaves code and links whole", () => {
     render("", true);
     render("Run `npm test` and see [the docs](https://example.com) now ", true);
     act(() => vi.advanceTimersByTime(2_000));
     expect(container.querySelector("code [data-word-fade]")).toBeNull();
     expect(container.querySelector("a [data-word-fade]")).toBeNull();
+    // Each comes in as one word, with the words around it.
+    expect(container.querySelector("code[data-word-fade]")?.textContent).toBe(
+      "npm test",
+    );
+    expect(container.querySelector("a[data-word-fade]")?.textContent).toBe(
+      "the docs",
+    );
     expect(word("now")).toBeDefined();
   });
 });
@@ -381,6 +419,9 @@ describe("streamed reveal", () => {
     render("Done reviewing.", false);
     expect(shown()).toBe("Done reviewing.");
     act(() => vi.advanceTimersByTime(400));
+    // The fade is over; the accent trail still runs on the last words.
+    expect(container.querySelector("[data-word-fade]")).not.toBeNull();
+    act(() => vi.advanceTimersByTime(WORD_TRAIL_MS - 400));
     expect(container.querySelector(".word-fading")).toBeNull();
     expect(container.querySelector("[data-word-fade]")).toBeNull();
   });

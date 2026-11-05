@@ -66,6 +66,7 @@ import { rehypeHardBreaks } from "./hardBreaks";
 import {
   pacedRevealPreferred,
   rehypeWordFade,
+  staggerNewWords,
   useCadenceFade,
   usePacedText,
   useStreamedText,
@@ -73,7 +74,13 @@ import {
   WORD_FADE_MS,
 } from "./wordFade";
 import { parseStreamingMarkdown } from "./streamingMarkdown";
+import { holdHalfTable, PACED_STAGGER_CAP_MS } from "../model/wordMotion";
 import { HighlightedCodeBlock } from "./HighlightedCodeBlock";
+import { CitationChip } from "./CitationChip";
+import { CitationContext, CitationScope } from "./citationContext";
+import { CitationSources } from "./CitationSources";
+import { CLAIM_HIGHLIGHT_CLASS } from "./citationClaim";
+import { citationNumber, isCitationHref } from "../model/citations";
 import { TranscriptPacing, TranscriptVisibility } from "./transcriptVisibility";
 import { usePacedReveal } from "../../settings/model/displayPrefs";
 import {
@@ -293,8 +300,20 @@ function MarkdownLink({
   const file = href ? resolveWorkspaceFileReference(href, cwd) : undefined;
   const label = textContent(children);
   const localMedia = useContext(LocalMediaContext);
+  const citations = useContext(CitationContext);
   if (allowRemoteMedia && href && isInboxMediaUrl(href)) {
     return <InboxMedia src={href} alt={label} />;
+  }
+  const cited = citationNumber(label);
+  if (citations && cited !== null && isCitationHref(href)) {
+    return (
+      <CitationChip
+        href={href}
+        number={cited}
+        title={props.title}
+        dir={dir}
+      />
+    );
   }
 
   const link = (
@@ -606,18 +625,34 @@ const MarkdownCommit = createContext<
   ((index: number, content: string) => void) | null
 >(null);
 
+/**
+ * The longest a word waits behind the others of its paint; 0 while not
+ * fading. A ref, so a new value never re-renders the blocks that read it:
+ * only a block whose text changed staggers its new words.
+ */
+const WordStagger = createContext<{ readonly current: number }>({
+  current: 0,
+});
+
 function DirectionalBlock({ dir, ...props }: BlockProps) {
   const committed = useContext(MarkdownCommit);
+  const stagger = useContext(WordStagger);
+  const box = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     committed?.(props.index, props.content);
   }, [committed, props.index, props.content]);
+  // Before the paint, so a word that waits is never seen before it starts.
+  useLayoutEffect(() => {
+    if (stagger.current > 0 && box.current)
+      staggerNewWords(box.current, stagger.current);
+  }, [stagger, props.content]);
   // The word-fade plugin marks changed ancestors for Streamdown's memoized
   // elements, so removing its spans can reconcile the existing block.
   // A fade-end key change also tears down nested code/media in lists and can
   // briefly collapse the reply, clamping the transcript's scroll position.
   const block = <Block {...props} />;
   return dir ? (
-    <div dir={dir} className="agent-markdown-block">
+    <div ref={box} dir={dir} className="agent-markdown-block">
       {block}
     </div>
   ) : (
@@ -637,6 +672,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
   localMedia,
   hardBreaks,
   documentPath,
+  citations,
 }: {
   text: string;
   measurement?: StreamMeasurement;
@@ -656,6 +692,12 @@ export const AgentMarkdown = memo(function AgentMarkdown({
    * project, `cwd`.
    */
   documentPath?: string;
+  /**
+   * Show numbered links, `[1](url "Title | passage")`, as source chips with a
+   * preview. "sources" adds the list of cited sources under the text. Off, they
+   * stay ordinary links.
+   */
+  citations?: "chips" | "sources";
 }) {
   const [fileMenu, setFileMenu] = useState<FileLinkMenu | null>(null);
   const [fileActionError, setFileActionError] = useState<string | null>(null);
@@ -703,12 +745,16 @@ export const AgentMarkdown = memo(function AgentMarkdown({
     visible && !pacedReveal,
   );
   const paced = pacedReveal ? smooth : immediate;
+  const writing = !!streaming || paced.revealing;
+  // A table on its way waits for its header and delimiter, so its first row
+  // never shows as a line of bars that then jumps into a table.
+  const drawable = writing ? holdHalfTable(paced.text) : paced.text;
   const presented = useStreamPresentation(measurement, text.length, visible);
   // Only instrumentation needs the expected block list outside Streamdown.
   // Feed that same list to its parser so measuring never doubles the parsing.
   const measuredBlocks = useMemo(
-    () => (measurement ? parseStreamingMarkdown(paced.text) : undefined),
-    [measurement, paced.text],
+    () => (measurement ? parseStreamingMarkdown(drawable) : undefined),
+    [measurement, drawable],
   );
   const parseBlocks = useCallback(
     (source: string) => measuredBlocks ?? parseStreamingMarkdown(source),
@@ -720,13 +766,23 @@ export const AgentMarkdown = memo(function AgentMarkdown({
     return (index: number, content: string) => {
       if (measuredBlocks[index] !== content) return;
       committed.add(index);
-      if (committed.size === measuredBlocks.length)
-        presented(paced.text.length);
+      if (committed.size === measuredBlocks.length) presented(drawable.length);
     };
-  }, [measuredBlocks, paced.text.length, presented]);
-  const cadence = useCadenceFade(paced.text);
+  }, [measuredBlocks, drawable.length, presented]);
+  const cadence = useCadenceFade(drawable);
   const fadeMs = pacedReveal ? WORD_FADE_MS : cadence.durationMs;
-  const fading = useWordFading(!!streaming || paced.revealing, fadeMs);
+  const fading = useWordFading(writing, fadeMs);
+  // What waits for the reply (its artifacts, its actions) waits for the last
+  // word to come into focus, not for its colour trail.
+  const focusing = useWordFading(writing, fadeMs, fadeMs);
+  // A paced reveal lets out a word or two a paint; a burst shown as it came
+  // spreads over half its fade, so it still reads a word at a time.
+  const stagger = useRef(0);
+  stagger.current = !fading
+    ? 0
+    : pacedReveal
+      ? PACED_STAGGER_CAP_MS
+      : Math.round(fadeMs / 2);
   const fadeStyle = pacedReveal
     ? undefined
     : ({
@@ -798,27 +854,30 @@ export const AgentMarkdown = memo(function AgentMarkdown({
     <RemoteMediaContext.Provider value={remoteMedia}>
       <LocalMediaContext.Provider value={!!localMedia}>
         <FileOpenContext.Provider value={fileOpen}>
-          <>
+          <CitationScope text={drawable} enabled={!!citations}>
             {/* Streamdown takes no style; a contents box passes the fade timing down. */}
             <div className="contents" style={fadeStyle}>
               <MarkdownCommit.Provider value={blockCommitted}>
-                <Streamdown
-                  BlockComponent={DirectionalBlock}
-                  className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${fading ? "word-fading" : ""} ${className ?? ""}`}
-                  components={MARKDOWN_COMPONENTS}
-                  controls={false}
-                  dir="auto"
-                  isAnimating={!!streaming || paced.revealing}
-                  parseIncompleteMarkdown={false}
-                  parseMarkdownIntoBlocksFn={parseBlocks}
-                  plugins={MARKDOWN_PLUGINS}
-                  remarkPlugins={remarkPlugins}
-                  rehypePlugins={rehypePlugins}
-                >
-                  {paced.text}
-                </Streamdown>
+                <WordStagger.Provider value={stagger}>
+                  <Streamdown
+                    BlockComponent={DirectionalBlock}
+                    className={`agent-markdown min-w-0 font-sans text-sm leading-6 ${fading ? "word-fading" : ""} ${focusing ? "word-focusing" : ""} ${citations ? CLAIM_HIGHLIGHT_CLASS : ""} ${className ?? ""}`}
+                    components={MARKDOWN_COMPONENTS}
+                    controls={false}
+                    dir="auto"
+                    isAnimating={writing}
+                    parseIncompleteMarkdown={false}
+                    parseMarkdownIntoBlocksFn={parseBlocks}
+                    plugins={MARKDOWN_PLUGINS}
+                    remarkPlugins={remarkPlugins}
+                    rehypePlugins={rehypePlugins}
+                  >
+                    {drawable}
+                  </Streamdown>
+                </WordStagger.Provider>
               </MarkdownCommit.Provider>
             </div>
+            {citations === "sources" ? <CitationSources /> : null}
             {fileMenu ? (
               <ExplorerMenu
                 x={fileMenu.x}
@@ -835,7 +894,7 @@ export const AgentMarkdown = memo(function AgentMarkdown({
                 onDismiss={() => setFileActionError(null)}
               />
             ) : null}
-          </>
+          </CitationScope>
         </FileOpenContext.Provider>
       </LocalMediaContext.Provider>
     </RemoteMediaContext.Provider>

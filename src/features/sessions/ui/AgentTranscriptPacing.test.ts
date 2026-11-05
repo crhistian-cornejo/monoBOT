@@ -4,7 +4,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Block } from "../model/session";
 import { AgentTranscript } from "./AgentTranscript";
-import { PACED_REVEAL_KEY, WORD_FADE_MS } from "./wordFade";
+import { PACED_REVEAL_KEY } from "./wordFade";
+import { WORD_TRAIL_MS } from "../model/wordMotion";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -165,7 +166,7 @@ it("paces a reply whose text and completion arrive in the same render", () => {
     false,
   );
   act(() => vi.advanceTimersByTime(2_000));
-  act(() => vi.advanceTimersByTime(WORD_FADE_MS));
+  act(() => vi.advanceTimersByTime(WORD_TRAIL_MS));
   expect(answerText()).toBe(reply);
   expect(container.querySelector(".word-fading")).toBeNull();
 });
@@ -266,7 +267,7 @@ it("shows a new reply at once and fades it in without the paced reveal", () => {
   expect(answerText()).toBe(reply);
   expect(container.querySelector(".word-fading")).not.toBeNull();
 
-  act(() => vi.advanceTimersByTime(400));
+  act(() => vi.advanceTimersByTime(WORD_TRAIL_MS));
   expect(answerText()).toBe(reply);
   expect(container.querySelector(".word-fading")).toBeNull();
 });
