@@ -670,6 +670,9 @@ describe("helpers", () => {
   it("classifies tools and todo plans", () => {
     expect(toolKindFromName("Bash")).toBe("execute");
     expect(toolKindFromName("Skill")).toBe("skill");
+    // Reading a page is reading: plan mode allows it.
+    expect(toolKindFromName("WebFetch")).toBe("fetch");
+    expect(toolKindFromName("mcp__exa__web_fetch_exa")).toBe("fetch");
     expect(toolKindFromName("Agent")).toBe("agent");
     expect(toolKindFromName("Task")).toBe("agent");
     expect(toolTitle("Agent", { description: "Explore the auth module" })).toBe(

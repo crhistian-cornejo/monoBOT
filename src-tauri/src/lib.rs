@@ -63,6 +63,7 @@ mod trackpad_zoom;
 #[cfg(target_os = "windows")]
 mod tray;
 mod voice;
+mod web;
 mod window;
 mod window_transfer;
 #[cfg(windows)]
@@ -449,6 +450,9 @@ pub fn run() {
             jira::jira_issue_thread,
             jira::jira_issue_comment,
             link_preview::fetch_link_preview,
+            web::web_page,
+            web::web_download,
+            web::web_keep,
             papers::paper_api,
             papers::paper_pdf,
             papers::paper_pdf_bytes,

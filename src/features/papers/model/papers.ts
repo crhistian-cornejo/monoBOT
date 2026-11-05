@@ -40,6 +40,7 @@ const OPENALEX = "https://api.openalex.org";
 const CROSSREF = "https://api.crossref.org";
 const HAL = "https://api.archives-ouvertes.fr";
 const SEMANTIC = "https://api.semanticscholar.org/graph/v1";
+const ARXIV = "https://export.arxiv.org/api";
 const EUROPE_PMC = "https://www.ebi.ac.uk/europepmc/webservices/rest";
 const WORK_FIELDS =
   "id,doi,title,publication_year,cited_by_count,authorships,primary_location,best_oa_location,open_access,abstract_inverted_index,locations";
@@ -260,11 +261,176 @@ function checkRate(service: string, data: unknown) {
     throw new RateLimited(service, count(body.retryAfter));
 }
 
-/** Searches by words. OpenAlex first; Crossref when OpenAlex is limiting. */
+/**
+ * Searches by words in three indexes at once: OpenAlex (Crossref when OpenAlex
+ * is limiting), Semantic Scholar and arXiv. Their results are taken in turns,
+ * so a preprint isn't buried under the first index's list, and a paper found
+ * twice appears once.
+ */
 export async function findPapers(
   query: string,
   deps: PaperDeps,
   limit = 6,
+  since?: number,
+): Promise<{ papers: Paper[]; source: string; note?: string }> {
+  const [main, semantic, arxiv] = await Promise.all([
+    findInOpenAlex(query, deps, limit, since),
+    searchSemanticScholar(query, deps, limit, since).catch((): Paper[] => []),
+    searchArxiv(query, deps, limit, since).catch((): Paper[] => []),
+  ]);
+  const papers = interleave([main.papers, semantic, arxiv], limit);
+  const sources = [
+    main.source,
+    ...(papers.some((paper) => semantic.includes(paper)) ? ["Semantic Scholar"] : []),
+    ...(papers.some((paper) => arxiv.includes(paper)) ? ["arXiv"] : []),
+  ];
+  return {
+    papers,
+    source: sources.join(", "),
+    ...(main.note ? { note: main.note } : {}),
+  };
+}
+
+/** Takes from each list in turn, skipping a paper already taken (same DOI or title). */
+export function interleave(lists: Paper[][], limit: number): Paper[] {
+  const seen = new Set<string>();
+  const taken: Paper[] = [];
+  const longest = Math.max(0, ...lists.map((found) => found.length));
+  for (let index = 0; index < longest && taken.length < limit; index++) {
+    for (const found of lists) {
+      const paper = found[index];
+      if (!paper || taken.length >= limit) continue;
+      const keys = [
+        paper.doi?.toLowerCase(),
+        paper.title.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim(),
+      ].filter((key): key is string => !!key);
+      if (keys.some((key) => seen.has(key))) continue;
+      keys.forEach((key) => seen.add(key));
+      taken.push(paper);
+    }
+  }
+  return taken;
+}
+
+/** Semantic Scholar's keyword search; with no key it limits often, so it is extra. */
+async function searchSemanticScholar(
+  query: string,
+  deps: PaperDeps,
+  limit: number,
+  since?: number,
+): Promise<Paper[]> {
+  const fields =
+    "title,authors,year,venue,citationCount,externalIds,abstract,openAccessPdf,url";
+  const data = object(
+    await json(
+      deps,
+      `${SEMANTIC}/paper/search?query=${encodeURIComponent(query.trim())}&limit=${limit}&fields=${fields}${since ? `&year=${since}-` : ""}`,
+    ),
+  );
+  return list(data?.data).flatMap((entry) => {
+    const item = object(entry);
+    const title = typeof item?.title === "string" ? item.title.trim() : "";
+    if (!item || !title) return [];
+    const ids = object(item.externalIds);
+    const arxiv = typeof ids?.ArXiv === "string" ? ids.ArXiv : undefined;
+    const doi =
+      normalizeDoi(typeof ids?.DOI === "string" ? ids.DOI : "") ??
+      (arxiv ? `10.48550/arxiv.${arxiv.toLowerCase()}` : undefined);
+    const pdf = object(item.openAccessPdf)?.url;
+    const paper: Paper = {
+      key: doi ?? `s2:${String(item.paperId ?? title)}`,
+      ...(doi ? { doi } : {}),
+      title,
+      authors: list(item.authors)
+        .map((author) => object(author)?.name)
+        .filter((name): name is string => typeof name === "string"),
+      ...(typeof item.year === "number" ? { year: item.year } : {}),
+      ...(typeof item.venue === "string" && item.venue ? { venue: item.venue } : {}),
+      ...(typeof item.citationCount === "number"
+        ? { citedBy: item.citationCount }
+        : {}),
+      ...(typeof item.abstract === "string" && item.abstract
+        ? { abstract: item.abstract, abstractFrom: "Semantic Scholar" }
+        : {}),
+      pdfUrls: typeof pdf === "string" && pdf ? [pdf] : [],
+      ...(typeof item.url === "string" ? { landing: item.url } : {}),
+      access: typeof pdf === "string" && pdf ? "open" : "unknown",
+    };
+    return [paper];
+  });
+}
+
+/** arXiv's own search (Atom): preprints, always open, often newer than journals. */
+async function searchArxiv(
+  query: string,
+  deps: PaperDeps,
+  limit: number,
+  since?: number,
+): Promise<Paper[]> {
+  const words = query
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((word) => `all:${encodeURIComponent(word.replace(/["()]/g, ""))}`)
+    .join("+AND+");
+  const atom = await deps.api(
+    `${ARXIV}/query?search_query=${words}&start=0&max_results=${limit}&sortBy=relevance`,
+  );
+  return parseArxivFeed(atom).filter(
+    (paper) => !since || !paper.year || paper.year >= since,
+  );
+}
+
+/** The entries of an arXiv Atom feed as papers. */
+export function parseArxivFeed(atom: string): Paper[] {
+  const tag = (block: string, name: string) =>
+    block
+      .match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`))?.[1]
+      ?.replace(/\s+/g, " ")
+      .trim();
+  return Array.from(atom.matchAll(/<entry>([\s\S]*?)<\/entry>/g)).flatMap(
+    ([, entry]) => {
+      const id = arxivId(tag(entry, "id") ?? "");
+      const title = tag(entry, "title");
+      if (!id || !title) return [];
+      const doi = `10.48550/arxiv.${id.toLowerCase()}`;
+      const published = tag(entry, "published");
+      const summary = tag(entry, "summary");
+      return [
+        {
+          key: doi,
+          doi,
+          title: decodeXml(title),
+          authors: Array.from(
+            entry.matchAll(/<author>\s*<name>([\s\S]*?)<\/name>/g),
+          ).map(([, name]) => decodeXml(name.trim())),
+          ...(published ? { year: Number(published.slice(0, 4)) } : {}),
+          venue: "arXiv",
+          ...(summary
+            ? { abstract: decodeXml(summary), abstractFrom: "arXiv" }
+            : {}),
+          pdfUrls: [`https://arxiv.org/pdf/${id}`],
+          landing: `https://arxiv.org/abs/${id}`,
+          access: "open" as const,
+        },
+      ];
+    },
+  );
+}
+
+function decodeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
+async function findInOpenAlex(
+  query: string,
+  deps: PaperDeps,
+  limit: number,
   since?: number,
 ): Promise<{ papers: Paper[]; source: string; note?: string }> {
   const terms = encodeURIComponent(query.trim());

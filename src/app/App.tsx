@@ -53,6 +53,11 @@ import {
   nativePaperDeps,
   renderPaperPage,
 } from "../features/papers/model/paperStore";
+import {
+  downloadWebFile,
+  fetchWebPage,
+  keepDownload,
+} from "../features/web/model/webApi";
 import { submitWithSettlement } from "./model/managedSubmission";
 import {
   submitAfterProjectSync,
@@ -12329,6 +12334,11 @@ function Workspace({
               addPdf: (path, options) => addPaperPdf(path, options),
             },
             installedSkills: async () => installedClaudeSkills(await homeDir()),
+            web: {
+              page: (url) => fetchWebPage(url),
+              download: (url, options) => downloadWebFile(url, options),
+              keep: (path, agent) => keepDownload(path, agent),
+            },
             readAgentFile: (monoId, path) => readAgentFile(monoId, path),
             writeAgentFile: (monoId, path, text, hash) =>
               writeAgentFile(monoId, path, text, hash),

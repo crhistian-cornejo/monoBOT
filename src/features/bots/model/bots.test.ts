@@ -208,6 +208,8 @@ describe("bots", () => {
       "mslearn",
       "xmd",
       "openalex",
+      "exa",
+      "playwright",
     ]);
     expect(botTools("documents").skills).toEqual(["docx", "xlsx", "pptx", "pdf"]);
     expect(botTools("inbox")).toMatchObject({ services: ["gmail"], access: ["read"] });

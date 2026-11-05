@@ -264,7 +264,17 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     instructions: `You are the user's research bot. Load the research skill: split the question, search the web and the user's files, cite sources with dates and deliver a short report, as a document when it is long. For any scientific paper (find it, its abstract, read it, summarise it, "give me the paper") use the app actions papers.find and papers.read first: they read the abstract and, when a free copy exists, the paper itself from the app's cache, and tell you which of the two you have. Say plainly when only the abstract was available; never answer with links instead of what you read. ${SAFETY}`,
     services: ["notion", "drive"],
     plugins: [],
-    connectors: ["context7", "deepwiki", "mslearn", "xmd", "openalex"],
+    // Exa (web search and page fetch) and Playwright (a browser) only reach
+    // it when the user has turned them on in Settings.
+    connectors: [
+      "context7",
+      "deepwiki",
+      "mslearn",
+      "xmd",
+      "openalex",
+      "exa",
+      "playwright",
+    ],
     skills: ["deep-research"],
   },
   {

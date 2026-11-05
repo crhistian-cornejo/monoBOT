@@ -1114,7 +1114,10 @@ async function handleControlRequest(
 
   if (live.planning) {
     const kind = toolKindFromName(toolName);
-    const decision = kind === "read" || kind === "search" ? "allow" : "deny";
+    const decision =
+      kind === "read" || kind === "search" || kind === "fetch"
+        ? "allow"
+        : "deny";
     await writeJson(
       sessionId,
       buildControlResponse(

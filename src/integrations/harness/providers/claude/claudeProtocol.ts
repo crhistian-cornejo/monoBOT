@@ -1061,6 +1061,8 @@ export function toolKindFromName(toolName: string): string {
   ) {
     return "edit";
   }
+  // WebFetch and a connector's page fetch only read; plan mode allows them.
+  if (normalized.includes("fetch")) return "fetch";
   if (normalized === "read" || normalized.includes("read")) return "read";
   if (
     normalized.includes("grep") ||

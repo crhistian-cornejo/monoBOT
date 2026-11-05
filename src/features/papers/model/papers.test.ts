@@ -293,6 +293,71 @@ describe("findPapers", () => {
     expect(found.note).toContain("OpenAlex was not available");
     expect(found.papers[0].title).toBe("Hit");
   });
+
+  it("also asks Semantic Scholar and arXiv, in turns, once per paper", async () => {
+    const api = deps({
+      "https://api.openalex.org/works?": { results: [alex()] },
+      "https://api.semanticscholar.org/graph/v1/paper/search?": {
+        data: [
+          {
+            paperId: "s1",
+            title: "Settling ponds for mine water",
+            authors: [{ name: "J. Lee" }],
+            year: 2021,
+            citationCount: 12,
+            externalIds: { DOI: "10.1016/j.mineng.2021.1" },
+            openAccessPdf: { url: "https://x.org/ponds.pdf" },
+          },
+          // The same paper OpenAlex found, by title: not listed twice.
+          { paperId: "s2", title: alex().title, externalIds: {} },
+        ],
+      },
+      "https://export.arxiv.org/api/query?": `<?xml version="1.0"?><feed>
+        <entry>
+          <id>http://arxiv.org/abs/2403.01234v2</id>
+          <published>2024-03-02T00:00:00Z</published>
+          <title>Sediment &amp; flocculant
+            dosing in tailings ponds</title>
+          <summary>We model the settling.</summary>
+          <author><name>A. Gómez</name></author>
+          <author><name>B. Ruiz</name></author>
+        </entry></feed>`,
+    });
+    const found = await findPapers("settling ponds", api, 6);
+    expect(found.source).toBe("OpenAlex, Semantic Scholar, arXiv");
+    expect(found.papers.map((paper) => paper.title)).toEqual([
+      alex().title,
+      "Settling ponds for mine water",
+      "Sediment & flocculant dosing in tailings ponds",
+    ]);
+    expect(found.papers[1]).toMatchObject({
+      doi: "10.1016/j.mineng.2021.1",
+      citedBy: 12,
+      access: "open",
+      pdfUrls: ["https://x.org/ponds.pdf"],
+    });
+    // An arXiv paper reads by its arXiv DOI, like any other.
+    expect(found.papers[2]).toMatchObject({
+      doi: "10.48550/arxiv.2403.01234",
+      authors: ["A. Gómez", "B. Ruiz"],
+      year: 2024,
+      venue: "arXiv",
+      abstractFrom: "arXiv",
+      pdfUrls: ["https://arxiv.org/pdf/2403.01234"],
+    });
+    expect(api.calls.some((url) => url.includes("search_query=all:settling+AND+all:ponds"))).toBe(true);
+  });
+
+  it("keeps OpenAlex's answer when the other two fail", async () => {
+    const api = deps({
+      "https://api.openalex.org/works?": { results: [alex()] },
+      "https://api.semanticscholar.org/": new Error("429"),
+      "https://export.arxiv.org/": new Error("timeout"),
+    });
+    const found = await findPapers("lumped GR models", api, 3);
+    expect(found.source).toBe("OpenAlex");
+    expect(found.papers).toHaveLength(1);
+  });
 });
 
 describe("reading the text", () => {

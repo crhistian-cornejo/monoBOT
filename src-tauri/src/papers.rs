@@ -151,7 +151,7 @@ fn pdf_links(html: &str, base: &Url) -> Vec<Url> {
 /// Gets the PDF a link leads to: the file itself, or the PDF its page points
 /// to (up to two pages deep). Errors starting `blocked:` name a host that
 /// refuses programs; nothing here tries to get past that.
-fn download_pdf(start: Url) -> Result<(Vec<u8>, Url), String> {
+pub(crate) fn download_pdf(start: Url) -> Result<(Vec<u8>, Url), String> {
     let mut queue = std::collections::VecDeque::from([(start, 0u8)]);
     let mut seen = std::collections::HashSet::new();
     let mut blocked: Option<String> = None;
@@ -364,7 +364,7 @@ pub fn paper_image_write(
 /// A folder or file name that is safe on macOS and Windows: no separators or
 /// characters Windows refuses, no control characters, no trailing dots or
 /// spaces, no reserved device names, and not too long.
-fn safe_name(raw: &str, fallback: &str, max: usize) -> String {
+pub(crate) fn safe_name(raw: &str, fallback: &str, max: usize) -> String {
     let cleaned: String = raw
         .chars()
         .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { ' ' } else { c })
