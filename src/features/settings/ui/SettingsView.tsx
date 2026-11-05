@@ -404,7 +404,13 @@ import {
   type SettingsSearchResult,
   type SettingsSectionId,
 } from "../model/settings";
-import { loadSoundsEnabled, playCue, saveSoundsEnabled } from "../model/sounds";
+import {
+  loadSoundsEnabled,
+  loadSoundsVolume,
+  playCue,
+  saveSoundsEnabled,
+  saveSoundsVolume,
+} from "../model/sounds";
 import { setQuickComposerShortcut } from "../../quick-composer/model/quickComposer";
 import {
   isGlobalShortcut,
@@ -848,6 +854,10 @@ function GeneralPage({
   onOpenWhatsNew: (version: string) => void;
 }) {
   const [soundsEnabled, setSoundsEnabled] = useState(loadSoundsEnabled);
+  const [soundsVolume, setSoundsVolume] = useState(loadSoundsVolume);
+  // A cue plays once the slider rests, so the user hears the new level.
+  const volumeCue = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(volumeCue.current), []);
   const [notificationsEnabled, setNotificationsEnabled] = useState(
     loadNotificationsEnabled,
   );
@@ -885,6 +895,13 @@ function GeneralPage({
   const onSoundsEnabled = (next: boolean) => {
     saveSoundsEnabled(next);
     setSoundsEnabled(next);
+  };
+
+  const onSoundsVolume = (next: number) => {
+    saveSoundsVolume(next);
+    setSoundsVolume(next);
+    window.clearTimeout(volumeCue.current);
+    volumeCue.current = window.setTimeout(() => playCue("copy"), 250);
   };
 
   const onNotificationsEnabled = (next: boolean) => {
@@ -950,6 +967,22 @@ function GeneralPage({
             label="Sounds"
             on={soundsEnabled}
             onChange={onSoundsEnabled}
+          />
+        </Row>
+        <Row
+          id="sounds-volume"
+          label="Sound volume"
+          description="How loud the cues play, on top of your system's volume."
+        >
+          <Slider
+            label="Sound volume"
+            value={soundsVolume}
+            display={`${soundsVolume}%`}
+            min={0}
+            max={100}
+            step={5}
+            disabled={!soundsEnabled}
+            onChange={onSoundsVolume}
           />
         </Row>
         <Row

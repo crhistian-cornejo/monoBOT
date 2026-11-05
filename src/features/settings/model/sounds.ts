@@ -8,11 +8,44 @@ import { inboxNotificationProject } from "../../notifications/model/notification
 
 const KEY = "monocode.sounds";
 const ENABLED_AT_KEY = "monocode.soundsEnabledAt";
+const VOLUME_KEY = "monocode.soundsVolume";
 
 export const SOUNDS_DEFAULT = true;
 
-/** Soft enough to sit in the background while a turn runs in another app. */
-export const SOUNDS_VOLUME = 0.55;
+/**
+ * The cues' volume as the user sets it, in percent of the loudest MonoBOT
+ * plays. The system volume still scales it, as it does any app's sound.
+ */
+export const SOUNDS_VOLUME_DEFAULT = 100;
+
+/**
+ * cuelume tops out at 1 and its limiter keeps peaks near -8 dBFS, which on
+ * laptop speakers and headphones read as barely there. The output is lifted
+ * by this much after the limiter: about +5 dB, peaks still under full scale.
+ */
+export const SOUNDS_BOOST = 1.8;
+
+export function loadSoundsVolume(): number {
+  try {
+    const raw = localStorage.getItem(VOLUME_KEY);
+    const value = raw == null ? NaN : Number(raw);
+    return Number.isFinite(value)
+      ? Math.min(100, Math.max(0, Math.round(value)))
+      : SOUNDS_VOLUME_DEFAULT;
+  } catch {
+    return SOUNDS_VOLUME_DEFAULT;
+  }
+}
+
+export function saveSoundsVolume(value: number) {
+  const volume = Math.min(100, Math.max(0, Math.round(value)));
+  try {
+    localStorage.setItem(VOLUME_KEY, String(volume));
+  } catch {
+    // private mode / quota
+  }
+  applySoundEngine();
+}
 
 export const SOUNDS_CHANGE_EVENT = "monocode:sounds-change";
 
@@ -62,7 +95,7 @@ export function saveSoundsEnabled(value: boolean) {
 
 function applySoundEngine() {
   setEnabled(loadSoundsEnabled());
-  setVolume(SOUNDS_VOLUME);
+  setVolume(loadSoundsVolume() / 100);
 }
 
 /** Apply the stored mute/volume before the first cue. */
@@ -117,9 +150,20 @@ function captureAudioContext(run: () => void) {
     typeof window === "undefined" ? undefined : window.AudioContext;
   if (!Native) return run();
   window.AudioContext = class extends Native {
+    private boosted?: GainNode;
     constructor(options?: AudioContextOptions) {
       super(options);
       audioContext = this;
+    }
+    // cuelume ends its chain at the destination; a gain in front of the
+    // real one lifts everything it plays (SOUNDS_BOOST).
+    override get destination(): AudioDestinationNode {
+      if (!this.boosted) {
+        this.boosted = this.createGain();
+        this.boosted.gain.value = SOUNDS_BOOST;
+        this.boosted.connect(super.destination);
+      }
+      return this.boosted as unknown as AudioDestinationNode;
     }
   };
   try {

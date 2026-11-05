@@ -252,6 +252,12 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     keywords: "audio cue chime mute volume",
   },
   {
+    id: "sounds-volume",
+    section: "general",
+    label: "Sound volume",
+    keywords: "audio loud quiet louder level cue volume",
+  },
+  {
     id: "notifications",
     section: "general",
     label: "Notifications",

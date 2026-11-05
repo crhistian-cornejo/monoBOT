@@ -18,7 +18,10 @@ import {
   saveSoundsEnabled,
   SOUNDS_DEFAULT,
   SOUNDS_SUSPEND_MS,
-  SOUNDS_VOLUME,
+  SOUNDS_BOOST,
+  SOUNDS_VOLUME_DEFAULT,
+  loadSoundsVolume,
+  saveSoundsVolume,
 } from "./sounds";
 import { updateNotificationPreferences } from "../../notifications/model/notificationPreferences";
 
@@ -79,7 +82,7 @@ describe("sounds", () => {
 
   it("plays the mapped cue when enabled", () => {
     playCue("turnFinished", { projectId: "work", category: "agentFinished" });
-    expect(setVolume).toHaveBeenCalledWith(SOUNDS_VOLUME);
+    expect(setVolume).toHaveBeenCalledWith(SOUNDS_VOLUME_DEFAULT / 100);
     expect(play).toHaveBeenCalledWith("success");
     playCue("inboxUnseen", { projectId: "work", category: "issues" });
     expect(play).toHaveBeenCalledWith("bloom");
@@ -91,6 +94,17 @@ describe("sounds", () => {
     expect(play).toHaveBeenCalledWith("toggle");
     playCue("copy");
     expect(play).toHaveBeenCalledWith("scan");
+  });
+
+  it("plays at full volume until the user turns it down", () => {
+    expect(loadSoundsVolume()).toBe(100);
+    saveSoundsVolume(40);
+    expect(loadSoundsVolume()).toBe(40);
+    expect(setVolume).toHaveBeenLastCalledWith(0.4);
+    saveSoundsVolume(140);
+    expect(loadSoundsVolume()).toBe(100);
+    localStorage.setItem("monocode.soundsVolume", "loud");
+    expect(loadSoundsVolume()).toBe(SOUNDS_VOLUME_DEFAULT);
   });
 
   it("is silent when muted", () => {
@@ -186,6 +200,36 @@ describe("sounds", () => {
       expect(shared!.suspend).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
+      vi.unstubAllGlobals();
+      play.mockReset();
+    }
+  });
+
+  it("lifts what cuelume plays at the context's destination", () => {
+    const real = { name: "speakers" };
+    class FakeAudioContext {
+      state = "running";
+      suspend = vi.fn(async () => undefined);
+      get destination(): unknown {
+        return real;
+      }
+      createGain() {
+        return { gain: { value: 1 }, connect: vi.fn() };
+      }
+    }
+    let output: { gain: { value: number }; connect: ReturnType<typeof vi.fn> } | undefined;
+    play.mockImplementation(() => {
+      const Ctor = (
+        window as unknown as { AudioContext: typeof FakeAudioContext }
+      ).AudioContext;
+      output = new Ctor().destination as typeof output;
+    });
+    vi.stubGlobal("window", { AudioContext: FakeAudioContext });
+    try {
+      playCue("copy");
+      expect(output!.gain.value).toBe(SOUNDS_BOOST);
+      expect(output!.connect).toHaveBeenCalledWith(real);
+    } finally {
       vi.unstubAllGlobals();
       play.mockReset();
     }
