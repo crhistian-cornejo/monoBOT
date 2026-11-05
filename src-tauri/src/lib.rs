@@ -461,6 +461,7 @@ pub fn run() {
             mail::mail_remove_account,
             mail::mail_overview,
             mail::mail_last,
+            mail::mail_search,
             mail::mail_prefetch,
             mail::mail_archive_more,
             mail::mail_open,

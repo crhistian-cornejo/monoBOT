@@ -59,6 +59,11 @@ import {
   keepDownload,
 } from "../features/web/model/webApi";
 import { mailApi } from "../features/mail/model/mailApi";
+import {
+  loadMailAccess,
+  requestMailConnect,
+} from "../features/mail/model/mailAccess";
+import { MailConnectDialog } from "../features/mail/ui/MailConnectDialog";
 import { submitWithSettlement } from "./model/managedSubmission";
 import {
   submitAfterProjectSync,
@@ -12903,6 +12908,10 @@ function Workspace({
               overview: () => mailApi.overview(false),
               open: (id) => mailApi.open(id),
               draft: (id, text) => mailApi.draft(id, text),
+              accounts: () => mailApi.accounts(),
+              search: (query, options) => mailApi.search(query, options),
+              access: loadMailAccess,
+              connect: requestMailConnect,
             },
             web: {
               page: (url) => fetchWebPage(url),
@@ -16398,6 +16407,7 @@ function Workspace({
                 }}
               />
             ) : null}
+            <MailConnectDialog />
             {providerSignInRequest ? (
               <ProviderSignInDialog
                 key={providerSignInRequest.key}

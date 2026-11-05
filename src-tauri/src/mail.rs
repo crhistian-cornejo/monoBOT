@@ -283,6 +283,104 @@ pub async fn mail_last(app: AppHandle) -> Result<Option<Overview>, String> {
     .map_err(|e| e.to_string())?
 }
 
+/// The most messages one search gives back per account.
+const SEARCH_MAX: usize = 50;
+
+/// A message a search found, as an agent reads it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FoundMail {
+    /// When it arrived, in Unix milliseconds (0: the server did not say).
+    at: i64,
+    from: String,
+    address: String,
+    subject: String,
+    /// The first lines of its text, without HTML or attachments.
+    text: String,
+    /// The same on every server that keeps it: what an agent keys a movement by.
+    message_id: String,
+    /// Gmail's own id, empty on other servers.
+    gmail_id: String,
+}
+
+/// What one account answered to a search.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSearch {
+    address: String,
+    found: Vec<FoundMail>,
+    /// More messages matched than `limit`.
+    more: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    problem: Option<String>,
+}
+
+/// Searches the whole history of the accounts named in `addresses` (all of them
+/// when unset) with the words of Gmail's search box, each account at once. Read
+/// only: nothing is marked, moved or kept. The page decides which accounts an
+/// agent may search; this only searches the ones it is given.
+#[tauri::command]
+pub async fn mail_search(
+    app: AppHandle,
+    query: String,
+    addresses: Option<Vec<String>>,
+    limit: usize,
+    oldest_first: bool,
+) -> Result<Vec<AccountSearch>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let limit = limit.clamp(1, SEARCH_MAX);
+        let accounts: Vec<Account> = load(&app)
+            .accounts
+            .into_iter()
+            .filter(|account| {
+                addresses.as_ref().is_none_or(|wanted| {
+                    wanted.iter().any(|a| a.eq_ignore_ascii_case(&account.address))
+                })
+            })
+            .collect();
+        let results = std::thread::scope(|scope| {
+            let jobs: Vec<_> = accounts
+                .iter()
+                .map(|account| {
+                    let query = query.as_str();
+                    scope.spawn(move || (account, mail().search(account, query, limit, oldest_first)))
+                })
+                .collect();
+            jobs.into_iter().filter_map(|job| job.join().ok()).collect::<Vec<_>>()
+        });
+        Ok(results
+            .into_iter()
+            .map(|(account, result)| match result {
+                Ok((found, more)) => AccountSearch {
+                    address: account.address.clone(),
+                    found: found
+                        .into_iter()
+                        .map(|f| FoundMail {
+                            at: f.at.saturating_mul(1000),
+                            from: f.from_name,
+                            address: f.from_address,
+                            subject: f.subject,
+                            text: f.text,
+                            message_id: f.message_id,
+                            gmail_id: f.gmail_id,
+                        })
+                        .collect(),
+                    more,
+                    problem: None,
+                },
+                Err(problem) => AccountSearch {
+                    address: account.address.clone(),
+                    found: Vec::new(),
+                    more: false,
+                    problem: Some(problem),
+                },
+            })
+            .collect())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Reads ahead the messages the user is likely to open next, so opening them
 /// comes from memory. Nothing is marked read.
 #[tauri::command]

@@ -3,7 +3,16 @@ import { useRef, useState } from "react";
 import { Trash2 } from "../../../shared/ui/icons";
 import { PersonAvatar } from "../../../shared/ui/PersonAvatar";
 import { Switch } from "../../../shared/ui/Switch";
+import { findMono, monoLook } from "../../monos/model/mono";
 import { loadAutoImages, saveAutoImages, type MailAccount } from "../model/mail";
+import {
+  keepFor,
+  loadMailAccess,
+  openToAll,
+  readersOf,
+  saveMailAccess,
+  type MailConnectRequest,
+} from "../model/mailAccess";
 import { loadMyPhoto, saveMyPhoto } from "../model/mailAvatar";
 import { mailApi } from "../model/mailApi";
 import { readPhoto, useMailFace } from "./MailPeople";
@@ -84,17 +93,33 @@ function AccountPhoto({ account }: { account: MailAccount }) {
 }
 
 /** Connect a mail account with an app password, or remove one. */
+/** Who an account is kept for, as the user reads it: «Finance». */
+function readerNames(ids: string[]): string {
+  return ids
+    .map((id) => {
+      const mono = findMono(id);
+      return mono ? monoLook(mono).name : "a removed bot";
+    })
+    .join(", ");
+}
+
 export function MailAccounts({
   accounts,
   onChanged,
+  request,
+  onConnected,
 }: {
   accounts: MailAccount[];
   onChanged: () => void;
+  /** A bot asked for this account: its address comes filled in. */
+  request?: MailConnectRequest;
+  onConnected?: (address: string) => void;
 }) {
-  const [provider, setProvider] = useState<Provider>("gmail");
-  const [address, setAddress] = useState("");
+  const [provider, setProvider] = useState<Provider>(request?.provider ?? "gmail");
+  const [address, setAddress] = useState(request?.address ?? "");
   const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
+  const [name, setName] = useState(request?.name ?? "");
+  const [access, setAccess] = useState(loadMailAccess);
   const [host, setHost] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
@@ -112,6 +137,12 @@ export function MailAccounts({
         provider,
         ...(provider === "imap" ? { host } : {}),
       });
+      if (request?.onlyFor) {
+        const next = keepFor(loadMailAccess(), address, request.onlyFor);
+        saveMailAccess(next);
+        setAccess(next);
+      }
+      onConnected?.(address.trim());
       setAddress("");
       setPassword("");
       setName("");
@@ -139,13 +170,34 @@ export function MailAccounts({
                 <span className="block truncate text-[12px] text-content/50">
                   {account.address}
                 </span>
+                {readersOf(access, account.address) ? (
+                  <span className="block truncate text-[12px] text-content/50">
+                    Only {readerNames(readersOf(access, account.address)!)} reads it ·{" "}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = openToAll(loadMailAccess(), account.address);
+                        saveMailAccess(next);
+                        setAccess(next);
+                      }}
+                      className="text-accent hover:underline"
+                    >
+                      Open to every agent
+                    </button>
+                  </span>
+                ) : null}
               </span>
               <button
                 type="button"
                 title="Remove this account from MonoBOT"
                 aria-label={`Remove ${account.address}`}
                 onClick={() =>
-                  void mailApi.removeAccount(account.id).then(onChanged)
+                  void mailApi.removeAccount(account.id).then(() => {
+                    const next = openToAll(loadMailAccess(), account.address);
+                    saveMailAccess(next);
+                    setAccess(next);
+                    onChanged();
+                  })
                 }
                 className="order-last grid size-7 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content"
               >
@@ -202,6 +254,15 @@ export function MailAccounts({
             </button>
           ))}
         </div>
+        {request ? (
+          <p className="rounded-md bg-content/5 px-3 py-2 text-[12px] leading-relaxed text-content/70">
+            {request.askedBy} asked to connect this account.{" "}
+            {request.onlyFor
+              ? `Only ${request.askedBy} will read it; you can open it to every agent later.`
+              : "Every agent will be able to read it."}{" "}
+            Type the password here, never in a chat.
+          </p>
+        ) : null}
         <p className="text-[12px] leading-relaxed text-content/60">
           {steps.text}{" "}
           {steps.link ? (

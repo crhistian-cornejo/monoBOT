@@ -5,6 +5,7 @@ import type {
   MailAction,
   MailOverview,
   MailRecipients,
+  MailSearchResult,
   OpenedMail,
 } from "./mail";
 
@@ -26,6 +27,20 @@ export const mailApi = {
       host: input.host ?? null,
     }),
   removeAccount: (id: string) => invoke<void>("mail_remove_account", { id }),
+  /**
+   * The whole history of the accounts in `addresses` (all when unset), with
+   * Gmail's search words; read only. Each account says what it found.
+   */
+  search: (
+    query: string,
+    options: { addresses?: string[]; limit: number; oldestFirst: boolean },
+  ) =>
+    invoke<MailSearchResult[]>("mail_search", {
+      query,
+      addresses: options.addresses ?? null,
+      limit: options.limit,
+      oldestFirst: options.oldestFirst,
+    }),
   overview: (force = false) => invoke<MailOverview>("mail_overview", { force }),
   /** The last reading at once (memory, else the snapshot on disk); null before the first. */
   last: () => invoke<MailOverview | null>("mail_last"),

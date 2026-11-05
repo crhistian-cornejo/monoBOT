@@ -35,6 +35,24 @@ export type MailAccount = {
   provider: string;
 };
 
+/** What one account answered to a search of its whole history (`mail_search`). */
+export type MailSearchResult = {
+  address: string;
+  found: {
+    /** Unix milliseconds; 0 when the server did not say. */
+    at: number;
+    from: string;
+    address: string;
+    subject: string;
+    /** The first lines of its text. */
+    text: string;
+    messageId: string;
+    gmailId: string;
+  }[];
+  more: boolean;
+  problem?: string;
+};
+
 export type MailOverview = {
   accounts: MailAccount[];
   messages: MailMessage[];
