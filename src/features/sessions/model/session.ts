@@ -420,6 +420,8 @@ export type Block = {
   noteCard?: NoteCardMeta;
   /** Saved artifacts attached to this turn; their bodies live outside chat. */
   artifactCards?: import("../../artifacts/artifacts").ArtifactCard[];
+  /** Visuals the agent published this turn; replies place them by id. */
+  visuals?: import("../../visuals/model/visual").VisualDocument[];
   /** Exact CI repair instructions and evidence supplied with this user turn. */
   ciContext?: string;
   /** Mid-turn interjection chrome; system blocks only. Body lives in text. */

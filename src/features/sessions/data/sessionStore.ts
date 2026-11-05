@@ -9,6 +9,7 @@ import { codexCommandPresentation } from "../../../integrations/harness/provider
 import { recoverCursorSubagents } from "../../../integrations/harness/providers/cursor/cursorSubagents";
 import { persistableAttachment } from "../model/attachments";
 import { ARTIFACT_KINDS } from "../../artifacts/artifacts";
+import { sanitizeVisuals } from "../../visuals/model/visual";
 import type { ContextUsage } from "../model/contextUsage";
 import {
   isRemoteProjectPath,
@@ -1108,6 +1109,8 @@ function sanitizeBlock(
     });
     if (cards.length) next.artifactCards = cards;
   }
+  const visuals = sanitizeVisuals(block.visuals);
+  if (block.role === "user" && visuals.length) next.visuals = visuals;
   if (
     block.role === "user" &&
     typeof block.ciContext === "string" &&

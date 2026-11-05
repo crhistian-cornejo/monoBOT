@@ -123,6 +123,14 @@
    VS Code's Dark+ by default; light mode (Light+) and the inset workspace
    themes swap them below. */
 :root {
+  /* Agent visuals (features/visuals): the native app's chart hues. Series 1
+     is the accent; light mode takes the darker variants in html.theme-light. */
+  --color-visual-positive: #4fd57f;
+  --color-visual-negative: #fc5855;
+  --color-visual-warning: #fea247;
+  --color-visual-series3: #b77df8;
+  --color-visual-series5: #fa78b2;
+  --color-visual-series6: #3faff3;
   /* Code text in the file editor and the unified diff. */
   --code-font-size: 12.5px;
   --syntax-keyword: #569cd6;
@@ -220,6 +228,12 @@ html {
 }
 
 html.theme-light {
+  --color-visual-positive: #0a924b;
+  --color-visual-negative: #d01d21;
+  --color-visual-warning: #d96700;
+  --color-visual-series3: #863ad2;
+  --color-visual-series5: #d12c80;
+  --color-visual-series6: #0077d7;
   --background-lightness: 97%;
   --content-lightness: 18%;
   --link-color: hsl(211 92% 40%);

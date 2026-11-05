@@ -171,6 +171,12 @@ import {
   isOperatorUserTurn,
   operatorUserPrompt,
 } from "../model/operatorCommand";
+import { visualsById } from "../../visuals/model/visual";
+import {
+  UnplacedVisuals,
+  VisualReply,
+  VisualsContext,
+} from "../../visuals/ui/VisualReply";
 import {
   clearTranscriptHighlights,
   paintTranscriptHighlights,
@@ -820,6 +826,7 @@ function AgentTranscriptComponent({
     [messageDeliveries],
   );
   const turns = turnCache.group(blocks, managed, inlineWork);
+  const visuals = useMemo(() => visualsById(blocks), [blocks]);
   // A scheduled update can land while the chat's own turn is still running.
   const activeTurnIndex = turns.reduce(
     (latest, turn, index) =>
@@ -1154,6 +1161,7 @@ function AgentTranscriptComponent({
       ref={setScroller}
       className={`agent-transcript h-full overflow-y-auto overscroll-none [overflow-anchor:none] font-mono text-[13px] leading-5${bottomAligned ? " mono-transcript-fades scrollbar-none" : ""}`}
     >
+      <VisualsContext.Provider value={visuals}>
       <TranscriptContent bottomAligned={bottomAligned}>
         {onReturnToLatest ? (
           <div className="flex justify-center px-4 py-2">
@@ -1746,6 +1754,7 @@ function AgentTranscriptComponent({
                     artifacts.length > 0 ? "pb-1" : "pb-3",
                   )
                 : null}
+              <UnplacedVisuals turn={turn} />
               {settled && artifacts.length > 0 ? (
                 <div
                   data-artifact-results
@@ -1825,6 +1834,7 @@ function AgentTranscriptComponent({
           );
         })}
       </TranscriptContent>
+      </VisualsContext.Provider>
       {onAddToChat || onSaveSelectionNote ? (
         <TranscriptSelectionMenu
           selection={selection}
@@ -2441,15 +2451,20 @@ const TranscriptBlock = memo(function TranscriptBlock({
       data-chat-message-role="assistant"
       className={`min-w-0 pb-1 text-content ${embedded ? "" : "px-4"} ${underLine ? "pt-1" : "pt-3"}`}
     >
-      <AgentMarkdown
+      <VisualReply
         text={block.text}
-        measurement={streamMeasurement(block)}
-        streaming={block.streaming}
-        revealOnMount={revealOnMount}
-        cwd={cwd}
-        onOpenFile={onOpenFile}
-        localMedia={localMedia}
-        citations="sources"
+        renderText={(text, last) => (
+          <AgentMarkdown
+            text={text}
+            measurement={last ? streamMeasurement(block) : undefined}
+            streaming={last && block.streaming}
+            revealOnMount={revealOnMount}
+            cwd={cwd}
+            onOpenFile={onOpenFile}
+            localMedia={localMedia}
+            citations="sources"
+          />
+        )}
       />
     </div>
   );

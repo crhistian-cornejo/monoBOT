@@ -9,6 +9,14 @@ fn main() {
             std::env::args().skip(2).collect(),
         ));
     }
+    if std::env::args().nth(1).as_deref() == Some("visual-mcp") {
+        std::process::exit(monocode_lib::visual_cli::run_mcp());
+    }
+    if std::env::args().nth(1).as_deref() == Some("visual") {
+        std::process::exit(monocode_lib::visual_cli::run(
+            std::env::args().skip(2).collect(),
+        ));
+    }
     if std::env::args().nth(1).as_deref() == Some("app") {
         std::process::exit(monocode_lib::control_cli::run_app(
             std::env::args().skip(2).collect(),

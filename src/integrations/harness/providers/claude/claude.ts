@@ -92,6 +92,12 @@ import {
 import { isAgentToolName } from "../../core/preview";
 import { joinStreamText, snapshotRemainder } from "../../core/streamText";
 import {
+  VISUAL_ALLOWED_TOOLS,
+  VISUAL_INSTRUCTIONS,
+  visualMcpServer,
+  withVisualServer,
+} from "../../../../features/visuals/model/visualMcp";
+import {
   questionPromptTitle,
   questionsFromUnknown,
   type UserQuestionReply,
@@ -568,13 +574,18 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   // running and the bot tells the user.
   if (launch.mcpConfig?.mcpServers.poki)
     await startPoki(connectorCheckout("poki")).catch(() => undefined);
+  // Every chat can show the agent's charts and explainers inline.
+  const visual = await visualMcpServer();
   await spawnChild(
     input.sessionId,
     path,
     buildClaudeSpawnArgs({
       ...launch,
+      mcpConfig: withVisualServer(launch.mcpConfig, visual),
+      appendSystemPrompt: visual ? VISUAL_INSTRUCTIONS : undefined,
       allowedTools: [
         ...(launch.allowedTools ?? []),
+        ...(visual ? [VISUAL_ALLOWED_TOOLS] : []),
         ...(bot?.allowedTools ?? []),
         ...(group?.allowedTools ?? []),
       ],

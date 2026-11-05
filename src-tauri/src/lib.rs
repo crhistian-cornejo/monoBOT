@@ -71,6 +71,8 @@ mod window;
 mod window_transfer;
 #[cfg(windows)]
 mod windows;
+pub mod visual_cli;
+mod visuals;
 mod workstreams;
 mod worktree_lifecycle;
 mod worktrees;
@@ -287,9 +289,9 @@ pub fn run() {
         })
         .manage(harness::HarnessHost::new())
         .manage(pty::PtyHost::new())
+        .manage(git_watch::GitWatchHost::default())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
-        .manage(git_watch::GitWatchHost::default())
         .setup(|app| {
             harness::reap_orphaned_harness_processes();
             session_store::init(app.handle())?;
@@ -352,6 +354,9 @@ pub fn run() {
             control::control_authorize_turn,
             control::control_turn_finished,
             control::app_cli_path,
+            visuals::visual_open,
+            visuals::visual_dispatch,
+            visuals::visual_close,
             default_cwd,
             home_dir,
             notifications::notification_permission,
@@ -585,13 +590,13 @@ pub fn run() {
             rate_limits::fetch_claude_usage,
             rate_limits::fetch_opencode_go_usage,
             devin_usage::fetch_devin_usage,
+            git_watch::git_watch_start,
+            git_watch::git_watch_stop,
             pty::pty_spawn,
             pty::pty_write,
             pty::pty_resize,
             pty::pty_status,
             pty::pty_kill,
-            git_watch::git_watch_start,
-            git_watch::git_watch_stop,
             pty::pty_kill_all,
             session_store::session_upsert,
             session_store::session_list_by_project,

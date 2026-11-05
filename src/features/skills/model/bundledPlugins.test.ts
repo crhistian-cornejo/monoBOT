@@ -38,6 +38,7 @@ describe("bundled plugins", () => {
       "research",
       "review-animations",
       "threejs-graphics",
+      "visualize",
       "write-swift",
       "writing",
     ]);

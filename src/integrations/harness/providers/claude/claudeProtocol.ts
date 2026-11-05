@@ -262,6 +262,8 @@ export function buildClaudeSpawnArgs(input: {
   disallowedTools?: readonly string[];
   /** Folders beyond the working one the session may reach (a bot's). */
   addDirs?: readonly string[];
+  /** Guidance added after Claude Code's own system prompt. */
+  appendSystemPrompt?: string;
 }): string[] {
   const args = [
     "--output-format",
@@ -305,6 +307,9 @@ export function buildClaudeSpawnArgs(input: {
     }
     for (const dir of input.pluginDirs ?? []) {
       args.push("--plugin-dir", dir);
+    }
+    if (input.appendSystemPrompt) {
+      args.push("--append-system-prompt", input.appendSystemPrompt);
     }
   }
   if (input.model) args.push("--model", input.model);

@@ -161,11 +161,24 @@ struct Event {
 fn request_grant(host: &Inner, namespace: &str, token: &str) -> Result<Grant, String> {
     let grant = match namespace {
         "control" => host.grants.values().find(|grant| grant.token == token),
-        "app" => host.app_grants.values().find(|grant| grant.token == token),
+        "app" | "visual" => host.app_grants.values().find(|grant| grant.token == token),
         _ => return Err("Unknown control namespace".into()),
     }
     .cloned()
     .ok_or("Connection revoked or unauthorized")?;
+    // A visual only lands in the chat whose turn is running. It needs no app
+    // access: it shows the user something and changes nothing else.
+    if namespace == "visual" {
+        let running = host
+            .active
+            .get(&grant.session)
+            .is_some_and(|turn| turn.window == grant.window);
+        return if running {
+            Ok(grant)
+        } else {
+            Err("Visuals can only be shown during this chat's running turn".into())
+        };
+    }
     if namespace == "app"
         && (host.grants.contains_key(&grant.session)
             || host.workers.contains_key(&grant.session)
@@ -652,8 +665,13 @@ mod tests {
         assert!(request_grant(&inner, "control", "app-token").is_err());
         inner.active.get_mut("ordinary").unwrap().app_allowed = false;
         assert!(request_grant(&inner, "app", "app-token").is_err());
+        // Visuals need a running turn in the token's window, not app access.
+        assert!(request_grant(&inner, "visual", "app-token").is_ok());
+        inner.active.get_mut("ordinary").unwrap().window = "other".into();
+        assert!(request_grant(&inner, "visual", "app-token").is_err());
         inner.active.remove("ordinary");
         assert!(request_grant(&inner, "app", "app-token").is_err());
+        assert!(request_grant(&inner, "visual", "app-token").is_err());
     }
     #[test]
     fn app_token_survives_normal_turns_but_only_works_when_opted_in() {
