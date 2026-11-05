@@ -1,3 +1,13 @@
+# Check out text files with LF on every platform, as they're stored. With Git
+# for Windows' core.autocrlf the working copy was CRLF, so every file an agent or
+# editor wrote with LF showed up as changed and Git warned about it.
+* text=auto eol=lf
+
+# Committed with Windows line endings on purpose: keep their bytes as they are.
+*.cmd -text
+*.bat -text
+crates/monocode-gpui/assets/native-editor.LICENSE.txt -text
+
 # Shell scripts are also embedded in the desktop app and sent to Unix hosts.
 *.sh text eol=lf
 

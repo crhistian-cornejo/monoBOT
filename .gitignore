@@ -55,6 +55,9 @@ lerna-debug.log*
 Thumbs.db
 ehthumbs.db
 Desktop.ini
+# A Unix shell on Windows turns `command > nul` into a real file named nul,
+# which Windows can't open and Git can't index.
+nul
 
 # Local document preview mockup
 /work/mono-document-preview.html

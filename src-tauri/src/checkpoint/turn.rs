@@ -601,7 +601,9 @@ fn git_command(root: &Path, args: &[&str]) -> Command {
     command
         .args(["--no-pager", "-C"])
         .arg(root)
-        .args(["-c", "core.fsmonitor=false"])
+        // core.safecrlf=false: with core.autocrlf on (Git for Windows' default)
+        // every LF file prints a warning, which buries the real error.
+        .args(["-c", "core.fsmonitor=false", "-c", "core.safecrlf=false"])
         .args(args)
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -648,16 +650,17 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
     let index = PrivateIndex(
         std::env::temp_dir().join(format!("monocode-checkpoint-{}", uuid::Uuid::new_v4())),
     );
-    let run = |args: &[&str]| {
-        checked_output(
-            git_command(root, args)
-                .env("GIT_INDEX_FILE", &index.0)
-                .env("GIT_AUTHOR_NAME", "MonoBOT")
-                .env("GIT_AUTHOR_EMAIL", "checkpoint@monocode.local")
-                .env("GIT_COMMITTER_NAME", "MonoBOT")
-                .env("GIT_COMMITTER_EMAIL", "checkpoint@monocode.local"),
-        )
+    let command = |args: &[&str]| {
+        let mut command = git_command(root, args);
+        command
+            .env("GIT_INDEX_FILE", &index.0)
+            .env("GIT_AUTHOR_NAME", "MonoBOT")
+            .env("GIT_AUTHOR_EMAIL", "checkpoint@monocode.local")
+            .env("GIT_COMMITTER_NAME", "MonoBOT")
+            .env("GIT_COMMITTER_EMAIL", "checkpoint@monocode.local");
+        command
     };
+    let run = |args: &[&str]| checked_output(&mut command(args));
     if run_git(root, &["rev-parse", "--verify", "HEAD"]).is_ok() {
         run(&["read-tree", "HEAD"])?;
     } else {
@@ -669,7 +672,19 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
         "-c",
         "core.fsyncMethod=fsync",
     ];
-    run(&[durable.as_slice(), &["add", "-A", "--", "."]].concat())?;
+    let added = command(
+        &[
+            durable.as_slice(),
+            &["add", "-A", "--ignore-errors", "--", "."],
+        ]
+        .concat(),
+    )
+    .output()
+    .map_err(|e| e.to_string())?;
+    let stderr = String::from_utf8_lossy(&added.stderr);
+    if !added.status.success() && !only_device_names_skipped(&stderr) {
+        return Err(stderr.trim().to_string());
+    }
     let tree = String::from_utf8(run(&[durable.as_slice(), &["write-tree"]].concat())?)
         .map_err(|e| e.to_string())?;
     let commit = String::from_utf8(run(&[
@@ -689,6 +704,57 @@ fn capture_workspace(root: &Path, reference: &str) -> Result<String, String> {
     ]
     .concat())?;
     Ok(commit.trim().to_string())
+}
+
+/// Windows can't open a file named after a device (`nul`, `con`, `com1`…), even
+/// with an extension, so Git can't index one. They appear when a Unix shell runs
+/// a cmd-style `> nul`, and they're never real work.
+fn is_windows_device_name(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    let stem = name
+        .split('.')
+        .next()
+        .unwrap_or(name)
+        .trim_end()
+        .to_ascii_lowercase();
+    matches!(stem.as_str(), "con" | "prn" | "aux" | "nul")
+        || (stem.len() == 4
+            && (stem.starts_with("com") || stem.starts_with("lpt"))
+            && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+}
+
+/// `git add --ignore-errors` indexes everything it can and exits non-zero if it
+/// skipped anything. That's fine only when every skipped file is a device name.
+fn only_device_names_skipped(stderr: &str) -> bool {
+    let mut skipped = false;
+    for line in stderr
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+    {
+        if line.starts_with("warning:") {
+            continue;
+        }
+        let path = line
+            .strip_prefix("error: unable to index file '")
+            .and_then(|rest| rest.strip_suffix('\''))
+            .or_else(|| {
+                line.strip_prefix("error: open(\"")
+                    .and_then(|rest| rest.split_once("\"):"))
+                    .map(|(path, _)| path)
+            })
+            // Git can open the device itself, then it reads zero bytes.
+            .or_else(|| line.strip_prefix("error: short read while indexing "))
+            .or_else(|| {
+                line.strip_prefix("error: ")
+                    .and_then(|rest| rest.strip_suffix(": failed to insert into database"))
+            });
+        match path {
+            Some(path) if is_windows_device_name(path) => skipped = true,
+            _ => return false,
+        }
+    }
+    skipped
 }
 
 fn changes(root: &Path, turn: &RecordedTurn) -> Result<Vec<Change>, String> {

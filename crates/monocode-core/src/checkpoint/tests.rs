@@ -890,3 +890,74 @@ fn checkpoints_scope_nested_workspaces_and_repositories_without_head() {
     f.store.undo("unborn", cwd, None).unwrap();
     assert!(!unborn.join("new.txt").exists());
 }
+
+#[test]
+fn recognizes_windows_device_names() {
+    for name in [
+        "nul",
+        "src-tauri/nul",
+        "NUL",
+        "con.txt",
+        "a/b/aux",
+        "com1",
+        "LPT9.log",
+    ] {
+        assert!(is_windows_device_name(name), "{name}");
+    }
+    for name in [
+        "null",
+        "nul2",
+        "com0",
+        "com10",
+        "console",
+        "a/nul/b.txt",
+        "src/main.rs",
+    ] {
+        assert!(!is_windows_device_name(name), "{name}");
+    }
+}
+
+#[test]
+fn accepts_add_failures_only_for_device_names() {
+    let skipped_nul = "warning: in the working copy of 'a.txt', LF will be replaced by CRLF the next time Git touches it\n\
+        error: open(\"src-tauri/nul\"): No such file or directory\n\
+        error: unable to index file 'src-tauri/nul'\n";
+    assert!(only_device_names_skipped(skipped_nul));
+    let read_the_device = "error: short read while indexing nul\n\
+        error: nul: failed to insert into database\n\
+        error: unable to index file 'nul'\n";
+    assert!(only_device_names_skipped(read_the_device));
+    assert!(!only_device_names_skipped(
+        "error: src/a.rs: failed to insert into database\n"
+    ));
+    let real_failure = "error: open(\"src/locked.rs\"): Permission denied\n\
+        error: unable to index file 'src/locked.rs'\n";
+    assert!(!only_device_names_skipped(real_failure));
+    assert!(!only_device_names_skipped(
+        "error: unable to index file 'nul'\nfatal: adding files failed\n"
+    ));
+    assert!(!only_device_names_skipped(""));
+}
+
+// A Unix shell on Windows turns `cmd > nul` into a real file Git can't index.
+#[cfg(windows)]
+#[test]
+fn records_changes_beside_a_file_named_nul() {
+    let f = Fixture::new();
+    // Only a verbatim path can create or remove a file with a device name.
+    let nul = std::fs::canonicalize(&f.repo).unwrap().join("nul");
+    std::fs::write(&nul, "bash: wmic: command not found\n").unwrap();
+    f.store.begin_turn("session", f.cwd(), "first").unwrap();
+    f.write("new.txt", "agent change\n");
+    f.store.finish_turn("session", f.cwd(), "first").unwrap();
+    let status = f.store.status("session", f.cwd()).unwrap();
+    assert_eq!(
+        status
+            .files
+            .iter()
+            .map(|file| file.relative.as_str())
+            .collect::<Vec<_>>(),
+        ["new.txt"]
+    );
+    std::fs::remove_file(&nul).unwrap();
+}
