@@ -383,6 +383,42 @@ describe("devin catalog", () => {
     ]);
   });
 
+  it("lists SWE-2 Flash as its own model next to SWE-2", () => {
+    const catalog = {
+      configOptions: [
+        {
+          id: "model",
+          category: "model",
+          type: "select",
+          currentValue: "swe-2-high",
+          options: [
+            { value: "swe-2-high", name: "SWE-2" },
+            { value: "swe-2-flash-high", name: "SWE-2 Flash" },
+          ],
+        },
+      ],
+    };
+    const models = modelsFromDevinSession(catalog, new Map([
+      ["swe-2-high", { id: "thought_level", current: "high", choices: [
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+        { value: "max", label: "Max" },
+      ] }],
+      ["swe-2-flash-high", { id: "thought_level", current: "high", choices: [
+        { value: "medium", label: "Medium" },
+        { value: "high", label: "High" },
+        { value: "max", label: "Max" },
+      ] }],
+    ]));
+    expect(models.map((model) => model.name)).toEqual(["SWE-2", "SWE-2 Flash"]);
+    const flash = models.find((model) => model.nativeId === "swe-2-flash-high")!;
+    expect(flash.settings?.[0]?.options?.map((option) => option.value)).toEqual([
+      "medium",
+      "high",
+      "max",
+    ]);
+  });
+
   it("uses each model's own effort levels when the probe read them", () => {
     const level = (values: string[], current: string) => ({
       id: "thought_level",
