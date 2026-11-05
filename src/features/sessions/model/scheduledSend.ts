@@ -1,43 +1,10 @@
 import type { QueuedMessage, Session } from "./session";
 
-/** Presets for "Send later", plus a step to pick any date and time. */
-export type SendLaterChoice = {
-  id: string;
-  label: string;
-  /** Absent for the custom step. */
-  sendAt?: number;
-};
-
+/**
+ * "Send later" offers the same times as a session's "Remind me"
+ * (`sessionReminderPresets`), plus this step to pick any date and time.
+ */
 export const SEND_LATER_CUSTOM = "send-later:custom";
-
-/** Tomorrow at 9:00 in local time. */
-function tomorrowMorning(now: Date): number {
-  const date = new Date(now);
-  date.setDate(date.getDate() + 1);
-  date.setHours(9, 0, 0, 0);
-  return date.getTime();
-}
-
-export function sendLaterChoices(now = new Date(Date.now())): SendLaterChoice[] {
-  const at = (minutes: number) => now.getTime() + minutes * 60_000;
-  const timed = [
-    { id: "send-later:30m", label: "In 30 minutes", sendAt: at(30) },
-    { id: "send-later:1h", label: "In 1 hour", sendAt: at(60) },
-    { id: "send-later:3h", label: "In 3 hours", sendAt: at(180) },
-    {
-      id: "send-later:tomorrow",
-      label: "Tomorrow morning",
-      sendAt: tomorrowMorning(now),
-    },
-  ];
-  return [
-    ...timed.map((choice) => ({
-      ...choice,
-      label: `${choice.label} (${formatScheduledSend(choice.sendAt, now.getTime())})`,
-    })),
-    { id: SEND_LATER_CUSTOM, label: "Choose date and time" },
-  ];
-}
 
 /** "15:30" today, "Tomorrow 9:00", "Fri, Nov 7, 9:00" later. */
 export function formatScheduledSend(sendAt: number, now: number): string {

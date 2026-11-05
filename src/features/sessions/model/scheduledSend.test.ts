@@ -1,13 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { canDispatchQueuedHead, queuedHead } from "./messageQueue";
 import {
-  SEND_LATER_CUSTOM,
   formatScheduledSend,
   hasImmediateQueuedMessage,
   nextScheduledSendAt,
   releaseDueScheduledMessages,
   releaseScheduledMessages,
-  sendLaterChoices,
 } from "./scheduledSend";
 import { newSession, type QueuedMessage, type Session } from "./session";
 
@@ -99,22 +97,6 @@ describe("nextScheduledSendAt", () => {
       ),
     ).toBe(4_000);
     expect(nextScheduledSendAt(queued([message("b")]))).toBeUndefined();
-  });
-});
-
-describe("sendLaterChoices", () => {
-  it("offers presets and a custom step", () => {
-    const now = new Date(2026, 10, 5, 14, 0);
-    const choices = sendLaterChoices(now);
-    expect(choices.map((choice) => choice.sendAt)).toEqual([
-      now.getTime() + 30 * 60_000,
-      now.getTime() + 60 * 60_000,
-      now.getTime() + 180 * 60_000,
-      new Date(2026, 10, 6, 9, 0).getTime(),
-      undefined,
-    ]);
-    expect(choices.at(-1)?.id).toBe(SEND_LATER_CUSTOM);
-    expect(choices[3].label).toMatch(/^Tomorrow morning \(Tomorrow /);
   });
 });
 

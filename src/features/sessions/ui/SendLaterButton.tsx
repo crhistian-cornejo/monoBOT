@@ -1,13 +1,27 @@
 import { useRef, useState } from "react";
-import { ExplorerMenu } from "../../files/ui/ExplorerMenu";
+import {
+  ExplorerMenu,
+  type ExplorerMenuItem,
+} from "../../files/ui/ExplorerMenu";
 import { DateTimeForm } from "../../../shared/ui/DateTimeForm";
 import { Popover } from "../../../shared/ui/Popover";
 import { Clock } from "../../../shared/ui/icons";
-import { SEND_LATER_CUSTOM, sendLaterChoices } from "../model/scheduledSend";
+import { SEND_LATER_CUSTOM } from "../model/scheduledSend";
+import { reminderTime } from "../model/sessionReminders";
+import { sessionReminderPresets } from "./sessionReminderPresets";
 
 const MENU_WIDTH = 250;
 
-/** "Send later": presets, or any date and time. */
+/** The same times as "Remind me", then any date and time. */
+function sendLaterItems(): ExplorerMenuItem[] {
+  return [
+    ...sessionReminderPresets(),
+    { kind: "sep" },
+    { kind: "item", id: SEND_LATER_CUSTOM, label: "Choose date and time" },
+  ];
+}
+
+/** "Send later": a preset time, or any date and time. */
 export function SendLaterButton({
   onSchedule,
   onClose,
@@ -18,7 +32,7 @@ export function SendLaterButton({
 }) {
   const [open, setOpen] = useState<"menu" | "custom" | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const [choices, setChoices] = useState(() => sendLaterChoices());
+  const [items, setItems] = useState(sendLaterItems);
   const close = () => {
     setOpen(null);
     onClose?.();
@@ -36,7 +50,8 @@ export function SendLaterButton({
         aria-expanded={open !== null}
         onMouseDown={(event) => event.preventDefault()}
         onClick={() => {
-          setChoices(sendLaterChoices());
+          // The labels show clock times; refresh them each time it opens.
+          setItems(sendLaterItems());
           setOpen(open ? null : "menu");
         }}
         className="grid size-6.5 shrink-0 place-items-center rounded-md text-content/45 transition-colors hover:bg-content/8 hover:text-content/90"
@@ -54,16 +69,16 @@ export function SendLaterButton({
               Send this message
             </p>
           }
-          items={choices.map(({ id, label }) => ({ kind: "item", id, label }))}
+          items={items}
           onClose={close}
           onPick={(id) => {
             if (id === SEND_LATER_CUSTOM) {
               setOpen("custom");
               return;
             }
-            const choice = choices.find((entry) => entry.id === id);
+            const sendAt = reminderTime(id);
             setOpen(null);
-            if (choice?.sendAt != null) onSchedule(choice.sendAt);
+            if (sendAt != null) onSchedule(sendAt);
           }}
         />
       ) : null}
