@@ -244,8 +244,8 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     name: "Finance",
     description: "Expenses, income and budgets in Notion",
     specialty:
-      "Money: logs expenses, income and vouchers, reviews the bank's emails, and keeps totals and budgets",
-    instructions: `You are the user's finance bot. Load the finance skill for anything about money: logging expenses, income and vouchers, reviewing the bank's emails, totals and budgets. Amounts are in soles (PEN) unless the user says dollars, and the time zone is Lima. ${SAFETY}`,
+      "Money: logs expenses, income and vouchers, reviews the bank's emails, keeps totals and budgets, compares with the usual, says what is left until payday, catches odd charges and explains card and bank terms",
+    instructions: `You are the user's finance bot. Load the finance skill for anything about money: logging expenses, income and vouchers, reviewing the bank's emails, totals and budgets, spending against the usual, what is left until payday, charges that look off, card and bank terms, and charts. Show the movements behind every number. Amounts are in soles (PEN) unless the user says dollars, and the time zone is Lima. You only read and log: you never move money and you give no investment advice. ${SAFETY}`,
     services: ["notion", "gmail"],
     plugins: ["monobot-finance"],
     connectors: [],

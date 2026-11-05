@@ -245,11 +245,18 @@ export type AgentAppHost = {
         folder?: { name: string; color: string };
         /** Its name, which also names its folder of papers in Documents. */
         name?: string;
+        /**
+         * When the session is its seat in a group: that group, whose memory
+         * it writes to and whose folders it asks for.
+         */
+        seatGroupId?: string;
       }
     | undefined;
   /** A hidden run of one of a Mono's habits: it may remember, not schedule. */
   isHabitRun?(sessionId: string): boolean;
   /** A Mono's own conversation, made if it was never opened, for groups. */
+  /** A member's seat in a group: its own conversation there, made on first use. */
+  groupSeat?(groupId: string, memberId: string): Promise<string | undefined>;
   monoSession?(monoId: string): Promise<string | undefined>;
   /** Puts a card in the Mono's chat, or holds it for a habit run's report. */
   postCard?(sourceSessionId: string, card: MonoCard): void;
@@ -378,11 +385,14 @@ const FIELDS = new Map<string, readonly string[]>([
   ["mail.draft", ["id", "text"]],
   ["soul.read", []],
   ["soul.update", ["text", "expectedHash"]],
-  ["memory.read", ["topic", "shared"]],
-  ["memory.search", ["query", "since"]],
-  ["memory.add", ["fact", "topic", "until", "shared"]],
-  ["memory.replace", ["find", "fact", "topic", "until", "shared"]],
-  ["memory.remove", ["find", "topic", "shared"]],
+  ["memory.read", ["topic", "shared", "personal"]],
+  ["memory.search", ["query", "since", "personal"]],
+  ["memory.add", ["fact", "topic", "until", "shared", "personal"]],
+  [
+    "memory.replace",
+    ["find", "fact", "topic", "until", "shared", "personal"],
+  ],
+  ["memory.remove", ["find", "topic", "shared", "personal"]],
   ["habits.list", []],
   ["habits.add", ["name", "instructions", "schedule"]],
   ["habits.update", ["id", "name", "instructions", "schedule", "enabled"]],
@@ -789,10 +799,17 @@ async function handleMemory(
   input: Record<string, unknown>,
   host: AgentAppHost,
 ): Promise<unknown> {
-  const ownId = host.monoOf?.(source.id)?.id;
-  if (!ownId) throw new Error("Memory belongs to the Mono's conversation");
+  const owner = host.monoOf?.(source.id);
+  if (!owner?.id) throw new Error("Memory belongs to the Mono's conversation");
   if (input.shared !== undefined && typeof input.shared !== "boolean")
     throw new Error("shared must be true or false");
+  if (input.personal !== undefined && typeof input.personal !== "boolean")
+    throw new Error("personal must be true or false");
+  // In a group's seat, what it learns is the group's unless it says not.
+  const ownId =
+    owner.seatGroupId && input.personal !== true
+      ? owner.seatGroupId
+      : owner.id;
   const shared = input.shared === true;
   // The team's memory is one more agent folder, owned by none of them.
   const monoId = shared ? TEAM_MEMORY_ID : ownId;
@@ -1066,10 +1083,19 @@ async function handleGroup(
   if (action === "group.access") {
     if (group?.kind === "group" && group.group)
       return groupAccess(group, monoLook(group).name, input);
-    // A member, from its chat or a habit run, asks through its group.
-    const memberId = host.monoOf?.(source.id)?.id;
+    // A member, from its chat, its seat or a habit run, asks through its
+    // group; in a seat, that seat's group.
+    const owner = host.monoOf?.(source.id);
+    const memberId = owner?.id;
     const member = memberId ? findMono(memberId) : undefined;
-    const groups = member ? groupsOf(member.id) : [];
+    const seatGroup = owner?.seatGroupId
+      ? findMono(owner.seatGroupId)
+      : undefined;
+    const groups = seatGroup
+      ? [seatGroup]
+      : member
+        ? groupsOf(member.id)
+        : [];
     const wanted =
       typeof input.group === "string" ? input.group.trim().toLowerCase() : "";
     const target = wanted
@@ -1110,7 +1136,10 @@ async function handleGroup(
     throw new Error("No member by that name or id; run group.members");
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
     throw new Error("Invalid request ID");
-  const sessionId = await host.monoSession?.(member.id);
+  // A member answers the group from its seat there, never its own chat.
+  const sessionId = host.groupSeat
+    ? await host.groupSeat(group.id, member.id)
+    : await host.monoSession?.(member.id);
   if (!sessionId)
     throw new Error("That member's conversation is not available");
   const message = requiredString(input.message, "message", 30_000);

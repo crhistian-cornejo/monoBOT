@@ -1,6 +1,6 @@
 ---
 name: finance
-description: Log expenses, income and Yape/Plin vouchers in Notion, review the bank's emails, answer how much was spent and manage budgets ("gasté 45 en almuerzo", "¿cuánto gasté este mes?", "pon 300 de tope en delivery").
+description: Log expenses, income and Yape/Plin vouchers in Notion, review the bank's emails, answer how much was spent, against the usual and what is left until payday, catch what looks off, explain card and bank terms, and manage budgets ("gasté 45 en almuerzo", "¿cuánto gasté este mes?", "¿es más de lo normal?", "¿qué me queda hasta fin de mes?", "¿hay algo raro?", "pon 300 de tope en delivery").
 ---
 # Personal finances
 
@@ -67,6 +67,12 @@ reembolso; zero for ingreso, transferencia recibida and rows marked Duplicado).
 3. Name the categories and merchants that weigh most, and the budgets this pace would exceed.
 4. Before day 3 of the period do not project: say so. Soles only; dollars separately.
 
+## 4c. Against the usual («¿es más de lo normal?»)
+1. Usual = the average of the last 3 complete periods, per category and in total, each currency apart. With fewer
+   than 2 periods of data, say there is not enough history yet and compare only with the one there is.
+2. Say the difference in soles and in percent, then the 1–3 categories or merchants that explain most of it, and
+   anything new this period that was not in the others (a subscription, a merchant, a renewal).
+
 ## 5. Budgets
 - «Pon 300 de tope en delivery»: create or update that category's row in «Presupuestos».
 - «¿Cómo voy?»: compare this month's spending per category with its Tope and give the percentage used.
@@ -85,3 +91,45 @@ reembolso; zero for ingreso, transferencia recibida and rows marked Duplicado).
 When asked for the summary, or at the end of a review, rewrite «Dashboard» with: «Última revisión», totals per
 currency, top categories and merchants, income against spending, budgets used, and anything unusual (new
 subscriptions, repeated small charges). Keep it short and factual.
+
+## 7. What is left until payday («¿qué me queda hasta fin de mes?», «¿llego al día de pago?»)
+1. Payday: read it from memory; if it is not there, ask once («¿Qué día te pagan?») and save it with memory.add.
+2. Balance: you cannot see the bank. Use the balance the user gives you, or the latest balance a bank email
+   states, and say which one and from when. Without either, ask for it in one line; never invent it.
+3. Still to come before payday: rows marked Recurrente whose usual day falls before it (from the previous
+   months' dates), card due dates read from statement emails, and budgets with room left at this period's pace.
+4. Answer with the balance, each payment to come with its date and amount, and what would be left. Mark the
+   amounts you estimated.
+
+## 8. Anything off («¿hay algo raro?», and at the end of every review)
+Look across the period and report only what you find, each with its row:
+- Charges that look duplicated (same merchant and amount within a day, different Clave) and are not marked yet.
+- Fees and commissions: «comisión», «membresía», «mantenimiento», ITF, interest, late fees, foreign-currency fees.
+- Subscriptions that went up against their earlier months, new ones, and ones that renewed after a long pause.
+- Merchants the user has never paid before above a few times their usual ticket, and charges abroad.
+Never mark or change a row from this check: say what you saw and let the user decide.
+
+## 9. Terms and interest («¿qué es la TCEA?», «¿cuánto me costó la tarjeta este año?»)
+1. Explain the term in two or three plain lines, with a worked example in soles: TCEA, TEA, TEM, ITF, cuota sin
+   intereses, pago mínimo, pago total del mes, línea de crédito, cargo por mora.
+2. For what it cost: add up the interest, fees and insurance lines in the card statement emails of the period
+   (Gmail) and the matching rows, and say which statements you read. A statement you could not read is missing,
+   not zero.
+
+## 10. Show the rows behind every number
+Every total, average or projection you give names the movements behind it: for up to 10, list them (date,
+merchant, amount, link to their Notion page); for more, the 5 largest and the count of the rest, with the
+filter the user can open in «Movimientos». When the user asks «¿de dónde sale?», list them all.
+
+## 11. Charts, calendar and dashboard
+When the user asks for a chart, a calendar of what is due or a dashboard, make it with app artifacts.write
+{"kind":"html"} from the rows you read, with the data embedded and the period in its title: weekly spending by
+category, the month's due dates, budgets used. Revise the same artifact when they ask for changes. Keep the
+Notion «Dashboard» as the record (step 6).
+
+## Limits
+- Read-only for money: you log and explain, you never pay, transfer, move or invest anything.
+- No investment advice: no products, funds, stocks, crypto or loans to choose. Explain the terms and the numbers,
+  and say that decisions like those are for the user with a licensed professional.
+- Numbers can be wrong: say so when a figure rests on estimates or incomplete emails, and suggest checking the
+  important ones with the bank.

@@ -31,6 +31,11 @@ export type Group = {
   answers?: GroupAccessAnswer[];
   /** Asked and not answered yet: the group chat shows each one. */
   requests?: GroupAccessRequest[];
+  /**
+   * Each member's own conversation in this group, by member id: the same
+   * agent, its tools and model, with a history apart from its own chat.
+   */
+  seats?: Record<string, string>;
 };
 
 /** read: may read; edit: may read and change; no: the user said no. */
@@ -153,8 +158,20 @@ export function parseGroup(value: unknown): Group | undefined {
         })
         .slice(-REQUESTS_MAX)
     : [];
+  const seats =
+    entry.seats && typeof entry.seats === "object"
+      ? Object.fromEntries(
+          Object.entries(entry.seats as Record<string, unknown>).filter(
+            (pair): pair is [string, string] =>
+              members.includes(pair[0]) &&
+              typeof pair[1] === "string" &&
+              /^[A-Za-z0-9_-]{1,128}$/.test(pair[1]),
+          ),
+        )
+      : {};
   return {
     members,
+    ...(Object.keys(seats).length ? { seats } : {}),
     ...(goal ? { goal } : {}),
     ...(folders ? { folders } : {}),
     ...(context.length ? { context } : {}),

@@ -692,6 +692,7 @@ import {
 import {
   addBotNews,
   botTurnNews,
+  answeringGroup,
   queueNewsToast,
   removeBotNewsFor,
   shouldAlertNews,
@@ -737,6 +738,12 @@ import {
 } from "../features/groups/model/groupBrief";
 import { groupMessage } from "../features/groups/model/group";
 import { leadModelChoice } from "../features/groups/model/groupVoice";
+import {
+  saveSeat,
+  seatBrief,
+  seatOf,
+  seatSessionId,
+} from "../features/groups/model/groupSeats";
 import {
   roundAnswers,
   roundPrompt,
@@ -2536,9 +2543,25 @@ function Workspace({
     [monosSnap],
   );
   // How many replies each Mono has that the user has not read, for the rail.
+  // A member busy with a group's message answers there: its own chat gets
+  // no unread count for it, the group's does.
+  const nextMonoReplyBusyIds = useMemo(() => {
+    const quiet = sessions.filter(
+      (session) =>
+        busySessionIds.has(session.id) && answeringGroup(session.blocks),
+    );
+    if (!quiet.length) return busySessionIds;
+    const ids = new Set(busySessionIds);
+    for (const session of quiet) ids.delete(session.id);
+    return ids;
+  }, [busySessionIds, sessions]);
+  const monoReplyBusyIdsRef = useRef(nextMonoReplyBusyIds);
+  if (!setsEqual(monoReplyBusyIdsRef.current, nextMonoReplyBusyIds))
+    monoReplyBusyIdsRef.current = nextMonoReplyBusyIds;
+  const monoReplyBusyIds = monoReplyBusyIdsRef.current;
   const monoReplies = useUnseenReplyCounts(
     monoSessionIds,
-    busySessionIds,
+    monoReplyBusyIds,
     activeSessionId,
   );
 
@@ -8772,6 +8795,14 @@ function Workspace({
           if (habitPosts.length) {
             appContext.push(habitPostsContext(habitPosts));
           }
+          // A member in its seat knows which group it answers and that
+          // its words show there.
+          const seat = mono ? seatOf(sessionId) : undefined;
+          if (seat && handAgent) {
+            appContext.push(
+              seatBrief(monoLook(seat.group).name, monoLook(seat.member).name),
+            );
+          }
           // Members' answers to an @Name went around the lead; it reads
           // them once, with the user's next message.
           const groupPosts = mono ? unseenGroupPosts(current.blocks) : [];
@@ -8948,8 +8979,13 @@ function Workspace({
               (s) => s.id === sessionId,
             );
             const visible = sessionId === activeSessionIdRef.current;
-            // A habit's hidden run speaks through its Mono's chat instead.
-            if (finished && !isHabitRun(sessionId))
+            // A habit's hidden run speaks through its Mono's chat instead,
+            // and a member's answer to a group through the group's.
+            if (
+              finished &&
+              !isHabitRun(sessionId) &&
+              !answeringGroup(finished.blocks)
+            )
               void announceSessionFinished(finished, visible);
             // A bot that finished while the user was elsewhere says so in
             // the Principal's News, and the Principal brings it up as a card.
@@ -9045,6 +9081,10 @@ function Workspace({
     [submitSession],
   );
 
+  // A member's seat in a group, set below once its helpers exist.
+  const ensureGroupSeatRef = useRef<
+    (groupId: string, memberId: string) => Promise<Session | undefined>
+  >(async () => undefined);
   // A group's @Name goes to that member alone, around the lead; set below,
   // once the helpers it needs exist.
   const directGroupAskRef = useRef<
@@ -9110,8 +9150,10 @@ function Workspace({
       const posted = postedGroupRequests(group);
       for (const memberId of mono.group.members) {
         const member = findMono(memberId);
-        const memberSession = member?.sessionId
-          ? sessions.find((entry) => entry.id === member.sessionId)
+        // Members answer the group from their seats, never their own chats.
+        const seatId = mono.group.seats?.[memberId];
+        const memberSession = seatId
+          ? sessions.find((entry) => entry.id === seatId)
           : undefined;
         if (!member || !memberSession) continue;
         const look = monoLook(member);
@@ -9560,17 +9602,14 @@ function Workspace({
   saveDraftRef.current = onSaveDraft;
   const ensureOpenSessionRef = useRef(ensureOpenSession);
   ensureOpenSessionRef.current = ensureOpenSession;
-  // One member's part of a group's message, in its own chat and model, with
-  // the project's memory; false when its chat could not take it.
-  const sendToGroupMember = async (
-    group: Mono,
+  // A member's seat in a group: its own conversation there, made the first
+  // time it is asked, with the model, settings and permissions of its chat,
+  // which it keeps following.
+  const ensureGroupSeat = async (
+    groupId: string,
     memberId: string,
-    message: string,
-    request: string,
-  ): Promise<boolean> => {
-    const info = group.group;
-    if (!info) return false;
-    const member = await ensureMonoSession(memberId, {
+  ): Promise<Session | undefined> => {
+    const own = await ensureMonoSession(memberId, {
       home: homeDir,
       load: ensureOpenSessionRef.current,
       create: (path) => newDefaultSession(path),
@@ -9580,6 +9619,56 @@ function Workspace({
           created,
         ]),
     });
+    if (!own) return undefined;
+    const known = seatSessionId(groupId, memberId);
+    const open = known ? await ensureOpenSessionRef.current(known) : null;
+    if (open) {
+      if (!open.busy) {
+        if (open.harness !== own.harness || open.model !== own.model)
+          onModelChange(open.id, own.harness, own.model);
+        else if (
+          JSON.stringify(open.modelSettings ?? {}) !==
+          JSON.stringify(own.modelSettings ?? {})
+        )
+          onModelSettingsChange(open.id, own.modelSettings ?? {});
+        if (open.runtimeMode !== own.runtimeMode)
+          onRuntimeModeChange(open.id, own.runtimeMode);
+      }
+      return open;
+    }
+    const member = findMono(memberId);
+    const group = findMono(groupId);
+    if (!member || !group) return undefined;
+    const seat: Session = {
+      ...newSession(
+        own.harness,
+        own.cwd,
+        own.model,
+        own.runtimeMode,
+        own.modelSettings,
+      ),
+      title: `${monoLook(member).name} · ${monoLook(group).name}`,
+    };
+    updateSessionState(sessionsRef, setSessions, (current) => [
+      ...current,
+      seat,
+    ]);
+    saveSeat(groupId, memberId, seat.id);
+    persistSession(seat);
+    return seat;
+  };
+  ensureGroupSeatRef.current = ensureGroupSeat;
+  // One member's part of a group's message, in its seat, with its own model, with
+  // the project's memory; false when its chat could not take it.
+  const sendToGroupMember = async (
+    group: Mono,
+    memberId: string,
+    message: string,
+    request: string,
+  ): Promise<boolean> => {
+    const info = group.group;
+    if (!info) return false;
+    const member = await ensureGroupSeat(group.id, memberId);
     if (!member) return false;
     const memory = await readAgentFile(group.id, "MEMORY.md")
       .then((file) => file.text ?? "")
@@ -9652,11 +9741,10 @@ function Workspace({
   const [roundTick, setRoundTick] = useState(0);
   useEffect(() => {
     if (!groupRounds.current.size) return;
-    const sessionOf = (memberId: string) => {
-      const id = findMono(memberId)?.sessionId;
-      return id ? sessions.find((entry) => entry.id === id) : undefined;
-    };
     for (const round of [...groupRounds.current.values()]) {
+      const seats = monoForSession(round.groupSessionId)?.group?.seats ?? {};
+      const sessionOf = (memberId: string) =>
+        sessions.find((entry) => entry.id === seats[memberId]);
       const answers = roundAnswers(round, sessionOf);
       if (!answers) continue;
       const chat = sessions.find((entry) => entry.id === round.groupSessionId);
@@ -12688,12 +12776,18 @@ function Workspace({
                   setSessions(sessionsRef.current);
                 },
               }).then((session) => session?.id),
+            groupSeat: (groupId, memberId) =>
+              ensureGroupSeatRef
+                .current(groupId, memberId)
+                .then((seat) => seat?.id),
             monoOf: (id) => {
               const mono =
                 monoForSession(id) ?? findMono(habitRunMono(id) ?? "");
+              const seat = seatOf(id);
               return (
                 mono && {
                   id: mono.id,
+                  ...(seat ? { seatGroupId: seat.group.id } : {}),
                   projects: mono.projects,
                   showStartedSessionsInSidebar:
                     mono.showStartedSessionsInSidebar,

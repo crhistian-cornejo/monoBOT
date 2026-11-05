@@ -7,6 +7,7 @@ import {
   type MonoState,
 } from "../../monos/model/mono";
 import type { Block, Session } from "../../sessions/model/session";
+import { resolveModel } from "../../sessions/model/models";
 import { memberRole } from "./groupBrief";
 
 /** One row of a group's activity: a member, what it is doing, and the
@@ -24,12 +25,16 @@ export type MemberActivity = {
   runs: Block[];
   /** Where its chat runs, for the paths its subagents show. */
   cwd?: string;
+  /** What it has spent in this group: its seat's turns, tokens and model. */
+  usage?: { turns: number; tokens: number; model: string };
 };
 
 type ActivitySession = Pick<
   Session,
   | "id"
   | "cwd"
+  | "harness"
+  | "model"
   | "blocks"
   | "busy"
   | "pendingQuestion"
@@ -52,11 +57,31 @@ export function latestRuns(blocks: readonly Block[]): Block[] {
   return blocks.slice(start).filter((block) => !!block.agentRun);
 }
 
+/** A seat's turns and tokens in its group, and the model it answers with. */
+export function seatUsage(
+  session: Pick<Session, "blocks" | "harness" | "model">,
+): { turns: number; tokens: number; model: string } {
+  let turns = 0;
+  let tokens = 0;
+  for (const block of session.blocks) {
+    if (block.role !== "user" || block.internal) continue;
+    turns += 1;
+    tokens +=
+      (block.turnMetrics?.inputTokens ?? 0) +
+      (block.turnMetrics?.outputTokens ?? 0);
+  }
+  return {
+    turns,
+    tokens,
+    model: resolveModel(session.harness, session.model).name,
+  };
+}
+
 /**
  * The group's members as its Activity panel lists them, one under the
  * other: the Principal first, read from the group chat it leads, then each
- * member from its own chat. A member whose chat is not open reads from the
- * rail's states.
+ * member from its seat, its own conversation in the group. A member that
+ * has not spoken in the group yet is idle here, whatever its chat is doing.
  */
 export function groupActivity(
   group: Mono,
@@ -69,7 +94,9 @@ export function groupActivity(
     id ? sessions.find((session) => session.id === id) : undefined;
   const rows = members.map((mono): MemberActivity => {
     const lead = mono.botRole === "principal";
-    const session = sessionOf(lead ? group.sessionId : mono.sessionId);
+    const session = sessionOf(
+      lead ? group.sessionId : group.group?.seats?.[mono.id],
+    );
     const look = monoLook(mono);
     return {
       monoId: mono.id,
@@ -82,9 +109,10 @@ export function groupActivity(
         ? monoState(session)
         : lead
           ? (states.get(group.id) ?? IDLE)
-          : (states.get(mono.id) ?? IDLE),
+          : IDLE,
       runs: session ? latestRuns(session.blocks) : [],
       ...(session?.cwd ? { cwd: session.cwd } : {}),
+      ...(session && !lead ? { usage: seatUsage(session) } : {}),
     };
   });
   return [

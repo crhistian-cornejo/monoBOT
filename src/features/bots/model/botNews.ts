@@ -211,6 +211,22 @@ export function newsToastsSnapshot(): BotNewsItem[] {
  * elsewhere: the request it answered (its first line) and its reply, with the
  * final report it wrote, if any. Null when the turn left no reply.
  */
+/** A turn a group's chat asked of one of its members. */
+export function isGroupAsk(block: Block): boolean {
+  return (
+    block.role === "user" && block.text.trimStart().startsWith("<group_message")
+  );
+}
+
+/** Whether the latest message a chat took was a group's. */
+export function answeringGroup(blocks: readonly Block[]): boolean {
+  for (let index = blocks.length - 1; index >= 0; index--) {
+    const block = blocks[index];
+    if (block.role === "user" && !block.internal) return isGroupAsk(block);
+  }
+  return false;
+}
+
 export function botTurnNews(
   blocks: readonly Block[],
 ): { source: string; text: string } | null {
@@ -221,6 +237,8 @@ export function botTurnNews(
       break;
     }
   if (start < 0) return null;
+  // A group's message is answered in the group's chat, where it shows.
+  if (isGroupAsk(blocks[start])) return null;
   const reply = blocks
     .slice(start + 1)
     .reverse()

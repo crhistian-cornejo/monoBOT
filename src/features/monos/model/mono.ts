@@ -355,9 +355,21 @@ export function findMono(id: string): Mono | undefined {
   return listMonos().find((mono) => mono.id === id);
 }
 
-/** The Mono whose conversation this is. */
+/**
+ * The Mono whose conversation this is: its own chat, or its seat in one of
+ * its groups, where it is the same agent with a history of its own.
+ */
 export function monoForSession(sessionId: string): Mono | undefined {
-  return listMonos().find((mono) => mono.sessionId === sessionId);
+  const roster = listMonos();
+  const own = roster.find((mono) => mono.sessionId === sessionId);
+  if (own) return own;
+  for (const group of roster) {
+    const seat = Object.entries(group.group?.seats ?? {}).find(
+      ([, seatId]) => seatId === sessionId,
+    );
+    if (seat) return roster.find((mono) => mono.id === seat[0]);
+  }
+  return undefined;
 }
 
 export function isMonoSession(sessionId: string): boolean {

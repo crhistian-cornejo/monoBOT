@@ -52,7 +52,10 @@ const group: Mono = {
   color: "purple",
   projects: [],
   kind: "group",
-  group: { members: ["research", "ivy", "docs"] },
+  group: {
+    members: ["research", "ivy", "docs"],
+    seats: { research: "research-seat" },
+  },
 };
 const find = (id: string) => monos.find((mono) => mono.id === id);
 
@@ -70,7 +73,7 @@ describe("a group's activity", () => {
     expect(latestRuns(blocks).map((block) => block.id)).toEqual(["a", "b"]);
   });
 
-  it("lists the Principal first, from the group chat, then each member", () => {
+  it("lists the Principal first, from the group chat, then each member's seat", () => {
     const sessions = [
       {
         id: "nexa-chat",
@@ -79,13 +82,27 @@ describe("a group's activity", () => {
         busy: true,
       },
       {
-        id: "research-chat",
+        id: "research-seat",
         cwd: "/home",
+        harness: "claude" as const,
+        model: "sonnet",
         blocks: [
-          { id: "u", role: "user", text: "find" } as Block,
+          {
+            id: "u",
+            role: "user",
+            text: "find",
+            turnMetrics: { inputTokens: 1200, outputTokens: 300 },
+          } as Block,
           run("papers"),
           run("web"),
         ],
+        busy: true,
+      },
+      // Its own chat is busy with something else: not the group's work.
+      {
+        id: "docs-chat",
+        cwd: "/home",
+        blocks: [{ id: "u", role: "user", text: "mine" } as Block],
         busy: true,
       },
     ];
@@ -98,11 +115,13 @@ describe("a group's activity", () => {
     expect(rows.map((row) => [row.name, row.lead, row.state.status])).toEqual([
       ["IVY", true, "working"],
       ["Research", false, "working"],
-      ["Documents", false, "needs-you"],
+      ["Documents", false, "idle"],
     ]);
     expect(rows[1]!.runs.map((block) => block.id)).toEqual(["papers", "web"]);
     expect(rows[1]!.cwd).toBe("/home");
+    expect(rows[1]!.usage).toMatchObject({ turns: 1, tokens: 1500 });
     expect(rows[2]!.runs).toEqual([]);
+    expect(rows[2]!.usage).toBeUndefined();
   });
 
   it("shows what members asked each other lately", () => {

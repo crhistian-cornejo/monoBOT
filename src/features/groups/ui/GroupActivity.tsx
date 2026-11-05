@@ -13,6 +13,7 @@ import { EmptyState } from "../../monos/ui/monoPanelParts";
 import { MonoRailMascot } from "../../monos/ui/MonoRailMascot";
 import { SubagentStack } from "../../sessions/ui/AgentTranscript";
 import type { Session } from "../../sessions/model/session";
+import { formatTokens } from "../../sessions/model/contextUsage";
 import {
   delegationsSnapshot,
   subscribeDelegations,
@@ -178,6 +179,16 @@ function MemberRow({
           >
             {row.state.status === "idle" ? row.role : statusLine(row.state)}
           </span>
+          {row.usage ? (
+            <span className="truncate text-[11px] tabular-nums text-content/40">
+              {row.usage.model} · {row.usage.turns}{" "}
+              {row.usage.turns === 1 ? "turn" : "turns"}
+              {row.usage.tokens
+                ? ` · ${formatTokens(row.usage.tokens)} tokens`
+                : ""}{" "}
+              here
+            </span>
+          ) : null}
         </span>
       </button>
       {row.runs.length ? (

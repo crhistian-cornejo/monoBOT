@@ -38,12 +38,10 @@ export function useGroupLearning(sessions: readonly Session[]) {
       const chat = sessions.find((entry) => entry.id === mono.sessionId);
       if (!chat || chat.busy) continue;
       // Wait for the members still answering: their part is the exchange.
-      const memberBusy = mono.group.members.some((id) => {
-        const member = roster.find((entry) => entry.id === id);
-        return sessions.some(
-          (entry) => entry.id === member?.sessionId && entry.busy,
-        );
-      });
+      const seats = mono.group.seats ?? {};
+      const memberBusy = mono.group.members.some((id) =>
+        sessions.some((entry) => entry.id === seats[id] && entry.busy),
+      );
       if (memberBusy) continue;
       const lead = groupLead(mono.group);
       const exchange = pendingExchange(

@@ -1,5 +1,5 @@
 import type { Session } from "../../sessions/model/session";
-import { groupRequestPrefix } from "./groupReplies";
+import { groupRequestPrefix, turnAfter } from "./groupReplies";
 
 /**
  * A round of a group's chat: the user writes once, every member answers in
@@ -37,30 +37,18 @@ export function roundRequest(
 export function roundAnswer(
   member: Pick<Session, "blocks" | "busy">,
   request: string,
-): { text: string } | undefined {
+): { text: string; error?: string } | undefined {
   const blocks = member.blocks;
   const start = blocks.findIndex(
     (block) => block.role === "user" && block.appRequestId === request,
   );
   if (start < 0) return undefined;
-  let text = "";
-  let finished = false;
-  for (const block of blocks.slice(start + 1)) {
-    if (block.role === "user" && !block.internal) {
-      finished = true;
-      break;
-    }
-    if (
-      block.role === "assistant" &&
-      !block.tool &&
-      !block.internal &&
-      block.text.trim()
-    )
-      text = block.text.trim();
-  }
-  if (!finished && member.busy) return undefined;
-  return { text: text === "PASS" ? "" : text };
+  const turn = turnAfter(blocks, start);
+  if (!turn.finished && member.busy) return undefined;
+  if (!turn.text && turn.error) return { text: "", error: turn.error };
+  return { text: turn.text === "PASS" ? "" : turn.text };
 }
+
 
 export type RoundAnswer = { name: string; text?: string; missing?: string };
 
@@ -86,7 +74,11 @@ export function roundAnswers(
       answers.push({ name: ask.name, missing: "still working" });
       continue;
     }
-    answers.push({ name: ask.name, text: answer.text });
+    answers.push(
+      answer.error
+        ? { name: ask.name, missing: `it stopped on an error: ${answer.error}` }
+        : { name: ask.name, text: answer.text },
+    );
   }
   return answers;
 }

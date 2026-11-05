@@ -18,6 +18,32 @@ export function groupRequestPrefix(groupSessionId: string): string {
   return `app-${groupSessionId}-`;
 }
 
+/**
+ * The member's turn after the message at `start`: its last written reply,
+ * the error it stopped on, and whether a later message closed it.
+ */
+export function turnAfter(
+  blocks: readonly Block[],
+  start: number,
+): { text: string; error?: string; finished: boolean } {
+  let text = "";
+  let error: string | undefined;
+  for (const block of blocks.slice(start + 1)) {
+    if (block.role === "user" && !block.internal)
+      return { text, ...(error ? { error } : {}), finished: true };
+    if (
+      block.role === "assistant" &&
+      !block.tool &&
+      !block.internal &&
+      block.text.trim()
+    )
+      text = block.text.trim();
+    if (block.notice === "error" && block.text.trim())
+      error = block.text.trim();
+  }
+  return { text, ...(error ? { error } : {}), finished: false };
+}
+
 export type GroupReply = { request: string; text: string; at: number };
 
 /**
@@ -36,24 +62,12 @@ export function finishedGroupReplies(
   for (let index = 0; index < blocks.length; index++) {
     const ask = blocks[index];
     if (ask.role !== "user" || !ask.appRequestId?.startsWith(prefix)) continue;
-    let text = "";
-    let finished = false;
-    for (const block of blocks.slice(index + 1)) {
-      if (block.role === "user" && !block.internal) {
-        finished = true;
-        break;
-      }
-      if (
-        block.role === "assistant" &&
-        !block.tool &&
-        !block.internal &&
-        block.text.trim()
-      )
-        text = block.text;
-    }
-    if (!finished && member.busy) continue;
+    const turn = turnAfter(blocks, index);
+    if (!turn.finished && member.busy) continue;
     const at = ask.startedAt ?? ask.sentAt;
-    const answer = text.trim();
+    // A member that stopped on an error says so in the group, not silence.
+    const answer =
+      turn.text || (turn.error ? `Couldn't answer: ${turn.error}` : "");
     if (at == null || at < since || !answer || answer === "PASS") continue;
     replies.push({
       request: ask.appRequestId,

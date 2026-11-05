@@ -87,22 +87,16 @@ export function MonoCardPreview({
       )
         onClose();
     };
-    const onOtherCard = (event: PointerEvent) => {
-      const card =
-        event.target instanceof Element
-          ? event.target.closest<HTMLElement>("[data-mono-card]")
-          : null;
-      if (card && card.dataset.monoCard !== mono.id) onClose();
-    };
+    // No closing on another row's hover here: the rail's one preview moves
+    // to that row, and React opens it before a pointerover listener would
+    // run, so closing then shut the card just opened (every other row).
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("blur", onClose);
-    window.addEventListener("pointerover", onOtherCard, true);
     return () => {
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("blur", onClose);
-      window.removeEventListener("pointerover", onOtherCard, true);
     };
-  }, [anchor, onClose, mono.id]);
+  }, [anchor, onClose]);
 
   const look = monoLook(mono);
   const group = mono.group;
