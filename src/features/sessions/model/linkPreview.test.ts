@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { parseStandaloneHttpUrl, parseUserMessageLink } from "./linkPreview";
+import { describe, expect, it, vi } from "vitest";
+
+const invoke = vi.hoisted(() => vi.fn());
+vi.mock("@tauri-apps/api/core", () => ({ invoke }));
+
+import {
+  cachedSiteIcon,
+  fetchSiteIcon,
+  parseStandaloneHttpUrl,
+  parseUserMessageLink,
+  siteIconHost,
+} from "./linkPreview";
 
 describe("parseStandaloneHttpUrl", () => {
   it("normalizes a standalone web URL for display", () => {
@@ -87,5 +97,36 @@ describe("parseUserMessageLink", () => {
 
   it("returns null when there is no valid web URL", () => {
     expect(parseUserMessageLink("Nothing to preview here")).toBeNull();
+  });
+});
+
+describe("site icons", () => {
+  it("names the host a source's icon belongs to", () => {
+    expect(siteIconHost("www.dnr.alaska.gov")).toBe("dnr.alaska.gov");
+    expect(siteIconHost("https://www2.gov.bc.ca/a/b.pdf")).toBe("www2.gov.bc.ca");
+    expect(siteIconHost("localhost")).toBeNull();
+    expect(siteIconHost("file:///etc/passwd")).toBeNull();
+    expect(siteIconHost("")).toBeNull();
+  });
+
+  it("reads each site's icon once, from its home page, failures included", async () => {
+    invoke.mockReset();
+    invoke.mockImplementation(async (_command: string, { url }: { url: string }) => {
+      if (url === "https://broken.example/") throw new Error("offline");
+      return { title: null, faviconDataUrl: `data:image/png;base64,${url}` };
+    });
+    const [one, two] = await Promise.all([
+      fetchSiteIcon("doi.org"),
+      fetchSiteIcon("https://doi.org/10.1/x"),
+    ]);
+    expect(one).toBe("data:image/png;base64,https://doi.org/");
+    expect(two).toBe(one);
+    expect(cachedSiteIcon("doi.org")).toBe(one);
+    expect(await fetchSiteIcon("broken.example")).toBeNull();
+    expect(await fetchSiteIcon("broken.example")).toBeNull();
+    expect(invoke.mock.calls.map(([, args]) => args.url)).toEqual([
+      "https://doi.org/",
+      "https://broken.example/",
+    ]);
   });
 });

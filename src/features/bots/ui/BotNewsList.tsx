@@ -1,5 +1,7 @@
 import { useEffect, useSyncExternalStore } from "react";
 import { Bell } from "../../../shared/ui/icons";
+import { CollapsibleBody } from "../../../shared/ui/CollapsibleBody";
+import { AgentMarkdown } from "../../sessions/ui/AgentMarkdown";
 import { createNote } from "../../notes";
 import { EmptyState } from "../../monos/ui/monoPanelParts";
 import {
@@ -119,46 +121,55 @@ function NewsItems({
   onOpenBot: (monoId: string) => void;
 }) {
   return (
-    <ul className="flex flex-col gap-px" data-bot-news>
+    <ul className="flex flex-col gap-2" data-bot-news>
       {items.map((item) => (
-        <li key={item.id} className="group rounded-md hover:bg-content/5">
-          <button
-            type="button"
-            onClick={() => onOpenBot(item.monoId)}
-            title={`Open ${item.botName}`}
-            className="flex w-full flex-col gap-1 px-2 pt-2 text-left"
-          >
-            <span className="flex items-center gap-2 text-[12px] text-content/50">
-              {!item.seen ? (
-                <span
-                  aria-label="Unread"
-                  className="size-1.5 shrink-0 rounded-full bg-accent"
-                />
-              ) : null}
-              <span className="min-w-0 truncate">
-                <span className="font-medium text-content/75">
-                  {item.botName}
-                </span>
-                {" · "}
-                {item.source}
+        <li
+          key={item.id}
+          className="group rounded-lg border border-content/8 bg-content/[0.02] px-3 pt-2.5"
+        >
+          <div className="flex items-center gap-2 text-[12px] text-content/50">
+            {!item.seen ? (
+              <span
+                aria-label="Unread"
+                className="size-1.5 shrink-0 rounded-full bg-accent"
+              />
+            ) : null}
+            <button
+              type="button"
+              onClick={() => onOpenBot(item.monoId)}
+              title={`Open ${item.botName}`}
+              className="min-w-0 truncate text-left hover:text-content/80"
+            >
+              <span className="font-medium text-content/75">
+                {item.botName}
               </span>
-              {item.status && item.status !== "progress" ? (
-                <span
-                  className={`shrink-0 rounded px-1.5 text-[11px] font-medium leading-4 ${STATUS_STYLE[item.status]}`}
-                >
-                  {STATUS_LABEL[item.status]}
-                </span>
-              ) : null}
-              <span className="ml-auto shrink-0 tabular-nums text-content/40">
-                {when(item.at)}
+              {" · "}
+              {item.source}
+            </button>
+            {item.status && item.status !== "progress" ? (
+              <span
+                className={`shrink-0 rounded px-1.5 text-[11px] font-medium leading-4 ${STATUS_STYLE[item.status]}`}
+              >
+                {STATUS_LABEL[item.status]}
               </span>
+            ) : null}
+            <span className="ml-auto shrink-0 tabular-nums text-content/40">
+              {when(item.at)}
             </span>
-            <span className="line-clamp-4 whitespace-pre-line text-[13px] leading-relaxed text-content/85">
-              {item.text}
-            </span>
-          </button>
+          </div>
+          {/* The report reads as it does in the bot's chat, clamped. */}
+          <div className="pt-1.5 text-[13px]">
+            <CollapsibleBody maxHeight={140}>
+              <AgentMarkdown
+                className="inbox-comment-md"
+                text={item.text}
+                streaming={false}
+                allowRemoteMedia
+              />
+            </CollapsibleBody>
+          </div>
           {/* The chat's own actions, shown on hover as under a reply. */}
-          <div className="flex items-center gap-1 px-2 pb-1.5 pt-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
+          <div className="-mx-1 flex items-center gap-1 pb-1.5 pt-0.5 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
             <CopyTurnButton text={item.text} label="Copy report" />
             {notes ? (
               <SaveNoteButton

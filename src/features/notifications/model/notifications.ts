@@ -6,6 +6,7 @@ import {
   type NotificationSubject,
 } from "./notificationPreferences";
 import { monoReplyText } from "../../monos/model/monoReaction";
+import { newsPreview } from "../../bots/model/botNews";
 import { monoForSession, monoLook } from "../../monos/model/mono";
 import {
   knownNotificationProject,
@@ -295,7 +296,7 @@ export async function announceBotPost(
         sessionId,
         title: botName,
         subtitle: source,
-        body: text.replace(/\s+/g, " ").trim().slice(0, 240),
+        body: newsPreview(text),
         sound: loadSoundsEnabled(),
       });
       return;

@@ -674,10 +674,12 @@ import {
 } from "./shell/PersonalRail";
 import {
   addBotNews,
+  queueNewsToast,
   removeBotNewsFor,
   shouldAlertNews,
 } from "../features/bots/model/botNews";
 import { BotNewsList } from "../features/bots/ui/BotNewsList";
+import { BotNewsToasts } from "../features/bots/ui/BotNewsToasts";
 import { installedClaudeSkills } from "../features/bots/model/botSession";
 import { createWorkstream } from "../features/workstreams/model/workstreamApi";
 import {
@@ -9006,6 +9008,9 @@ function Workspace({
               text,
               ...(status ? { status } : {}),
             });
+            // Elsewhere in the app, the Principal brings it up as a card.
+            if (added && monoId !== activeSessionIdRef.current)
+              queueNewsToast(added.id);
             if (added && shouldAlertNews(status))
               void announceBotPost(
                 monoId,
@@ -15646,6 +15651,12 @@ function Workspace({
               onFocusSession={onOpenApprovalSession}
               onApproval={onApproval}
             />
+            {monosEnabled ? (
+              <BotNewsToasts
+                onRead={onOpenNews}
+                onOpenBot={onOpenRailMono}
+              />
+            ) : null}
             <ReminderNotices
               reminders={sessionReminders.due}
               error={sessionReminders.error}

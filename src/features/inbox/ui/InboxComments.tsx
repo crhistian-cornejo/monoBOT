@@ -22,6 +22,7 @@ import {
 } from "../model/githubTasks";
 import { MOD } from "../../../platform/tauri/platform";
 import { AgentMarkdown } from "../../sessions/ui/AgentMarkdown";
+import { CollapsibleBody } from "../../../shared/ui/CollapsibleBody";
 
 export type InboxReplyTarget = {
   id: string;
@@ -501,53 +502,6 @@ function InboxComment({
     <article className="overflow-hidden rounded-md border border-content/10 bg-content/5">
       {inner}
     </article>
-  );
-}
-
-const CLAMPED_BODY_PX = 180;
-
-/** Bot reviews and long write-ups start clamped so the timeline stays scannable. */
-function CollapsibleBody({ children }: { children: ReactNode }) {
-  const inner = useRef<HTMLDivElement>(null);
-  const [overflows, setOverflows] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-
-  useEffect(() => {
-    const el = inner.current;
-    if (!el) return;
-    // A little slack so a body barely over the limit just shows in full.
-    const measure = () => setOverflows(el.scrollHeight > CLAMPED_BODY_PX + 48);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, []);
-
-  const clamped = overflows && !expanded;
-  return (
-    <>
-      <div
-        style={clamped ? { maxHeight: CLAMPED_BODY_PX } : undefined}
-        className={
-          clamped
-            ? "overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]"
-            : ""
-        }
-      >
-        <div ref={inner}>{children}</div>
-      </div>
-      {overflows ? (
-        <button
-          type="button"
-          aria-expanded={expanded}
-          onClick={() => setExpanded((current) => !current)}
-          className="mt-1.5 text-[12px] text-content/50 hover:text-content"
-        >
-          {expanded ? "Show less" : "Show more"}
-        </button>
-      ) : null}
-    </>
   );
 }
 

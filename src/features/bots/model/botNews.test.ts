@@ -4,8 +4,12 @@ import {
   addBotNews,
   hasUnseenBotNews,
   listBotNews,
+  dismissNewsToast,
   markBotNewsSeen,
   NEWS_ALERT_INTERVAL_MS,
+  newsPreview,
+  newsToastsSnapshot,
+  queueNewsToast,
   removeBotNewsFor,
   shouldAlertNews,
 } from "./botNews";
@@ -62,5 +66,35 @@ describe("bot news", () => {
     addBotNews({ monoId: "b", botName: "Research", source: "Digest", text: "y" });
     removeBotNewsFor("a");
     expect(listBotNews().map((item) => item.monoId)).toEqual(["b"]);
+  });
+
+  it("previews a Markdown report as one plain line", () => {
+    expect(
+      newsPreview(
+        [
+          "Lo más relevante:",
+          "",
+          "- **Kimi K3.1 Pro** — pesos en [HF](https://hf.co)",
+          "- `Hy4` *nuevo* MoE",
+        ].join("\n"),
+      ),
+    ).toBe("Lo más relevante: Kimi K3.1 Pro — pesos en HF Hy4 nuevo MoE");
+    expect(newsPreview("## Title\n1. one", 240)).toBe("Title one");
+    expect(newsPreview("a".repeat(20), 10)).toBe(`${"a".repeat(9)}…`);
+    expect(newsPreview("snake_case_name stays")).toBe("snake_case_name stays");
+  });
+
+  it("shows a post as a card until it is dismissed or read", () => {
+    const first = addBotNews({ monoId: "a", botName: "F", source: "Bank", text: "1" })!;
+    const second = addBotNews({ monoId: "b", botName: "R", source: "Digest", text: "2" })!;
+    queueNewsToast(first.id);
+    queueNewsToast(second.id);
+    queueNewsToast(second.id);
+    expect(newsToastsSnapshot().map((item) => item.id)).toEqual([second.id, first.id]);
+    expect(newsToastsSnapshot()).toBe(newsToastsSnapshot());
+    dismissNewsToast(second.id);
+    expect(newsToastsSnapshot().map((item) => item.id)).toEqual([first.id]);
+    markBotNewsSeen();
+    expect(newsToastsSnapshot()).toEqual([]);
   });
 });

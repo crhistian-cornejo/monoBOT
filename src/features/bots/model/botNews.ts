@@ -149,3 +149,57 @@ export function subscribeBotNews(onChange: () => void): () => void {
 export function botNewsSnapshot(): BotNewsItem[] {
   return read();
 }
+
+/**
+ * A report's text as one plain line, for a banner or a card's preview: the
+ * Markdown marks (bold, headings, list bullets, links, code) dropped and the
+ * whitespace collapsed.
+ */
+export function newsPreview(text: string, max = 240): string {
+  const plain = text
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, "")
+    .replace(/(\*\*|__|~~|`)/g, "")
+    .replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?=[^\w*]|$)/g, "$1$2")
+    .replace(/\s+/g, " ")
+    .trim();
+  return plain.length > max ? `${plain.slice(0, max - 1).trimEnd()}…` : plain;
+}
+
+/** How many news cards stack at once; older ones wait in the feed. */
+const MAX_TOASTS = 3;
+let toastIds: string[] = [];
+let toastCache: { items: BotNewsItem[]; ids: string[]; out: BotNewsItem[] } | null =
+  null;
+
+/**
+ * Shows a post as a card over the app. The card goes away once dismissed,
+ * once the feed is read, or once the bot's posts are removed.
+ */
+export function queueNewsToast(id: string) {
+  if (toastIds.includes(id)) return;
+  toastIds = [id, ...toastIds];
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENT));
+}
+
+export function dismissNewsToast(id: string) {
+  if (!toastIds.includes(id)) return;
+  toastIds = toastIds.filter((entry) => entry !== id);
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(EVENT));
+}
+
+/** The posts to show as cards, newest first, for useSyncExternalStore. */
+export function newsToastsSnapshot(): BotNewsItem[] {
+  const items = read();
+  if (toastCache && toastCache.items === items && toastCache.ids === toastIds)
+    return toastCache.out;
+  const byId = new Map(items.map((item) => [item.id, item]));
+  const out = toastIds
+    .map((id) => byId.get(id))
+    .filter((item): item is BotNewsItem => !!item && !item.seen)
+    .slice(0, MAX_TOASTS);
+  toastCache = { items, ids: toastIds, out };
+  return out;
+}
