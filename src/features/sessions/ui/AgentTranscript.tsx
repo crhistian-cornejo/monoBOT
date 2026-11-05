@@ -4977,7 +4977,10 @@ function HandoffDivider({ block }: { block: Block }) {
   if (!meta) return null;
 
   const preparing = meta.status === "preparing";
-  const label = preparing ? "Preparing a handoff" : HARNESS_TITLE[meta.to];
+  // Say who the switch waits on: the outgoing agent writes the brief.
+  const label = preparing
+    ? `Asking ${HARNESS_TITLE[meta.from]} for a summary`
+    : HARNESS_TITLE[meta.to];
 
   return (
     <div className="px-4 py-5">
