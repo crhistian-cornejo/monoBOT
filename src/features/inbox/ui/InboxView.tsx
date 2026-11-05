@@ -940,14 +940,24 @@ export function InboxView({
     });
   };
 
-  // The source tabs: GitHub and the trackers, then the user's email.
+  // The source tabs: GitHub and the trackers, then the user's email. Beside
+  // the email, the row spans the whole view, its line from edge to edge, and
+  // the tabs keep their own width instead of sharing the row's.
   const sourceTabs = (
-  <div className="flex h-9 shrink-0 items-center gap-px border-b border-stroke px-2">
+  <div
+    className={`flex h-9 w-full shrink-0 items-center gap-px border-b border-stroke px-2 ${
+      emailOpen ? "[&_button]:flex-none [&_button]:px-3" : ""
+    }`}
+  >
     <div
       role="tablist"
       aria-label="Inbox source"
-      className="flex min-w-0 basis-0 items-center gap-px"
-      style={{ flexGrow: visibleSources.length + 1 }}
+      className={
+        emailOpen
+          ? "flex shrink-0 items-center gap-px"
+          : "flex min-w-0 basis-0 items-center gap-px"
+      }
+      style={emailOpen ? undefined : { flexGrow: visibleSources.length + 1 }}
     >
       {visibleSources.map((option) => (
         <InboxSourceTab
