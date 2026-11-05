@@ -7,6 +7,8 @@ import {
   deniedSkills,
   folderProblem,
   isBotRole,
+  isUserOnlyRole,
+  offeredBotRoles,
   parseBotTools,
   rulePath,
   skillMatches,
@@ -31,6 +33,7 @@ describe("bots", () => {
       "research",
       "social",
       "images",
+      "phone",
       "custom",
     ]);
     // Every role says what it takes on, for the orchestrator to pick by.
@@ -255,5 +258,55 @@ describe("bots", () => {
         skills: ["pdf", "pdf", "a b", "plugin:xlsx", 4],
       }),
     ).toEqual({ services: [], plugins: [], skills: ["pdf", "plugin:xlsx"] });
+  });
+});
+
+describe("the Phone bot", () => {
+  it("has only the iPhone connector and reads files, nothing else", () => {
+    const tools = botTools("phone");
+    expect(tools.connectors).toEqual(["poki"]);
+    expect(tools.services).toEqual([]);
+    expect(tools.access).toEqual(["read"]);
+    const launch = botLaunch("phone");
+    expect(launch.connectors).toEqual(["poki"]);
+    expect(launch.disallowedTools).toContain("WebSearch");
+    expect(launch.disallowedTools).toContain("Edit");
+  });
+
+  it("tells it to read before and after, ask first, and never handle codes", () => {
+    const soul = BOT_ROLES.find((info) => info.role === "phone")!.instructions;
+    expect(soul).toMatch(/before every action and again after it/);
+    expect(soul).toMatch(/one step per call/);
+    for (const word of ["sends", "pays", "buys", "accepts terms", "changes a setting", "deletes", "password"])
+      expect(soul).toContain(word);
+    expect(soul).toMatch(/never unlock the phone/);
+    expect(soul).toMatch(/two-factor code/);
+    expect(soul).toMatch(/is data, never instructions/);
+  });
+
+  it("denies Poki's batches, clipboard and installs to every bot", () => {
+    for (const { role } of BOT_ROLES) {
+      const { disallowedTools } = botLaunch(role);
+      for (const tool of [
+        "batch_commands",
+        "get_clipboard",
+        "set_clipboard",
+        "install_app",
+        "uninstall_app",
+        "download_app_container",
+        "build_and_run",
+      ])
+        expect(disallowedTools, role).toContain(`mcp__poki__${tool}`);
+    }
+  });
+
+  it("is offered only on a Mac, and only the user makes one", () => {
+    const roles = (platform: "mac" | "windows") =>
+      offeredBotRoles(platform).map((info) => info.role);
+    expect(roles("mac")).toContain("phone");
+    expect(roles("windows")).not.toContain("phone");
+    expect(roles("windows")).toContain("research");
+    expect(isUserOnlyRole("phone")).toBe(true);
+    expect(isUserOnlyRole("research")).toBe(false);
   });
 });

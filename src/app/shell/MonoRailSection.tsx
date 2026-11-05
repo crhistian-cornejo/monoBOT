@@ -46,9 +46,9 @@ import {
   type MonoState,
 } from "../../features/monos/model/mono";
 import {
-  BOT_ROLES,
   botIntroDismissed,
   dismissBotIntro,
+  offeredBotRoles,
   type BotRole,
 } from "../../features/bots/model/bots";
 import type { RailZone } from "./PersonalRail";
@@ -422,7 +422,7 @@ export function MonoRailSection({
             </span>
           </button>
           <div role="separator" className="my-1 h-px bg-content/10" />
-          {BOT_ROLES.filter((info) => !info.hidden).map((info) => (
+          {offeredBotRoles().map((info) => (
             <button
               key={info.role}
               type="button"
@@ -433,7 +433,10 @@ export function MonoRailSection({
               }}
               className="flex w-full flex-col items-start px-2.5 py-1.5 text-left hover:bg-content/8"
             >
-              <span className="text-[13px] font-medium">{info.name}</span>
+              <span className="flex items-center gap-1.5 text-[13px] font-medium">
+                {info.name}
+                {info.experimental ? <BetaBadge label="Experimental" /> : null}
+              </span>
               <span className="text-xs text-content/55">
                 {info.description}
               </span>

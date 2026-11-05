@@ -87,8 +87,11 @@ import {
   type Mono,
 } from "../../monos/model/mono";
 import {
+  availableConnectors,
   CONNECTORS,
-  isConnectorEnabled,
+  connectorInList,
+  isConnectorReady,
+  userGrantedAdded,
 } from "../../settings/model/connectors";
 import {
   BOT_ACCESS,
@@ -100,6 +103,7 @@ import {
   folderProblem,
   isBotRole,
   isSkillName,
+  isUserOnlyRole,
   skillMatches,
   type BotTools,
 } from "../../bots/model/bots";
@@ -1351,7 +1355,7 @@ function handleBots(
   if (!isBotRole(role) || role === "principal")
     throw new Error(
       `role must be one of ${BOT_ROLES.filter(
-        (info) => info.role !== "principal",
+        (info) => info.role !== "principal" && !isUserOnlyRole(info.role),
       )
         .map((info) => info.role)
         .join(", ")}`,
@@ -1365,6 +1369,10 @@ function handleBots(
     input.specialty === undefined
       ? undefined
       : requiredString(input.specialty, "specialty", SPECIALTY_MAX);
+  if (isUserOnlyRole(role))
+    throw new Error(
+      `A ${botRole(role).name} bot reaches the user's phone; only the user creates one, from the new-bot menu`,
+    );
   const tools =
     input.services === undefined &&
     input.skills === undefined &&
@@ -1372,6 +1380,7 @@ function handleBots(
     input.connectors === undefined
       ? undefined
       : requiredTools(input, botTools(role));
+  refuseUserGranted(tools?.connectors, botTools(role).connectors);
   const bot = createMono([], { role, name, instructions });
   if (tools) saveBotTools(bot.id, tools);
   if (specialty) saveMonoSpecialty(bot.id, specialty);
@@ -1467,6 +1476,21 @@ function installedSkillList(value: unknown): string[] {
   return skillList(value).filter((name) => !BUNDLED_SKILLS.includes(name));
 }
 
+/**
+ * A connector that reaches something real (the user's iPhone) is the user's
+ * to grant, in the bot's settings: a bot keeps it or drops it, never adds it.
+ */
+function refuseUserGranted(
+  next: readonly string[] | undefined,
+  before: readonly string[] | undefined,
+) {
+  const added = userGrantedAdded(next, before);
+  if (added.length)
+    throw new Error(
+      `Only the user can give a bot ${added.map((connector) => connector.name).join(", ")}, from its settings; ask them`,
+    );
+}
+
 /** A bot reads and changes its own services and skills. */
 async function handleTools(
   source: { id: string },
@@ -1478,8 +1502,12 @@ async function handleTools(
   if (!mono || !isBot(mono))
     throw new Error("Only a bot's own conversation can manage its tools");
   const role = mono.botRole ?? "assistant";
-  if (action === "tools.update")
-    saveBotTools(mono.id, requiredTools(input, botTools(role, mono.botTools)));
+  if (action === "tools.update") {
+    const current = botTools(role, mono.botTools);
+    const next = requiredTools(input, current);
+    refuseUserGranted(next.connectors, current.connectors);
+    saveBotTools(mono.id, next);
+  }
   const tools = botTools(role, findMono(mono.id)?.botTools);
   return {
     services: BOT_SERVICES.map((info) => ({
@@ -1511,15 +1539,17 @@ async function handleTools(
       does: info.note,
       on: tools.access.includes(info.access),
     })),
-    connectors: CONNECTORS.map((connector) => ({
+    connectors: availableConnectors().map((connector) => ({
       name: connector.id,
       label: connector.name,
       does: connector.description,
       on:
-        isConnectorEnabled(connector) &&
-        (!tools.connectors || tools.connectors.includes(connector.id)),
-      ...(isConnectorEnabled(connector)
-        ? {}
+        isConnectorReady(connector) &&
+        connectorInList(connector, tools.connectors),
+      ...(isConnectorReady(connector)
+        ? connector.userGranted
+          ? { note: "Only the user turns this on or off for you" }
+          : {}
         : { note: "Off in the app's settings; ask the user" }),
     })),
     folders: tools.folders.map((folder) => ({
