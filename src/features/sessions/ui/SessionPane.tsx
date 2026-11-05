@@ -84,7 +84,7 @@ import {
 } from "../../monos/model/monoMessaging";
 import { MessageQueue } from "./MessageQueue";
 import { useMonoTranscript } from "../../monos/hooks/useMonoTranscript";
-import { MONO_PAGE_TURNS } from "../data/sessionStore";
+import { MONO_PAGE_TURNS, shouldPersistSession } from "../data/sessionStore";
 import { useComposerDockMotion } from "./useComposerDockMotion";
 import { MOD } from "../../../platform/tauri/platform";
 import {
@@ -209,6 +209,7 @@ export type SessionPaneProps = {
   onUsageLimitAccountChange?: (sessionId: string, accountId: string) => void;
   onProviderRetryNow?: (sessionId: string) => void;
   onProviderRetryCancel?: (sessionId: string) => void;
+  onSendQueuedMessageNow?: (sessionId: string, messageId: string) => void;
   onInboxCardDismiss?: (sessionId: string) => void;
   onLinkedWorkItemUpdateCardDismiss?: (sessionId: string) => void;
   onNoteCardDismiss?: (sessionId: string) => void;
@@ -348,6 +349,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
   onUsageLimitAccountChange,
   onProviderRetryNow,
   onProviderRetryCancel,
+  onSendQueuedMessageNow,
   onInboxCardDismiss,
   onLinkedWorkItemUpdateCardDismiss,
   onNoteCardDismiss,
@@ -799,6 +801,14 @@ const LocalSessionPane = memo(function LocalSessionPane({
           ? () => onProviderRetryCancel(session.id)
           : undefined
       }
+      onSendQueuedMessageNow={
+        onSendQueuedMessageNow
+          ? (messageId) => onSendQueuedMessageNow(session.id, messageId)
+          : undefined
+      }
+      // A scheduled message lives in the saved session; an unsaved one
+      // (empty, remote, ephemeral) would lose it on restart.
+      canSendLater={!!onSendQueuedMessageNow && shouldPersistSession(session)}
       onOpenFile={onOpenFile}
       busy={!!session.busy}
       editLastTurnSupported={editLastTurnSupported}

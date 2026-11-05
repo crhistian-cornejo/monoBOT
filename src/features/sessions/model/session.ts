@@ -95,6 +95,8 @@ export type ComposerTurnOptions = {
   onResendRejected?: (recovery: EditedResendRejection) => void;
   /** Promote an existing unsent transcript block instead of appending a turn. */
   draftBlockId?: string;
+  /** Queue the message to send at this epoch ms instead of now. */
+  sendAt?: number;
 };
 
 export type PlanStatus = "streaming" | "ready" | "building" | "built";
@@ -300,6 +302,8 @@ export type QueuedMessage = {
   monoSessionCompletion?: MonoSessionCompletion;
   /** Delivery failed; the message remains available to retry or edit. */
   error?: string;
+  /** Epoch ms to send at ("Send later"). Until then the queue passes over it. */
+  sendAt?: number;
 };
 
 export type MessageQueueStatus = "active" | "paused" | "resuming";

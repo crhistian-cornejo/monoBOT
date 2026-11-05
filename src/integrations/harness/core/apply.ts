@@ -24,6 +24,7 @@ import { resolveModel } from "../../../features/sessions/model/models";
 import type { HarnessEvent } from "./types";
 import { usageLimitFromError } from "../../../features/sessions/model/usageLimit";
 import { nextProviderRetry } from "../../../features/sessions/model/providerRetry";
+import { hasImmediateQueuedMessage } from "../../../features/sessions/model/scheduledSend";
 
 /** Apply one delivery batch without copying the transcript for every token. */
 export function applyHarnessEvents(
@@ -169,7 +170,8 @@ export function applyHarnessEvent(
             Date.now(),
           ),
           // Do not drain remaining messages into the same failed connection.
-          queueStatus: session.queuedMessages?.length
+          // Messages scheduled for later still go out at their time.
+          queueStatus: hasImmediateQueuedMessage(session)
             ? "paused"
             : session.queueStatus,
         }),

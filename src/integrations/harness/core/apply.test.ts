@@ -83,6 +83,19 @@ describe("follow-up readiness", () => {
     expect(session.queueStatus).toBe("paused");
     expect(session.queuedMessages).toBe(queuedMessages);
   });
+  it("keeps messages scheduled for later going when a turn fails", () => {
+    const session = applyHarnessEvent(
+      {
+        ...appendUser(newSession("codex", "/tmp"), "First"),
+        queuedMessages: [
+          { id: "later", text: "Follow up", attachments: [], sendAt: 9_000 },
+        ],
+        queueStatus: "active",
+      },
+      { type: "session.error", message: "Connection failed" },
+    );
+    expect(session.queueStatus).toBe("active");
+  });
   it("becomes ready only after acceptance and resets when stopped or restarted", () => {
     let session = appendUser(newSession("codex", "/tmp"), "First");
     expect(session.turnReady).toBe(false);

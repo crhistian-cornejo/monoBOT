@@ -297,6 +297,9 @@ function sanitizeQueuedMessages(value: unknown): QueuedMessage[] {
         ...(typeof message.error === "string" && message.error
           ? { error: message.error }
           : {}),
+        ...(typeof message.sendAt === "number" && Number.isFinite(message.sendAt)
+          ? { sendAt: message.sendAt }
+          : {}),
       },
     ];
   });
@@ -1539,9 +1542,15 @@ function recordToSession(record: SessionRecord): Session {
     runtimeMode: asRuntimeMode(record.runtimeMode),
     title: record.title,
     blocks,
-    // A restart interrupted the active turn. Let the user resume pending work.
+    // A restart interrupted the active turn. Let the user resume pending work;
+    // messages scheduled for later still go out at their time.
     ...(queuedMessages.length
-      ? { queuedMessages, queueStatus: "paused" as const }
+      ? {
+          queuedMessages,
+          queueStatus: queuedMessages.some((message) => message.sendAt == null)
+            ? ("paused" as const)
+            : ("active" as const),
+        }
       : {}),
     ...(record.monoTranscript ? { monoTranscript: record.monoTranscript } : {}),
     busy: false,

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Check,
+  Clock,
   CornerDownRight,
   ListEnd,
   Pause,
@@ -11,6 +12,7 @@ import {
 } from "../../../shared/ui/icons";
 import { isImeComposition } from "../../../shared/lib/keyboard";
 import type { MessageQueueStatus, QueuedMessage } from "../model/session";
+import { formatScheduledSend } from "../model/scheduledSend";
 
 export function MessageQueue({
   messages,
@@ -19,6 +21,7 @@ export function MessageQueue({
   onEdit,
   onEditingChange,
   onSteer,
+  onSendNow,
   onResume,
   variant = "queue",
   sendingId,
@@ -29,6 +32,8 @@ export function MessageQueue({
   onEdit?: (messageId: string, text: string) => void;
   onEditingChange?: (messageId?: string) => void;
   onSteer?: (messageId: string) => void;
+  /** Send a scheduled message now instead of at its time. */
+  onSendNow?: (messageId: string) => void;
   onResume?: () => void;
   variant?: "queue" | "messages";
   sendingId?: string;
@@ -115,7 +120,11 @@ export function MessageQueue({
                 index > 0 ? "border-t border-content/5" : ""
               }`}
             >
-              <ListEnd className="size-3.5 shrink-0 text-content/35" />
+              {message.sendAt != null ? (
+                <Clock className="size-3.5 shrink-0 text-content/35" />
+              ) : (
+                <ListEnd className="size-3.5 shrink-0 text-content/35" />
+              )}
               {editing ? (
                 <>
                   <textarea
@@ -164,13 +173,29 @@ export function MessageQueue({
                     <div className="truncate text-content/75" title={label}>
                       {label}
                     </div>
+                    {message.sendAt != null ? (
+                      <div className="text-[11px] text-content/45">
+                        Sends {formatScheduledSend(message.sendAt, Date.now())}
+                      </div>
+                    ) : null}
                     {message.error ? (
                       <p role="alert" className="text-red-400">
                         {message.error}
                       </p>
                     ) : null}
                   </div>
-                  {onSteer && !message.monoSessionCompletion ? (
+                  {message.sendAt != null ? (
+                    onSendNow ? (
+                      <button
+                        type="button"
+                        onClick={() => onSendNow(message.id)}
+                        className="flex h-6 shrink-0 items-center gap-1.5 rounded-md px-2 text-content/50 transition-colors hover:bg-content/8 hover:text-content/90"
+                      >
+                        <Play className="size-3.5" />
+                        Send now
+                      </button>
+                    ) : null
+                  ) : onSteer && !message.monoSessionCompletion ? (
                     <button
                       type="button"
                       disabled={sending}

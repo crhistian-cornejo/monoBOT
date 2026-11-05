@@ -149,6 +149,7 @@ import { useComposerSkills } from "./useComposerSkills";
 import { Popover } from "../../../shared/ui/Popover";
 import { UsageLimitNotice } from "./UsageLimitNotice";
 import { ProviderRetryNotice } from "./ProviderRetryNotice";
+import { SendLaterButton } from "./SendLaterButton";
 import { UsageLimitAccountPicker } from "./UsageLimitAccountPicker";
 import { consumePlanCommand, PLAN_COMMAND } from "../model/plan";
 import {
@@ -303,6 +304,9 @@ type Props = {
   onUsageLimitAccountChange?: (accountId: string) => void;
   onProviderRetryNow?: () => void;
   onProviderRetryCancel?: () => void;
+  /** Offer "Send later": only where a scheduled message survives a restart. */
+  canSendLater?: boolean;
+  onSendQueuedMessageNow?: (messageId: string) => void;
   providerAccountId?: string;
   onOpenFile?: (path: string) => void;
   onDraftChange?: (text: string) => void;
@@ -423,6 +427,8 @@ export function Composer({
   onUsageLimitAccountChange,
   onProviderRetryNow,
   onProviderRetryCancel,
+  canSendLater,
+  onSendQueuedMessageNow,
   providerAccountId,
   onOpenFile,
   onDraftChange,
@@ -1318,14 +1324,14 @@ export function Composer({
     onRecallLastTurnReady(recallLastTurn);
   }, [editLastTurnSupported, onRecallLastTurnReady, recallLastTurn]);
 
-  const submit = (value: string) => {
+  const submit = (value: string, sendAt?: number) => {
     if (disabled || worktreeRemoved || submitLockRef.current) return;
     submitLockRef.current = true;
-    void completeSubmit(value).finally(() => {
+    void completeSubmit(value, sendAt).finally(() => {
       submitLockRef.current = false;
     });
   };
-  const completeSubmit = async (submittedValue: string) => {
+  const completeSubmit = async (submittedValue: string, sendAt?: number) => {
     let pending = pasteFlightRef.current;
     const generation = pasteGenerationRef.current;
     while (pending) {
@@ -1467,6 +1473,7 @@ export function Composer({
             : orchestrationSelected || orchestratorCommand.matched
               ? "orchestrate"
               : "default",
+        ...(sendAt != null ? { sendAt } : {}),
         ...(resendEdited
           ? {
               resendEdited: true,
@@ -1900,6 +1907,7 @@ export function Composer({
       <MessageQueue
         messages={queuedMessages}
         status={queueStatus}
+        onSendNow={onSendQueuedMessageNow}
         onDelete={onDeleteQueuedMessage}
         onEdit={onEditQueuedMessage}
         onEditingChange={onQueuedMessageEditingChange}
@@ -2484,6 +2492,19 @@ export function Composer({
             ) : null}
             <div className="flex shrink-0 items-center gap-1">
               {disabled ? null : <DictationButton dictation={dictation} />}
+              {canSendLater &&
+              !disabled &&
+              hasValue &&
+              !worktreeRemoved &&
+              !draftActive &&
+              !resendEdited ? (
+                <SendLaterButton
+                  onSchedule={(sendAt) =>
+                    submit(ref.current?.value ?? "", sendAt)
+                  }
+                  onClose={() => ref.current?.focus()}
+                />
+              ) : null}
               <ComposerAction
                 busy={busy}
                 disabled={disabled}

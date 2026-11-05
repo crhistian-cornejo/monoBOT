@@ -56,6 +56,27 @@ describe("restoring a session whose repair cannot be persisted", () => {
     expect(repaired?.[1].session.sidebarHidden).toBe(true);
   });
 
+  it("keeps scheduled messages waiting after a restart", async () => {
+    const scheduled = { id: "later", text: "Ship it", attachments: [], sendAt: 9_000 };
+    const record = { ...codexRecord(), queuedMessages: [scheduled] };
+    invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "session_get" ? record : null),
+    );
+    const restored = await readSession("s1");
+    expect(restored?.queuedMessages).toEqual([scheduled]);
+    // Nothing was interrupted, so the queue isn't paused.
+    expect(restored?.queueStatus).toBe("active");
+
+    const interrupted = {
+      ...codexRecord(),
+      queuedMessages: [scheduled, { id: "next", text: "Then this", attachments: [] }],
+    };
+    invoke.mockImplementation((cmd: string) =>
+      Promise.resolve(cmd === "session_get" ? interrupted : null),
+    );
+    expect((await readSession("s1"))?.queueStatus).toBe("paused");
+  });
+
   it("restores the turn's launched session links", async () => {
     const record = codexRecord();
     const launch = {

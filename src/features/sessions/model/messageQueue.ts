@@ -1,8 +1,9 @@
 import { isPreparingHandoff } from "./handoff";
 import type { QueuedMessage, Session } from "./session";
 
+/** The next message to send. Scheduled ones wait until their time comes. */
 export function queuedHead(session: Session): QueuedMessage | undefined {
-  return session.queuedMessages?.[0];
+  return session.queuedMessages?.find((message) => message.sendAt == null);
 }
 
 /** Hold auto-dispatch only while the item about to send is being edited. */

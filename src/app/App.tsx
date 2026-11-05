@@ -551,8 +551,14 @@ import {
   canDispatchQueuedHead,
   canSteerQueuedHead,
   dequeueQueuedMessage,
+  queuedHead,
   queuedMessageForSubmit,
 } from "../features/sessions/model/messageQueue";
+import {
+  nextScheduledSendAt,
+  releaseDueScheduledMessages,
+  releaseScheduledMessages,
+} from "../features/sessions/model/scheduledSend";
 import { deliverQueuedFollowUp } from "../features/sessions/model/queuedFollowUp";
 import {
   USAGE_LIMIT_RESUME_GRACE_MS,
@@ -7699,6 +7705,36 @@ function Workspace({
         });
       }
 
+      // "Send later": wait in the queue, which passes over it until its time.
+      if (options?.sendAt != null) {
+        setSessions((prev) =>
+          prev.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  inboxCard: rawCommand ? s.inboxCard : undefined,
+                  noteCard: rawCommand ? s.noteCard : undefined,
+                  handoffCard: rawCommand ? s.handoffCard : undefined,
+                  queuedMessages: [
+                    ...(s.queuedMessages ?? []),
+                    {
+                      id: crypto.randomUUID(),
+                      text,
+                      attachments,
+                      noteCard,
+                      handoffCard,
+                      intent,
+                      sendAt: options.sendAt,
+                    },
+                  ],
+                  queueStatus: s.queueStatus ?? "active",
+                }
+              : s,
+          ),
+        );
+        return true;
+      }
+
       if (current.busy && !pendingSwitch) {
         if (
           operatorCommand.matched &&
@@ -9684,14 +9720,14 @@ function Workspace({
           (monoForSession(session.id) &&
             canSteerQueuedHead(session) &&
             canSteerHarness(session.harness) &&
-            !consumeOperatorCommand(queued[0].text).matched)
+            !consumeOperatorCommand(queuedHead(session)!.text).matched)
         ) ||
         queueDispatchingRef.current.has(session.id)
       ) {
         continue;
       }
 
-      const next = queued[0];
+      const next = queuedHead(session);
       if (!next) continue;
       queueDispatchingRef.current.add(session.id);
       scheduled.add(session.id);
@@ -9701,7 +9737,7 @@ function Workspace({
           const latest = sessionsRef.current.find(
             (entry) => entry.id === session.id,
           );
-          const head = latest?.queuedMessages?.[0];
+          const head = latest ? queuedHead(latest) : undefined;
           if (
             !latest ||
             !head ||
@@ -9755,7 +9791,7 @@ function Workspace({
                 (steering
                   ? canSteerQueuedHead(current)
                   : canDispatchQueuedHead(current)) &&
-                current.queuedMessages?.[0] === head
+                queuedHead(current) === head
               ) {
                 setSessions((prev) =>
                   prev.map((entry) =>
@@ -10276,6 +10312,49 @@ function Workspace({
       for (const id of scheduled) providerRetryingRef.current.delete(id);
     };
   }, [onProviderRetryNow, sessions, providerRetryTick]);
+
+  // "Send later": a scheduled message joins the queue when its time comes,
+  // and the queue sends it like any other. See scheduledSend.ts.
+  const [scheduledSendTick, setScheduledSendTick] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    let next = Number.POSITIVE_INFINITY;
+    let due = false;
+    for (const session of sessions) {
+      const sendAt = nextScheduledSendAt(session);
+      if (sendAt == null) continue;
+      if (sendAt <= now) due = true;
+      else next = Math.min(next, sendAt);
+    }
+    if (due) {
+      updateSessionState(sessionsRef, setSessions, (prev) =>
+        prev.map((session) => releaseDueScheduledMessages(session, Date.now())),
+      );
+    }
+    if (!Number.isFinite(next)) return;
+    // Timers drift while the machine sleeps; look again at least every minute.
+    const timer = window.setTimeout(
+      () => setScheduledSendTick((tick) => tick + 1),
+      Math.max(1_000, Math.min(next - now, 60_000)),
+    );
+    return () => window.clearTimeout(timer);
+  }, [sessions, scheduledSendTick]);
+
+  const onSendQueuedMessageNow = useCallback(
+    (sessionId: string, messageId: string) => {
+      updateSessionState(sessionsRef, setSessions, (prev) =>
+        prev.map((session) =>
+          session.id === sessionId
+            ? releaseScheduledMessages(
+                session,
+                (message) => message.id === messageId,
+              )
+            : session,
+        ),
+      );
+    },
+    [],
+  );
 
   const openSessionBeside = useCallback(
     (
@@ -14055,6 +14134,7 @@ function Workspace({
     onUsageLimitAccountChange,
     onProviderRetryNow,
     onProviderRetryCancel,
+    onSendQueuedMessageNow,
     onInboxCardDismiss,
     onLinkedWorkItemUpdateCardDismiss,
     onNoteCardDismiss,

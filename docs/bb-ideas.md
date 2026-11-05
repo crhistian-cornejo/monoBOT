@@ -12,19 +12,25 @@ MonoBOT ya cubre buena parte de lo que bb ofrece: automatizaciones, memoria comp
 - Tarjeta: `src/features/sessions/ui/ProviderRetryNotice.tsx`, con el mismo estilo que `UsageLimitNotice`.
 - Diferencia con bb: no hay ajuste de espera máxima. Con 4 reintentos la espera total no pasa de unos 19 minutos, así que ese ajuste no cambiaría nada. Las sesiones remotas y los chats de Mono todavía no reintentan solos.
 
+**scheduled-send** (5 de noviembre de 2026). Junto al botón de enviar hay un reloj: "En 30 minutos", "En 1 hora", "En 3 horas", "Mañana por la mañana" (9:00) o "Elegir fecha y hora". El mensaje queda en la cola de la sesión con un reloj y su hora, y se puede editar, borrar o enviar al momento ("Send now"). Cuando llega la hora pasa a la cola normal: se envía si el agente está libre, o espera o guía el turno en curso como cualquier mensaje en cola. Conserva texto, adjuntos, menciones, modo (plan, orquestar) y tarjetas de nota o handoff.
+
+- Lógica: `src/features/sessions/model/scheduledSend.ts`. La cola (`queuedHead` en `messageQueue.ts`) se salta los mensajes que esperan. El temporizador está en `App.tsx`.
+- Se guarda con la sesión (`sendAt` en cada mensaje de la cola), así que sobrevive a reinicios. Tras un reinicio o un error, la cola solo se pausa si había mensajes para enviar ya.
+- UI: `src/features/sessions/ui/SendLaterButton.tsx`. El formulario de fecha y hora está en `src/shared/ui/DateTimeForm.tsx`, compartido con el silencio de notificaciones.
+- Diferencias con bb: se envía con el modelo y los permisos que tenga la sesión al llegar la hora, no con los del momento de programarlo, porque cambiar de modelo tiene su propio flujo de handoff. Solo se ofrece en sesiones que se guardan: no en una sesión vacía (para empezar algo a una hora, usa Automatizaciones), ni en remotas, ni en chats de Mono. Los mensajes programados solo salen con la app abierta.
+
 ## Ideas, por prioridad
 
 | Idea de bb | Qué aporta a MonoBOT | Esfuerzo |
 |---|---|---|
 | **secrets** | El agente pide una API key y el usuario la escribe en un formulario oculto del hilo. El valor se guarda directo en un `.env` con permisos `0600`, actualizando las líneas existentes y añadiendo las nuevas; nunca aparece en el transcript. El agente solo recibe la ruta y qué nombres se añadieron o cambiaron. | Medio |
 | **concurrency-limit** | Limita los agentes que corren a la vez: por defecto uno por CPU, con un límite global opcional. Los turnos que superan el límite esperan en cola y el hilo dice por qué. Un mensaje a un hilo que ya está corriendo no se retiene. | Medio |
-| **scheduled-send** | "Enviar más tarde" desde el composer, conservando adjuntos, menciones, modelo y modo de permisos. | Bajo |
 | **prompt-library** | Historial de los prompts enviados, con búsqueda y favoritos, para reinsertarlos en el composer. | Bajo |
 | **keep-awake** | Impide que el Mac entre en reposo mientras hay agentes trabajando. | Bajo |
 | **agent-annotations** | En el navegador integrado, haces clic en un elemento, escribes una nota y se añade al prompt con la URL, el selector, el texto, los estilos clave y los nombres de componentes de React. Muy útil para iterar UI. | Medio-alto |
 | **account-pool** | Rota entre varias cuentas de Claude o Codex cuando una llega a su límite, y se combina con provider-retry para saber cuándo vuelve a haber una cuenta disponible. | Alto |
 
-Siguiente recomendación: **scheduled-send** o **keep-awake**, por su bajo esfuerzo. **account-pool** ya puede apoyarse en provider-retry.
+Siguiente recomendación: **keep-awake**, que encaja con scheduled-send (los mensajes programados solo salen si el equipo no está en reposo), o **prompt-library**. **account-pool** ya puede apoyarse en provider-retry.
 
 ## Prácticas de su repo que nos sirven
 
