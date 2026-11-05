@@ -743,6 +743,7 @@ import {
   seatBrief,
   seatOf,
   seatSessionId,
+  seatSessionIds,
 } from "../features/groups/model/groupSeats";
 import {
   roundAnswers,
@@ -2565,17 +2566,19 @@ function Workspace({
     activeSessionId,
   );
 
+  // A member working in a group shows in the group's Activity, not here.
   const liveAgentRows = useMemo(
     () =>
       liveAgentsEnabled
         ? liveAgentsFromSessions(
             promptableSessions,
             unseenFinishedIds,
-            new Set(
-              listMonos().flatMap((mono) =>
+            new Set([
+              ...listMonos().flatMap((mono) =>
                 mono.sessionId ? [mono.sessionId] : [],
               ),
-            ),
+              ...seatSessionIds(),
+            ]),
           )
         : [],
     [liveAgentsEnabled, promptableSessions, unseenFinishedIds, monosSnap],
@@ -9001,6 +9004,8 @@ function Workspace({
                 source: news.source,
                 text: news.text,
                 status: "done",
+                sessionId,
+                blockId: news.blockId,
               });
               if (added) queueNewsToast(added.id);
             }
@@ -9243,11 +9248,12 @@ function Workspace({
       );
       setSessions(sessionsRef.current);
     },
-    post: (monoId, habit, text, name, artifacts, launches, status) =>
+    post: (monoId, habit, text, name, artifacts, launches, status) => {
+      const postId = crypto.randomUUID();
       appendToMono(
         monoId,
         {
-          id: crypto.randomUUID(),
+          id: postId,
           role: "assistant",
           text,
           monoHabit: { id: habit.id, name: habit.name, at: Date.now() },
@@ -9267,6 +9273,8 @@ function Workspace({
               source: habit.name,
               text,
               ...(status ? { status } : {}),
+              sessionId: monoId,
+              blockId: postId,
             });
             // Elsewhere in the app, the Principal brings it up as a card.
             if (added && monoId !== activeSessionIdRef.current)
@@ -9286,7 +9294,8 @@ function Workspace({
             monoId === activeSessionIdRef.current,
           );
         },
-      ),
+      );
+    },
     // The chat shows it like any approval, and the usual approval banner
     // fires for the Mono; the answer is routed back in onApproval.
     askApproval: (monoId, habit, runId, block) => {
@@ -15072,7 +15081,12 @@ function Workspace({
         news={
           monoViewMono.botRole === "principal" ? (
             <BotNewsList
-              onOpenBot={(monoId) => void onOpenMono(monoId)}
+              onOpenBot={(monoId, at) => {
+                // The chat finds the message once it shows; the request
+                // waits for it.
+                if (at) requestTranscriptJump(at.sessionId, at.blockId);
+                void onOpenMono(monoId);
+              }}
               notes={notesEnabled}
               waiting={monoRail.waiting}
             />

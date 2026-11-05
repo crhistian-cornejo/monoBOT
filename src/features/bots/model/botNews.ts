@@ -14,6 +14,9 @@ export type BotNewsItem = {
   at: number;
   seen: boolean;
   status?: ReportStatus;
+  /** The chat and the message it was posted as, to open it there. */
+  sessionId?: string;
+  blockId?: string;
 };
 
 /** The same bot saying the same thing within a day is not news again. */
@@ -42,7 +45,9 @@ function read(): BotNewsItem[] {
             typeof item.id === "string" &&
             typeof item.monoId === "string" &&
             typeof item.text === "string" &&
-            typeof item.at === "number",
+            typeof item.at === "number" &&
+            // A member's answer to a group was once filed as news.
+            !String(item.source ?? "").trimStart().startsWith("<group_message"),
         )
       : [];
   } catch {
@@ -89,6 +94,9 @@ export function addBotNews(
     at,
     seen: false,
     ...(item.status ? { status: item.status } : {}),
+    ...(item.sessionId && item.blockId
+      ? { sessionId: item.sessionId, blockId: item.blockId }
+      : {}),
   };
   write([entry, ...read()].slice(0, MAX_ITEMS));
   return entry;
@@ -229,7 +237,7 @@ export function answeringGroup(blocks: readonly Block[]): boolean {
 
 export function botTurnNews(
   blocks: readonly Block[],
-): { source: string; text: string } | null {
+): { source: string; text: string; blockId: string } | null {
   let start = -1;
   for (let index = blocks.length - 1; index >= 0; index -= 1)
     if (blocks[index].role === "user") {
@@ -262,5 +270,6 @@ export function botTurnNews(
   return {
     source,
     text: final ? `**Final report: ${final.title}**\n\n${text}` : text,
+    blockId: reply!.id,
   };
 }

@@ -31,6 +31,25 @@ describe("bot news", () => {
     expect(hasUnseenBotNews()).toBe(false);
   });
 
+  it("keeps where a post was made, and leaves group answers out", () => {
+    addBotNews({
+      monoId: "s",
+      botName: "Social Media",
+      source: "Radar",
+      text: "GPT-6",
+      sessionId: "s-chat",
+      blockId: "b1",
+    });
+    expect(listBotNews()[0]).toMatchObject({ sessionId: "s-chat", blockId: "b1" });
+    // A member's answer to a group is the group's, not news.
+    expect(
+      botTurnNews([
+        { id: "u", role: "user", text: '<group_message group="Nexa">\nHola' },
+        { id: "a", role: "assistant", text: "Hola" },
+      ]),
+    ).toBeNull();
+  });
+
   it("keeps a repeat of a recent post out of the feed", () => {
     expect(
       addBotNews({ monoId: "a", botName: "F", source: "Bank", text: "Same  thing", at: 1 }),
@@ -116,13 +135,14 @@ describe("bot news", () => {
     ).toEqual({
       source: "Pozas de paso para minería",
       text: ["**Final report: Informe**", "", "Listo, guardé el informe."].join("\n"),
+      blockId: "a2",
     });
     expect(
       botTurnNews([
         { id: "u", role: "user", text: "hidden", monocode: true },
         { id: "a", role: "assistant", text: "Done." },
       ]),
-    ).toEqual({ source: "Finished", text: "Done." });
+    ).toEqual({ source: "Finished", text: "Done.", blockId: "a" });
     expect(botTurnNews([{ id: "u", role: "user", text: "Hi" }])).toBeNull();
   });
 });
