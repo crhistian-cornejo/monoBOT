@@ -39,20 +39,23 @@ export function saveRailZone(zone: RailZone) {
 export function RailZoneSwitch({
   zone,
   onChange,
+  className = "mx-2 mb-2",
 }: {
   zone: RailZone;
   onChange: (zone: RailZone) => void;
+  className?: string;
 }) {
+  // The segmented control Settings uses, so both layouts read the same.
   const option = (value: RailZone, label: string) => (
     <button
       type="button"
       role="tab"
       aria-selected={zone === value}
       onClick={() => onChange(value)}
-      className={`h-6 flex-1 font-mono text-[11px] uppercase tracking-wide ${
+      className={`min-w-0 rounded-sm px-2.5 py-1 ${
         zone === value
-          ? "bg-content text-background-base"
-          : "text-content/55 hover:bg-content/6 hover:text-content"
+          ? "bg-selection text-content"
+          : "text-content/50 hover:text-content"
       }`}
     >
       {label}
@@ -62,7 +65,7 @@ export function RailZoneSwitch({
     <div
       role="tablist"
       aria-label="Sidebar zone"
-      className="mx-2 mb-2 flex shrink-0 border border-stroke"
+      className={`grid shrink-0 grid-cols-2 gap-0.5 rounded-md border border-content/10 p-0.5 text-[12px] ${className}`}
     >
       {option("code", "Code")}
       {option("personal", "Personal")}
@@ -80,7 +83,14 @@ export function RailDivider() {
 /** The Personal zone: the Principal bot pinned on top, then the bots and
  * the groups, each under its own label. The bots' news lives on the
  * Principal's overview; a dot here says there is something unread. */
-export function PersonalRail({ monos }: { monos: MonoRailProps }) {
+export function PersonalRail({
+  monos,
+  inset = false,
+}: {
+  monos: MonoRailProps;
+  /** The focused layout's sidebar: its section labels and spacing. */
+  inset?: boolean;
+}) {
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const news = useSyncExternalStore(subscribeBotNews, botNewsSnapshot);
   const newsUnseen = news.some((item) => !item.seen);
@@ -98,7 +108,10 @@ export function PersonalRail({ monos }: { monos: MonoRailProps }) {
 
   return (
     <>
-      <div className="flex shrink-0 flex-col gap-px px-2 pb-2" data-rail-principal>
+      <div
+        className="flex shrink-0 flex-col gap-px px-2 pb-2"
+        data-rail-principal
+      >
         <button
           type="button"
           aria-current={active ? "true" : undefined}
@@ -108,7 +121,9 @@ export function PersonalRail({ monos }: { monos: MonoRailProps }) {
               : monos.onCreateBot?.("principal")
           }
           // The same row as every bot's below, so it reads as one of them.
-          className={`flex h-8 items-center gap-2 rounded-md px-2 text-left text-sm ${
+          className={`flex h-8 items-center gap-2 rounded-md px-2 text-left ${
+            inset ? "text-[13px]" : "text-sm"
+          } ${
             active
               ? "bg-selection-strong text-content"
               : "opacity-65 hover:bg-content/6 hover:opacity-100"
@@ -127,22 +142,22 @@ export function PersonalRail({ monos }: { monos: MonoRailProps }) {
             {look?.name ?? "Principal"}
           </span>
           {unseen ? (
-            <span className="grid h-4 min-w-4 place-items-center bg-accent px-1 text-[10px] font-medium text-white">
+            <span className="grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] font-medium tabular-nums text-white">
               {unseen > 99 ? "99+" : unseen}
             </span>
           ) : newsUnseen ? (
             <span
               aria-label="Unread news"
               title="Unread news"
-              className="size-1.5 shrink-0 bg-accent"
+              className="size-1.5 shrink-0 rounded-full bg-accent"
             />
           ) : null}
         </button>
       </div>
       <RailDivider />
-      <MonoRailSection {...monos} kind="bot" />
+      <MonoRailSection {...monos} kind="bot" inset={inset} />
       <RailDivider />
-      <MonoRailSection {...monos} kind="group" />
+      <MonoRailSection {...monos} kind="group" inset={inset} />
     </>
   );
 }

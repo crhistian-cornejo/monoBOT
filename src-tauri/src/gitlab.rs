@@ -11,7 +11,7 @@ const DEFAULT_GITLAB_URL: &str = "https://gitlab.com";
 const DEFAULT_LIMIT: u32 = 40;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
-const USER_AGENT: &str = "MonoCode";
+const USER_AGENT: &str = "MonoBOT";
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -846,7 +846,7 @@ fn gitlab_post_form(
 }
 
 fn gitlab_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+    monobot_http::agent()
         .timeout(HTTP_TIMEOUT)
         .redirects(0)
         .build()

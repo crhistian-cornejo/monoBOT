@@ -4,8 +4,8 @@ version.workspace = true
 edition.workspace = true
 description = "MonoBOT — one UI for every agent harness"
 authors = ["Nick"]
-repository = "https://github.com/hardbeat920/monocode"
-homepage = "https://usemono.dev"
+repository = "https://github.com/crhistian-cornejo/monoBOT"
+homepage = "https://github.com/crhistian-cornejo/monoBOT"
 license.workspace = true
 
 [lib]
@@ -17,6 +17,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 monobot-dictation = { path = "../crates/dictation" }
+monobot-http = { path = "../crates/http" }
 monobot-voice = { path = "../crates/voice" }
 monocode-mobile-link = { path = "../crates/mobile-link" }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }

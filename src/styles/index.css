@@ -79,8 +79,8 @@
     var(--color-content) var(--selection-emphasis-strength),
     transparent
   );
-  /* Factory-inspired orange. The previous blue was hsl(211 92% 62%). */
-  --color-accent: #ef6f2e;
+  /* The accent the user picks in Settings, else Factory-inspired orange. */
+  --color-accent: var(--user-accent-color, #ef6f2e);
   --color-skill: #e8c547;
   --color-mention: #38bdf8;
   --font-mono:
@@ -527,7 +527,7 @@ html.layout-inset.theme-light {
 html.layout-inset.has-workspace-theme {
   --color-content: var(--wt-dark-content);
   --color-background-base: var(--wt-dark-surface);
-  --color-accent: var(--wt-dark-accent);
+  --color-accent: var(--user-accent-color, var(--wt-dark-accent));
   --link-color: var(--wt-dark-link);
   --color-markdown-heading: var(--wt-dark-heading);
   --syntax-keyword: var(--wt-dark-syntax-keyword);
@@ -545,7 +545,7 @@ html.layout-inset.has-workspace-theme {
 html.layout-inset.has-workspace-theme.theme-light {
   --color-content: var(--wt-light-content);
   --color-background-base: var(--wt-light-surface);
-  --color-accent: var(--wt-light-accent);
+  --color-accent: var(--user-accent-color, var(--wt-light-accent));
   --link-color: var(--wt-light-link);
   --color-markdown-heading: var(--wt-light-heading);
   --syntax-keyword: var(--wt-light-syntax-keyword);

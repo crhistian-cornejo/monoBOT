@@ -48,13 +48,25 @@ import {
   listMonos,
   monoForSession,
   monoLook,
+  saveBotTools,
   type Mono,
 } from "../../monos/model/mono";
-import { BOT_ROLES, botRole, isBotRole } from "../../bots/model/bots";
+import {
+  BOT_ROLES,
+  BOT_SERVICES,
+  BOT_SKILLS,
+  botRole,
+  botTools,
+  isBotRole,
+  type BotTools,
+} from "../../bots/model/bots";
 import { groupMessage } from "../../groups/model/group";
 import { groupMembers, memberRole } from "../../groups/model/groupBrief";
 import { agentMessage, isAnswering, markAnswering } from "./agentMessages";
-import { sessionConversationPage, type SessionReadOptions } from "./sessionConversation";
+import {
+  sessionConversationPage,
+  type SessionReadOptions,
+} from "./sessionConversation";
 import {
   CARD_FIELDS,
   parseCard,
@@ -117,7 +129,10 @@ export type AgentAppHost = {
   ): Promise<void>;
   sessions(cwd: string): Promise<AppSessionListing[]>;
   session(id: string): Promise<Session | null>;
-  readConversation?(session: Session, options: SessionReadOptions): Promise<ReturnType<typeof sessionConversationPage>>;
+  readConversation?(
+    session: Session,
+    options: SessionReadOptions,
+  ): Promise<ReturnType<typeof sessionConversationPage>>;
   send(
     id: string,
     prompt: string,
@@ -144,20 +159,25 @@ export type AgentAppHost = {
   artifacts?(): Promise<Artifact[]>;
   artifact?(id: string): Promise<Artifact | null>;
   saveArtifact?(artifact: ArtifactUpsert): Promise<Artifact>;
-  postArtifact?(sourceSessionId: string, card: ArtifactCard): void | Promise<void>;
+  postArtifact?(
+    sourceSessionId: string,
+    card: ArtifactCard,
+  ): void | Promise<void>;
   /** Whether the session is a Mono's own conversation, which owns memory. */
   isMono(sessionId: string): boolean;
   /**
    * The Mono a session works for: its own conversation or one of its habit
    * runs. Its projects are the ones it may name with "project".
    */
-  monoOf?(sessionId: string): {
-    id: string;
-    projects: readonly string[];
-    showStartedSessionsInSidebar?: boolean;
-    /** Files the sessions it starts into a folder named after it. */
-    folder?: { name: string; color: string };
-  } | undefined;
+  monoOf?(sessionId: string):
+    | {
+        id: string;
+        projects: readonly string[];
+        showStartedSessionsInSidebar?: boolean;
+        /** Files the sessions it starts into a folder named after it. */
+        folder?: { name: string; color: string };
+      }
+    | undefined;
   /** A hidden run of one of a Mono's habits: it may remember, not schedule. */
   isHabitRun?(sessionId: string): boolean;
   /** A Mono's own conversation, made if it was never opened, for groups. */
@@ -239,7 +259,9 @@ const FIELDS = new Map<string, readonly string[]>([
   ["habits.run", ["id"]],
   ["habits.remove", ["id"]],
   ["bots.list", []],
-  ["bots.create", ["name", "role", "instructions"]],
+  ["bots.create", ["name", "role", "instructions", "services", "skills"]],
+  ["tools.read", []],
+  ["tools.update", ["services", "skills"]],
   ["group.members", []],
   ["group.ask", ["member", "message"]],
   ["agents.list", []],
@@ -344,11 +366,10 @@ function requireProject(
     const byPath = mono.projects.find(
       (path) => pathKey(path) === pathKey(named),
     );
-    const byName = mono.projects.filter(
-      (path) => projectName(path) === named,
-    );
+    const byName = mono.projects.filter((path) => projectName(path) === named);
     const match = byPath ?? (byName.length === 1 ? byName[0] : undefined);
-    if (!match) throw new Error(`Not one of your projects. Yours: ${choices()}`);
+    if (!match)
+      throw new Error(`Not one of your projects. Yours: ${choices()}`);
     return match;
   }
   const own = mono.projects.find(
@@ -584,8 +605,7 @@ async function editAgentFile<T>(
         await host.writeAgentFile(monoId, path, next.text, current.hash);
       return next.result;
     } catch (error) {
-      if (!(error instanceof MonoFileConflict) || attempt >= 2)
-        throw error;
+      if (!(error instanceof MonoFileConflict) || attempt >= 2) throw error;
     }
   }
 }
@@ -672,7 +692,10 @@ async function handleMemory(
       const hits = searchMemory(texts, query, { since });
       return hits.length
         ? { hits }
-        : { hits, note: "Nothing in memory matches. It may never have been saved." };
+        : {
+            hits,
+            note: "Nothing in memory matches. It may never have been saved.",
+          };
     }
     case "memory.read": {
       if (path !== "MEMORY.md") {
@@ -691,7 +714,11 @@ async function handleMemory(
       };
     }
     case "memory.add": {
-      const entry = memoryEntry(requiredString(input.fact, "fact"), date, until);
+      const entry = memoryEntry(
+        requiredString(input.fact, "fact"),
+        date,
+        until,
+      );
       const added = await editAgentFile(host, monoId, path, (text) => {
         const next = addMemoryEntry(text, entry);
         return { text: next.text, result: next.added };
@@ -702,7 +729,11 @@ async function handleMemory(
     }
     case "memory.replace": {
       const find = requiredString(input.find, "find", 2000);
-      const entry = memoryEntry(requiredString(input.fact, "fact"), date, until);
+      const entry = memoryEntry(
+        requiredString(input.fact, "fact"),
+        date,
+        until,
+      );
       await editAgentFile(host, monoId, path, (text) => ({
         text: supersedeMemoryEntry(text, find, entry, date),
         result: undefined,
@@ -797,7 +828,8 @@ async function handleGroup(
   if (!/^[A-Za-z0-9_-]{1,128}$/.test(requestId))
     throw new Error("Invalid request ID");
   const sessionId = await host.monoSession?.(member.id);
-  if (!sessionId) throw new Error("That member's conversation is not available");
+  if (!sessionId)
+    throw new Error("That member's conversation is not available");
   const message = requiredString(input.message, "message", 30_000);
   const result = await host.send(
     sessionId,
@@ -891,7 +923,9 @@ function handleBots(
   const role = input.role === undefined ? "assistant" : input.role;
   if (!isBotRole(role) || role === "principal")
     throw new Error(
-      `role must be one of ${BOT_ROLES.filter((info) => !info.hidden)
+      `role must be one of ${BOT_ROLES.filter(
+        (info) => info.role !== "principal",
+      )
         .map((info) => info.role)
         .join(", ")}`,
     );
@@ -900,7 +934,84 @@ function handleBots(
     input.instructions === undefined
       ? botRole(role).instructions
       : requiredString(input.instructions, "instructions", 4_000);
-  return { bot: view(createMono([], { role, name, instructions })) };
+  const tools =
+    input.services === undefined && input.skills === undefined
+      ? undefined
+      : requiredTools(input, botTools(role));
+  const bot = createMono([], { role, name, instructions });
+  if (tools) saveBotTools(bot.id, tools);
+  return { bot: view(bot) };
+}
+
+/**
+ * The services and skills a bot keeps, from a complete list. A list left out
+ * keeps what it has; a name MonoBOT does not know is an error.
+ */
+function requiredTools(
+  input: Record<string, unknown>,
+  current: BotTools,
+): BotTools {
+  const list = <T extends string>(
+    value: unknown,
+    field: string,
+    known: readonly T[],
+    keep: T[],
+  ): T[] => {
+    if (value === undefined) return keep;
+    if (!Array.isArray(value)) throw new Error(`${field} must be an array`);
+    for (const item of value)
+      if (!known.includes(item as T))
+        throw new Error(
+          `Unknown ${field.replace(/s$/, "")} ${JSON.stringify(item)}; use ${known.join(", ")}`,
+        );
+    return known.filter((item) => value.includes(item));
+  };
+  return {
+    services: list(
+      input.services,
+      "services",
+      BOT_SERVICES.map((info) => info.service),
+      current.services,
+    ),
+    plugins: list(
+      input.skills,
+      "skills",
+      BOT_SKILLS.map((info) => info.plugin),
+      current.plugins,
+    ),
+  };
+}
+
+/** A bot reads and changes its own services and skills. */
+function handleTools(
+  source: { id: string },
+  action: string,
+  input: Record<string, unknown>,
+): unknown {
+  const mono = monoForSession(source.id);
+  if (!mono || !isBot(mono))
+    throw new Error("Only a bot's own conversation can manage its tools");
+  const role = mono.botRole ?? "assistant";
+  if (action === "tools.update")
+    saveBotTools(mono.id, requiredTools(input, botTools(role, mono.botTools)));
+  const tools = botTools(role, findMono(mono.id)?.botTools);
+  return {
+    services: BOT_SERVICES.map((info) => ({
+      name: info.service,
+      label: info.name,
+      does: info.note,
+      on: tools.services.includes(info.service),
+    })),
+    skills: BOT_SKILLS.map((info) => ({
+      name: info.plugin,
+      label: info.name,
+      does: info.note,
+      on: tools.plugins.includes(info.plugin),
+    })),
+    alwaysBlocked:
+      "Sending, replying to, forwarding or deleting email; sharing or deleting files; deleting Notion pages; deleting files or pushing from the shell.",
+    ...(action === "tools.update" ? { appliesFrom: "your next turn" } : {}),
+  };
 }
 
 async function handleHabits(
@@ -928,7 +1039,10 @@ async function handleHabits(
       const note = requiredString(input.note, "note", 2_000);
       const at = wakeTime(input, now.getTime());
       const wake = await habits.update(monoId, (list) => {
-        if (list.filter((entry) => entry.once && entry.enabled).length >= WAKES_MAX)
+        if (
+          list.filter((entry) => entry.once && entry.enabled).length >=
+          WAKES_MAX
+        )
           throw new Error(
             `At most ${WAKES_MAX} wakes can wait; run habits.list and remove one`,
           );
@@ -944,7 +1058,11 @@ async function handleHabits(
       return { habits: (await habits.load(monoId)).map(habitView) };
     case "habits.add": {
       const name = requiredString(input.name, "name", 80);
-      const instructions = requiredString(input.instructions, "instructions", 4_000);
+      const instructions = requiredString(
+        input.instructions,
+        "instructions",
+        4_000,
+      );
       const schedule = habitSchedule(input.schedule);
       const habit = await habits.update(monoId, (list) => {
         if (list.length >= HABITS_MAX)
@@ -1162,6 +1280,7 @@ export async function handleAgentApp(
   if (action.startsWith("habits.") || action === "wakes.add")
     return handleHabits(source, action, input, host);
   if (action.startsWith("bots.")) return handleBots(source, action, input);
+  if (action.startsWith("tools.")) return handleTools(source, action, input);
   if (action.startsWith("group."))
     return handleGroup(source, requestId, action, input, host);
   if (action.startsWith("agents."))
@@ -1205,14 +1324,18 @@ export async function handleAgentApp(
     }
     case "sessions.read": {
       const id = requiredString(input.sessionId, "sessionId", 256);
-      const target = id === source.id && host.isMono?.(id)
-        ? source : await projectSession(source, id, input, host);
+      const target =
+        id === source.id && host.isMono?.(id)
+          ? source
+          : await projectSession(source, id, input, host);
       const options = {
         before: optionalString(input.before, "before", 256),
         limit: input.limit as number | undefined,
         maxChars: input.maxChars as number | undefined,
       };
-      return host.readConversation ? host.readConversation(target, options) : sessionConversationPage(target, options);
+      return host.readConversation
+        ? host.readConversation(target, options)
+        : sessionConversationPage(target, options);
     }
     case "sessions.send": {
       const id = requiredString(input.sessionId, "sessionId", 256);
@@ -1319,7 +1442,8 @@ export async function handleAgentApp(
           { direction: placement as SplitDir, besideSessionId },
           ...(notifyMonoId ? [notifyMonoId] : []),
         );
-      else if (notifyMonoId) await host.start(launch, id, undefined, notifyMonoId);
+      else if (notifyMonoId)
+        await host.start(launch, id, undefined, notifyMonoId);
       else await host.start(launch, id);
       const folder = host.monoOf?.(source.id)?.folder;
       if (folder && !launch.sidebarHidden)

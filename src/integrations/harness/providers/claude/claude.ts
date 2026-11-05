@@ -552,7 +552,10 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     path,
     buildClaudeSpawnArgs({
       ...launch,
-      allowedTools: [...(launch.allowedTools ?? []), ...(bot?.allowedTools ?? [])],
+      allowedTools: [
+        ...(launch.allowedTools ?? []),
+        ...(bot?.allowedTools ?? []),
+      ],
       disallowedTools: bot?.disallowedTools,
       pluginDirs: await bundledPluginDirs(["monobot", ...(bot?.plugins ?? [])]),
     }),
@@ -1774,7 +1777,13 @@ function writeJson(
 }
 
 function settingsKeyFor(input: HarnessSessionInput): string {
-  return `${input.providerAccountId ?? "default"}:${claudeSettingsKey({
+  // A bot that changes its tools gets a fresh process on its next turn,
+  // resuming the same conversation.
+  const bot = botLaunchForSession(input.sessionId);
+  const botKey = bot
+    ? `:${JSON.stringify([bot.plugins, bot.allowedTools])}`
+    : "";
+  return `${input.providerAccountId ?? "default"}${botKey}:${claudeSettingsKey({
     model: nativeModelId(input.model),
     effort: input.modelSettings?.effort,
     fast: input.modelSettings?.fast,

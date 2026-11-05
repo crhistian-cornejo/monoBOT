@@ -8,7 +8,7 @@ use crate::fs::MAX_PREVIEW_BYTES;
 const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 const MAX_REDIRECTS: usize = 5;
 const MAX_URL_BYTES: usize = 8192;
-const USER_AGENT: &str = "MonoCode";
+const USER_AGENT: &str = "MonoBOT";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct MediaUrl {
@@ -34,7 +34,7 @@ fn fetch_inbox_media_sync(url: &str) -> Result<Vec<u8>, String> {
     } else {
         None
     };
-    let agent = ureq::AgentBuilder::new()
+    let agent = monobot_http::agent()
         .timeout(HTTP_TIMEOUT)
         .redirects(0)
         .build();

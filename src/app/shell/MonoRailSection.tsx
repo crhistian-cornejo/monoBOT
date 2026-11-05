@@ -22,6 +22,7 @@ import {
 import {
   defaultMonoName,
   findMono,
+  isBot,
   listMonos,
   MONO_STATUS_LABEL,
   nextMonoLook,
@@ -36,8 +37,14 @@ import {
   updateMono,
   type MonoState,
 } from "../../features/monos/model/mono";
-import { BOT_ROLES, type BotRole } from "../../features/bots/model/bots";
+import {
+  BOT_ROLES,
+  botIntroDismissed,
+  dismissBotIntro,
+  type BotRole,
+} from "../../features/bots/model/bots";
 import type { RailZone } from "./PersonalRail";
+import { BetaBadge } from "../../shared/ui/BetaBadge";
 
 export type MonoRailProps = {
   /** The Mono open in the main area, if any. */
@@ -92,6 +99,7 @@ export function MonoRailSection({
   onDelete,
   project,
   kind,
+  inset = false,
 }: MonoRailProps & {
   /**
    * Lists only the Monos working on this project, as the inset sidebar does;
@@ -100,7 +108,11 @@ export function MonoRailSection({
   project?: string;
   /** Lists the productivity bots or the workstreams instead of the Monos. */
   kind?: "bot" | "workstream" | "group";
+  /** The focused layout's look without narrowing to a project. */
+  inset?: boolean;
 }) {
+  // A project's section is always the focused sidebar's.
+  const insetLook = inset || !!project;
   const bots = kind === "bot";
   const snapshot = useSyncExternalStore(subscribeMonos, monosSnapshot);
   const monos = useMemo(
@@ -120,6 +132,12 @@ export function MonoRailSection({
   const [roles, setRoles] = useState<PopoverAnchor>();
   const section = useRef<HTMLDivElement>(null);
   const [background, setBackground] = useState<string>();
+  // Invites a bot made from scratch until there is one or the card is closed.
+  const [botIntroHidden, setBotIntroHidden] = useState(botIntroDismissed);
+  const showBotIntro =
+    bots &&
+    !botIntroHidden &&
+    !listMonos().some((mono) => isBot(mono) && mono.botRole === "custom");
   const backgroundMono = background ? findMono(background) : undefined;
   const workstreams = kind === "workstream";
   const groups = kind === "group";
@@ -160,7 +178,7 @@ export function MonoRailSection({
   return (
     <div
       ref={section}
-      className={`shrink-0 ${project ? "px-2 pb-3" : "mb-2"}`}
+      className={`shrink-0 ${insetLook ? "px-2 pb-3" : "mb-2"}`}
       data-mono-rail
       data-mono-project={project}
       data-mono-kind={kind}
@@ -168,17 +186,18 @@ export function MonoRailSection({
       <div
         className={
           // The inset sidebar's section labels.
-          project
+          insetLook
             ? "flex h-7 items-center gap-1 px-2 text-[12px] font-medium text-content/50"
             : "flex items-center gap-1 px-3 pb-1.5 pt-1"
         }
       >
         <span
           className={`min-w-0 flex-1 truncate${
-            project ? "" : " px-1 text-xs leading-5 text-content/50"
+            insetLook ? "" : " px-1 text-xs leading-5 text-content/50"
           }`}
         >
           {label}
+          {workstreams ? <BetaBadge className="ml-1.5 align-middle" /> : null}
         </span>
         {monos.length ? (
           <button
@@ -188,14 +207,14 @@ export function MonoRailSection({
             aria-haspopup={bots ? "menu" : undefined}
             onClick={(event) => create(event.currentTarget)}
             className={`grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content${
-              project ? " -mr-0.5" : ""
+              insetLook ? " -mr-0.5" : ""
             }`}
           >
             <Plus className="size-3.5" strokeWidth={1.75} />
           </button>
         ) : null}
       </div>
-      <div className={`flex flex-col gap-px${project ? "" : " px-2"}`}>
+      <div className={`flex flex-col gap-px${insetLook ? "" : " px-2"}`}>
         {monos.length === 0 ? (
           <RailAction
             label={newLabel}
@@ -313,6 +332,23 @@ export function MonoRailSection({
           );
         })}
       </div>
+      {showBotIntro ? (
+        // The card brings its own side margin; the inset section has one too.
+        <div className={insetLook ? "-mx-2 mt-2" : "mt-2"}>
+          <MonoIntroCard
+            look={nextMonoLook(listMonos())}
+            title="A bot of your own"
+            body="Beyond Assistant, Finance, Documents and Research: give it a name, write its soul and pick its tools."
+            createLabel="Create bot"
+            hideAs="close"
+            onCreate={() => onCreateBot?.("custom", { blank: true })}
+            onHide={() => {
+              dismissBotIntro();
+              setBotIntroHidden(true);
+            }}
+          />
+        </div>
+      ) : null}
       {menu ? (
         <MonoMenu
           key={menu.id}
@@ -345,7 +381,7 @@ export function MonoRailSection({
             role="menuitem"
             onClick={() => {
               setRoles(undefined);
-              onCreateBot?.("assistant", { blank: true });
+              onCreateBot?.("custom", { blank: true });
             }}
             className="flex w-full flex-col items-start px-2.5 py-1.5 text-left hover:bg-content/8"
           >

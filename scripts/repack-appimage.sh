@@ -16,7 +16,7 @@ set -euo pipefail
 # ever enabled, the .AppImage.sig Tauri writes is for the pre-repack file and
 # must be regenerated after this script, or the updater will reject the image.
 #
-# Usage: scripts/repack-appimage.sh [path/to/MonoCode_x.y.z_amd64.AppImage]
+# Usage: scripts/repack-appimage.sh [path/to/MonoBOT_x.y.z_amd64.AppImage]
 
 APPIMAGETOOL_VERSION="1.9.1"
 APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"

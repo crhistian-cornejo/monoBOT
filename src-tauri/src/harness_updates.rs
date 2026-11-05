@@ -6,7 +6,7 @@ use serde_json::Value;
 use crate::harness::{exec_output, is_resolved_harness_binary};
 
 const REGISTRY_URL: &str = "https://registry.npmjs.org";
-const USER_AGENT: &str = "MonoCode";
+const USER_AGENT: &str = "MonoBOT";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Only harnesses whose releases are published to npm. The rest ship through
@@ -50,7 +50,7 @@ pub async fn harness_latest_version(provider: String) -> Result<String, String> 
     let package =
         npm_package(&provider).ok_or_else(|| format!("No update feed for harness: {provider}"))?;
     tauri::async_runtime::spawn_blocking(move || {
-        let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
+        let agent = monobot_http::agent().timeout(HTTP_TIMEOUT).build();
         let text = agent
             .get(&format!("{REGISTRY_URL}/{package}/latest"))
             .set("User-Agent", USER_AGENT)

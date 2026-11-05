@@ -138,7 +138,7 @@ fn rpc(
     method: &str,
     params: Value,
 ) -> Result<Value, String> {
-    let agent = ureq::AgentBuilder::new()
+    let agent = monobot_http::agent()
         .redirects(0)
         .timeout_connect(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(30))

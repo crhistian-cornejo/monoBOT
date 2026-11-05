@@ -15,11 +15,18 @@ export function NewGroupDialog({
   const [goal, setGoal] = useState("");
   const [members, setMembers] = useState<string[]>([]);
   const ready = !!name.trim() && members.length > 0;
-  const label = "font-mono text-[11px] uppercase tracking-wide text-content/55";
+  const field =
+    "rounded-md border border-content/10 bg-background-base px-2.5 text-[13px] outline-none placeholder:text-content/35 focus:border-content/25";
+  const label = "flex flex-col gap-1.5 text-[12px] text-content/70";
   return (
-    <Modal title="New group" onClose={onClose} size="md">
+    <Modal
+      title="New group"
+      description="Agents that work on one goal together"
+      onClose={onClose}
+      size="md"
+    >
       <form
-        className="flex flex-col gap-4"
+        className="flex flex-col gap-4 p-4"
         onSubmit={(event) => {
           event.preventDefault();
           if (!ready) return;
@@ -27,46 +34,50 @@ export function NewGroupDialog({
           onClose();
         }}
       >
-        <label className="flex flex-col gap-1.5">
-          <span className={label}>Group name *</span>
+        <label className={label}>
+          Name
           <input
             autoFocus
             value={name}
             maxLength={60}
             placeholder="Morning briefing, Trip planning, Release crew…"
+            autoComplete="off"
             onChange={(event) => setName(event.target.value)}
-            className="h-9 border border-stroke bg-transparent px-2.5 text-[13px] outline-none focus:border-accent"
+            className={`h-9 ${field}`}
           />
         </label>
-        <label className="flex flex-col gap-1.5">
-          <span className={label}>What it is for</span>
+        <label className={label}>
+          What it is for
           <textarea
             value={goal}
             rows={2}
             maxLength={500}
             placeholder="Shared with every member when the group brings them in."
             onChange={(event) => setGoal(event.target.value)}
-            className="resize-none border border-stroke bg-transparent px-2.5 py-2 text-[13px] outline-none focus:border-accent"
+            className={`resize-none py-2 leading-relaxed ${field}`}
           />
         </label>
-        <div className="flex flex-col gap-1.5">
-          <span className={label}>
-            Members * · {members.length}/{GROUP_MAX_MEMBERS}
+        <div className={label}>
+          <span className="flex items-center">
+            Members
+            <span className="ml-auto tabular-nums text-content/35">
+              {members.length}/{GROUP_MAX_MEMBERS}
+            </span>
           </span>
           <MemberPicker selected={members} onChange={setMembers} />
         </div>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex justify-end gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="h-8 border border-stroke px-3 text-xs hover:bg-content/5"
+            className="rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8 active:scale-[0.97]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!ready}
-            className="h-8 bg-accent px-3 text-xs font-medium text-white disabled:opacity-50"
+            className="primary-action rounded-md px-3 py-1.5 text-[12px] font-medium active:scale-[0.97]"
           >
             Create group
           </button>

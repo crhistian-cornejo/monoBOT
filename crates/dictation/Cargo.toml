@@ -12,5 +12,11 @@ cpal = "=0.17.3"
 sha2 = "0.10"
 # The same client src-tauri already uses for downloads.
 ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
+# Parakeet's second source, a .tar.bz2 on GitHub, as Echo unpacks it.
+tar = { version = "0.4", default-features = false }
+bzip2 = "0.4"
+# The app's HTTPS settings: Windows' own certificate store, as Echo does.
+monobot-http = { path = "../http" }
 thiserror.workspace = true
 serde.workspace = true
+

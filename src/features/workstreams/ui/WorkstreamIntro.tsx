@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
+import { BetaBadge } from "../../../shared/ui/BetaBadge";
 import { Modal } from "../../../shared/ui/Modal";
 
-function Box({
+function Node({
   children,
   lead = false,
 }: {
@@ -10,8 +11,10 @@ function Box({
 }) {
   return (
     <span
-      className={`border px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide ${
-        lead ? "border-accent text-accent" : "border-stroke text-content/70"
+      className={`rounded-md border px-2.5 py-1 text-[12px] ${
+        lead
+          ? "border-accent/40 bg-accent/10 text-accent"
+          : "border-content/10 bg-background-base text-content/70"
       }`}
     >
       {children}
@@ -19,12 +22,13 @@ function Box({
   );
 }
 
+/** One node handing work to several. */
 function Fan({ from, to }: { from: ReactNode; to: ReactNode[] }) {
   return (
-    <div className="flex items-center justify-center gap-4">
+    <div className="flex items-center justify-center gap-3">
       {from}
-      <span aria-hidden className="h-px w-8 bg-accent" />
-      <div className="flex flex-col gap-2 border-l border-accent pl-4">
+      <span aria-hidden className="h-px w-6 bg-content/15" />
+      <div className="flex flex-col gap-1.5 border-l border-content/15 pl-3">
         {to}
       </div>
     </div>
@@ -33,62 +37,60 @@ function Fan({ from, to }: { from: ReactNode; to: ReactNode[] }) {
 
 const STEPS: { title: string; body: string; diagram: ReactNode }[] = [
   {
-    title: "Delegate a project, not a task",
-    body: "A workstream takes on work that would keep a team busy for days: a framework migration, a feature across several services, a backlog of bugs. Agents work on it in parallel and the work comes back as pull requests to review.",
+    title: "A goal, not a single task",
+    body: "Give a workstream something that spans several parts of a repository: a migration, a feature across front end and back end, a batch of bugs. An orchestrator plans it with you and runs one agent per part at the same time.",
     diagram: (
       <Fan
-        from={<Box lead>Orchestrator</Box>}
+        from={<Node lead>Orchestrator</Node>}
         to={[
-          <Box key="a">Agent · API</Box>,
-          <Box key="w">Agent · Web</Box>,
-          <Box key="t">Agent · Tests</Box>,
+          <Node key="a">Agent · API</Node>,
+          <Node key="w">Agent · Web</Node>,
+          <Node key="t">Agent · Tests</Node>,
         ]}
       />
     ),
   },
   {
-    title: "A lead and its team",
-    body: "The orchestrator splits your goal into areas and gives each one to an agent. Agents build and report; the orchestrator keeps them coordinated and gathers the results. It does not write the code itself.",
+    title: "Each agent on its own branch",
+    body: "Every agent works in its own worktree on the branch ws/<name>/<part>, so agents never touch each other's files. When an agent finishes, it opens a draft pull request and reports back to the orchestrator.",
     diagram: (
-      <div className="flex flex-col items-center gap-2">
-        <Box lead>Orchestrator</Box>
-        <span className="font-mono text-[11px] text-content/50">
-          assigns ↓ · reports ↑
-        </span>
-        <div className="flex gap-2">
-          <Box>Agent</Box>
-          <Box>Agent</Box>
-          <Box>Agent</Box>
+      <Fan
+        from={<Node lead>Repository</Node>}
+        to={[
+          <Node key="1">ws/…/api</Node>,
+          <Node key="2">ws/…/web</Node>,
+          <Node key="3">ws/…/tests</Node>,
+        ]}
+      />
+    ),
+  },
+  {
+    title: "You decide, it coordinates",
+    body: "Talk to the orchestrator in its chat. It writes the plan to the workstream's shared folder, asks you only for the decisions that are yours, and applies the rules you set to every agent.",
+    diagram: (
+      <div className="flex flex-col items-center gap-1.5">
+        <Node>You</Node>
+        <span aria-hidden className="h-4 w-px bg-content/15" />
+        <Node lead>Orchestrator</Node>
+        <span aria-hidden className="h-4 w-px bg-content/15" />
+        <div className="flex gap-1.5">
+          <Node>Agent</Node>
+          <Node>Agent</Node>
+          <Node>Agent</Node>
         </div>
       </div>
     ),
   },
   {
-    title: "Each agent in its own worktree",
-    body: "Agents work in separate git worktrees of your repository, so they never step on each other, and each one opens its own pull request. Local workstreams stop when you quit MonoBOT.",
+    title: "Review what comes back",
+    body: "Follow each agent in Agents, read plans and notes in Files, and review the work in Pull requests. Agents run on this computer and stop when you quit MonoBOT. A workstream uses far more tokens than one session, so keep it for large work.",
     diagram: (
       <Fan
-        from={<Box lead>Your repository</Box>}
+        from={<Node lead>Workstream</Node>}
         to={[
-          <Box key="1">ws/…/api</Box>,
-          <Box key="2">ws/…/web</Box>,
-          <Box key="3">ws/…/tests</Box>,
-        ]}
-      />
-    ),
-  },
-  {
-    title: "You direct, you don't operate",
-    body: "The workstream asks you only when a decision is yours, and the work comes back as pull requests. Follow any agent from the Agents tab. Workstreams use many more tokens than one session, so keep them for large work.",
-    diagram: (
-      <Fan
-        from={<Box>You</Box>}
-        to={[
-          <Box key="o" lead>
-            Orchestrator · chat
-          </Box>,
-          <Box key="a">Agents · answer</Box>,
-          <Box key="p">PRs · review</Box>,
+          <Node key="a">Agents</Node>,
+          <Node key="f">Files</Node>,
+          <Node key="p">Pull requests</Node>,
         ]}
       />
     ),
@@ -107,53 +109,59 @@ export function WorkstreamIntro({
   const current = STEPS[step]!;
   const last = step === STEPS.length - 1;
   return (
-    <Modal title={current.title} onClose={onClose} size="lg" minimalHeader>
-      <div className="flex flex-col">
-        <div className="flex min-h-44 items-center justify-center border-b border-stroke py-8">
-          {current.diagram}
-        </div>
-        <div className="flex flex-col gap-2 pt-4">
-          <span className="font-mono text-[11px] uppercase tracking-wide text-accent">
-            Workstreams · Beta · {step + 1} of {STEPS.length}
+    <Modal title={current.title} onClose={onClose} size="md" minimalHeader>
+      <div className="flex min-h-48 items-center justify-center border-b border-content/7 bg-content/[0.03] px-5 py-8">
+        {current.diagram}
+      </div>
+      <div className="flex flex-col gap-1.5 px-5 pt-4">
+        <div className="flex items-center gap-2 text-[12px] text-content/50">
+          <span>Workstreams</span>
+          <BetaBadge />
+          <span className="ml-auto tabular-nums">
+            {step + 1} of {STEPS.length}
           </span>
-          <h2 className="text-base font-semibold">{current.title}</h2>
-          <p className="text-[13px] leading-relaxed text-content/70">
-            {current.body}
-          </p>
         </div>
-        <div className="flex items-center gap-2 pt-5">
-          <div className="flex gap-1.5" aria-hidden>
-            {STEPS.map((_, index) => (
-              <span
-                key={index}
-                className={`size-1.5 ${index === step ? "bg-accent" : "bg-content/25"}`}
-              />
-            ))}
-          </div>
+        <h2 className="text-md font-semibold tracking-tight text-content">
+          {current.title}
+        </h2>
+        <p className="text-[13px] leading-relaxed text-content/65">
+          {current.body}
+        </p>
+      </div>
+      <div className="flex items-center gap-2 px-5 pb-4 pt-5">
+        <div className="flex gap-1.5" aria-hidden>
+          {STEPS.map((_, index) => (
+            <span
+              key={index}
+              className={`size-1.5 rounded-full ${
+                index === step ? "bg-accent" : "bg-content/20"
+              }`}
+            />
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          className="ml-auto rounded-md px-3 py-1.5 text-[12px] text-content/60 hover:bg-content/8 hover:text-content active:scale-[0.97]"
+        >
+          Skip
+        </button>
+        {step > 0 ? (
           <button
             type="button"
-            onClick={onClose}
-            className="ml-auto h-8 px-3 text-xs text-content/60 hover:text-content"
+            onClick={() => setStep(step - 1)}
+            className="rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8 active:scale-[0.97]"
           >
-            Skip
+            Back
           </button>
-          {step > 0 ? (
-            <button
-              type="button"
-              onClick={() => setStep(step - 1)}
-              className="h-8 px-3 text-xs text-content/60 hover:text-content"
-            >
-              Back
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => (last ? onStart() : setStep(step + 1))}
-            className="h-8 bg-accent px-3 text-xs font-medium text-white"
-          >
-            {last ? "Start a workstream" : "Next"}
-          </button>
-        </div>
+        ) : null}
+        <button
+          type="button"
+          onClick={() => (last ? onStart() : setStep(step + 1))}
+          className="primary-action rounded-md px-3 py-1.5 text-[12px] font-medium active:scale-[0.97]"
+        >
+          {last ? "Start a workstream" : "Next"}
+        </button>
       </div>
     </Modal>
   );

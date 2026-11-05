@@ -77,7 +77,7 @@ fn fetch_opencode_go_usage_sync() -> Result<OpencodeGoUsageFetch, String> {
             Some("OpenCode Go not connected".into()),
         ));
     };
-    let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
+    let agent = monobot_http::agent().timeout(HTTP_TIMEOUT).build();
     let result = agent
         .get(OPENCODE_GO_USAGE_URL)
         .set("Authorization", &format!("Bearer {api_key}"))
@@ -398,7 +398,7 @@ fn renews_on_next_message() -> ClaudeUsageFetch {
 }
 
 fn fetch_usage_with_token(token: &str) -> ClaudeUsageFetch {
-    let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
+    let agent = monobot_http::agent().timeout(HTTP_TIMEOUT).build();
     let result = agent
         .get(OAUTH_USAGE_URL)
         .set("Authorization", &format!("Bearer {token}"))

@@ -135,6 +135,11 @@ type Props = {
   sessionSidebarOpen?: boolean;
   compactRail?: boolean;
   /**
+   * The 48px rail is on screen, on any platform. It has its own expand
+   * button, Inbox, Notes and Settings, so the title bar does not repeat them.
+   */
+  compactRailShown?: boolean;
+  /**
    * Spans the inset layout's outer glass, above the rail and the card, and
    * owns the rail toggle and history navigation in both rail states.
    */
@@ -760,6 +765,7 @@ function TitleBarComponent({
   projectRailOpen = true,
   sessionSidebarOpen = true,
   compactRail = false,
+  compactRailShown = compactRail,
   inset = false,
   rightPanelOpen = false,
   onToggleRightPanel,
@@ -1054,6 +1060,7 @@ function TitleBarComponent({
     !mono &&
     projectless &&
     railClosed &&
+    !compactRailShown &&
     Boolean(onOpenInbox || onOpenNotes || onOpenSettings);
   const showRightPanelToggle = inset && Boolean(onToggleRightPanel);
   // A Mono's own overview holds its changes; app views have none beside them.
@@ -1189,7 +1196,7 @@ function TitleBarComponent({
       ) : null}
       {/* Both the rail and the sidebar step aside without a project, so the
           title bar takes over the traffic lights and the rail toggle. */}
-      {projectless && railClosed && !compactRail && !inset ? (
+      {projectless && railClosed && !compactRailShown && !inset ? (
         <>
           {trafficLightsVisible ? <div className="w-[78px] shrink-0" /> : null}
           <div className="flex shrink-0 items-center px-1.5">

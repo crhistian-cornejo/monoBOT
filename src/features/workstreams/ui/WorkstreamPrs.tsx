@@ -88,7 +88,7 @@ export function WorkstreamPrs({ workstream }: { workstream: Workstream }) {
         if (!items.length) return null;
         return (
           <section key={group} className="flex flex-col gap-1">
-            <h3 className="px-1 pt-2 font-mono text-[11px] uppercase tracking-wide text-content/50">
+            <h3 className="px-1 pt-2 text-[12px] font-medium text-content/50">
               {group} · {items.length}
             </h3>
             {items.map((pr) => (

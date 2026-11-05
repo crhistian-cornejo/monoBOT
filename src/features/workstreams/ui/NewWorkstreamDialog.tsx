@@ -1,13 +1,37 @@
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
+import { LAYER } from "../../../shared/lib/layers";
+import { BetaBadge } from "../../../shared/ui/BetaBadge";
+import { Loader } from "../../../shared/ui/icons";
 import { Modal } from "../../../shared/ui/Modal";
-import { SearchableProjectPicker } from "../../projects/ui/SearchableProjectPicker";
+import { SearchableSelect } from "../../../shared/ui/SearchableSelect";
 import type { RecentProject } from "../../projects/model/recents";
+import { SearchableProjectPicker } from "../../projects/ui/SearchableProjectPicker";
+import { workstreamBranchPrefix, workstreamSlug } from "../model/workstreams";
 
 const NAME_MAX = 120;
+const GOAL_MAX = 4000;
+
+const CHECKOUTS = [
+  {
+    value: "worktree",
+    label: "Its own worktree",
+    keywords: "worktree branch separate",
+  },
+  { value: "project", label: "The project folder", keywords: "project here" },
+];
+
+export type NewWorkstream = {
+  name: string;
+  /** Sent to the orchestrator as its first message, when given. */
+  goal: string;
+  project: string;
+  worktree: boolean;
+};
 
 /**
- * Names the workstream and picks where its orchestrator runs. The agents it
- * starts work in their own worktrees of the same repository.
+ * Names the workstream, gives its orchestrator the goal and the repository,
+ * and picks where the orchestrator runs. Its agents always get worktrees of
+ * their own.
  */
 export function NewWorkstreamDialog({
   cwd,
@@ -17,25 +41,24 @@ export function NewWorkstreamDialog({
 }: {
   cwd: string;
   recents: RecentProject[];
-  onCreate: (input: {
-    name: string;
-    project: string;
-    worktree: boolean;
-  }) => Promise<void>;
+  onCreate: (input: NewWorkstream) => Promise<void>;
   onClose: () => void;
 }) {
   const [name, setName] = useState("");
+  const [goal, setGoal] = useState("");
   const [project, setProject] = useState(cwd);
   const [worktree, setWorktree] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
-  const ready = !!name.trim() && !!project && project !== "~" && !busy;
+  const hasProject = !!project && project !== "~";
+  const ready = !!name.trim() && hasProject && !busy;
 
-  const submit = () => {
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
     if (!ready) return;
     setBusy(true);
     setError(undefined);
-    onCreate({ name: name.trim(), project, worktree })
+    onCreate({ name: name.trim(), goal: goal.trim(), project, worktree })
       .then(onClose)
       .catch((reason: unknown) => {
         setError(String(reason));
@@ -43,81 +66,115 @@ export function NewWorkstreamDialog({
       });
   };
 
-  const label = "font-mono text-[11px] uppercase tracking-wide text-content/55";
+  const field =
+    "rounded-md border border-content/10 bg-background-base px-2.5 text-[13px] outline-none placeholder:text-content/35 focus:border-content/25 disabled:opacity-50";
+  const label = "flex flex-col gap-1.5 text-[12px] text-content/70";
+  const hint = "text-[11px] leading-snug text-content/45";
   return (
-    <Modal title="New workstream" onClose={onClose} size="md">
-      <form
-        className="flex flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          submit();
-        }}
-      >
-        <label className="flex flex-col gap-1.5">
-          <span className={label}>Workstream name *</span>
+    <Modal
+      title="New workstream"
+      description="An orchestrator and its agents, working in parallel"
+      size="md"
+      onClose={() => {
+        if (!busy) onClose();
+      }}
+    >
+      <form className="flex flex-col gap-4 p-4" onSubmit={submit}>
+        <label className={label}>
+          <span className="flex items-center gap-2">
+            Name
+            <span className="ml-auto tabular-nums text-content/35">
+              {name.length}/{NAME_MAX}
+            </span>
+          </span>
           <input
             autoFocus
             value={name}
             maxLength={NAME_MAX}
-            placeholder="What should this workstream accomplish?"
+            disabled={busy}
+            placeholder="Move the API to Hono"
+            autoComplete="off"
             onChange={(event) => setName(event.target.value)}
-            className="h-9 border border-stroke bg-transparent px-2.5 text-[13px] outline-none focus:border-accent"
+            className={`h-9 ${field}`}
           />
-          <span className="self-end text-[11px] tabular-nums text-content/40">
-            {name.length}/{NAME_MAX}
+          {name.trim() ? (
+            <span className={hint}>
+              Agents' branches:{" "}
+              <span className="font-mono text-content/60">
+                {workstreamBranchPrefix(workstreamSlug(name))}&lt;part&gt;
+              </span>
+            </span>
+          ) : null}
+        </label>
+        <label className={label}>
+          Goal
+          <textarea
+            value={goal}
+            rows={4}
+            maxLength={GOAL_MAX}
+            disabled={busy}
+            placeholder="What should be true when it is done, how to check it, and what to leave alone."
+            onChange={(event) => setGoal(event.target.value)}
+            className={`resize-none py-2 leading-relaxed ${field}`}
+          />
+          <span className={hint}>
+            The orchestrator gets it as its first message and starts the plan.
+            Leave it empty to explain it in the chat.
           </span>
         </label>
-        <div className="flex flex-col gap-1.5">
-          <span className={label}>Orchestrator machine *</span>
-          <div className="flex h-9 items-center border border-stroke px-2.5 text-[13px]">
-            Local
-            <span className="ml-auto text-xs text-content/45">
-              Stops when you quit MonoBOT
-            </span>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <span className={label}>Working directory</span>
+        <div className={label}>
+          Repository
           <SearchableProjectPicker
             cwd={project}
             recents={recents}
             appearance="filled"
             className="w-full"
-            buttonClassName="h-9 w-full justify-start border border-stroke px-2.5 text-[13px]"
+            buttonClassName="h-9 w-full justify-start rounded-md border border-content/10 bg-background-base px-2.5 text-[13px]"
             onSelectProject={setProject}
           />
-          <span className="text-xs text-content/45">
-            The orchestrator starts here; its agents get their own worktrees of
-            this repository.
+        </div>
+        <div className={label}>
+          Orchestrator runs in
+          <SearchableSelect
+            label="Orchestrator runs in"
+            value={worktree ? "worktree" : "project"}
+            options={CHECKOUTS}
+            searchable={false}
+            disabled={busy}
+            onChange={(value) => setWorktree(value === "worktree")}
+            layer={LAYER.dialogPopover}
+          />
+          <span className={hint}>
+            {worktree
+              ? "Your open files stay untouched. Each agent gets a worktree of its own either way."
+              : "The orchestrator shares the folder you work in. Each agent still gets a worktree of its own."}
           </span>
         </div>
-        <label className="flex items-center gap-2 text-[13px]">
-          <input
-            type="checkbox"
-            checked={worktree}
-            onChange={(event) => setWorktree(event.target.checked)}
-          />
-          Run the orchestrator in its own worktree
-        </label>
         {error ? (
-          <p role="alert" className="text-xs text-red-400">
+          <p role="alert" className="text-[12px] text-red-400">
             {error}
           </p>
         ) : null}
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center gap-2">
+          <BetaBadge />
+          <span className={hint}>
+            Runs on this computer and stops when you quit MonoBOT.
+          </span>
           <button
             type="button"
+            disabled={busy}
             onClick={onClose}
-            className="h-8 border border-stroke px-3 text-xs hover:bg-content/5"
+            className="ml-auto rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8 active:scale-[0.97]"
           >
             Cancel
           </button>
           <button
             type="submit"
             disabled={!ready}
-            className="h-8 bg-accent px-3 text-xs font-medium text-white disabled:opacity-50"
+            className="primary-action inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[12px] font-medium active:scale-[0.97]"
           >
-            {busy ? "Starting…" : "Start"}
+            {busy ? <Loader className="size-3.5 animate-spin" /> : null}
+            Start workstream
           </button>
         </div>
       </form>

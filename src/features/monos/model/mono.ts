@@ -19,7 +19,12 @@ import {
   projectMascot,
 } from "../../projects/model/projectMascots";
 import { removeMonoBackground } from "./monoBackground";
-import { isBotRole, type BotRole } from "../../bots/model/bots";
+import {
+  isBotRole,
+  parseBotTools,
+  type BotRole,
+  type BotTools,
+} from "../../bots/model/bots";
 import { parseGroup, type Group } from "../../groups/model/group";
 import {
   parseWorkstream,
@@ -59,6 +64,8 @@ export type Mono = {
    */
   kind?: "bot" | "workstream" | "group";
   botRole?: BotRole;
+  /** The tools the bot or the user picked, in place of its role's. */
+  botTools?: BotTools;
   workstream?: Workstream;
   group?: Group;
   /**
@@ -191,6 +198,9 @@ function parseMono(value: unknown): Mono | undefined {
       ? {
           kind: "bot" as const,
           botRole: isBotRole(entry.botRole) ? entry.botRole : "assistant",
+          ...(parseBotTools(entry.botTools)
+            ? { botTools: parseBotTools(entry.botTools) }
+            : {}),
         }
       : {}),
     ...(entry.kind === "workstream" && parseWorkstream(entry.workstream)
@@ -331,6 +341,11 @@ export function createGroupMono(name: string, group: Group): Mono {
   };
   saveRoster([...roster, mono]);
   return mono;
+}
+
+/** Gives a bot its own tools; its role's denied tools still apply. */
+export function saveBotTools(monoId: string, tools: BotTools): void {
+  updateMono(monoId, (mono) => ({ ...mono, botTools: tools }));
 }
 
 export function saveGroupMembers(monoId: string, members: string[]): void {
