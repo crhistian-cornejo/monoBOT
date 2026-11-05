@@ -12,10 +12,6 @@ import { Bell, MessageSquare } from "../../../shared/ui/icons";
 import { CollapsibleBody } from "../../../shared/ui/CollapsibleBody";
 import { Popover } from "../../../shared/ui/Popover";
 import { scrollParent } from "../../../shared/lib/scrollParent";
-import {
-  TranscriptJumpToBottom,
-  useTranscriptJumpVisibility,
-} from "../../sessions/ui/TranscriptJumpToBottom";
 import { AgentMarkdown } from "../../sessions/ui/AgentMarkdown";
 import { createNote } from "../../notes";
 import { EmptyState } from "../../monos/ui/monoPanelParts";
@@ -92,10 +88,10 @@ export function BotNewsList({
     );
 
   return (
-    <JumpToEnd>
+    <MoreBelow>
       {waiting.length ? <NeedsYouList waiting={waiting} onOpenBot={onOpenBot} /> : null}
       {items.length ? <NewsItems items={items} notes={notes} onOpenBot={onOpenBot} /> : null}
-    </JumpToEnd>
+    </MoreBelow>
   );
 }
 
@@ -103,19 +99,17 @@ export function BotNewsList({
 const END_SLACK_PX = 24;
 
 /**
- * The feed with a button on the panel's bottom edge while more reports wait
- * below, which scrolls to the last one.
+ * The feed, its last visible reports blurring into the panel's bottom edge
+ * while more wait below, so the panel reads as going on.
  */
-function JumpToEnd({ children }: { children: ReactNode }) {
+function MoreBelow({ children }: { children: ReactNode }) {
   const root = useRef<HTMLDivElement>(null);
-  const visibility = useTranscriptJumpVisibility();
-  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  const [more, setMore] = useState(false);
   useEffect(() => {
     const parent = scrollParent(root.current);
-    setScroller(parent);
     if (!parent) return;
     const update = () =>
-      visibility.setVisible(
+      setMore(
         parent.scrollHeight - parent.scrollTop - parent.clientHeight >
           END_SLACK_PX,
       );
@@ -129,18 +123,18 @@ function JumpToEnd({ children }: { children: ReactNode }) {
       parent.removeEventListener("scroll", update);
       observer?.disconnect();
     };
-  }, [visibility]);
+  }, []);
   return (
     <div ref={root} className="flex flex-col gap-3">
       {children}
-      {/* Sticks to the panel's bottom edge; the button floats just above. */}
-      <div className="sticky bottom-0 -mt-3 h-0">
-        <TranscriptJumpToBottom
-          visibility={visibility}
-          label="Go to the end"
-          onJump={() =>
-            scroller?.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" })
-          }
+      {/* Sticks to the panel's bottom edge, past the panel's own padding
+          (px-2 py-2), and the fade rises from it. */}
+      <div aria-hidden className="pointer-events-none sticky -bottom-2 -mt-3 h-0">
+        <div
+          data-more-below={more ? "" : undefined}
+          className={`absolute -inset-x-2 bottom-0 h-14 bg-gradient-to-t from-background-base to-transparent backdrop-blur-[2px] transition-opacity duration-200 [mask-image:linear-gradient(to_top,#000_35%,transparent)] ${
+            more ? "opacity-100" : "opacity-0"
+          }`}
         />
       </div>
     </div>
