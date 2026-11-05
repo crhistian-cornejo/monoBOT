@@ -504,6 +504,8 @@ html.layout-inset {
   --inset-glass-alpha: 0.8;
   --inset-panel-alpha: 0.4;
   --inset-wash: hsl(0 0% 92% / 0.05);
+  /* What opens over the window (dialogs, menus, panels) is solid. */
+  --inset-raised: var(--wt-dark-panel-solid, #141414);
   /* The card's edge, and every rule inside it and the sidebar, so the
      separators sit no brighter than the hairline around them. */
   --inset-stroke: color-mix(in srgb, var(--color-content) 4%, transparent);
@@ -518,6 +520,7 @@ html.layout-inset:not(.has-native-glass):not(.theme-light) {
 html.layout-inset.theme-light {
   --inset-surface: var(--wt-light-surface, #f5f5f5);
   --inset-panel: var(--wt-light-panel-solid, #ffffff);
+  --inset-raised: var(--wt-light-panel-solid, #ffffff);
   --inset-wash: hsl(0 0% 10% / 0.01);
 }
 
@@ -3809,6 +3812,18 @@ html.layout-inset .modal-surface {
 html.theme-light .popover-backdrop,
 html.layout-inset.theme-light .modal-surface {
   background: var(--color-background-base);
+}
+
+/* Focused keeps its glass for the window and its chat only. Whatever opens
+   over them (dialogs, menus, popovers, sheets, the overview, a peeking
+   sidebar) is solid, so what is behind never shows through. */
+html.layout-inset .popover-backdrop,
+html.layout-inset .modal-surface,
+html.layout-inset .mono-details-panel,
+html.layout-inset .sidebar-peek {
+  background: var(--inset-raised);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 
 /* Animate content only; its sibling glass stays still. Finish at `none` and
