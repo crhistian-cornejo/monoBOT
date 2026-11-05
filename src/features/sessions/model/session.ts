@@ -312,6 +312,20 @@ export type UsageLimit = {
   resumeAtReset?: boolean;
 };
 
+/** Why the provider failed a turn in a way that's worth retrying. */
+export type ProviderRetryReason = "overloaded" | "server" | "connection";
+
+/** The provider failed the last turn with a transient error. */
+export type ProviderRetry = {
+  reason: ProviderRetryReason;
+  /** Failed attempts at this turn, the original one included. */
+  attempt: number;
+  /** Epoch ms of the next automatic retry. Absent when it won't retry by itself. */
+  retryAt?: number;
+  /** A retry was sent; clear this once that turn ends without an error. */
+  sending?: boolean;
+};
+
 /** Provider/model provenance captured when a user turn is submitted. */
 export type TurnModel = {
   harness: HarnessId;
@@ -497,6 +511,8 @@ export type Session = {
   sendingQueuedMessageId?: string;
   /** Last turn hit a provider usage limit; cleared by the next send. In-memory only. */
   usageLimit?: UsageLimit;
+  /** Last turn failed with a transient provider error. In-memory only. */
+  providerRetry?: ProviderRetry;
   /**
    * Lives only in memory: never saved, never listed with the project's chats.
    * A Mono's habit runs are, and disappear when the run ends.

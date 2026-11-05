@@ -541,6 +541,7 @@ import {
   type PlanStatus,
   type SecondOpinionMeta,
   type MonoSpawnedSession,
+  type ProviderRetry,
   type Session,
   type UsageLimit,
   type WorkspaceMode,
@@ -559,6 +560,11 @@ import {
   usageLimitResumeDue,
   withUsageLimitAccount,
 } from "../features/sessions/model/usageLimit";
+import {
+  providerRetryDue,
+  providerRetrySucceeded,
+  sendingProviderRetry,
+} from "../features/sessions/model/providerRetry";
 import {
   fetchClaudeRateLimits,
   fetchCodexRateLimits,
@@ -973,6 +979,8 @@ type SubmitOptions = ComposerTurnOptions & {
   onSettled?: (outcome: ControlOutcome) => void;
   /** Generate a fresh title even when this is not the session's first turn. */
   refreshTitle?: boolean;
+  /** An automatic or "Retry now" resend keeps counting attempts; a typed one starts over. */
+  providerRetry?: ProviderRetry;
   /** Internal guard for the retry after resolving a renamed project. */
   projectLocationReady?: boolean;
 };
@@ -7992,6 +8000,7 @@ function Workspace({
               ...selected,
               providerAccountId,
               usageLimit: undefined,
+              providerRetry: options?.providerRetry,
               worktreePreparing: createDraftWorktree
                 ? true
                 : selected.worktreePreparing,
@@ -10157,6 +10166,116 @@ function Workspace({
       });
     }
   }, [sessions]);
+
+  // A transient provider failure (overloaded, 5xx, dropped connection) is
+  // resent after a growing wait. See providerRetry.ts.
+  const onProviderRetryNow = useCallback(
+    async (sessionId: string) => {
+      const session = sessionsRef.current.find(
+        (entry) => entry.id === sessionId,
+      );
+      const retry = session?.providerRetry;
+      if (!session || !retry || retry.sending || session.busy) return;
+      try {
+        if (
+          await submitSession(sessionId, CONTINUE_PROMPT, [], {
+            providerRetry: sendingProviderRetry(retry),
+          })
+        )
+          return;
+      } catch {
+        /* The submission path reports its own error. */
+      }
+      // Not sent: stop retrying by itself, but keep "Retry now".
+      updateSessionState(sessionsRef, setSessions, (prev) =>
+        prev.map((entry) =>
+          entry.id === sessionId && !entry.busy
+            ? {
+                ...entry,
+                providerRetry: { reason: retry.reason, attempt: retry.attempt },
+              }
+            : entry,
+        ),
+      );
+    },
+    [submitSession],
+  );
+
+  const onProviderRetryCancel = useCallback((sessionId: string) => {
+    updateSessionState(sessionsRef, setSessions, (prev) =>
+      prev.map((session) =>
+        session.id === sessionId && session.providerRetry
+          ? { ...session, providerRetry: undefined }
+          : session,
+      ),
+    );
+  }, []);
+
+  const providerRetryingRef = useRef(new Set<string>());
+  const [providerRetryTick, setProviderRetryTick] = useState(0);
+  useEffect(() => {
+    const now = Date.now();
+    const timers: number[] = [];
+    const scheduled = new Set<string>();
+    let succeeded = false;
+    let nextCheck = Number.POSITIVE_INFINITY;
+    for (const session of sessions) {
+      const retry = session.providerRetry;
+      if (!retry) continue;
+      if (providerRetrySucceeded(session)) {
+        succeeded = true;
+        continue;
+      }
+      // Mono chats have their own notice, and remote hosts run their own turns.
+      if (
+        retry.retryAt == null ||
+        isMonoSession(session.id) ||
+        remoteProjectFor(session.cwd)
+      )
+        continue;
+      if (!providerRetryDue(session, now)) {
+        if (!session.busy && !retry.sending)
+          nextCheck = Math.min(nextCheck, retry.retryAt - now);
+        continue;
+      }
+      if (providerRetryingRef.current.has(session.id)) continue;
+      providerRetryingRef.current.add(session.id);
+      scheduled.add(session.id);
+      timers.push(
+        window.setTimeout(() => {
+          providerRetryingRef.current.delete(session.id);
+          const latest = sessionsRef.current.find(
+            (entry) => entry.id === session.id,
+          );
+          if (latest && providerRetryDue(latest, Date.now())) {
+            void onProviderRetryNow(session.id);
+          }
+        }, 0),
+      );
+    }
+    if (succeeded) {
+      updateSessionState(sessionsRef, setSessions, (prev) =>
+        prev.map((entry) =>
+          providerRetrySucceeded(entry)
+            ? { ...entry, providerRetry: undefined }
+            : entry,
+        ),
+      );
+    }
+    if (Number.isFinite(nextCheck)) {
+      // Timers drift while the machine sleeps; look again at least every minute.
+      timers.push(
+        window.setTimeout(
+          () => setProviderRetryTick((tick) => tick + 1),
+          Math.max(1_000, Math.min(nextCheck, 60_000)),
+        ),
+      );
+    }
+    return () => {
+      for (const timer of timers) window.clearTimeout(timer);
+      for (const id of scheduled) providerRetryingRef.current.delete(id);
+    };
+  }, [onProviderRetryNow, sessions, providerRetryTick]);
 
   const openSessionBeside = useCallback(
     (
@@ -13934,6 +14053,8 @@ function Workspace({
     onUsageLimitResumeAtReset,
     onUsageLimitDismiss,
     onUsageLimitAccountChange,
+    onProviderRetryNow,
+    onProviderRetryCancel,
     onInboxCardDismiss,
     onLinkedWorkItemUpdateCardDismiss,
     onNoteCardDismiss,

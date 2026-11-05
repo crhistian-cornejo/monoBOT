@@ -70,6 +70,7 @@ import type {
   MessageQueueStatus,
   QueuedMessage,
   UsageLimit,
+  ProviderRetry,
   RuntimeMode,
   WorkspaceMode,
   ComposerTurnOptions,
@@ -147,6 +148,7 @@ import { resolveTabGroupLogo } from "../../workspace/model/tabGroups";
 import { useComposerSkills } from "./useComposerSkills";
 import { Popover } from "../../../shared/ui/Popover";
 import { UsageLimitNotice } from "./UsageLimitNotice";
+import { ProviderRetryNotice } from "./ProviderRetryNotice";
 import { UsageLimitAccountPicker } from "./UsageLimitAccountPicker";
 import { consumePlanCommand, PLAN_COMMAND } from "../model/plan";
 import {
@@ -251,6 +253,7 @@ type Props = {
   queuedMessages?: QueuedMessage[];
   queueStatus?: MessageQueueStatus;
   usageLimit?: UsageLimit;
+  providerRetry?: ProviderRetry;
   hotkeys?: boolean;
   onFocus: () => void;
   onCwdChange: (cwd: string) => void;
@@ -298,6 +301,8 @@ type Props = {
   onUsageLimitDismiss?: () => void;
   /** Continue this session under another account of its provider. */
   onUsageLimitAccountChange?: (accountId: string) => void;
+  onProviderRetryNow?: () => void;
+  onProviderRetryCancel?: () => void;
   providerAccountId?: string;
   onOpenFile?: (path: string) => void;
   onDraftChange?: (text: string) => void;
@@ -378,6 +383,7 @@ export function Composer({
   queuedMessages = [],
   queueStatus,
   usageLimit,
+  providerRetry,
   onFocus,
   onCwdChange,
   onBranchChange,
@@ -415,6 +421,8 @@ export function Composer({
   onUsageLimitResumeAtReset,
   onUsageLimitDismiss,
   onUsageLimitAccountChange,
+  onProviderRetryNow,
+  onProviderRetryCancel,
   providerAccountId,
   onOpenFile,
   onDraftChange,
@@ -1881,6 +1889,12 @@ export function Composer({
               />
             ) : undefined
           }
+        />
+      ) : providerRetry && !providerRetry.sending ? (
+        <ProviderRetryNotice
+          retry={providerRetry}
+          onRetryNow={onProviderRetryNow}
+          onCancel={onProviderRetryCancel}
         />
       ) : null}
       <MessageQueue

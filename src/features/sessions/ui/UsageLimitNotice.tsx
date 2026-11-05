@@ -3,8 +3,13 @@ import { Clock, Gauge, Play, X } from "../../../shared/ui/icons";
 import type { UsageLimit } from "../model/session";
 import { formatUsageLimitReset, usageLimitWaiting } from "../model/usageLimit";
 
-const BUTTON =
+/** Shared with the other notices docked on top of the composer. */
+export const COMPOSER_NOTICE_BUTTON =
   "flex h-6 shrink-0 items-center gap-1.5 rounded-md px-1.5 hover:bg-content/10 hover:text-content";
+export const COMPOSER_NOTICE_BAR =
+  "relative z-0 flex h-8 items-center gap-2 rounded-t-xl border border-b-0 border-amber-400/25 bg-amber-400/10 px-2 text-[12px]";
+
+const BUTTON = COMPOSER_NOTICE_BUTTON;
 
 export function UsageLimitNotice({
   limit,
@@ -46,7 +51,7 @@ export function UsageLimitNotice({
         className={
           variant === "mono"
             ? "flex items-center gap-2"
-            : "relative z-0 flex h-8 items-center gap-2 rounded-t-xl border border-b-0 border-amber-400/25 bg-amber-400/10 px-2 text-[12px]"
+            : COMPOSER_NOTICE_BAR
         }
       >
         <Gauge className="size-3.5 shrink-0 text-amber-400" />

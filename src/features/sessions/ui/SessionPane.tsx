@@ -207,6 +207,8 @@ export type SessionPaneProps = {
   onUsageLimitResumeAtReset: (sessionId: string, enabled: boolean) => void;
   onUsageLimitDismiss: (sessionId: string) => void;
   onUsageLimitAccountChange?: (sessionId: string, accountId: string) => void;
+  onProviderRetryNow?: (sessionId: string) => void;
+  onProviderRetryCancel?: (sessionId: string) => void;
   onInboxCardDismiss?: (sessionId: string) => void;
   onLinkedWorkItemUpdateCardDismiss?: (sessionId: string) => void;
   onNoteCardDismiss?: (sessionId: string) => void;
@@ -344,6 +346,8 @@ const LocalSessionPane = memo(function LocalSessionPane({
   onUsageLimitResumeAtReset,
   onUsageLimitDismiss,
   onUsageLimitAccountChange,
+  onProviderRetryNow,
+  onProviderRetryCancel,
   onInboxCardDismiss,
   onLinkedWorkItemUpdateCardDismiss,
   onNoteCardDismiss,
@@ -784,6 +788,15 @@ const LocalSessionPane = memo(function LocalSessionPane({
       onUsageLimitAccountChange={
         onUsageLimitAccountChange
           ? (accountId) => onUsageLimitAccountChange(session.id, accountId)
+          : undefined
+      }
+      providerRetry={session.providerRetry}
+      onProviderRetryNow={
+        onProviderRetryNow ? () => onProviderRetryNow(session.id) : undefined
+      }
+      onProviderRetryCancel={
+        onProviderRetryCancel
+          ? () => onProviderRetryCancel(session.id)
           : undefined
       }
       onOpenFile={onOpenFile}

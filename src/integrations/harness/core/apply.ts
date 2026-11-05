@@ -23,6 +23,7 @@ import { isReviewablePlan } from "../../../features/sessions/model/plan";
 import { resolveModel } from "../../../features/sessions/model/models";
 import type { HarnessEvent } from "./types";
 import { usageLimitFromError } from "../../../features/sessions/model/usageLimit";
+import { nextProviderRetry } from "../../../features/sessions/model/providerRetry";
 
 /** Apply one delivery batch without copying the transcript for every token. */
 export function applyHarnessEvents(
@@ -155,11 +156,18 @@ export function applyHarnessEvent(
       return { ...session, backgroundTasks: event.tasks };
     case "plan":
       return upsertPlan(session, event);
-    case "session.error":
+    case "session.error": {
+      const usageLimit =
+        session.usageLimit ?? usageLimitFromError(event.message);
       return appendBlock(
         failStreaming({
           ...session,
-          usageLimit: session.usageLimit ?? usageLimitFromError(event.message),
+          usageLimit,
+          providerRetry: nextProviderRetry(
+            { ...session, usageLimit },
+            event.message,
+            Date.now(),
+          ),
           // Do not drain remaining messages into the same failed connection.
           queueStatus: session.queuedMessages?.length
             ? "paused"
@@ -172,6 +180,7 @@ export function applyHarnessEvent(
           notice: "error",
         },
       );
+    }
     case "session.providerBound":
       return { ...session, providerSessionId: event.providerSessionId };
     case "turn.started": {

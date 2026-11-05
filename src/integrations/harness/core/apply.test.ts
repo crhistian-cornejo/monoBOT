@@ -29,6 +29,43 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("provider retry", () => {
+  it("schedules a retry when the provider is overloaded", () => {
+    now = 1_000;
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const session = applyHarnessEvent(
+      appendUser(newSession("claude", "/tmp"), "First"),
+      { type: "session.error", message: "API Error: 529 Overloaded" },
+    );
+    expect(session.providerRetry).toEqual({
+      reason: "overloaded",
+      attempt: 1,
+      retryAt: 61_000,
+    });
+    expect(session.usageLimit).toBeUndefined();
+  });
+
+  it("leaves usage limits to their own notice", () => {
+    const session = applyHarnessEvent(
+      appendUser(newSession("claude", "/tmp"), "First"),
+      { type: "session.error", message: "You've hit your usage limit (HTTP 503)" },
+    );
+    expect(session.usageLimit).toEqual({});
+    expect(session.providerRetry).toBeUndefined();
+  });
+
+  it("keeps the retry state out of the saved session", () => {
+    const session = applyHarnessEvent(
+      appendUser(newSession("claude", "/tmp"), "First"),
+      { type: "session.error", message: "HTTP 502 Bad Gateway" },
+    );
+    expect(session.providerRetry).toBeDefined();
+    expect(sanitizeSessionForPersist(session)).not.toHaveProperty(
+      "providerRetry",
+    );
+  });
+});
+
 describe("follow-up readiness", () => {
   it("preserves and pauses the backlog when the original turn fails to connect", () => {
     const queuedMessages = [
