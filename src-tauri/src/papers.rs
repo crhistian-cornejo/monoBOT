@@ -254,7 +254,10 @@ pub async fn paper_pdf(app: AppHandle, key: String, url: String) -> Result<Cache
 }
 
 /// The text extracted from a cached paper, written once by the app.
-#[tauri::command]
+// Disk reads and writes below run off the main thread so a large paper
+// can't stall the window. `paper_text_write` stays synchronous: saves of the
+// same paper must land in the order they were made.
+#[tauri::command(async)]
 pub fn paper_text_read(app: AppHandle, key: String) -> Result<Option<String>, String> {
     let path = cache_dir(&app)?.join(format!("{}.json", key_of(&key)));
     match fs::read_to_string(path) {
@@ -350,7 +353,7 @@ fn store_page_image(
     Ok(path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn paper_image_write(
     app: AppHandle,
     key: String,
@@ -423,7 +426,7 @@ fn export_pdf(
 
 /// Puts a copy of a paper's PDF where the user can see it: Documents, in a
 /// folder named for the agent that fetched it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn paper_export(app: AppHandle, key: String, agent: String, name: String) -> Result<String, String> {
     let cached = cache_dir(&app)?.join(format!("{}.pdf", key_of(&key)));
     let documents = app.path().document_dir().map_err(|e| e.to_string())?;
@@ -431,7 +434,7 @@ pub fn paper_export(app: AppHandle, key: String, agent: String, name: String) ->
 }
 
 /// The cached PDF's bytes, for the app's own viewer.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn paper_pdf_bytes(app: AppHandle, key: String) -> Result<tauri::ipc::Response, String> {
     let path = cache_dir(&app)?.join(format!("{}.pdf", key_of(&key)));
     fs::read(path)

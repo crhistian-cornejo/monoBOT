@@ -1,21 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { decodePtyChunk, trimReplay } from "./pty";
+import { describe, expect, it, vi } from "vitest";
+import { trimReplay } from "./pty";
 
 const KB = 1024;
-
-describe("decodePtyChunk", () => {
-  it("decodes a valid base64 payload", () => {
-    // "hi" in base64
-    const chunk = decodePtyChunk("aGk=");
-    expect(chunk).not.toBeNull();
-    expect(Array.from(chunk!)).toEqual([104, 105]);
-  });
-
-  it("returns null instead of throwing on a malformed payload", () => {
-    expect(() => decodePtyChunk("not valid base64!!!")).not.toThrow();
-    expect(decodePtyChunk("not valid base64!!!")).toBeNull();
-  });
-});
 
 describe("trimReplay", () => {
   it("keeps a small buffer whole", () => {
@@ -47,5 +33,33 @@ describe("trimReplay", () => {
   it("never drops the only chunk", () => {
     const sizes = [512 * KB];
     expect(trimReplay(sizes, 512 * KB)).toEqual({ drop: 0, bytes: 512 * KB });
+  });
+});
+
+describe("spawnPty output channel", () => {
+  it("delivers raw bytes from the latest spawn and drops a replaced one", async () => {
+    vi.resetModules();
+    const sent: Array<(data: ArrayBuffer) => void> = [];
+    vi.doMock("@tauri-apps/api/core", () => ({
+      Channel: class {
+        constructor(onmessage: (data: ArrayBuffer) => void) {
+          sent.push(onmessage);
+        }
+      },
+      invoke: vi.fn(async () => undefined),
+    }));
+    vi.doMock("@tauri-apps/api/event", () => ({
+      listen: vi.fn(async () => () => {}),
+    }));
+    const pty = await import("./pty");
+    const received: number[][] = [];
+    pty.subscribePty("t1", (chunk) => received.push(Array.from(chunk)), () => {});
+    await pty.spawnPty("t1", "/tmp", 80, 24);
+    await pty.spawnPty("t1", "/tmp", 80, 24);
+    sent[0](new Uint8Array([1]).buffer);
+    sent[1](new Uint8Array([104, 105]).buffer);
+    expect(received).toEqual([[104, 105]]);
+    vi.doUnmock("@tauri-apps/api/core");
+    vi.doUnmock("@tauri-apps/api/event");
   });
 });

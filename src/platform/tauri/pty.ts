@@ -1,7 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
-type DataPayload = { id: string; data: string };
 type ExitPayload = { id: string; code: number | null };
 
 type DataHandler = (data: Uint8Array) => void;
@@ -11,9 +10,8 @@ const dataHandlers = new Map<string, DataHandler>();
 const exitHandlers = new Map<string, ExitHandler>();
 const dataBuffer = new Map<string, Uint8Array[]>();
 const dataBufferBytes = new Map<string, number>();
-/** PTYs this window opened. Global `pty-data` still fires for every terminal
- * in the process; decoding those in a window that never mounted them was
- * megabytes of base64 work and a 256KB replay buffer per stranger id. */
+/** PTYs this window opened. Output only buffers for these while no view is
+ * subscribed; anything else is dropped. */
 const openedPtys = new Set<string>();
 
 /**
@@ -26,28 +24,6 @@ const MAX_BUFFERED = 200;
 let bridge: Promise<UnlistenFn[]> | null = null;
 let users = 0;
 let teardownTimer: ReturnType<typeof setTimeout> | undefined;
-
-function decodeBase64(data: string): Uint8Array {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
-}
-
-/**
- * Same as decodeBase64, but a payload the backend never actually sends
- * malformed should not throw inside the pty-data listener and lose the
- * chunk (and whatever else was queued behind it). Returns null instead.
- */
-export function decodePtyChunk(data: string): Uint8Array | null {
-  try {
-    return decodeBase64(data);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Leading chunks to drop to bring a replay buffer back within budget, and the
@@ -87,18 +63,18 @@ function clearBuffered(id: string) {
   dataBufferBytes.delete(id);
 }
 
+function deliver(id: string, chunk: Uint8Array) {
+  const handler = dataHandlers.get(id);
+  if (handler) handler(chunk);
+  else if (openedPtys.has(id)) pushBuffered(id, chunk);
+}
+
+/** The latest spawn of each id; output from a replaced spawn is ignored. */
+const liveChannels = new Map<string, Channel<ArrayBuffer>>();
+
 function ensureBridge() {
   if (bridge) return;
   bridge = Promise.all([
-    listen<DataPayload>("pty-data", (event) => {
-      const { id, data } = event.payload;
-      const handler = dataHandlers.get(id);
-      if (!handler && !openedPtys.has(id)) return;
-      const chunk = decodePtyChunk(data);
-      if (!chunk) return;
-      if (handler) handler(chunk);
-      else pushBuffered(id, chunk);
-    }),
     listen<ExitPayload>("pty-exit", (event) => {
       const { id, code } = event.payload;
       exitHandlers.get(id)?.(code);
@@ -133,7 +109,13 @@ export async function spawnPty(
   cols: number,
   rows: number,
 ): Promise<void> {
-  await invoke("pty_spawn", { id, cwd, cols, rows });
+  // Rust sends the output here as raw bytes. Each spawn gets a new channel:
+  // Tauri numbers a channel's messages per invoke, so one can't be reused.
+  const onData: Channel<ArrayBuffer> = new Channel((data) => {
+    if (liveChannels.get(id) === onData) deliver(id, new Uint8Array(data));
+  });
+  liveChannels.set(id, onData);
+  await invoke("pty_spawn", { id, cwd, cols, rows, onData });
 }
 
 export async function writePty(id: string, data: string): Promise<void> {
@@ -158,6 +140,7 @@ export async function killPty(id: string): Promise<void> {
   dataHandlers.delete(id);
   exitHandlers.delete(id);
   openedPtys.delete(id);
+  liveChannels.delete(id);
   clearBuffered(id);
   await invoke("pty_kill", { id }).catch(() => undefined);
 }
@@ -166,6 +149,7 @@ export async function killAllPtys(): Promise<void> {
   dataHandlers.clear();
   exitHandlers.clear();
   openedPtys.clear();
+  liveChannels.clear();
   dataBuffer.clear();
   dataBufferBytes.clear();
   await invoke("pty_kill_all").catch(() => undefined);

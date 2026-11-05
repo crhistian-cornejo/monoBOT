@@ -16,6 +16,7 @@ mod devin_usage;
 mod dictation;
 mod external_editor;
 mod fs;
+mod git_watch;
 mod gitlab;
 mod harness;
 mod harness_updates;
@@ -288,6 +289,7 @@ pub fn run() {
         .manage(pty::PtyHost::new())
         .manage(remote::RemoteConnections::default())
         .manage(window_transfer::WindowTransferState::new())
+        .manage(git_watch::GitWatchHost::default())
         .setup(|app| {
             harness::reap_orphaned_harness_processes();
             session_store::init(app.handle())?;
@@ -588,6 +590,8 @@ pub fn run() {
             pty::pty_resize,
             pty::pty_status,
             pty::pty_kill,
+            git_watch::git_watch_start,
+            git_watch::git_watch_stop,
             pty::pty_kill_all,
             session_store::session_upsert,
             session_store::session_list_by_project,

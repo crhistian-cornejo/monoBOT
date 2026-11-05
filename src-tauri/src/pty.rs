@@ -7,12 +7,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use tauri::ipc::{Channel, InvokeResponseBody};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::dirs_home;
 use crate::fs::expand_home;
 
-const DATA_EVENT: &str = "pty-data";
 const EXIT_EVENT: &str = "pty-exit";
 const READ_CHUNK: usize = 32 * 1024;
 /// Cap how often a busy PTY hops the webview. Each `emit` is a JS eval; a
@@ -21,11 +21,17 @@ const PTY_COALESCE: Duration = Duration::from_millis(8);
 #[cfg(unix)]
 const KILL_ESCALATE: Duration = Duration::from_secs(1);
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct PtyData {
-    id: String,
-    data: String,
+/// Where a terminal's output goes: the channel of the window that spawned it,
+/// as raw bytes, instead of a base64 event that every window had to decode.
+#[derive(Clone)]
+struct PtySink(Channel<InvokeResponseBody>);
+
+impl PtySink {
+    fn send(&self, bytes: &[u8]) {
+        if !bytes.is_empty() {
+            let _ = self.0.send(InvokeResponseBody::Raw(bytes.to_vec()));
+        }
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -122,15 +128,19 @@ impl Drop for PtyHost {
     }
 }
 
-#[tauri::command]
+/// Starts a terminal whose output goes to `on_data`. Opening a ConPTY and the
+/// shell takes long enough that it runs off the main thread.
+#[tauri::command(async)]
 pub fn pty_spawn(
     app: AppHandle,
-    host: State<PtyHost>,
+    host: State<'_, PtyHost>,
     id: String,
     cwd: String,
     cols: u16,
     rows: u16,
+    on_data: Channel<InvokeResponseBody>,
 ) -> Result<(), String> {
+    let sink = PtySink(on_data);
     let workdir = working_dir(&cwd);
     let _reservation = crate::worktree_lifecycle::reserve_spawn(&workdir)?;
     if let Some(prev) = host.remove(&id) {
@@ -141,21 +151,23 @@ pub fn pty_spawn(
 
     #[cfg(unix)]
     {
-        spawn_unix(app, host, id, workdir, cols.max(2), rows.max(2))
+        spawn_unix(app, host, id, sink, workdir, cols.max(2), rows.max(2))
     }
 
     #[cfg(windows)]
     {
-        spawn_windows(app, host, id, workdir, cols.max(2), rows.max(2))
+        spawn_windows(app, host, id, sink, workdir, cols.max(2), rows.max(2))
     }
 
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (app, cwd, cols, rows);
+        let _ = (app, cwd, cols, rows, sink);
         Err("Terminals are not supported on this platform.".into())
     }
 }
 
+// Writes stay synchronous: commands on the main thread run in order, and
+// keystrokes must reach the shell in the order they were typed.
 #[tauri::command]
 pub fn pty_write(host: State<PtyHost>, id: String, data: String) -> Result<(), String> {
     let live = host
@@ -244,6 +256,7 @@ fn spawn_unix(
     app: AppHandle,
     host: State<PtyHost>,
     id: String,
+    sink: PtySink,
     workdir: std::path::PathBuf,
     cols: u16,
     rows: u16,
@@ -308,8 +321,6 @@ fn spawn_unix(
     });
     host.insert(id.clone(), live);
 
-    let data_app = app.clone();
-    let data_id = id.clone();
     thread::spawn(move || {
         let mut file = reader;
         let fd = file.as_raw_fd();
@@ -329,7 +340,7 @@ fn spawn_unix(
             } else if pty_should_flush(acc.len(), last_emit.elapsed())
                 || !wait_readable(fd, PTY_COALESCE.saturating_sub(last_emit.elapsed()))
             {
-                emit_pty_data(&data_app, &data_id, &acc);
+                sink.send(&acc);
                 acc.clear();
                 last_emit = Instant::now();
             } else {
@@ -340,7 +351,7 @@ fn spawn_unix(
                 }
             }
         }
-        emit_pty_data(&data_app, &data_id, &acc);
+        sink.send(&acc);
     });
 
     let wait_app = app;
@@ -373,6 +384,7 @@ fn spawn_windows(
     app: AppHandle,
     host: State<PtyHost>,
     id: String,
+    sink: PtySink,
     workdir: std::path::PathBuf,
     cols: u16,
     rows: u16,
@@ -424,8 +436,6 @@ fn spawn_windows(
     });
     host.insert(id.clone(), live);
 
-    let data_app = app.clone();
-    let data_id = id.clone();
     // ConPTY pipes can't be polled, so one thread blocks on reads and hands
     // each chunk to an emitter that gathers them for up to PTY_COALESCE (or a
     // full chunk) before a single emit, as the Unix reader does.
@@ -455,7 +465,7 @@ fn spawn_windows(
                     Err(_) => break,
                 }
             }
-            emit_pty_data(&data_app, &data_id, &acc);
+            sink.send(&acc);
             acc.clear();
         }
     });
@@ -679,20 +689,6 @@ fn close_fd(fd: i32) {
 #[cfg(unix)]
 fn os_err(ctx: &str) -> String {
     format!("{ctx}: {}", std::io::Error::last_os_error())
-}
-
-fn emit_pty_data(app: &AppHandle, id: &str, bytes: &[u8]) {
-    if bytes.is_empty() {
-        return;
-    }
-    let data = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes);
-    let _ = app.emit(
-        DATA_EVENT,
-        PtyData {
-            id: id.to_string(),
-            data,
-        },
-    );
 }
 
 fn pty_should_flush(buffered: usize, since: Duration) -> bool {

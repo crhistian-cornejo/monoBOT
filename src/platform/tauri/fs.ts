@@ -1,4 +1,5 @@
 import { invoke as invokeLocal } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { joinPath, slash } from "../../shared/lib/paths";
 import { REMOTE_PATH_PREFIX } from "../../shared/lib/remotePaths";
@@ -480,6 +481,38 @@ export function notifyGitChanged({ invalidatePending = true } = {}) {
 export function subscribeGitChanged(listener: () => void): () => void {
   window.addEventListener(GIT_CHANGED, listener);
   return () => window.removeEventListener(GIT_CHANGED, listener);
+}
+
+/**
+ * Calls `onChange` when files in a local checkout change in a way that may
+ * move its Git status. Resolves to a stop function, or null when this
+ * platform or folder can't be watched and the caller should keep polling.
+ */
+export async function watchGitWorktree(
+  cwd: string,
+  onChange: () => void,
+): Promise<(() => void) | null> {
+  try {
+    const unlisten = await listen<{ cwd: string }>(
+      "git-worktree-changed",
+      (event) => {
+        if (event.payload.cwd === cwd) onChange();
+      },
+    );
+    const watching = await invokeLocal<boolean>("git_watch_start", {
+      cwd,
+    }).catch(() => false);
+    if (!watching) {
+      unlisten();
+      return null;
+    }
+    return () => {
+      unlisten();
+      void invokeLocal("git_watch_stop", { cwd }).catch(() => undefined);
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function createPath(

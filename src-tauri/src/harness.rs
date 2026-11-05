@@ -55,7 +55,7 @@ struct HarnessSseBatch {
 }
 
 /// Each `emit` is a JS eval in every window, and a streaming agent prints a
-/// line per token. Coalesce to about one hop per frame, like `pty-data`.
+/// line per token. Coalesce to about one hop per frame, like PTY output.
 const OUTPUT_COALESCE: Duration = Duration::from_millis(16);
 /// A huge tool result shouldn't hold back the lines queued behind it.
 const OUTPUT_BATCH_BYTES: usize = 1 << 20;

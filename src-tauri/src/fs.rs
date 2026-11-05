@@ -681,7 +681,7 @@ pub(crate) fn list_project_files_sync_cancellable(
 const CHECK_IGNORE_SOME_MATCHED: i32 = 0;
 const CHECK_IGNORE_NONE_MATCHED: i32 = 1;
 
-fn git_ignored_names(dir: &Path, names: &[&str]) -> Option<HashSet<String>> {
+pub(crate) fn git_ignored_names(dir: &Path, names: &[&str]) -> Option<HashSet<String>> {
     if names.is_empty() {
         return Some(HashSet::new());
     }

@@ -60,6 +60,7 @@ import {
   gitUnstageFile,
   notifyGitChanged,
   subscribeGitChanged,
+  watchGitWorktree,
   type GitChangedFile,
   type GitDiffIndex,
   type GitFileDiffKind,
@@ -84,6 +85,9 @@ import { useLockOverscroll } from "../../../shared/hooks/useLockOverscroll";
 import { isRemoteProjectPath } from "../../projects/model/recents";
 
 const GIT_POLL_MS = 2000;
+/** With a file watcher, polling is only a safety net: a linked worktree keeps
+ * its index and HEAD outside the watched checkout. */
+const GIT_WATCHED_POLL_MS = 30_000;
 
 function confirmNative(message: string, okLabel?: string): Promise<boolean> {
   return ask(message, {
@@ -1693,12 +1697,25 @@ function useDiffIndex(
     const onResume = () => {
       if (!publishing && !document.hidden) void load();
     };
-    const timer = window.setInterval(onResume, GIT_POLL_MS);
+    let stopWatch: (() => void) | null = null;
+    if (!isRemoteProjectPath(cwd)) {
+      void watchGitWorktree(cwd, onResume).then((stop) => {
+        if (cancelled) stop?.();
+        else stopWatch = stop;
+      });
+    }
+    let lastPoll = Date.now();
+    const timer = window.setInterval(() => {
+      if (stopWatch && Date.now() - lastPoll < GIT_WATCHED_POLL_MS) return;
+      lastPoll = Date.now();
+      onResume();
+    }, GIT_POLL_MS);
     window.addEventListener("focus", onResume);
     document.addEventListener("visibilitychange", onResume);
     const unsubGit = subscribeGitChanged(onResume);
     return () => {
       cancelled = true;
+      stopWatch?.();
       window.clearInterval(timer);
       window.removeEventListener("focus", onResume);
       document.removeEventListener("visibilitychange", onResume);
