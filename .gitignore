@@ -58,6 +58,7 @@ Desktop.ini
 # A Unix shell on Windows turns `command > nul` into a real file named nul,
 # which Windows can't open and Git can't index.
 nul
+.claude/
 
 # Local document preview mockup
 /work/mono-document-preview.html
