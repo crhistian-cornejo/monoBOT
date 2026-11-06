@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { sherpaEnv } from "./native-sherpa.mjs";
 
 const workspace = fileURLToPath(new URL("../", import.meta.url));
 
@@ -24,7 +25,7 @@ export async function startDev({
   debounce = 300,
 } = {}) {
   const bundle = platform === "darwin";
-  const buildEnv = { ...env, CARGO_BUILD_JOBS: env.CARGO_BUILD_JOBS || "1" };
+  const buildEnv = { ...sherpaEnv(root, env), CARGO_BUILD_JOBS: env.CARGO_BUILD_JOBS || "1" };
   const launch = (command, argv, options = {}) => track(spawnProcess(command, argv, {
     cwd: root, env: buildEnv, stdio: "inherit", ...options,
   }));

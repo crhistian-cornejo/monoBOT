@@ -1,10 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { sherpaEnv } from "./native-sherpa.mjs";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const env = {
-  ...process.env,
+  ...sherpaEnv(root),
   CARGO_BUILD_JOBS: process.env.CARGO_BUILD_JOBS || "1",
 };
 
