@@ -583,6 +583,7 @@ mod tests {
             },
             root: PathBuf::from("/desktop/monos"),
             executable: PathBuf::from("monocode"),
+            ..Default::default()
         });
         let first = key(&request);
         assert_ne!(regular, first);

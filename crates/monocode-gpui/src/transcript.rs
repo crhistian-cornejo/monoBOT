@@ -470,15 +470,32 @@ pub(crate) fn mono_continues(source: &[Row], turn: usize) -> Option<usize> {
         || source[prompt..turn].iter().any(|r| r.role != "mono-system")
         || source[prompt - 1].is_prompt()
         || dates::mono_opens_stretch(source, prompt)
+        // A group member's post speaks for itself, under its own name.
+        || member_post_at(source, turn).is_some()
     {
         return None;
     }
-    Some(
-        source[..prompt]
-            .iter()
-            .rposition(|r| r.is_prompt())
-            .map_or(0, |i| i + 1),
-    )
+    let previous = source[..prompt]
+        .iter()
+        .rposition(|r| r.is_prompt())
+        .map_or(0, |i| i + 1);
+    // Nor does the lead's answer join a member's post.
+    if member_post_at(source, previous).is_some() {
+        return None;
+    }
+    Some(previous)
+}
+/// The member who posted the turn at `turn` in a group's chat: its mark is
+/// the prompt row right before the reply.
+pub(crate) fn member_post_at(
+    source: &[Row],
+    turn: usize,
+) -> Option<monocode_core::mono::groups::GroupMemberPost> {
+    let prompt = prompt_start(source, turn);
+    source[prompt..turn.min(source.len())]
+        .iter()
+        .rev()
+        .find_map(monocode_core::mono::groups::native::member_post)
 }
 /// monoWorkStatus: a short status for the turn's latest activity.
 pub(crate) fn mono_work_label(source: &[Row], group: usize) -> String {
@@ -1182,7 +1199,17 @@ impl TranscriptView {
             .mono_activity()
             .filter(|(group, _)| *group == turn)
             .map(|(_, label)| label);
-        self.mono_header(turn, label, cx)
+        // A group member's post signs with the member's face and name.
+        let member = member_post_at(&self.source, turn).map(|post| {
+            let color = monocode_core::mono::groups::native::post_color(&post)
+                .or_else(|| self.mono_look.as_ref().map(|(_, color, _)| *color))
+                .unwrap_or(0x969696);
+            (post.mascot, color, SharedString::from(post.name))
+        });
+        match member {
+            Some(look) => self.signature(turn, look, None, cx),
+            None => self.mono_header(turn, label, cx),
+        }
     }
     /// The latest live activity, without relabeling a completed turn before
     /// the next prompt arrives.
@@ -1224,9 +1251,21 @@ impl TranscriptView {
         label: Option<String>,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
-        let Some((mascot, color, name)) = self.mono_look.clone() else {
+        let Some(look) = self.mono_look.clone() else {
             return div().into_any_element();
         };
+        self.signature(turn, look, label, cx)
+    }
+    /// The pill a turn is signed with: a mascot and a name, beside a live
+    /// ticker while it works.
+    fn signature(
+        &self,
+        turn: usize,
+        (mascot, color, name): (String, u32, SharedString),
+        label: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let signed = format!("mono-signature-name-{name}");
         let pill = div()
             .debug_selector(|| "mono-signature-pill".into())
             .flex()
@@ -1250,6 +1289,7 @@ impl TranscriptView {
             )
             .child(
                 div()
+                    .debug_selector(move || signed)
                     .min_w_0()
                     .truncate()
                     .font_weight(gpui::FontWeight::MEDIUM)

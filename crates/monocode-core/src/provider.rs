@@ -1468,13 +1468,30 @@ fn run_operation(
             ]);
             let settings = &request.settings;
             // botLaunchForSession: a bot's Claude gets only its tools and
-            // folders, and never what sends, shares or deletes.
+            // folders, and its groups' folders, and never what sends, shares
+            // or deletes.
             let bot = settings
                 .mono
                 .as_ref()
                 .filter(|_| !settings.text_only)
                 .filter(|mono| mono.mono.is_bot())
-                .map(|mono| crate::mono::bot_tools::launch_for(&mono.mono, &request.cwd));
+                .map(|mono| {
+                    crate::mono::bot_tools::launch_in_groups(
+                        &mono.mono,
+                        &request.cwd,
+                        &mono.groups.places,
+                    )
+                });
+            // groupLaunchForSession: a group's chat and the coding Monos in
+            // groups get the groups' folders; the group's chat leads
+            // without subagents of its own.
+            let group = settings
+                .mono
+                .as_ref()
+                .filter(|_| !settings.text_only)
+                .and_then(|mono| {
+                    crate::mono::groups::native::group_launch(&mono.mono, &mono.groups.places)
+                });
             // The app's connectors and MonoBOT's skill packs, for every chat.
             let extras = (!settings.text_only).then(|| {
                 crate::connectors::claude_launch(
@@ -1551,6 +1568,15 @@ fn run_operation(
                     command.args(["--disallowedTools", &bot.disallowed_tools.join(",")]);
                 }
                 for dir in &bot.add_dirs {
+                    command.args(["--add-dir", dir]);
+                }
+            }
+            if let Some(group) = &group {
+                allowed.extend(group.allowed_tools.iter().map(String::as_str));
+                if !group.disallowed_tools.is_empty() {
+                    command.args(["--disallowedTools", &group.disallowed_tools.join(",")]);
+                }
+                for dir in &group.add_dirs {
                     command.args(["--add-dir", dir]);
                 }
             }
@@ -1984,6 +2010,7 @@ mod tests {
             },
             root: "/monos".into(),
             executable: "/bin/monocode-gpui".into(),
+            ..Default::default()
         });
         let mut out = Vec::new();
         p.frame(json!({"id":1,"result":{}}), &mut out).unwrap();

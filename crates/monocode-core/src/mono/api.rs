@@ -15,7 +15,8 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "artifacts.list"=>"kind limit offset","artifacts.read"=>"id","artifacts.write"=>"id kind title body summary",
         "papers.find"=>"query limit fromYear","papers.read"=>"ref pages query section maxChars","papers.figure"=>"ref page","papers.add"=>"path ref title",
         "soul.update"=>"text expectedHash","memory.read"=>"topic","memory.search"=>"query since",
-        "memory.add"=>"fact topic until","memory.replace"=>"find fact topic until","memory.remove"=>"find topic",
+        // "personal" keeps a fact learned in a group's seat out of the group's memory.
+        "memory.add"=>"fact topic until personal","memory.replace"=>"find fact topic until personal","memory.remove"=>"find topic personal",
         "habits.add"=>"name instructions schedule","habits.update"=>"id name instructions schedule enabled","habits.run"|"habits.remove"=>"id",
         "chat.card"=>"type repo number note sessionId options name instructions schedule",
         "mail.list"=>"view query unread limit","mail.read"=>"id maxChars","mail.draft"=>"id text",
@@ -45,6 +46,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "oldestFirst",
             "shared",
             "wait",
+            "personal",
         ]
         .contains(&key.as_str())
             && !value.is_boolean()
@@ -108,6 +110,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "connectors",
             "in",
             "count",
+            "personal",
         ]
         .contains(&key.as_str())
             && !value.is_string()
@@ -204,6 +207,18 @@ mod tests {
         assert!(validate("wakes.add", &json!({"in":30,"note":"check"})).is_ok());
         assert!(validate("wakes.add", &json!({"in":"30"})).is_err());
         assert!(validate("tools.update", &json!({"connectors":[]})).is_ok());
+        assert!(validate("memory.add", &json!({"fact":"f","personal":true})).is_ok());
+        assert!(validate("memory.add", &json!({"fact":"f","personal":"yes"})).is_err());
+        assert!(validate(
+            "group.ask",
+            &json!({"member":"Docs","message":"m","wait":true})
+        )
+        .is_ok());
+        assert!(validate(
+            "group.access",
+            &json!({"target":"/x","reason":"r","group":"Nexa"})
+        )
+        .is_ok());
         assert!(validate("mail.draft", &json!({"id":"a.inbox.1","text":"Hola"})).is_ok());
         assert!(validate("mail.draft", &json!({"id":"a.inbox.1","to":"x@y.z"})).is_err());
         assert!(validate(

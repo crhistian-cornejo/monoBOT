@@ -5,7 +5,7 @@ use monocode_core::session_title::{TextModel, display_title};
 impl Conversation {
     /// The background model picked in Settings, else this session's harness.
     /// Only the session's own provider reuses the session's account.
-    pub(super) fn background_text_model(&self, cx: &gpui::App) -> TextModel {
+    pub(crate) fn background_text_model(&self, cx: &gpui::App) -> TextModel {
         let kind = Kind::from_id(&self.summary.provider);
         let account = self.settings.account.clone();
         let chosen = cx

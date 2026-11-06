@@ -90,6 +90,15 @@ pub struct Mono {
     /// The tools the bot or the user picked, in place of its role's.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bot_tools: Option<bot_tools::BotTools>,
+    /// A group's members, folders and access, as the desktop roster keeps
+    /// them: every Mono of kind `group` has one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group: Option<groups::Group>,
+    /// Each member's seat this app made in the group, by member id. Kept
+    /// apart from `group`, which follows the desktop's edits; the desktop's
+    /// own seats stay in `group.seats`.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub seats: std::collections::BTreeMap<String, i64>,
 }
 
 /// What a Mono's sessions start with when it names no provider, model or
@@ -163,6 +172,8 @@ impl Default for Mono {
             bot_role: None,
             specialty: None,
             bot_tools: None,
+            group: None,
+            seats: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -516,7 +527,8 @@ pub fn context(
 /// A fresh provider session gets a bounded brief; the saved chat stays whole.
 pub fn rotation_brief(rows: &[Row]) -> String {
     let mut exchanges: Vec<(String, String)> = Vec::new();
-    for row in rows {
+    // A group's marks describe the message after them; they say nothing.
+    for row in rows.iter().filter(|row| !groups::native::is_mark(row)) {
         if row.is_prompt() {
             if row.first || exchanges.is_empty() {
                 exchanges.push((row.text.clone(), String::new()));
