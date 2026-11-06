@@ -147,13 +147,22 @@ pub fn resolve_auto(kind: Kind) -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(key).filter(|s| !s.is_empty()) {
         return Some(path.into());
     }
+    std::iter::once(kind.binary_name())
+        .chain(kind.binary_aliases().iter().copied())
+        .find_map(|name| resolve_named(kind, name))
+}
+/// The `agy` CLI, rather than the standalone ACP server wrapper.
+pub(crate) fn antigravity_cli(binary: &Path) -> bool {
+    binary.file_stem().is_some_and(|name| name == "agy")
+}
+fn resolve_named(kind: Kind, name: &str) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Some(std::ffi::OsString::from(
         crate::scm::shell::gui_search_path(),
     ))
     .into_iter()
     .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
     .filter(|p| !p.as_os_str().is_empty())
-    .map(|p| p.join(kind.binary_name()))
+    .map(|p| p.join(name))
     .collect();
     if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
         let home = PathBuf::from(home);
@@ -164,7 +173,7 @@ pub fn resolve_auto(kind: Kind) -> Option<PathBuf> {
             ".cargo/bin",
             "n/bin",
         ]) {
-            candidates.push(home.join(dir).join(kind.binary_name()));
+            candidates.push(home.join(dir).join(name));
         }
         if kind == Kind::Claude {
             candidates.push(home.join(".claude/local/claude"));
@@ -186,7 +195,7 @@ pub fn resolve_auto(kind: Kind) -> Option<PathBuf> {
             candidates.extend(versions.into_iter().rev());
         }
         #[cfg(windows)]
-        candidates.push(home.join("AppData/Roaming/npm").join(kind.binary_name()));
+        candidates.push(home.join("AppData/Roaming/npm").join(name));
     }
     for dir in [
         "/opt/homebrew/bin",
@@ -194,7 +203,7 @@ pub fn resolve_auto(kind: Kind) -> Option<PathBuf> {
         "/usr/bin",
         "/snap/bin",
     ] {
-        candidates.push(Path::new(dir).join(kind.binary_name()));
+        candidates.push(Path::new(dir).join(name));
     }
     if matches!(kind, Kind::Cursor | Kind::Pi) {
         let alias = if kind == Kind::Cursor {
@@ -1660,11 +1669,13 @@ fn run_operation(
         _ => acp::configure(&mut command, &request)?,
     }
     command
-        .current_dir(if request.kind == Kind::Antigravity {
-            request.binary.parent().unwrap_or(&request.cwd)
-        } else {
-            &request.cwd
-        })
+        .current_dir(
+            if request.kind == Kind::Antigravity && !antigravity_cli(&request.binary) {
+                request.binary.parent().unwrap_or(&request.cwd)
+            } else {
+                &request.cwd
+            },
+        )
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());

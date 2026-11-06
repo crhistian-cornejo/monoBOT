@@ -51,7 +51,8 @@ fn launch(value: &Value) -> Option<Value> {
     let cwd = value["cwd"].as_str()?.trim();
     let model = value["model"].as_str()?.trim();
     let harness = value["harness"].as_str()?;
-    // Match desktop HARNESSES, including providers not yet executable natively.
+    // Match desktop HARNESSES, including providers not yet executable natively,
+    // plus Kimi, which only the native app runs.
     if cwd.is_empty()
         || model.is_empty()
         || ![
@@ -66,6 +67,7 @@ fn launch(value: &Value) -> Option<Value> {
             "antigravity",
             "devin",
             "droid",
+            "kimi",
             "grok",
         ]
         .contains(&harness)

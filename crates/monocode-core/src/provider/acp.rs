@@ -52,7 +52,13 @@ pub(super) fn configure(command: &mut Command, request: &Request) -> Result<(), 
     let settings = &request.settings;
     match request.kind {
         Kind::Antigravity => {
-            if cfg!(target_os = "linux") {
+            if super::antigravity_cli(&request.binary) {
+                // `agy acp` has no session modes; full access is a launch flag.
+                command.arg("acp");
+                if settings.access == AccessMode::FullAccess && !settings.plan {
+                    command.arg("--dangerously-skip-permissions");
+                }
+            } else if cfg!(target_os = "linux") {
                 command.arg("--uid=");
             }
         }
@@ -395,6 +401,17 @@ impl Protocol {
                     "build"
                 }
             }
+            Kind::Kimi => {
+                if planning {
+                    "plan"
+                } else {
+                    match settings.access {
+                        AccessMode::FullAccess => "yolo",
+                        AccessMode::Supervised => "default",
+                        _ => "auto",
+                    }
+                }
+            }
             // Cursor's Tauri adapter enforces planning in request_permission;
             // it does not require or change the server's session mode.
             Kind::Cursor => "",
@@ -403,10 +420,10 @@ impl Protocol {
         let modes = setup["modes"]["availableModes"].as_array();
         if !mode.is_empty()
             && (modes.is_some_and(|modes| modes.iter().any(|m| m["id"] == mode))
-                || matches!(
+                || (matches!(
                     kind,
                     Kind::Antigravity | Kind::Hermes | Kind::Devin | Kind::Fx
-                ))
+                ) && !super::antigravity_cli(&self.request.binary)))
         {
             self.acp.mode = Some(mode);
         }
@@ -1716,6 +1733,50 @@ mod tests {
             let events = p.frame(json!({"id":"permission","method":"session/request_permission","params":{"toolCall":{"kind":"execute"},"options":[{"kind":"allow_once","optionId":"yes"},{"kind":"reject_once","optionId":"no"}]}}), &mut out).unwrap();
             assert!(events.is_empty());
             assert_eq!(last(&mut out)["result"]["outcome"]["optionId"], "no");
+        }
+    }
+    #[test]
+    fn antigravity_runs_from_the_agy_cli_without_session_modes() {
+        let args = |p: &Protocol| {
+            let mut command = Command::new("unused");
+            configure(&mut command, &p.request).unwrap();
+            command
+                .get_args()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+        };
+        let mut p = protocol(Kind::Antigravity);
+        p.request.binary = "/home/me/.local/bin/agy".into();
+        p.request.settings.access = AccessMode::FullAccess;
+        assert_eq!(args(&p), ["acp", "--dangerously-skip-permissions"]);
+        p.request.settings.access = AccessMode::Supervised;
+        assert_eq!(args(&p), ["acp"]);
+        p.acp.session = "saved".into();
+        p.acp_options(&json!({})).unwrap();
+        assert!(p
+            .acp
+            .options
+            .iter()
+            .all(|(method, _)| *method != "session/set_mode"));
+        p.request.binary = "/home/me/.local/bin/agy_acp_server.par".into();
+        assert!(!args(&p).contains(&"acp".to_string()));
+    }
+    #[test]
+    fn kimi_maps_access_to_its_session_modes() {
+        let modes = json!({"modes":{"availableModes":[{"id":"default"},{"id":"plan"},{"id":"auto"},{"id":"yolo"}]}});
+        for (access, plan, mode) in [
+            (AccessMode::Supervised, false, "default"),
+            (AccessMode::Auto, false, "auto"),
+            (AccessMode::FullAccess, false, "yolo"),
+            (AccessMode::FullAccess, true, "plan"),
+            (AccessMode::ReadOnly, false, "plan"),
+        ] {
+            let mut p = protocol(Kind::Kimi);
+            p.request.settings.access = access;
+            p.request.settings.plan = plan;
+            p.acp.session = "saved".into();
+            p.acp_options(&modes).unwrap();
+            assert_eq!(p.acp.mode, Some(mode));
         }
     }
 }

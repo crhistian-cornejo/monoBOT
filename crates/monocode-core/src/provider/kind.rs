@@ -13,9 +13,11 @@ pub enum Kind {
     Hermes,
     Devin,
     Droid,
+    /// Kimi Code serves ACP from `kimi acp`. Only the native app runs it.
+    Kimi,
 }
 impl Kind {
-    pub const ALL: [Self; 12] = [
+    pub const ALL: [Self; 13] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -28,6 +30,7 @@ impl Kind {
         Self::Antigravity,
         Self::Devin,
         Self::Droid,
+        Self::Kimi,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -43,6 +46,7 @@ impl Kind {
             Self::Hermes => "hermes",
             Self::Devin => "devin",
             Self::Droid => "droid",
+            Self::Kimi => "kimi",
         }
     }
     pub fn label(self) -> &'static str {
@@ -59,6 +63,7 @@ impl Kind {
             Self::Hermes => "Hermes Agent",
             Self::Devin => "Devin",
             Self::Droid => "Droid",
+            Self::Kimi => "Kimi Code",
         }
     }
     pub fn parse(id: &str) -> Option<Self> {
@@ -74,6 +79,15 @@ impl Kind {
             _ => self.id(),
         }
     }
+    /// Other names the binary goes by, tried after [`Self::binary_name`].
+    /// Antigravity's `agy` CLI serves the same ACP server as the standalone
+    /// wrapper, from `agy acp`.
+    pub(super) fn binary_aliases(self) -> &'static [&'static str] {
+        match self {
+            Self::Antigravity => &["agy"],
+            _ => &[],
+        }
+    }
     pub(super) fn install_dirs(self) -> &'static [&'static str] {
         match self {
             Self::Grok => &[".grok/bin"],
@@ -81,6 +95,7 @@ impl Kind {
             Self::Fx => &[".fx/bin"],
             Self::Antigravity => &[".local/share/agy-acp"],
             Self::Droid => &[".factory/bin"],
+            Self::Kimi => &[".kimi-code/bin"],
             Self::Hermes => &[
                 ".hermes/hermes-agent/venv/bin",
                 ".hermes/hermes-agent/.venv/bin",
@@ -112,6 +127,7 @@ impl Kind {
             Self::Hermes => "Hermes Agent CLI",
             Self::Devin => "Devin CLI",
             Self::Droid => "Droid CLI",
+            Self::Kimi => "Kimi Code CLI",
         }
     }
     /// The install command React shows in its hint, when it has one.
@@ -129,7 +145,12 @@ impl Kind {
             Self::Devin => Some("irm https://static.devin.ai/cli/setup.ps1 | iex"),
             #[cfg(not(windows))]
             Self::Devin => Some("curl -fsSL https://cli.devin.ai/install.sh | bash"),
-            Self::Codex | Self::Claude | Self::Cursor | Self::OpenCode | Self::Antigravity => None,
+            Self::Codex
+            | Self::Claude
+            | Self::Cursor
+            | Self::OpenCode
+            | Self::Antigravity
+            | Self::Kimi => None,
         }
     }
     /// The same "not found" copy React uses. React only checks that a binary
@@ -155,7 +176,9 @@ mod tests {
         let source = include_str!("../../../../src/integrations/harness/core/register.ts");
         for kind in Kind::ALL {
             assert_eq!(Kind::parse(kind.id()), Some(kind));
-            assert!(source.contains(&format!("../providers/{}/", kind.id())));
+            if kind != Kind::Kimi {
+                assert!(source.contains(&format!("../providers/{}/", kind.id())));
+            }
         }
         assert_eq!(Kind::parse("unknown"), None);
         assert_eq!(Kind::Cursor.binary_name(), "cursor-agent");
@@ -178,7 +201,7 @@ mod tests {
     #[test]
     fn hints_match_the_react_source() {
         let source = include_str!("../../../../src/integrations/harness/core/availability.ts");
-        for kind in Kind::ALL {
+        for kind in Kind::ALL.into_iter().filter(|kind| *kind != Kind::Kimi) {
             assert!(
                 source.contains(&format!("\"{}\"", kind.install_name())),
                 "React is missing the install name for {}",
