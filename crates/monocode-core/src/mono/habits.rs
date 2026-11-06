@@ -1,9 +1,14 @@
 //! The React Mono habit schedule, claiming and run-history policy.
 use super::files;
+use super::outcomes::ReportStatus;
 use chrono::{DateTime, Datelike, Duration, Local, Timelike};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::path::Path;
 pub const MAX: usize = 20;
+/// Runs kept per habit, newest first.
+pub const RUNS_KEPT: usize = 20;
+/// Longest report kept with a run.
+pub const REPORT_KEPT_CHARS: usize = 4000;
 pub const GRACE_MS: u64 = 2 * 60 * 60 * 1000;
 pub const TIMEOUT_MS: u64 = 60 * 60 * 1000;
 pub const APPROVAL_WAIT_MS: u64 = 12 * 60 * 60 * 1000;
@@ -126,9 +131,26 @@ pub struct Habit {
     pub running_since: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub from_card: Option<String>,
+    /// A wake the agent set for itself: it runs once at `next_run_at` and is
+    /// then removed. Written as `"once": true`, and only when true.
+    #[serde(
+        default,
+        deserialize_with = "only_true",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub once: bool,
 }
 fn yes() -> bool {
     true
+}
+/// The desktop app honours `once` only when it is exactly `true`.
+fn only_true<'de, D: Deserializer<'de>>(d: D) -> Result<bool, D::Error> {
+    Ok(serde_json::Value::deserialize(d)? == serde_json::Value::Bool(true))
+}
+/// The desktop app keeps a run's status only when it is one of the four known
+/// values, and an unknown one must not discard the run.
+fn known_status<'de, D: Deserializer<'de>>(d: D) -> Result<Option<ReportStatus>, D::Error> {
+    Ok(serde_json::from_value(serde_json::Value::deserialize(d)?).unwrap_or(None))
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -138,6 +160,13 @@ pub struct Run {
     pub duration_ms: u64,
     pub outcome: String,
     pub report: Option<String>,
+    /// Where the report stands (see [`ReportStatus`]); absent on plain runs.
+    #[serde(
+        default,
+        deserialize_with = "known_status",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub status: Option<ReportStatus>,
     pub error: Option<String>,
 }
 impl Habit {
@@ -170,7 +199,88 @@ impl Habit {
             run_requested: false,
             running_since: None,
             from_card: None,
+            once: false,
         })
+    }
+    /// When the habit runs, as its row says it: "Once, Thu 09:30" for a wake.
+    pub fn when_label(&self) -> String {
+        if !self.once {
+            return self.schedule.label();
+        }
+        match DateTime::from_timestamp_millis(self.next_run_at as i64) {
+            Some(at) => format!("Once, {}", at.with_timezone(&Local).format("%a %H:%M")),
+            None => "Once".into(),
+        }
+    }
+    /// The habit as `habits.list` and friends show it to an agent.
+    pub fn view(&self) -> serde_json::Value {
+        use serde_json::{json, Map, Value};
+        let local = |ms: u64| {
+            DateTime::from_timestamp_millis(ms as i64)
+                .map(|at| {
+                    at.with_timezone(&Local)
+                        .format("%Y-%m-%d %H:%M")
+                        .to_string()
+                })
+                .unwrap_or_default()
+        };
+        let mut view = Map::new();
+        view.insert("id".into(), json!(self.id));
+        view.insert("name".into(), json!(self.name));
+        view.insert("instructions".into(), json!(self.instructions));
+        view.insert("schedule".into(), json!(self.when_label()));
+        if self.once {
+            view.insert("wake".into(), json!(true));
+        }
+        view.insert("enabled".into(), json!(self.enabled));
+        view.insert(
+            "nextRun".into(),
+            if self.enabled {
+                json!(local(self.next_run_at))
+            } else {
+                Value::Null
+            },
+        );
+        if self.running_since.is_some() {
+            view.insert("running".into(), json!(true));
+        }
+        if let Some(at) = self.last_run_at.filter(|at| *at != 0) {
+            view.insert("lastRun".into(), json!(local(at)));
+            if let Some(outcome) = &self.last_outcome {
+                view.insert("lastOutcome".into(), json!(outcome));
+            }
+            if let Some(error) = self.last_error.as_ref().filter(|e| !e.is_empty()) {
+                view.insert("lastError".into(), json!(error));
+            }
+        }
+        Value::Object(view)
+    }
+    /// Takes the habit's next run at `now`: marks it running and moves the
+    /// schedule on. A manual run (`run_requested`) leaves a pending time alone.
+    /// A wake keeps its time and stays enabled while it runs; it is removed
+    /// when the run is recorded (see `outcomes::record_run`).
+    pub fn claim(&mut self, now: u64) -> Result<(), String> {
+        self.running_since = Some(now);
+        let manual = std::mem::take(&mut self.run_requested);
+        if !self.once && (!manual || self.next_run_at <= now) {
+            self.next_run_at = self.schedule.next(now)?;
+        }
+        Ok(())
+    }
+    /// Moves a habit that came due longer ago than the grace period (the app
+    /// was closed) on to its next time instead of catching up. A missed wake
+    /// has no next time, so it is switched off.
+    pub fn skip_missed(&mut self, now: u64) -> Result<(), String> {
+        if self.enabled && self.next_run_at < now && now - self.next_run_at > GRACE_MS {
+            if self.once {
+                if !self.run_requested {
+                    self.enabled = false;
+                }
+            } else {
+                self.next_run_at = self.schedule.next(now)?;
+            }
+        }
+        Ok(())
     }
     pub fn due(&self, now: u64) -> bool {
         self.running_since.is_none()
@@ -183,7 +293,7 @@ impl Habit {
         self.last_error = run.error.clone();
         self.running_since = None;
         self.runs.insert(0, run);
-        self.runs.truncate(20);
+        self.runs.truncate(RUNS_KEPT);
         Ok(())
     }
 }
@@ -211,7 +321,7 @@ fn parse(text: Option<&str>) -> Result<Vec<Habit>, String> {
                     .filter(|run| {
                         ["posted", "quiet", "failed", "interrupted"].contains(&run.outcome.as_str())
                     })
-                    .take(20)
+                    .take(RUNS_KEPT)
                     .collect();
                 *items = serde_json::to_value(runs).ok()?;
             }

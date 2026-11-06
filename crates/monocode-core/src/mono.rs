@@ -12,6 +12,8 @@ pub mod files;
 pub mod habits;
 pub mod heartbeat;
 pub mod memory;
+pub mod outcomes;
+pub mod wakes;
 pub mod work;
 pub(crate) use desktop::codex_home;
 #[cfg(test)]
