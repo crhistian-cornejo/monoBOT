@@ -346,8 +346,8 @@ impl Shell {
         } else {
             sidebar_width
         };
-        // The right panel runs full height beside the workspace column, so
-        // opening it pushes the tabs, body and footer together.
+        // The right panel runs beside the workspace column above the footer,
+        // so opening it pushes the tabs and body while the footer spans across.
         let card = self.workspace_content(false, right_width, full, window, cx);
         let panel = self
             .right_panel
@@ -428,8 +428,6 @@ impl Shell {
             })
             .child(
                 div()
-                    .id("main-pane-frame")
-                    .debug_selector(|| "main-pane-frame".into())
                     .flex_1()
                     .min_w_0()
                     .h_full()
@@ -450,8 +448,28 @@ impl Shell {
                                 .bg(pane_fill()),
                         )
                     })
-                    .children(tab_bar)
-                    .child(card)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_h_0()
+                            .min_w_0()
+                            .flex()
+                            .child(
+                                div()
+                                    .id("main-pane-frame")
+                                    .debug_selector(|| "main-pane-frame".into())
+                                    .flex_1()
+                                    .min_w_0()
+                                    .h_full()
+                                    .flex()
+                                    .flex_col()
+                                    .children(tab_bar)
+                                    .child(card),
+                            )
+                            .children(
+                                panel.map(|panel| div().h_full().bg(pane_fill()).child(panel)),
+                            ),
+                    )
                     .children(footer.map(|footer| {
                         footer
                             .h(px(28.))
@@ -461,7 +479,6 @@ impl Shell {
                     })),
             )
             .children(self.sidebar_resize(cx))
-            .children(panel.map(|panel| div().h_full().bg(pane_fill()).child(panel)))
             .when(show_navigation, |d| {
                 d.child(
                     // The traffic lights, toggle and arrows ride above the sidebar's

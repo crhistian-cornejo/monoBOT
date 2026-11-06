@@ -11277,6 +11277,12 @@ mod tests {
                 .unwrap()
         };
         let closed_corner = corner(cx);
+        let footer_terminal = |cx: &mut TestAppContext| {
+            gpui::VisualTestContext::from_window(window.into(), cx)
+                .debug_bounds("footer-terminal")
+                .unwrap()
+        };
+        let closed_terminal = footer_terminal(cx);
         assert_eq!(closed_corner.top(), px(TITLE_BAR_HEIGHT / 2. - 12.));
         assert!(tabs.right() <= closed_corner.left());
         window
@@ -11286,7 +11292,12 @@ mod tests {
             })
             .unwrap();
         let (_, main_open, _) = frames(cx);
+        let panel_open = gpui::VisualTestContext::from_window(window.into(), cx)
+            .debug_bounds("right-panel-frame")
+            .unwrap();
         assert_eq!(corner(cx), closed_corner);
+        assert_eq!(footer_terminal(cx), closed_terminal);
+        assert!(panel_open.bottom() <= closed_terminal.top());
         assert!(main_open.right() < main.right());
         // Open, the tools start at the panel's left edge as it is resized;
         // the toggle stays at the window's right edge.
