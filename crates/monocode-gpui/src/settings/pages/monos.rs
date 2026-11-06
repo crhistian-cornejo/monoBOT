@@ -1,10 +1,164 @@
 use crate::settings::SettingsView;
 use crate::{
-    settings::{SettingsEvent, management::Target, widgets::icon_action},
+    settings::{
+        SettingsEvent,
+        management::Target,
+        widgets::{icon_action, secondary_button},
+    },
     theme::*,
 };
 use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
+/// A status line under the buttons: red for an error.
+fn status_line(id: &'static str, text: String, error: bool) -> AnyElement {
+    div()
+        .id(id)
+        .debug_selector(move || format!("settings-{id}"))
+        .role(if error {
+            gpui::Role::Alert
+        } else {
+            gpui::Role::Status
+        })
+        .max_w(px(320.))
+        .text_size(px(11.))
+        .line_height(px(16.))
+        .text_align(gpui::TextAlign::Right)
+        .text_color(if error {
+            gpui::rgb(0xf87171).into()
+        } else {
+            content(0.5)
+        })
+        .child(text)
+        .into_any_element()
+}
 impl SettingsView {
+    #[cfg(test)]
+    pub(crate) fn bots_status(&self) -> Option<&(String, bool)> {
+        self.bots_status.as_ref()
+    }
+    /// The line under Export and Import: what the last one did.
+    pub(crate) fn set_bots_status(
+        &mut self,
+        status: Option<(String, bool)>,
+        cx: &mut Context<Self>,
+    ) {
+        self.bots_status = status;
+        cx.notify();
+    }
+    /// BotTransferControls and BotSyncControls, in their two rows.
+    fn bots_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let transfer = {
+            let mut column = div().flex().flex_col().items_end().gap(px(6.)).child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        secondary_button("bots-export", "Export bots", false, false)
+                            .debug_selector(|| "settings-bots-export".into())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.bots_status = None;
+                                cx.emit(SettingsEvent::BotsExport);
+                                cx.notify();
+                            })),
+                    )
+                    .child(
+                        secondary_button("bots-import", "Import bots", false, false)
+                            .debug_selector(|| "settings-bots-import".into())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.bots_status = None;
+                                cx.emit(SettingsEvent::BotsImport);
+                                cx.notify();
+                            })),
+                    ),
+            );
+            if let Some((text, error)) = self.bots_status.clone() {
+                column = column.child(status_line("bots-transfer-status", text, error));
+            }
+            column.into_any_element()
+        };
+        let sync = {
+            let view = self.ctx.bot_sync.clone();
+            let folder = view.folder.clone();
+            let mut buttons = div().flex().gap_2();
+            if folder.is_some() {
+                buttons = buttons
+                    .child(
+                        secondary_button("bots-sync-now", "Sync now", false, false)
+                            .debug_selector(|| "settings-bots-sync-now".into())
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::BotSyncNow)),
+                            ),
+                    )
+                    .child(
+                        secondary_button("bots-sync-off", "Turn off", false, false)
+                            .debug_selector(|| "settings-bots-sync-off".into())
+                            .on_click(
+                                cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::BotSyncOff)),
+                            ),
+                    );
+            }
+            buttons = buttons.child(
+                secondary_button(
+                    "bots-sync-choose",
+                    if folder.is_some() {
+                        "Change folder"
+                    } else {
+                        "Choose folder"
+                    },
+                    false,
+                    false,
+                )
+                .debug_selector(|| "settings-bots-sync-choose".into())
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::BotSyncChoose))),
+            );
+            let mut column = div()
+                .flex()
+                .flex_col()
+                .items_end()
+                .gap(px(6.))
+                .child(buttons);
+            if let Some(folder) = folder {
+                column = column.child(status_line("bots-sync-folder", folder, false));
+                if let Some(status) = view.status {
+                    let at = chrono::DateTime::from_timestamp_millis(status.at as i64)
+                        .map(|at| {
+                            at.with_timezone(&chrono::Local)
+                                .format("%-I:%M %p")
+                                .to_string()
+                        })
+                        .unwrap_or_default();
+                    column = column.child(status_line(
+                        "bots-sync-status",
+                        format!("{} \u{b7} {at}", status.text),
+                        status.error == Some(true),
+                    ));
+                }
+            }
+            column.into_any_element()
+        };
+        self.group(
+            None,
+            false,
+            "Bots on another computer",
+            None,
+            None,
+            vec![
+                self.row(
+                    Some("bots-transfer"),
+                    true,
+                    "Export and import bots",
+                    Some("Save every bot (its instructions, memory, habits, tools, model and permissions) to a file, then import it on your other computer, Windows or Mac. A bot that already exists there is compared with the imported one before you choose which to keep. Folders you opened to a bot stay on each computer.".into()),
+                    vec![transfer],
+                ),
+                self.row(
+                    Some("bots-sync"),
+                    false,
+                    "Keep bots in sync",
+                    Some("Choose a folder your computers already share (OneDrive, iCloud Drive, Google Drive, Dropbox). Each computer writes its own file there and reads the others' every couple of minutes: a bot changed on one updates on the other, a new one appears, and one changed on both opens the comparison so you choose.".into()),
+                    vec![sync],
+                ),
+            ],
+        )
+    }
     pub(super) fn monos_page(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = self.prefs.clone();
         let mut rows=vec![
@@ -95,6 +249,6 @@ impl SettingsView {
         if roster.is_empty() {
             roster.push(super::super::widgets::note("No monos yet."));
         }
-        vec![self.group(None,true,"Monos",None,None,rows),self.group(Some("mono-list"),false,"Your monos",Some("Show or hide sessions started by each Mono. Hidden sessions remain available from the Mono's chat.".into()),None,roster)]
+        vec![self.group(None,true,"Monos",None,None,rows),self.group(Some("mono-list"),false,"Your monos",Some("Show or hide sessions started by each Mono. Hidden sessions remain available from the Mono's chat.".into()),None,roster),self.bots_group(cx)]
     }
 }

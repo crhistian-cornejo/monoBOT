@@ -1,17 +1,137 @@
 use crate::{
     settings::{
-        SettingsView,
+        SettingsEvent, SettingsView,
         management::Target,
         widgets::{note, secondary_button},
     },
     theme::*,
 };
-use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
+use gpui::{AnyElement, Context, FontWeight, Role, SharedString, div, prelude::*, px};
+use monocode_core::connectors::{self, Platform, Server};
 impl SettingsView {
+    /// BuiltInConnectors: MonoBOT's own remote MCP servers, one switch each.
+    /// Poki's setup panel waits for the Poki port.
+    fn connectors_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let settings = self.ctx.connectors.clone();
+        let rows = connectors::available_connectors(Platform::current())
+            .into_iter()
+            .enumerate()
+            .map(|(ix, connector)| {
+                let on = settings.is_enabled(connector);
+                let id = connector.id;
+                let site = connector.site;
+                let wraps = matches!(
+                    connector.server,
+                    Server::Stdio {
+                        checkout: Some(_),
+                        ..
+                    }
+                );
+                div()
+                    .id(SharedString::from(format!("connector-{id}")))
+                    .debug_selector(move || format!("settings-connector-{id}"))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_4()
+                    .px_3()
+                    .py(px(10.))
+                    .when(ix > 0, |d| d.border_t_1().border_color(content(0.1)))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(6.))
+                                    .child(
+                                        div()
+                                            .id(SharedString::from(format!("connector-site-{id}")))
+                                            .role(Role::Link)
+                                            .aria_label(connector.name)
+                                            .min_w_0()
+                                            .truncate()
+                                            .text_size(px(13.))
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .cursor_pointer()
+                                            .hover(|s| s.underline())
+                                            .child(connector.name)
+                                            .on_click(move |_, _, cx| cx.open_url(site)),
+                                    )
+                                    .when(connector.experimental, |d| {
+                                        d.child(
+                                            div()
+                                                .h(px(16.))
+                                                .flex_shrink_0()
+                                                .flex()
+                                                .items_center()
+                                                .px_1()
+                                                .bg(accent_color().opacity(0.1))
+                                                .text_color(accent_color())
+                                                .text_size(px(10.))
+                                                .line_height(px(10.))
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .child("EXPERIMENTAL"),
+                                        )
+                                    }),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .line_height(px(16.))
+                                    .text_color(content(0.55))
+                                    .when(!wraps, |d| d.truncate())
+                                    .child(connector.description),
+                            ),
+                    )
+                    .child(self.toggle(
+                        id,
+                        format!("{} connector", connector.name),
+                        on,
+                        false,
+                        cx,
+                        move |_, on, cx| cx.emit(SettingsEvent::Connector(id.into(), on)),
+                    ))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        div()
+            .relative()
+            .mb_10()
+            .child(self.reveal_probe("connectors"))
+            .child(
+                div()
+                    .child(
+                        div()
+                            .text_size(px(14.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Connectors"),
+                    )
+                    .child(
+                        div()
+                            .mt_1()
+                            .text_size(px(12.))
+                            .text_color(content(0.55))
+                            .child("Remote MCP servers MonoBOT adds to each Claude turn. Nothing is installed and your Claude Code configuration stays untouched. Their read-only tools run without asking."),
+                    ),
+            )
+            .child(
+                div()
+                    .mt_3()
+                    .border_1()
+                    .border_color(content(0.1))
+                    .flex()
+                    .flex_col()
+                    .children(rows),
+            )
+            .into_any_element()
+    }
     pub(super) fn mcp_page(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let project = self.project_picker(cx);
         let busy = self.mcp_busy || self.management.as_ref().is_some_and(|e| e.busy);
         let mut page = vec![
+            self.connectors_section(cx),
             div()
                 .relative()
                 .child(self.reveal_probe("mcp-servers"))

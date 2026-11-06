@@ -87,6 +87,8 @@ pub(crate) struct Completion {
     selected_mcp: Vec<(String, monocode_core::mcp::McpConnection)>,
     mcp_open: bool,
     disabled_paths: Vec<String>,
+    /// The skill packs turned on in Settings, whose skills /name offers.
+    packs: Vec<String>,
     known: std::collections::HashSet<String>,
     files: Vec<ProjectFile>,
     /// `@name` → `@relative/path` for file names unique in the project; the
@@ -154,6 +156,7 @@ impl Completion {
             selected_mcp: Vec::new(),
             mcp_open: false,
             disabled_paths: Vec::new(),
+            packs: Vec::new(),
             known: [
                 "/plan",
                 "/operator",
@@ -400,8 +403,10 @@ impl Completion {
             .try_global::<crate::settings::Preferences>()
             .map(|p| p.disabled_skill_paths.clone())
             .unwrap_or_default();
-        if self.disabled_paths != disabled {
+        let packs = monocode_core::connectors::session_packs();
+        if self.disabled_paths != disabled || self.packs != packs {
             self.disabled_paths = disabled;
+            self.packs = packs;
             self.loaded = None;
             self.token = None;
         }
@@ -501,6 +506,7 @@ impl Completion {
         let cwd = self.cwd.clone();
         let generation = self.generation;
         let disabled = self.disabled_paths.clone();
+        let packs = self.packs.clone();
         let store = self.store.clone();
         let work = cx.background_executor().spawn(async move {
             let notes = store
@@ -510,8 +516,14 @@ impl Completion {
                         .and_then(|s| s.list_notes().ok())
                 })
                 .unwrap_or_default();
-            let skills =
-                monocode_core::skills::list_skills(cwd.clone(), Some(disabled)).unwrap_or_default();
+            // The packs turned on in Settings join the skills (enabledPackDirs).
+            let pack_dirs = monocode_core::skills::bundled::bundled_plugin_dirs(&packs);
+            let skills = monocode_core::skills::list_skills_with_packs(
+                cwd.clone(),
+                Some(disabled),
+                &pack_dirs,
+            )
+            .unwrap_or_default();
             let files =
                 monocode_core::files::list_project_files_sync_cancellable(&cwd, Some(&cancel));
             let mcp = monocode_core::mcp::mcp_discover(cwd).unwrap_or_default();

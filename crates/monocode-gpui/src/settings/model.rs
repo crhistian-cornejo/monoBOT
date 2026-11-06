@@ -189,6 +189,12 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         "router port upnp nat remote address public hostname vpn wifi",
     ),
     (
+        "connectors",
+        Section::Mcp,
+        "Connectors",
+        "mcp remote http context7 microsoft learn deepwiki x twitter openalex papers docs built-in",
+    ),
+    (
         "mcp-servers",
         Section::Mcp,
         "MCP servers",
@@ -211,6 +217,18 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         Section::Monos,
         "Your monos",
         "mono reset soul name projects sessions sidebar visibility hidden show",
+    ),
+    (
+        "bots-transfer",
+        Section::Monos,
+        "Export and import bots",
+        "bots export import backup move mac windows another computer file sync",
+    ),
+    (
+        "bots-sync",
+        Section::Monos,
+        "Keep bots in sync",
+        "bots sync onedrive icloud dropbox google drive folder mac windows automatic",
     ),
     (
         "project-worktrees",

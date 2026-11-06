@@ -1,6 +1,6 @@
 use crate::{
     settings::{
-        SettingsView,
+        SettingsEvent, SettingsView,
         management::Target,
         widgets::{icon_action, note, page_header, secondary_button},
     },
@@ -9,7 +9,108 @@ use crate::{
 use gpui::{
     AnyElement, ClipboardItem, Context, Focusable, Role, SharedString, div, prelude::*, px,
 };
+use monocode_core::skills::bundled::SKILL_PACKS;
 impl SettingsView {
+    /// SkillPacksCard: the skill packs MonoBOT ships, each off until turned on.
+    fn skill_packs_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let rows = SKILL_PACKS
+            .iter()
+            .enumerate()
+            .map(|(ix, pack)| {
+                let on = self.ctx.packs.iter().any(|id| id == pack.id);
+                let id = pack.id;
+                let skills = pack.skills.join(" · ")
+                    + &pack
+                        .needs
+                        .map(|n| format!(" · needs {n}"))
+                        .unwrap_or_default();
+                div()
+                    .id(SharedString::from(format!("skill-pack-{id}")))
+                    .debug_selector(move || format!("settings-skill-pack-{id}"))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_4()
+                    .px_4()
+                    .py(px(10.))
+                    .when(ix > 0, |d| d.border_t_1().border_color(content(0.1)))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .text_size(px(13.))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(pack.name)
+                                    .child(
+                                        div()
+                                            .ml_2()
+                                            .text_size(px(11.))
+                                            .font_weight(gpui::FontWeight::NORMAL)
+                                            .text_color(content(0.4))
+                                            .child(format!("{} skills", pack.skills.len())),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.))
+                                    .line_height(px(16.))
+                                    .text_color(content(0.55))
+                                    .child(pack.description),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .line_height(px(16.))
+                                    .text_color(content(0.4))
+                                    .child(skills),
+                            ),
+                    )
+                    .child(self.toggle(
+                        id,
+                        format!("{} skill pack", pack.name),
+                        on,
+                        false,
+                        cx,
+                        move |_, on, cx| cx.emit(SettingsEvent::SkillPack(id.into(), on)),
+                    ))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        div()
+            .relative()
+            .mb_6()
+            .child(self.reveal_probe("skill-packs"))
+            .child(
+                div()
+                    .pb_2()
+                    .child(
+                        div()
+                            .text_size(px(13.))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .child("Skill packs"),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.))
+                            .line_height(px(16.))
+                            .text_color(content(0.55))
+                            .child("Skills from Claude Code and Codex that MonoBOT carries with it. Claude loads a pack you turn on in every new session; other agents follow a skill when you call it with /name. Give a bot a pack in its tools."),
+                    ),
+            )
+            .child(
+                div()
+                    .border_1()
+                    .border_color(content(0.1))
+                    .flex()
+                    .flex_col()
+                    .children(rows),
+            )
+            .into_any_element()
+    }
     fn skill_create_form(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let e = self.management.as_ref().expect("open skill form");
         let name = e.name.clone();
@@ -219,6 +320,7 @@ impl SettingsView {
                 "Skills",
                 "Discover and manage file skills from project, personal, and harness folders.",
             ))
+            .child(self.skill_packs_card(cx))
             .child(
                 div()
                     .flex()

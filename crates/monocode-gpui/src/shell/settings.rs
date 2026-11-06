@@ -64,6 +64,7 @@ impl Shell {
                 catalogs.insert(session.summary.provider.clone(), models);
             }
         }
+        let (connectors, packs) = monocode_core::connectors::session_state();
         SettingsContext {
             remote: Some(self.remote.clone()),
             mobile: self.mobile_status(),
@@ -123,6 +124,13 @@ impl Shell {
                 .iter()
                 .map(|path| (path.clone(), self.project_label(path)))
                 .collect(),
+            connectors,
+            packs,
+            bot_sync: self
+                .monos
+                .as_ref()
+                .map(|m| m.read(cx).sync_view())
+                .unwrap_or_default(),
         }
     }
     pub(super) fn open_settings(
@@ -245,6 +253,13 @@ impl Shell {
                 SettingsEvent::MobilePair => this.pair_mobile(cx),
                 SettingsEvent::MobileCancelInvite => this.mobile_cancel_invite(cx),
                 SettingsEvent::MobileRevoke(id) => this.mobile_revoke(id, cx),
+                SettingsEvent::Connector(id, on) => this.save_connector(id, *on, cx),
+                SettingsEvent::SkillPack(id, on) => this.save_skill_pack(id, *on, cx),
+                SettingsEvent::BotsExport => this.export_bots(cx),
+                SettingsEvent::BotsImport => this.import_bots(cx),
+                SettingsEvent::BotSyncChoose => this.choose_bot_sync_folder(cx),
+                SettingsEvent::BotSyncNow => this.bot_sync_now(cx),
+                SettingsEvent::BotSyncOff => this.bot_sync_folder(None, cx),
             },
         ));
         // This dialog is painted at the window root, like React's portal.
