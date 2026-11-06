@@ -6,6 +6,12 @@ use serde::Serialize;
 use std::{path::Path, sync::LazyLock};
 pub const MAX_LINES: usize = 200;
 pub const MAX_BYTES: usize = 24 * 1024;
+/// The team's shared memory lives in an agent folder of its own, which no
+/// agent owns: what every agent should know about the user, saved by any
+/// of them with `"shared":true` (TEAM_MEMORY_ID).
+pub const TEAM_MEMORY_ID: &str = "team-memory";
+/// Only this much of the team's memory loads into a turn.
+pub const TEAM_MAX_LINES: usize = 60;
 static SECRETS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
     [
         r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
@@ -61,6 +67,17 @@ pub fn topic(value: &str) -> Result<String, String> {
         return Err("Use a topic name containing letters, numbers, spaces, dots or dashes".into());
     }
     Ok(name.into())
+}
+/// The newest part of the team's memory that fits, whole lines only, and
+/// how many older lines were left out (teamMemoryWithinBudget).
+pub fn team_within_budget(text: &str) -> (String, usize) {
+    let lines: Vec<&str> = if text.trim().is_empty() {
+        Vec::new()
+    } else {
+        text.trim_end().lines().collect()
+    };
+    let dropped = lines.len().saturating_sub(TEAM_MAX_LINES);
+    (lines[dropped..].join("\n"), dropped)
 }
 pub fn within_budget(text: &str) -> String {
     let mut bytes = 0;
@@ -292,11 +309,30 @@ pub fn search(root: &Path, id: &str, query: &str, since: Option<&str>) -> Result
         })
         .transpose()?;
     let loaded = files::load(root, id, None)?;
-    let mut paths = vec!["MEMORY.md".into(), "memory/archive.md".into()];
-    paths.extend(loaded.topics.iter().map(|t| format!("memory/{t}.md")));
+    let mut paths: Vec<(String, String)> = ["MEMORY.md".to_owned(), "memory/archive.md".into()]
+        .into_iter()
+        .chain(loaded.topics.iter().map(|t| format!("memory/{t}.md")))
+        .map(|file| (file.clone(), file))
+        .collect();
+    // The team's memory and its archive, which every agent shares.
+    if id != TEAM_MEMORY_ID {
+        paths.extend(
+            ["MEMORY.md", "memory/archive.md"]
+                .map(|file| (format!("team:{file}"), file.to_owned())),
+        );
+    }
     let mut hits = Vec::new();
-    for file in paths {
-        let text = files::read(root, id, None, &file)?.text.unwrap_or_default();
+    for (file, path) in paths {
+        let owner = if file.starts_with("team:") {
+            TEAM_MEMORY_ID
+        } else {
+            id
+        };
+        let text = match files::read(root, owner, None, &path) {
+            Ok(read) => read.text.unwrap_or_default(),
+            Err(_) if owner == TEAM_MEMORY_ID => String::new(),
+            Err(error) => return Err(error),
+        };
         for line in text.lines() {
             let lower = line.to_lowercase();
             if line.contains("~~") || !words.iter().all(|w| lower.contains(w)) {

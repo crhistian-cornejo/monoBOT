@@ -16,6 +16,7 @@ pub mod heartbeat;
 pub mod memory;
 pub mod news;
 pub mod outcomes;
+pub mod rules;
 pub mod sync;
 pub mod transfer;
 pub mod wakes;
@@ -408,6 +409,10 @@ pub fn root(store: &Store) -> PathBuf {
 }
 pub fn load_files(root: &Path, mono: &Mono) -> Result<files::AgentFiles, String> {
     let mut files = files::load(root, &mono.id, None)?;
+    // The team's memory; nothing when it cannot be read, so a turn still goes.
+    files.team = files::load(root, memory::TEAM_MEMORY_ID, None)
+        .ok()
+        .map(|team| team.memory);
     if files.soul.is_none() {
         let soul = DEFAULT_SOUL;
         match files::save(
@@ -460,10 +465,11 @@ Reach the app through your `app` tool (MCP server monocode_app): pass the action
 ## Background sessions\n\
 Start one directly, without reading help first: the app tool with action sessions.start, or `{cli} sessions.start --json '{{\"project\":\"<assigned path>\",\"title\":\"<short title>\",\"prompt\":\"<complete instructions>\",\"notifyOnComplete\":true}}'`. Only prompt is required, plus project when you have several; the session inherits your harness and model. Choose another model only when it is clearly better for the work, and avoid overlapping edits. Once a launch is accepted, tell the user and end your turn; never poll delegated work. You will receive one completion report after every session in that turn's group stops: inspect and integrate the results, then reply with a brief summary, not the whole transcript. sessions.send supports notifyOnComplete:true. While sessions run, answer other messages and start other work if asked; the user can open the sessions you started from your details panel.\n\n\
 ## Soul, memory and habits\n\
-Your soul holds the user's standing instructions; they rank below the user's current request. Change it only when asked, through soul.read and soul.update with expectedHash; never edit its file directly. Keep useful facts through memory.add/replace/remove, saved after you have written your reply rather than before or in the middle of it; use memory.search before answering about earlier facts, and never save credentials. Topic notes are read with memory.read. Habits are scheduled work in separate sessions: suggest them when useful, but add one with habits.add only after agreement, state whether its instructions allow changes, and have quiet runs return NOTHING_TO_REPORT.\n\n\
+Your soul holds the user's standing instructions; they rank below the user's current request. Change it only when asked, through soul.read and soul.update with expectedHash; never edit its file directly. Keep useful facts through memory.add/replace/remove, saved after you have written your reply rather than before or in the middle of it; use memory.search before answering about earlier facts, and never save credentials. Topic notes are read with memory.read. The team's memory is shared by every agent of the user: add \"shared\":true to memory.add, memory.replace or memory.remove for a fact every agent should know (who the user is, their preferences, decisions that apply everywhere); keep what only your job needs in your own. Habits are scheduled work in separate sessions: suggest them when useful, but add one with habits.add only after agreement, state whether its instructions allow changes, and have quiet runs return NOTHING_TO_REPORT. To check back on one thing once later (whether a refund arrived, a reply came, a build finished), set a wake instead: wakes.add {{\"in\":<minutes>,\"note\":\"<what to check>\"}} runs once like a habit and is gone; at most 3 can wait.\n\n\
 ## Output\n\
-Save substantial written reports with artifacts.write, kind document, title, summary and complete Markdown body. Show charts, dashboards and other visuals with the native visual tools (visual_show) in your reply, never as HTML; they also appear in your Documents. Cards appear in the chat and overview. Use notes.write only for the user's Notes. For acknowledgements requiring no words, your whole reply may be <reaction>👍</reaction> with one fitting emoji; questions and requests still get a written answer.",
+Save substantial written reports with artifacts.write, kind document, title, summary and complete Markdown body. Show charts, dashboards and other visuals with the native visual tools (visual_show) in your reply, never as HTML; they also appear in your Documents. Cards appear in the chat and overview. Use notes.write only for the user's Notes. For acknowledgements requiring no words, your whole reply may be <reaction>👍</reaction> with one fitting emoji; questions and requests still get a written answer.\n\n{}",
         mono.label(),
+        rules::fixed(mono),
     )
 }
 
@@ -506,10 +512,16 @@ pub fn context(
         format!("{}\n\n", instructions(mono, executable))
     };
     format!(
-        "<monocode_context>\nMonoBOT adds this context, not the user. Act on it without quoting or describing it.\n\n{rules}<soul>\n{}\n</soul>\n\n<memory>\n{}\nTopic notes: {}\n</memory>\n</monocode_context>",
+        "<monocode_context>\nMonoBOT adds this context, not the user. Act on it without quoting or describing it.\n\n{rules}<soul>\n{}\n</soul>\n\n<memory>\n{}\nTopic notes: {}\n</memory>{}\n</monocode_context>",
         files.soul.as_deref().unwrap_or_default(),
         memory::within_budget(&files.memory),
-        files.topics.join(", ")
+        files.topics.join(", "),
+        files
+            .team
+            .as_deref()
+            .and_then(rules::team_memory)
+            .map(|block| format!("\n\n{block}"))
+            .unwrap_or_default()
     )
 }
 

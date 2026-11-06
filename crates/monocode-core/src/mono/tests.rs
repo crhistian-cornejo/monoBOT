@@ -176,6 +176,7 @@ fn context_shows_how_to_delegate_without_running_help() {
         memory_hash: String::new(),
         memory_path: String::new(),
         topics: Vec::new(),
+        team: None,
     };
     let executable = std::path::Path::new("/Applications/Monocode.app/monocode");
     let start = r#"/Applications/Monocode.app/monocode app sessions.start --json '{"project":"<assigned path>","title":"<short title>","prompt":"<complete instructions>","notifyOnComplete":true}'"#;

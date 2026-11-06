@@ -735,9 +735,10 @@ impl Monos {
                     let value=match action.as_str(){
                         "soul.read"=>json!(files::read(&root,&target,None,"SOUL.md")?),
                         "soul.update"=>{let body=input.get("text").and_then(Value::as_str).filter(|t|t.len()<=128*1024).ok_or("Provide text")?;let expected=text(&input,"expectedHash",128)?;json!({"hash":files::save(&root,&target,None,"SOUL.md",body,Some(&expected))?})},
-                        "memory.read"=>json!(memory::read(&root,&target,input.get("topic").and_then(Value::as_str))?),
+                        // The team's memory is one more agent folder, owned by none of them.
+                        "memory.read"=>{let shared=input.get("shared")==Some(&json!(true));let owner=if shared{memory::TEAM_MEMORY_ID}else{&target};let mut read=json!(memory::read(&root,owner,input.get("topic").and_then(Value::as_str))?);if shared{read["shared"]=json!(true);}read},
                         "memory.search"=>json!(memory::search(&root,&target,&text(&input,"query",4000)?,input.get("since").and_then(Value::as_str))?),
-                        "memory.add"|"memory.replace"|"memory.remove"=>{let entry=if action=="memory.remove"{None}else{Some(memory::entry(&text(&input,"fact",4000)?,&memory::date(),input.get("until").and_then(Value::as_str))?)};let find=input.get("find").and_then(Value::as_str).unwrap_or_default();let hash=memory::edit(&root,&target,input.get("topic").and_then(Value::as_str),|old|if action=="memory.add"{Ok(memory::add(old,entry.as_deref().unwrap()))}else{memory::replace(old,find,entry.as_deref(),&memory::date())})?;json!({"hash":hash})},
+                        "memory.add"|"memory.replace"|"memory.remove"=>{let entry=if action=="memory.remove"{None}else{Some(memory::entry(&text(&input,"fact",4000)?,&memory::date(),input.get("until").and_then(Value::as_str))?)};let find=input.get("find").and_then(Value::as_str).unwrap_or_default();let shared=input.get("shared")==Some(&json!(true));let owner=if shared{memory::TEAM_MEMORY_ID}else{&target};let hash=memory::edit(&root,owner,input.get("topic").and_then(Value::as_str),|old|if action=="memory.add"{Ok(memory::add(old,entry.as_deref().unwrap()))}else{memory::replace(old,find,entry.as_deref(),&memory::date())})?;if shared{json!({"hash":hash,"shared":true})}else{json!({"hash":hash})}},
                         // habitView: what each habit is, when it runs and how it last went.
                         "habits.list"=>json!({"habits":habits::load(&root,&target)?.iter().map(Habit::view).collect::<Vec<_>>()}),
                         // A wake: the agent's note to itself, run once (wakes.add).
@@ -786,6 +787,7 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                 );
                 return;
             }
+            "images.generate" => self.images_generate(&call, &mono, &input, cx),
             // Any agent reads a web page or keeps a file from the web; files go
             // to Documents/MonoBOT/<agent> (handleWeb).
             "web.read" | "web.download" => {

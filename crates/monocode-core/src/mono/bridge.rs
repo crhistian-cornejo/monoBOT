@@ -33,8 +33,17 @@ notes.list {limit?,offset?}; notes.read {id}; notes.write {id?,title?,body?,tags
 artifacts.list {kind?,limit?,offset?}; artifacts.read {id}; artifacts.write {id?,kind:"document",title,body,summary?}
 papers.find {query,limit?,fromYear?}; papers.read {ref,pages?,query?,section?,maxChars?}; papers.figure {ref,page}; papers.add {path,ref?,title?}
 soul.read {}; soul.update {text,expectedHash}
-memory.read {topic?}; memory.search {query,since?}; memory.add {fact,topic?,until?}; memory.replace {find,fact,topic?,until?}; memory.remove {find,topic?}
+memory.read {topic?,shared?}; memory.search {query,since?}; memory.add {fact,topic?,until?,shared?}; memory.replace {find,fact,topic?,until?,shared?}; memory.remove {find,topic?,shared?}
+shared:true uses the team's memory, which every agent reads: facts all of them should know. memory.search covers it too.
 habits.list {}; habits.add {name,instructions,schedule:{kind,time?,minute?,dayOfWeek?}}; habits.update {id,name?,instructions?,schedule?,enabled?}; habits.run {id}; habits.remove {id}
+wakes.add {in:<minutes>,note} or {at:"YYYY-MM-DDTHH:MM",note}: run once later, like a habit; 5 minutes to 7 days ahead, at most 3 waiting; not from a habit run
+bots.list {}; bots.create {name,role,specialty?,instructions?,services?,skills?,access?,connectors?}: Principal bot only. role is assistant, inbox, planner, writer, analyst, finance, documents, research, social, images or custom
+tools.read {}; tools.update {services?,skills?,access?,connectors?}: bot only. Each list given is the complete one you keep, from your next turn; folders are the user's to add
+agents.list {}; agents.message {to,message,wait?}; agents.wait {waitId}: the user's other Monos and bots. An answer comes back to your chat, or to the call with wait:true (keep calling agents.wait while it says pending)
+group.members {}; group.ask {member,message,wait?}; group.access {target,reason,group?}: a group and its members only
+name.update {name}: the name the rail, the tab and the chat show
+web.read {url,query?,maxChars?}: a page's text; web.download {url,name?}: keeps a file from the web in Documents/MonoBOT
+images.generate {prompt,count?,aspect?,source?}: pictures through Gemini's Nano Banana; frames show in your chat at once and the pictures replace them
 chat.card {type:"pr",repo?,number,note?} / {type:"session",sessionId,note?} / {type:"choices",options:[text]} / {type:"habit",name,instructions,schedule}
 mail.list {view?,query?,unread?,limit?}: the user's email from the accounts they connected in the Inbox's Email tab: id, sender, subject, date, unread, a preview
 mail.read {id,maxChars?}: one message's text and the names of its attachments

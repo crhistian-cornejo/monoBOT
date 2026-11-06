@@ -79,6 +79,9 @@ pub struct AgentFiles {
     pub memory_path: String,
     /// Topic notes under memory/, by name without `.md`; not the archive.
     pub topics: Vec<String>,
+    /// The team's shared MEMORY.md, which every agent reads; none if unread.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team: Option<String>,
 }
 
 /// The files the app reads and writes for an agent, relative to its folder:
@@ -238,6 +241,7 @@ pub fn load(root: &Path, mono: &str, legacy_project: Option<&str>) -> Result<Age
         memory_path: memory_path.to_string_lossy().into_owned(),
         topics: topics(&dir),
         dir: dir.to_string_lossy().into_owned(),
+        team: None,
     })
 }
 
