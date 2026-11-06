@@ -47,18 +47,59 @@ fn divider() -> gpui::Div {
 }
 
 impl Monos {
-    /// The whole Agents zone, for the sidebar in either layout.
-    pub(crate) fn agents_rail(&mut self, original: bool, cx: &mut Context<Self>) -> AnyElement {
+    /// The whole Agents zone, for the sidebar in either layout. Compact is
+    /// the 48px rail: the Principal, the bots and the groups as mascots,
+    /// each set apart, with nothing to make from there.
+    pub(crate) fn agents_rail(
+        &mut self,
+        original: bool,
+        compact: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         self.rail_ids.clear();
-        let has_principal = self.roster.monos.iter().any(Mono::is_principal);
-        let principal = if has_principal {
+        let has =
+            |section: Section, this: &Self| this.roster.monos.iter().any(|m| section.holds(m));
+        if compact {
+            let present: Vec<Section> = [Section::Principal, Section::Bots, Section::Groups]
+                .into_iter()
+                .filter(|section| has(*section, self))
+                .collect();
+            let sections: Vec<AnyElement> = present
+                .into_iter()
+                .map(|section| self.rail_impl(None, original, true, section, cx))
+                .collect();
+            return div()
+                .id("agents-rail")
+                .debug_selector(|| "agents-rail".into())
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .children(sections.into_iter().map(|section| {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(div().w(px(24.)).h(px(1.)).bg(content(0.1)))
+                        .child(section)
+                }))
+                .into_any_element();
+        }
+        let principal = if has(Section::Principal, self) {
             self.rail_impl(None, original, false, Section::Principal, cx)
         } else {
-            self.principal_row(cx)
+            div()
+                .px_2()
+                .pb_2()
+                .child(self.principal_row(cx))
+                .into_any_element()
         };
         let bots = self.rail_impl(None, original, false, Section::Bots, cx);
-        let has_groups = self.roster.monos.iter().any(Mono::is_group);
-        let groups = has_groups.then(|| self.rail_impl(None, original, false, Section::Groups, cx));
+        // Groups are listed once there is one; making one is the group
+        // dialog's, which comes with the groups themselves.
+        let groups = has(Section::Groups, self)
+            .then(|| self.rail_impl(None, original, false, Section::Groups, cx));
         let custom = self
             .roster
             .monos
@@ -70,7 +111,7 @@ impl Monos {
             .debug_selector(|| "agents-rail".into())
             .flex()
             .flex_col()
-            .child(div().px_2().pb_2().child(principal))
+            .child(principal)
             .child(divider())
             .child(bots)
             .children(intro.map(|card| div().px_2().pb_3().child(card)))
@@ -83,6 +124,7 @@ impl Monos {
     fn principal_row(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .id("agents-principal-new")
+            .debug_selector(|| "agents-principal-new".into())
             .role(Role::Button)
             .aria_label("Principal")
             .h(px(32.))

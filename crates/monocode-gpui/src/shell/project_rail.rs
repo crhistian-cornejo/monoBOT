@@ -325,8 +325,10 @@ impl Shell {
             .overflow_hidden()
             .when(!self.classic_titlebar_spans_window(cx), |d| d.child(header))
             .when(!compact, |d| {
+                // ProjectRail: Agents keeps only the zone switch above its rail.
+                let agents = self.workspace.agents_zone;
                 d.child(div().px_2().pt_1().pb_2().child(self.rail_zone_switch(cx)))
-                    .child(self.original_rail_navigation(cx))
+                    .when(!agents, |d| d.child(self.original_rail_navigation(cx)))
             })
             .child(
                 div()
@@ -336,8 +338,10 @@ impl Shell {
                     .overflow_hidden()
                     .child(rows),
             )
-            .children(self.live_agents_preview(cx))
-            .child(self.app_update_footer(cx))
+            .when(!self.workspace.agents_zone, |d| {
+                d.children(self.live_agents_preview(cx))
+                    .child(self.app_update_footer(cx))
+            })
             .child(self.project_rail_footer(compact, cx))
             .into_any_element()
     }
@@ -441,7 +445,7 @@ impl Shell {
             ProjectRailRow::Agents => self
                 .monos
                 .clone()
-                .map(|m| m.update(cx, |m, cx| m.agents_rail(true, cx)))
+                .map(|m| m.update(cx, |m, cx| m.agents_rail(true, false, cx)))
                 .unwrap_or_else(|| div().into_any()),
             ProjectRailRow::Heading(label) => self.project_rail_heading(label, compact, cx),
             ProjectRailRow::Project { path, grouped } => {
@@ -537,7 +541,7 @@ impl Shell {
             .pl(px(if compact { 8. } else { 6. }))
             .pr_2()
             .flex_shrink_0()
-            .when(!compact, |d| {
+            .when(!compact && !self.workspace.agents_zone, |d| {
                 d.children(
                     self.github_star_prompt(cx)
                         .map(|prompt| div().mb_1().child(prompt)),
@@ -751,6 +755,37 @@ impl Shell {
             },
             |(name, mark)| (format!("Switch project, current mono {name}"), mark),
         );
+        // The compact rail's zone button (CompactRailAction), set apart from
+        // what the zone holds; Agents shows only the bots and groups.
+        let agents = self.workspace.agents_zone;
+        let zone = icon_button(
+            "rail-zone-toggle",
+            if agents {
+                "Switch to Code"
+            } else {
+                "Switch to Agents"
+            },
+            if agents { "code" } else { "bot" },
+        )
+        .debug_selector(|| "rail-zone-toggle".into())
+        .size(px(32.))
+        .on_click(cx.listener(move |this, _, _, cx| this.set_agents_zone(!agents, cx)));
+        if agents {
+            let rail = self
+                .monos
+                .clone()
+                .map(|m| m.update(cx, |m, cx| m.agents_rail(true, true, cx)));
+            return div()
+                .w_full()
+                .py(px(6.))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(6.))
+                .child(zone)
+                .children(rail)
+                .into_any();
+        }
         div()
             .w_full()
             .py(px(6.))
@@ -758,6 +793,8 @@ impl Shell {
             .flex_col()
             .items_center()
             .gap(px(6.))
+            .child(zone)
+            .child(div().w(px(24.)).h(px(1.)).bg(content(0.07)))
             .when_some(mono_rail, |d, monos| {
                 d.child(monos)
                     .child(div().w(px(24.)).h(px(1.)).bg(content(0.07)))
@@ -2200,5 +2237,31 @@ mod tests {
                 assert!(shell.workspace.agents_zone);
             })
             .unwrap();
+        // A new bot opens on its settings; close them first.
+        visual.simulate_keystrokes("escape");
+        visual.run_until_parked();
+        // With no Principal, its row makes one; it then wears Orchestrator.
+        let principal = visual.debug_bounds("agents-principal-new").unwrap();
+        visual.simulate_click(principal.center(), Default::default());
+        visual.run_until_parked();
+        window
+            .update(visual, |shell, _, cx| {
+                let monos = shell.monos.clone().unwrap();
+                assert!(monos.read(cx).roster.monos.iter().any(|m| m.is_principal()));
+            })
+            .unwrap();
+        assert!(visual.debug_bounds("mono-rail-orchestrator").is_some());
+        // The original layout: the project rail holds the zone, without
+        // Search, Inbox and Notes.
+        window
+            .update(visual, |shell, _, cx| {
+                shell.workspace.classic_layout = true;
+                shell.layout_changed(cx);
+                cx.notify();
+            })
+            .unwrap();
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("agents-rail").is_some());
+        assert!(visual.debug_bounds("rail-zone-agents").is_some());
     }
 }

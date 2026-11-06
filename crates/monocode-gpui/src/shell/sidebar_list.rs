@@ -506,7 +506,7 @@ impl Shell {
                 return self
                     .monos
                     .clone()
-                    .map(|monos| monos.update(cx, |monos, cx| monos.agents_rail(false, cx)))
+                    .map(|monos| monos.update(cx, |monos, cx| monos.agents_rail(false, false, cx)))
                     .unwrap_or_else(|| div().into_any());
             }
             Row::Pinned => section_label("Pinned").into_any(),

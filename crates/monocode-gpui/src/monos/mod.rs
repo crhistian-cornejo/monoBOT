@@ -1408,16 +1408,35 @@ impl Monos {
                             }),
                     )
                     .when(!compact, |d| {
+                        // PersonalRail: the pill takes room from the name,
+                        // never from the counts after it.
+                        let principal = mono.is_principal();
                         d.child(
                             div()
                                 .flex_1()
                                 .min_w_0()
-                                .truncate()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
                                 .when(unread > 0, |d| d.pr(px(24.)))
                                 .group_hover("mono-rail-row", |s| s.pr(px(24.)))
                                 .text_size(px(14.))
                                 .font_weight(gpui::FontWeight::MEDIUM)
-                                .child(mono.label()),
+                                .child(div().min_w_0().truncate().child(mono.label()))
+                                .when(principal, |d| {
+                                    d.child(
+                                        div()
+                                            .debug_selector(|| "mono-rail-orchestrator".into())
+                                            .flex_shrink_0()
+                                            .px_1()
+                                            .text_size(px(10.))
+                                            .line_height(px(16.))
+                                            .font_weight(gpui::FontWeight::MEDIUM)
+                                            .bg(accent_color().opacity(0.1))
+                                            .text_color(accent_color())
+                                            .child("Orchestrator"),
+                                    )
+                                }),
                         )
                     })
                     .when(unread > 0 && !compact, |d| {
