@@ -1358,6 +1358,7 @@ impl Monos {
             .detach();
     }
     pub(super) fn tick(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        self.sync_tick(cx);
         self.check_habits(cx);
         cx.notify();
     }

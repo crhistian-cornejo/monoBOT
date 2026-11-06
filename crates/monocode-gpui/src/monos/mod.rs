@@ -25,6 +25,7 @@ mod scheduler;
 mod search;
 #[cfg(all(target_os = "macos", not(test)))]
 mod status;
+mod sync;
 #[cfg(test)]
 mod tests;
 mod work;
@@ -144,6 +145,8 @@ pub(crate) struct Monos {
     agent_calls: agent_calls::AgentCalls,
     /// The bots' News feed and the cards waiting to be shown.
     news: news::NewsState,
+    /// Bots kept the same on the user's other computers.
+    sync: sync::SyncState,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
     running: HashMap<i64, RunningHabit>,
@@ -382,6 +385,7 @@ impl Monos {
             roles_menu: None,
             agent_calls: Default::default(),
             news: Default::default(),
+            sync: Default::default(),
             running: HashMap::new(),
             active_run: None,
             completion_work: HashSet::new(),
@@ -639,6 +643,7 @@ impl Monos {
         cx.notify();
     }
     fn save(&mut self, cx: &mut Context<Self>) {
+        self.sync_soon();
         let roster = self.roster.clone();
         let store = self.store.clone();
         let queued = roster
