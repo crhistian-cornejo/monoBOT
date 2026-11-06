@@ -181,6 +181,27 @@ impl EventEmitter<Changed> for Monos {}
 impl EventEmitter<TabOpened> for Monos {}
 impl EventEmitter<ShowDetails> for Monos {}
 impl Monos {
+    /// What its chats and habit runs are doing, for keeping the computer awake.
+    pub(crate) fn keep_awake_work(&self, cx: &App) -> Vec<monocode_core::keep_awake::Work> {
+        self.chats
+            .values()
+            .chain(self.running.values().map(|r| &r.view))
+            .map(|view| {
+                let view = view.read(cx);
+                monocode_core::keep_awake::Work {
+                    cwd: view.summary.cwd.clone(),
+                    busy: view.busy,
+                    retry_scheduled: view.retry_scheduled(),
+                    resume_at_reset: view
+                        .settings
+                        .usage_limit
+                        .as_ref()
+                        .is_some_and(|limit| limit.resume_at_reset),
+                    scheduled_message: view.has_scheduled_message(),
+                }
+            })
+            .collect()
+    }
     pub(crate) fn resource_sessions(
         &self,
         cx: &App,

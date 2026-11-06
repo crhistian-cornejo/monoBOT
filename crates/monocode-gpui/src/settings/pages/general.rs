@@ -23,6 +23,18 @@ impl SettingsView {
                 ],
             ),
             self.row(
+                Some("sounds-volume"),
+                false,
+                "Sound volume",
+                Some("How loud the cues play, on top of your system's volume.".into()),
+                vec![self.slider(
+                    crate::settings::SliderKind::SoundsVolume,
+                    format!("{}%", p.sounds_volume),
+                    !p.sounds,
+                    cx,
+                )],
+            ),
+            self.row(
                 Some("notifications"),
                 false,
                 "Notifications",
@@ -194,6 +206,22 @@ impl SettingsView {
                     false,
                     cx,
                     |this, on, cx| this.update(cx, |p| p.close_to_tray = on),
+                )],
+            ));
+        }
+        if monocode_core::keep_awake::AVAILABLE {
+            workspace.push(self.row(
+                Some("keep-awake"),
+                false,
+                "Keep computer awake",
+                Some("While an agent works, or a retry, a resume or a message sent later is waiting, the computer doesn't go to sleep on its own. The screen can still turn off, and closing the lid still puts it to sleep.".into()),
+                vec![self.toggle(
+                    "keep-awake",
+                    "Keep computer awake",
+                    p.keep_awake,
+                    false,
+                    cx,
+                    |this, on, cx| this.update(cx, |p| p.keep_awake = on),
                 )],
             ));
         }

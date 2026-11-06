@@ -6,34 +6,68 @@ pub(crate) enum Cue {
     Input,
     LinkedActivity,
 }
-pub(crate) fn play(cue: Cue) {
-    #[cfg(all(target_os = "macos", not(test)))]
+/// Plays a cue at the user's volume, 0 to 100, lifted as the desktop app's
+/// are (sounds.ts): silent at 0.
+pub(crate) fn play(cue: Cue, volume: u32) {
+    let volume = monocode_core::sounds::clamp(f64::from(volume));
+    if volume == 0 {
+        return;
+    }
+    #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
     std::thread::spawn(move || {
-        let directory = crate::data_dir().join("sounds");
-        if std::fs::create_dir_all(&directory).is_err() {
+        let gain = monocode_core::sounds::output_gain(volume);
+        let Some(wav) = monocode_core::sounds::scale_wav(&wave(cue), gain) else {
             return;
-        }
-        let path = directory.join(match cue {
-            Cue::Finished => "finished.wav",
-            Cue::Input => "input.wav",
-            Cue::LinkedActivity => "linked-activity.wav",
-        });
-        if !path.exists() && std::fs::write(&path, wave(cue)).is_err() {
-            return;
-        }
-        let mut command = std::process::Command::new("/usr/bin/afplay");
-        command
-            .arg(path)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null());
-        monocode_core::process::configure_child(&mut command);
-        let _ = command.status();
+        };
+        output(cue, volume, &wav);
     });
-    #[cfg(any(not(target_os = "macos"), test))]
+    #[cfg(any(not(any(target_os = "macos", target_os = "windows")), test))]
     let _ = cue;
 }
-#[cfg(any(target_os = "macos", test))]
+
+/// afplay plays a file, so each cue and volume keeps one.
+#[cfg(all(target_os = "macos", not(test)))]
+fn output(cue: Cue, volume: u8, wav: &[u8]) {
+    let directory = crate::data_dir().join("sounds");
+    if std::fs::create_dir_all(&directory).is_err() {
+        return;
+    }
+    let name = match cue {
+        Cue::Finished => "finished",
+        Cue::Input => "input",
+        Cue::LinkedActivity => "linked-activity",
+    };
+    let path = directory.join(format!("{name}-{volume}.wav"));
+    if !path.exists() && std::fs::write(&path, wav).is_err() {
+        return;
+    }
+    let mut command = std::process::Command::new("/usr/bin/afplay");
+    command
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    monocode_core::process::configure_child(&mut command);
+    let _ = command.status();
+}
+
+/// Windows plays the WAV from memory, on this thread until it ends.
+#[cfg(all(target_os = "windows", not(test)))]
+fn output(_: Cue, _: u8, wav: &[u8]) {
+    use windows::Win32::Media::Audio::{PlaySoundW, SND_MEMORY, SND_NODEFAULT, SND_SYNC};
+    use windows::core::PCWSTR;
+    // SAFETY: with SND_MEMORY the "name" is the WAV image, which lives until
+    // this synchronous call returns.
+    unsafe {
+        let _ = PlaySoundW(
+            PCWSTR(wav.as_ptr().cast()),
+            None,
+            SND_MEMORY | SND_SYNC | SND_NODEFAULT,
+        );
+    }
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
 fn wave(cue: Cue) -> Vec<u8> {
     type Layer = (f32, f32, f32, f32, f32, f32);
     type Recipe = (f32, &'static [Layer], f32, f32, f32);

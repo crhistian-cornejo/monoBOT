@@ -669,7 +669,7 @@ impl Shell {
                 && occurred >= self.notification_state.sounds_enabled_at
                 && let Some(cue) = cue
             {
-                crate::sound::play(cue);
+                crate::sound::play(cue, prefs.sounds_volume);
             }
             return;
         }
@@ -712,7 +712,7 @@ impl Shell {
                     && prefs.allows_project_notification(&directory, &category, Some(occurred), now)
                     && let Some(cue) = cue
                 {
-                    crate::sound::play(cue);
+                    crate::sound::play(cue, prefs.sounds_volume);
                 }
             });
         })
@@ -1207,7 +1207,10 @@ impl Shell {
                 && occurred >= self.notification_state.linked_started_at
             {
                 // React uses a deduplicated chime, without an OS/banner here.
-                crate::sound::play(crate::sound::Cue::LinkedActivity);
+                crate::sound::play(
+                    crate::sound::Cue::LinkedActivity,
+                    self.workspace.preferences.sounds_volume,
+                );
             }
         }
         self.notification_state.linked_primed = true;

@@ -64,17 +64,16 @@ impl Conversation {
         self.follow_ups.requested = None;
         self.save_follow_ups(cx);
     }
+    /// "Add to chat": the text waits beside the attachments as a quote chip
+    /// (QuoteChip.tsx) and goes out as a `>` block before what is typed.
     pub(crate) fn mono_quote(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         if self.input.read(cx).is_composing() {
             return;
         }
-        self.input.update(cx, |i, cx| {
-            i.set_text(
-                monocode_core::composer::append_selection_quote(&i.content, text),
-                cx,
-            );
-        });
+        let id = format!("quote-{}", monocode_core::mono::new_id());
+        self.quotes = monocode_core::composer_quotes::add(&self.quotes, text, &id);
         window.focus(&self.input.focus_handle(cx), cx);
+        cx.notify();
     }
     pub(crate) fn mono_external_pending(&self) -> bool {
         self.mono_ui.external.is_some()
@@ -835,7 +834,9 @@ impl Conversation {
     /// picker, its settings, access and send.
     fn mono_composer_box(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let radius = COMPOSER_RADIUS;
-        let has_value = self.input.read(cx).has_message_text() || !self.attachments.is_empty();
+        let has_value = self.input.read(cx).has_message_text()
+            || !self.attachments.is_empty()
+            || !self.quotes.is_empty();
         // As the session composer: setting pills only with controls beside
         // the model, otherwise the effort rides inside the model pill.
         let beside = cx

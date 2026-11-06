@@ -14,6 +14,8 @@ mod history;
 mod mobile;
 mod mono;
 mod notifications;
+mod provider_retry;
+mod send_later;
 mod remote;
 pub(crate) mod remote_plans;
 mod response_menu;
@@ -116,6 +118,8 @@ enum ComposerMenu {
     Setting(usize),
     /// The commit pill's chevron above the composer.
     GitActions,
+    /// Send later's times, from the clock beside Send.
+    SendLater,
 }
 struct OpenMenu {
     kind: ComposerMenu,
@@ -129,6 +133,10 @@ pub(crate) struct ChooseFolder(pub(crate) AnchorSlot);
 pub(crate) struct OpenSessionChanges(pub(crate) crate::review::ReviewTab);
 pub(crate) struct Conversation {
     editing_last_turn: edit_last_turn::State,
+    /// A transient provider failure waiting to be sent again.
+    provider_retry: provider_retry::RetryState,
+    /// The clock beside Send and the messages it scheduled.
+    send_later: send_later::SendLater,
     btw: Option<Entity<btw::Btw>>,
     /// The composer box the /btw sheet morphs out of, and how visible the
     /// composer is under the sheet.
@@ -154,6 +162,8 @@ pub(crate) struct Conversation {
     background: background_tasks::BackgroundTasks,
     changes: changes_shelf::ChangesShelf,
     attachments: Vec<std::path::PathBuf>,
+    /// Text added with "Add to chat", waiting as chips; sent as quotes.
+    quotes: Vec<monocode_core::composer_quotes::Quote>,
     pending_attachments: Vec<std::path::PathBuf>,
     attachment_photos: std::collections::HashMap<
         std::path::PathBuf,
@@ -591,6 +601,8 @@ impl Conversation {
         });
         perf_prompt(cx);
         Self {
+            provider_retry: Default::default(),
+            send_later: Default::default(),
             editing_last_turn: Default::default(),
             btw: None,
             btw_home: (AnchorSlot::default(), 1.),
@@ -615,6 +627,7 @@ impl Conversation {
             background: Default::default(),
             changes: Default::default(),
             attachments: Vec::new(),
+            quotes: Vec::new(),
             pending_attachments: Vec::new(),
             attachment_photos: Default::default(),
             attaching: false,
@@ -768,6 +781,7 @@ impl Conversation {
                     Ok(state) => {
                         this.follow_ups.persisted = state.revision;
                         this.follow_ups.state = state;
+                        this.arm_scheduled_sends(cx);
                         let draft = this.follow_ups.state.draft.clone();
                         if draft.is_some() {
                             this.summary.has_messages = true;
@@ -908,6 +922,7 @@ impl Conversation {
                 .input
                 .update(cx, |input, cx| input.take(cx))
                 .unwrap_or_default();
+            let text = self.take_quotes(text);
             let attachments = std::mem::take(&mut self.attachments);
             if !text.trim().is_empty() || !attachments.is_empty() {
                 cx.emit(mono::Submitted { text, attachments });
@@ -938,7 +953,9 @@ impl Conversation {
             return;
         }
         if self.attaching
-            || (!self.input.read(cx).has_message_text() && self.attachments.is_empty())
+            || (!self.input.read(cx).has_message_text()
+                && self.attachments.is_empty()
+                && self.quotes.is_empty())
         {
             return;
         }
@@ -952,6 +969,7 @@ impl Conversation {
         let raw = monocode_core::composer::consume_command(&raw, "add-to-folder")
             .map(str::to_owned)
             .unwrap_or(raw);
+        let raw = self.take_quotes(raw);
         self.folder_selected = false;
         let prompt = self.consume_mode_command(raw, cx);
         if prompt.trim().is_empty() && self.attachments.is_empty() {
@@ -1077,6 +1095,7 @@ impl Conversation {
             return;
         }
         self.settings.usage_limit = None;
+        self.provider_retry_on_launch();
         self.attach_account(cx);
         let worktree_message = if prompt.trim().is_empty() {
             self.settings
@@ -1473,6 +1492,7 @@ impl Conversation {
                             if !this.is_remote() {
                                 this.detect_usage_limit(cx);
                             }
+                            this.note_provider_retry(stopping, cx);
                             this.review
                                 .update(cx, |review, cx| review.set_busy(false, cx));
                             this.follow_ups.ready = false;
@@ -2011,6 +2031,9 @@ impl Conversation {
         if self.git_action_choice(id, cx) {
             return;
         }
+        if self.send_later_choice(id, cx) {
+            return;
+        }
         if let Some(choice) = id.strip_prefix("recent-model:") {
             if let Ok((provider, model)) = serde_json::from_str::<(String, Option<String>)>(choice)
                 && let Some(kind) = Kind::parse(&provider)
@@ -2362,6 +2385,7 @@ impl Conversation {
             ComposerMenu::Account => &self.account_anchor,
             ComposerMenu::Workspace => &self.workspace_anchor,
             ComposerMenu::GitActions => &self.git_action_anchor,
+            ComposerMenu::SendLater => &self.send_later.anchor,
             ComposerMenu::Setting(ix) => self
                 .mono_ui
                 .setting_anchors
@@ -2415,11 +2439,13 @@ impl Conversation {
             }
         });
         events.push(
-            cx.subscribe_in(&menu, window, |this, menu, event: &MenuEvent, _, cx| {
+            cx.subscribe_in(&menu, window, |this, menu, event: &MenuEvent, window, cx| {
                 if let MenuEvent::Picked(id, _) = event {
                     let toggle = menu.read(cx).toggle_state(id);
                     if id.as_ref() == "upload" {
                         this.choose_attachments(cx);
+                    } else if id.as_ref() == monocode_core::scheduled_send::CUSTOM {
+                        this.open_send_later_form(window, cx);
                     } else {
                         this.menu_choice(id, cx);
                     }
@@ -2571,6 +2597,12 @@ impl Conversation {
             ComposerMenu::GitActions => (
                 "Git actions",
                 self.git_action_menu_items(cx),
+                250.,
+                MenuStyle::Composer,
+            ),
+            ComposerMenu::SendLater => (
+                "Send this message",
+                self.send_later_items(),
                 250.,
                 MenuStyle::Composer,
             ),
@@ -2798,7 +2830,8 @@ impl Conversation {
             Vec::new()
         };
         let input = self.input.read(cx);
-        let has_value = input.has_message_text() || !self.attachments.is_empty();
+        let has_value =
+            input.has_message_text() || !self.attachments.is_empty() || !self.quotes.is_empty();
         self.completion.update(cx, |completion, cx| {
             completion.set_cwd(
                 self.settings
@@ -2829,9 +2862,11 @@ impl Conversation {
             .flex_col()
             .child(self.composer_anchor.probe())
             .children(menu)
+            .children(self.send_later_form(cx))
             .children(self.model_list_popover(cx))
             .children(self.orchestration_card(cx))
             .children(if self.is_remote() { None } else { self.usage_notice(false, cx) })
+            .children(self.provider_retry_notice(cx))
             .child(self.changes_shelf(window, cx))
             .child(self.background_shelf(window, cx))
             .child(self.message_queue(window, cx))
@@ -3039,6 +3074,7 @@ impl Conversation {
                                             .child(icon("chevron-down", 12.)),
                                     ),
                             )
+                            .when(self.can_send_later(cx), |d| d.child(self.send_later_button(cx)))
                             .child(self.action(has_value, window, cx)),
                     )
                     .children(self.attachment_drop_overlay(12.)),

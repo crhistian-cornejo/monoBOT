@@ -9,6 +9,10 @@ use std::collections::HashMap;
 pub(crate) struct Preferences {
     // General
     pub sounds: bool,
+    /// How loud the cues play, 0 to 100, on top of the system's volume.
+    pub sounds_volume: u32,
+    /// The computer stays awake while agents work or a turn is due.
+    pub keep_awake: bool,
     pub notifications: bool,
     pub project_notifications: serde_json::Value,
     pub notification_projects: serde_json::Value,
@@ -115,6 +119,8 @@ impl Default for Preferences {
     fn default() -> Self {
         Self {
             sounds: true,
+            sounds_volume: u32::from(monocode_core::sounds::VOLUME_DEFAULT),
+            keep_awake: monocode_core::keep_awake::DEFAULT,
             notifications: false,
             project_notifications: serde_json::json!({}),
             notification_projects: serde_json::json!([]),

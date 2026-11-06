@@ -19,6 +19,9 @@ pub struct Message {
     pub at: usize,
     pub error: Option<String>,
     pub steer: bool,
+    /// Send later: waits in the queue until this time (epoch ms).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub send_at: Option<u64>,
 }
 impl Message {
     pub fn label(&self) -> String {

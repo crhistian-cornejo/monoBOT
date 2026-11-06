@@ -127,6 +127,7 @@ impl AssetSource for Assets {
    "file-script"=>include_bytes!("../assets/hugeicons/file-script.svg"),
    "git-branch"=>include_bytes!("../assets/hugeicons/git-branch.svg"),
    "clock"=>include_bytes!("../assets/hugeicons/clock.svg"),
+   "text-quote"=>include_bytes!("../assets/hugeicons/text-quote.svg"),
    "list-bullet"=>include_bytes!("../assets/hugeicons/list-bullet.svg"),
    "file-diff"=>include_bytes!("../assets/hugeicons/file-diff.svg"),
    "minus-sign"=>include_bytes!("../assets/hugeicons/minus-sign.svg"),

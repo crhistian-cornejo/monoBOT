@@ -536,9 +536,21 @@ impl SettingsView {
         // A range input's thumb travels the track less its own width.
         let travel = (bounds.size.width.as_f32() - 12.).max(1.);
         let fraction = ((x - bounds.left()).as_f32() - 6.).clamp(0., travel) / travel;
-        let value = min + ((max - min) as f32 * fraction).round() as u32;
+        let mut value = min + ((max - min) as f32 * fraction).round() as u32;
+        if kind == SliderKind::SoundsVolume {
+            // Steps of 5, and a sample once the slider rests (onSoundsVolume).
+            value = (value + 2) / 5 * 5;
+        }
         if kind.get(&self.prefs) != value {
             self.update(cx, |p| kind.set(p, value));
+            if kind == SliderKind::SoundsVolume {
+                self.volume_cue = Some(cx.spawn(async move |_, cx| {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(250))
+                        .await;
+                    crate::sound::play(crate::sound::Cue::Finished, value);
+                }));
+            }
         }
     }
 

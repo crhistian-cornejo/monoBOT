@@ -143,6 +143,7 @@ pub(crate) enum SliderKind {
     SidebarOpacity,
     BackgroundEmpty,
     BackgroundSession,
+    SoundsVolume,
 }
 impl SliderKind {
     fn id(self) -> &'static str {
@@ -153,6 +154,7 @@ impl SliderKind {
             SliderKind::SidebarOpacity => "sidebar-opacity",
             SliderKind::BackgroundEmpty => "background-empty",
             SliderKind::BackgroundSession => "background-session",
+            SliderKind::SoundsVolume => "sounds-volume",
         }
     }
     fn label(self) -> &'static str {
@@ -163,6 +165,7 @@ impl SliderKind {
             SliderKind::SidebarOpacity => "Sidebar opacity",
             SliderKind::BackgroundEmpty => "Empty chat background visibility",
             SliderKind::BackgroundSession => "Session background visibility",
+            SliderKind::SoundsVolume => "Sound volume",
         }
     }
     fn range(self) -> (u32, u32) {
@@ -172,6 +175,7 @@ impl SliderKind {
             SliderKind::DarkLightness => (0, 30),
             SliderKind::SidebarOpacity => (15, 100),
             SliderKind::BackgroundEmpty | SliderKind::BackgroundSession => (5, 65),
+            SliderKind::SoundsVolume => (0, 100),
         }
     }
     fn get(self, p: &Preferences) -> u32 {
@@ -182,6 +186,7 @@ impl SliderKind {
             SliderKind::SidebarOpacity => p.sidebar_opacity,
             SliderKind::BackgroundEmpty => p.chat_background_empty,
             SliderKind::BackgroundSession => p.chat_background_session,
+            SliderKind::SoundsVolume => p.sounds_volume,
         }
     }
     fn set(self, p: &mut Preferences, value: u32) {
@@ -192,6 +197,7 @@ impl SliderKind {
             SliderKind::SidebarOpacity => p.sidebar_opacity = value,
             SliderKind::BackgroundEmpty => p.chat_background_empty = value,
             SliderKind::BackgroundSession => p.chat_background_session = value,
+            SliderKind::SoundsVolume => p.sounds_volume = value,
         }
     }
 }
@@ -210,6 +216,8 @@ pub(crate) struct SettingsView {
     targets: RefCell<HashMap<&'static str, AnchorSlot>>,
     slider_tracks: RefCell<HashMap<SliderKind, AnchorSlot>>,
     slider_drag: Option<SliderKind>,
+    /// The sample cue a volume change plays once the slider rests.
+    volume_cue: Option<Task<()>>,
     select_open: Option<&'static str>,
     select_active: usize,
     select_focus: FocusHandle,
@@ -363,6 +371,7 @@ impl SettingsView {
             targets: Default::default(),
             slider_tracks: Default::default(),
             slider_drag: None,
+            volume_cue: None,
             select_open: None,
             select_active: 0,
             select_focus: cx.focus_handle(),

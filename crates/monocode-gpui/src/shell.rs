@@ -15,6 +15,7 @@ mod image_lightbox_tests;
 mod layout;
 mod live_agents;
 mod mobile_host;
+mod keep_awake;
 mod mono_panes;
 pub(crate) mod monos;
 mod new_chat_choice;
@@ -887,7 +888,10 @@ impl Shell {
                     .timer(std::time::Duration::from_secs(3))
                     .await;
                 if this
-                    .update(cx, |this, cx| this.refresh_remote_projects(cx))
+                    .update(cx, |this, cx| {
+                        this.refresh_remote_projects(cx);
+                        this.sync_keep_awake(cx);
+                    })
                     .is_err()
                 {
                     break;

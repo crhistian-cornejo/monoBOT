@@ -292,12 +292,97 @@ impl Conversation {
         self.add_attachments(pending, cx);
         cx.notify();
     }
+    /// The message as sent: every waiting quote as a `>` block, then the text.
+    pub(super) fn take_quotes(&mut self, text: String) -> String {
+        let quotes = std::mem::take(&mut self.quotes);
+        monocode_core::composer_quotes::with_quotes(&text, &quotes)
+    }
+    /// QuoteChip: the start of the quote and, for one from a paper, where it
+    /// is from; the whole quote goes out with the message.
+    fn quote_chips(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        use monocode_core::composer_quotes as quotes;
+        self.quotes
+            .iter()
+            .map(|quote| {
+                let label = quotes::chip_label(&quote.text, quotes::CHIP_LABEL_MAX);
+                let source = quotes::chip_source(&quote.text);
+                let id = quote.id.clone();
+                div()
+                    .id(SharedString::from(format!("quote-chip-{}", quote.id)))
+                    .debug_selector(|| "composer-quote-chip".into())
+                    .role(Role::Group)
+                    .aria_label(format!("Quote: {}", quotes::split_source(&quote.text).body))
+                    .relative()
+                    .flex()
+                    .min_w_0()
+                    .max_w(px(280.))
+                    .items_center()
+                    .gap(px(6.))
+                    .rounded_md()
+                    .bg(content(0.1))
+                    .py_1()
+                    .pl(px(6.))
+                    .pr_1()
+                    .child(icon("text-quote", 14.).text_color(content(0.55)))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .line_height(px(11.))
+                                    .text_color(content(0.8))
+                                    .child(label),
+                            )
+                            .children(source.map(|source| {
+                                div()
+                                    .truncate()
+                                    .text_size(px(10.))
+                                    .line_height(px(10.))
+                                    .text_color(content(0.5))
+                                    .child(source)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .id(SharedString::from(format!("remove-quote-{}", quote.id)))
+                            .role(Role::Button)
+                            .aria_label("Remove quote")
+                            .size(px(16.))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .rounded_full()
+                            .text_color(content(0.4))
+                            .hover(|s| s.bg(content(0.15)).text_color(content(1.)))
+                            .child(icon("close", 12.))
+                            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.quotes = monocode_core::composer_quotes::remove(&this.quotes, &id);
+                                cx.notify();
+                            })),
+                    )
+                    .into_any_element()
+            })
+            .collect()
+    }
     pub(super) fn attachment_chips(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         // Removed chips release their thumbnail sprites with the entity.
         let attachments = &self.attachments;
         self.attachment_photos
             .retain(|path, _| attachments.contains(path));
-        if self.attachments.is_empty() && self.attachment_error.is_none() && !self.attaching {
+        if self.attachments.is_empty()
+            && self.quotes.is_empty()
+            && self.attachment_error.is_none()
+            && !self.attaching
+        {
             return None;
         }
         for path in &self.attachments {
@@ -318,6 +403,7 @@ impl Conversation {
                 .flex()
                 .flex_wrap()
                 .gap_1p5()
+                .children(self.quote_chips(cx))
                 .children(self.attachments.iter().enumerate().map(|(ix, path)| {
                     let label = path
                         .file_name()

@@ -44,12 +44,14 @@ pub fn member_role(mono: &Mono) -> String {
 /// The specialty agents.list shows: the bot's own, else its role's.
 pub fn specialty(mono: &Mono) -> Option<String> {
     let own = mono.specialty.as_deref().map(str::trim);
-    own.filter(|s| !s.is_empty()).map(str::to_owned).or_else(|| {
-        mono.is_bot()
-            .then(|| bots::role(mono.bot_role.as_deref().unwrap_or("assistant")))
-            .flatten()
-            .map(|role| role.specialty.to_owned())
-    })
+    own.filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .or_else(|| {
+            mono.is_bot()
+                .then(|| bots::role(mono.bot_role.as_deref().unwrap_or("assistant")))
+                .flatten()
+                .map(|role| role.specialty.to_owned())
+        })
 }
 
 /// A message an agent is waiting on an answer to.

@@ -316,7 +316,14 @@ impl Conversation {
                     .then(|| self.follow_ups.state.messages.iter().find(|m| m.steer))
                     .flatten()
             })
-            .or_else(|| self.follow_ups.state.messages.first());
+            // A message sent later waits for its time.
+            .or_else(|| {
+                self.follow_ups
+                    .state
+                    .messages
+                    .iter()
+                    .find(|m| m.send_at.is_none())
+            });
         let Some(message) = message.cloned() else {
             return;
         };
@@ -533,9 +540,11 @@ impl Conversation {
                             .child(queue_button("queue-save", "Save queued message", "check").on_click(cx.listener(|this, _, window, cx| this.finish_queue_edit(true, window, cx))))
                             .child(queue_button("queue-cancel", "Cancel queued message edit", "close").on_click(cx.listener(|this, _, window, cx| this.finish_queue_edit(false, window, cx))))
                     } else {
-                        let (steer, edit, remove) = (id.clone(), id.clone(), id);
-                        row.child(div().flex_1().min_w_0().py_1().child(div().id("queued-message-text").role(Role::Label).aria_label(message.label()).truncate().text_color(content(0.75)).child(message.label())).when_some(message.error.clone(), |d, error| d.child(div().id("queue-error").role(Role::Alert).text_color(gpui::rgb(0xf87171)).child(error))))
-                            .when(Kind::from_id(&self.summary.provider).can_steer(), |d| d.child(queue_button("queue-steer", "Steer queued message", "queue-steer").w_auto().px_2().gap(px(6.)).opacity(if sending { 0.4 } else { 1. }).child("Steer").on_click(cx.listener(move |this, _, _, cx| {
+                        let (steer, edit, remove, now_id) = (id.clone(), id.clone(), id.clone(), id);
+                        let sends = message.send_at.map(|at| format!("Sends {}", monocode_core::scheduled_send::format_scheduled_send(at, &chrono::Local::now())));
+                        row.child(div().flex_1().min_w_0().py_1().child(div().id("queued-message-text").role(Role::Label).aria_label(message.label()).truncate().text_color(content(0.75)).child(message.label())).when_some(sends.clone(), |d, sends| d.child(div().id("queue-sends-at").text_size(px(11.)).text_color(content(0.45)).child(sends))).when_some(message.error.clone(), |d, error| d.child(div().id("queue-error").role(Role::Alert).text_color(gpui::rgb(0xf87171)).child(error))))
+                            .when(sends.is_some(), |d| d.child(queue_button("queue-send-now", "Send now", "send").w_auto().px_2().gap(px(6.)).child("Send now").on_click(cx.listener(move |this, _, _, cx| this.send_scheduled_now(&now_id, cx)))))
+                            .when(sends.is_none() && Kind::from_id(&self.summary.provider).can_steer(), |d| d.child(queue_button("queue-steer", "Steer queued message", "queue-steer").w_auto().px_2().gap(px(6.)).opacity(if sending { 0.4 } else { 1. }).child("Steer").on_click(cx.listener(move |this, _, _, cx| {
                                 if !sending && let Some(message) = this.follow_ups.state.messages.iter_mut().find(|m| m.id == steer) {
                                     if !message.can_steer() && this.busy { return; }
                                     message.steer = true;

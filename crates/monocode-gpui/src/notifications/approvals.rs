@@ -62,6 +62,9 @@ impl SessionInputs {
     }
 }
 
+// A one-off action from a notification button: `Decision::Steer` carries a
+// whole queued message, and boxing it would change the core API for nothing.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum Action {
     OpenSession {
         session_id: String,
