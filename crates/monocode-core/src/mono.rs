@@ -20,6 +20,7 @@ pub mod sync;
 pub mod transfer;
 pub mod wakes;
 pub mod work;
+pub mod workstreams;
 pub(crate) use desktop::codex_home;
 #[cfg(test)]
 mod tests;
