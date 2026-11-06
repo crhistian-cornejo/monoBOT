@@ -1,6 +1,7 @@
 //! Persistent Mono identities and app-owned context, shared by native views,
 //! scheduled runs and the local app CLI. React's monos/model is the reference.
 pub mod api;
+pub mod bot_tools;
 pub mod bots;
 pub mod bridge;
 pub mod cards;
@@ -76,6 +77,9 @@ pub struct Mono {
     /// What it takes on, in place of its role's, for the Principal to read.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub specialty: Option<String>,
+    /// The tools the bot or the user picked, in place of its role's.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bot_tools: Option<bot_tools::BotTools>,
 }
 
 /// What a Mono's sessions start with when it names no provider, model or
@@ -148,6 +152,7 @@ impl Default for Mono {
             kind: None,
             bot_role: None,
             specialty: None,
+            bot_tools: None,
         }
     }
 }

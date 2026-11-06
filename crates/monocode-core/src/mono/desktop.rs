@@ -17,6 +17,7 @@ const IDENTITY_FIELDS: &[&str] = &[
     "kind",
     "botRole",
     "specialty",
+    "botTools",
 ];
 
 impl Roster {
@@ -190,6 +191,9 @@ fn desktop_mono(store: &Store, value: &Value, backgrounds: Option<&Value>) -> Op
                 .unwrap_or("assistant")
                 .to_owned()
         }),
+        bot_tools: (value.get("kind").and_then(Value::as_str) == Some("bot"))
+            .then(|| value.get("botTools").and_then(super::bot_tools::parse))
+            .flatten(),
         specialty: value
             .get("specialty")
             .and_then(Value::as_str)
