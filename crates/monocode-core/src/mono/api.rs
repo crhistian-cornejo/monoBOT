@@ -12,9 +12,9 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "worktrees.create"=>"branch base existing project",
         "folders.move"=>"sessionId folderId newFolderName project",
         "notes.list"=>"limit offset","notes.read"=>"id","notes.write"=>"id title body tags",
-        "artifacts.list"=>"kind limit offset","artifacts.read"=>"id","artifacts.write"=>"id kind title body summary",
+        "artifacts.list"=>"kind limit offset","artifacts.read"=>"id","artifacts.write"=>"id kind title body summary final",
         "papers.find"=>"query limit fromYear","papers.read"=>"ref pages query section maxChars","papers.figure"=>"ref page","papers.add"=>"path ref title",
-        "soul.update"=>"text expectedHash","memory.read"=>"topic shared personal","memory.search"=>"query since",
+        "soul.update"=>"text expectedHash","memory.read"=>"topic shared personal","memory.search"=>"query since personal",
         // "shared" is the team's memory; "personal" keeps a fact learned in a group's seat out of the group's.
         "memory.add"=>"fact topic until shared personal","memory.replace"=>"find fact topic until shared personal","memory.remove"=>"find topic shared personal",
         "habits.add"=>"name instructions schedule","habits.update"=>"id name instructions schedule enabled","habits.run"|"habits.remove"=>"id",
@@ -47,6 +47,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "shared",
             "wait",
             "personal",
+            "final",
         ]
         .contains(&key.as_str())
             && !value.is_boolean()
@@ -209,6 +210,16 @@ mod tests {
         assert!(validate("tools.update", &json!({"connectors":[]})).is_ok());
         assert!(validate("memory.add", &json!({"fact":"f","personal":true})).is_ok());
         assert!(validate("memory.add", &json!({"fact":"f","personal":"yes"})).is_err());
+        // The daily brief and the research bot mark their report final, as
+        // agentApp.ts accepts; a group seat searches its own memory with
+        // personal.
+        assert!(validate(
+            "artifacts.write",
+            &json!({"kind":"document","title":"Daily brief","body":"b","final":true})
+        )
+        .is_ok());
+        assert!(validate("artifacts.write", &json!({"body":"b","final":"yes"})).is_err());
+        assert!(validate("memory.search", &json!({"query":"q","personal":true})).is_ok());
         assert!(validate(
             "group.ask",
             &json!({"member":"Docs","message":"m","wait":true})

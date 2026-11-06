@@ -726,7 +726,12 @@ impl Monos {
                             }
                             self.documents.remove(&id);
                             self.html_documents.remove(&id);
-                            self.hold_card(call.session,&mono.id,json!({"id":mono::new_id(),"type":"document","documentId":id,"title":document.title,"summary":document.summary}));
+                            let mut card = json!({"id":mono::new_id(),"type":"document","documentId":id,"title":document.title,"summary":document.summary});
+                            // The turn's report, as agentApp.ts's card says.
+                            if let Some(last) = input.get("final").and_then(Value::as_bool) {
+                                card["final"] = json!(last);
+                            }
+                            self.hold_card(call.session,&mono.id,card);
                             self.save(cx);
                             Ok(json!(document))
                         }
