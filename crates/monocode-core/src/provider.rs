@@ -1495,6 +1495,23 @@ fn run_operation(
                     system.push(instructions);
                 }
             }
+            // botLaunchForSession: a bot's Claude gets only its tools and
+            // folders, and never what sends, shares or deletes.
+            let bot = settings
+                .mono
+                .as_ref()
+                .filter(|_| !settings.text_only)
+                .filter(|mono| mono.mono.is_bot())
+                .map(|mono| crate::mono::bot_tools::launch_for(&mono.mono, &request.cwd));
+            if let Some(bot) = &bot {
+                allowed.extend(bot.allowed_tools.iter().map(String::as_str));
+                if !bot.disallowed_tools.is_empty() {
+                    command.args(["--disallowedTools", &bot.disallowed_tools.join(",")]);
+                }
+                for dir in &bot.add_dirs {
+                    command.args(["--add-dir", dir]);
+                }
+            }
             if !system.is_empty() {
                 command.args(["--append-system-prompt", &system.join("\n\n")]);
             }

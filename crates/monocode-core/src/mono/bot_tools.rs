@@ -403,6 +403,31 @@ pub fn launch(
     }
 }
 
+/// The skills Claude Code loads for a session in `cwd`: the user's and the
+/// project's own (installedClaudeSkills). Empty when they cannot be listed,
+/// which leaves every skill open.
+pub fn installed_skills(cwd: &std::path::Path) -> Vec<String> {
+    crate::skills::list_skills(cwd.to_string_lossy().into_owned(), None)
+        .map(|skills| {
+            skills
+                .into_iter()
+                .filter(|skill| skill.source == "claude" || skill.source == "agents")
+                .map(|skill| skill.name)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// What a bot's session in `cwd` launches with (botLaunchForSession).
+pub fn launch_for(mono: &super::Mono, cwd: &std::path::Path) -> Launch {
+    launch(
+        mono.bot_role.as_deref().unwrap_or("assistant"),
+        mono.bot_tools.as_ref(),
+        &installed_skills(cwd),
+        &[],
+    )
+}
+
 /// Roles whose connectors reach something real (the user's phone): only the
 /// user makes one, from the new-bot menu, never a bot through bots.create.
 pub fn user_only(role: &str) -> bool {

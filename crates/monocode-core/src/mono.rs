@@ -5,6 +5,7 @@ pub mod bot_tools;
 pub mod bots;
 pub mod bridge;
 pub mod cards;
+pub mod delegations;
 mod desktop;
 pub mod files;
 pub mod habits;
