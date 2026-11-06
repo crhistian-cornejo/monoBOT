@@ -2076,6 +2076,7 @@ fn a_bots_settings_show_its_specialty_and_save_its_tools(cx: &mut TestAppContext
     assert!(!access.iter().any(|a| a == "web"));
     assert!(access.iter().any(|a| a == "read"));
     assert_eq!(mono.specialty.as_deref(), Some("Runs the team"));
+}
 
 #[gpui::test]
 fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut TestAppContext) {
