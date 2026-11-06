@@ -100,7 +100,11 @@ fn build(tx: SyncSender<Vec<f32>>, level: Arc<AtomicU32>) -> Result<(cpal::Strea
         cpal::SampleFormat::U16 => stream::<u16>(&device, &config, tx, level),
         cpal::SampleFormat::I8 => stream::<i8>(&device, &config, tx, level),
         cpal::SampleFormat::U8 => stream::<u8>(&device, &config, tx, level),
-        other => return Err(Error::Microphone(format!("unsupported sample format {other}"))),
+        other => {
+            return Err(Error::Microphone(format!(
+                "unsupported sample format {other}"
+            )))
+        }
     }?;
     stream
         .play()

@@ -59,7 +59,12 @@ pub fn git_watch_start(app: AppHandle, host: State<'_, GitWatchHost>, cwd: Strin
     let root = crate::fs::expand_home(&cwd);
     let changed = cwd.clone();
     let notify_ui = move || {
-        let _ = app.emit(CHANGED_EVENT, WorktreeChanged { cwd: changed.clone() });
+        let _ = app.emit(
+            CHANGED_EVENT,
+            WorktreeChanged {
+                cwd: changed.clone(),
+            },
+        );
     };
     let Some(watcher) = watch(root, notify_ui) else {
         return false;
@@ -206,7 +211,10 @@ mod tests {
     #[test]
     fn paths_outside_the_checkout_are_ignored() {
         let root = Path::new("/repo");
-        assert!(matches!(classify(root, Path::new("/other/file")), PathKind::Noise));
+        assert!(matches!(
+            classify(root, Path::new("/other/file")),
+            PathKind::Noise
+        ));
         assert!(matches!(classify(root, root), PathKind::Noise));
     }
 

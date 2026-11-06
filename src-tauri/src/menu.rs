@@ -126,14 +126,12 @@ pub fn dispatch(app: &AppHandle, id: &str) {
             let _ = open::that(REPO_URL);
         }
         "help_report_bug" => {
-            let _ = open::that(
-                &format!("{REPO_URL}/issues/new?template=bug_report.yml"),
-            );
+            let _ = open::that(&format!("{REPO_URL}/issues/new?template=bug_report.yml"));
         }
         "help_request_feature" => {
-            let _ = open::that(
-                &format!("{REPO_URL}/issues/new?template=feature_request.yml"),
-            );
+            let _ = open::that(&format!(
+                "{REPO_URL}/issues/new?template=feature_request.yml"
+            ));
         }
         "new_window" => {
             let _ = crate::window::open_new_window(app);

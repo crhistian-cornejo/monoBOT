@@ -14,8 +14,13 @@ fn name(address: &str) -> String {
 
 #[cfg(test)]
 fn memory() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, String>> {
-    static MEMORY: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, String>>> = std::sync::OnceLock::new();
-    MEMORY.get_or_init(Default::default).lock().unwrap_or_else(|p| p.into_inner())
+    static MEMORY: std::sync::OnceLock<
+        std::sync::Mutex<std::collections::HashMap<String, String>>,
+    > = std::sync::OnceLock::new();
+    MEMORY
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
 }
 
 #[cfg(not(test))]
@@ -40,7 +45,9 @@ pub fn get(address: &str) -> Result<String, String> {
 
 #[cfg(test)]
 pub fn get(address: &str) -> Result<String, String> {
-    memory().get(&name(address)).cloned().ok_or_else(|| "Falta la contraseña de esta cuenta: quítala y vuelve a añadirla.".to_string())
+    memory().get(&name(address)).cloned().ok_or_else(|| {
+        "Falta la contraseña de esta cuenta: quítala y vuelve a añadirla.".to_string()
+    })
 }
 
 /// Forgets the password; one that was not there is not an error.

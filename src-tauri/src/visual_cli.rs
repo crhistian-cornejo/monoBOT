@@ -41,7 +41,13 @@ pub fn embed(document: &VisualDocument) -> String {
     let caption: String = document
         .title
         .chars()
-        .map(|c| if matches!(c, '[' | ']' | '\n' | '\r') { ' ' } else { c })
+        .map(|c| {
+            if matches!(c, '[' | ']' | '\n' | '\r') {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     format!("![{}](visual:{})", caption.trim(), document.id)
 }
@@ -76,7 +82,11 @@ fn document(input: &Value) -> Result<(VisualDocument, String), String> {
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| format!("visual-{digest}")),
-        title: input["title"].as_str().unwrap_or("Visual").trim().to_owned(),
+        title: input["title"]
+            .as_str()
+            .unwrap_or("Visual")
+            .trim()
+            .to_owned(),
         source: source.to_owned(),
     };
     document.validate()?;
@@ -319,10 +329,15 @@ mod tests {
     fn publication_checks_before_it_needs_a_session() {
         let error = document(&json!({"source":"return 3;"})).unwrap_err();
         assert!(error.contains("render function"), "{error}");
-        let (doc, _) = document(&json!({"source":"return () => visual.text('Hi');","title":"Hi [1]","id":"hi"})).unwrap();
+        let (doc, _) = document(
+            &json!({"source":"return () => visual.text('Hi');","title":"Hi [1]","id":"hi"}),
+        )
+        .unwrap();
         assert_eq!(embed(&doc), "![Hi  1](visual:hi)");
-        let (first, _) = document(&json!({"source":"return () => visual.text('a');","requestId":"r"})).unwrap();
-        let (again, _) = document(&json!({"source":"return () => visual.text('a');","requestId":"r"})).unwrap();
+        let (first, _) =
+            document(&json!({"source":"return () => visual.text('a');","requestId":"r"})).unwrap();
+        let (again, _) =
+            document(&json!({"source":"return () => visual.text('a');","requestId":"r"})).unwrap();
         assert_eq!(first.id, again.id);
     }
 }

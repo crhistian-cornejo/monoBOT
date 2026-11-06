@@ -104,8 +104,8 @@ pub fn init(app: &AppHandle) {
         if state.engine.installed() {
             // Load it ahead of the first dictation.
             let engine = state.engine.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || engine.prepare().map(|_| ()))
-                .await;
+            let _ =
+                tauri::async_runtime::spawn_blocking(move || engine.prepare().map(|_| ())).await;
             return;
         }
         let _ = install(&app).await;

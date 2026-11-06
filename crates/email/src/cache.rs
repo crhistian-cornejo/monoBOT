@@ -14,7 +14,11 @@ pub struct Cache<V> {
 
 impl<V: Clone> Cache<V> {
     pub fn new(limit: usize) -> Self {
-        Self { entries: VecDeque::new(), bytes: 0, limit }
+        Self {
+            entries: VecDeque::new(),
+            bytes: 0,
+            limit,
+        }
     }
 
     /// The value under `key`, which becomes the most recent one.
@@ -33,7 +37,9 @@ impl<V: Clone> Cache<V> {
             return;
         }
         while self.bytes + size > self.limit {
-            let Some((_, _, old)) = self.entries.pop_back() else { break };
+            let Some((_, _, old)) = self.entries.pop_back() else {
+                break;
+            };
             self.bytes -= old;
         }
         self.bytes += size;
@@ -74,9 +80,16 @@ mod tests {
         let mut cache = Cache::new(10);
         cache.put("a".into(), 1, 4);
         cache.put("b".into(), 2, 4);
-        assert_eq!(cache.get("a"), Some(1), "reading a makes it the most recent");
+        assert_eq!(
+            cache.get("a"),
+            Some(1),
+            "reading a makes it the most recent"
+        );
         cache.put("c".into(), 3, 4);
-        assert_eq!((cache.get("b"), cache.get("a"), cache.get("c")), (None, Some(1), Some(3)));
+        assert_eq!(
+            (cache.get("b"), cache.get("a"), cache.get("c")),
+            (None, Some(1), Some(3))
+        );
         assert_eq!(cache.bytes, 8);
     }
 

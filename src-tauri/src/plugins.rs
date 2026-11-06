@@ -124,8 +124,14 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("monobot-plugin-exec-{}", std::process::id()));
         let files = [
-            PluginFile { path: "s/run".into(), content: "#!/bin/sh\necho hi\n".into() },
-            PluginFile { path: "s/SKILL.md".into(), content: "# x".into() },
+            PluginFile {
+                path: "s/run".into(),
+                content: "#!/bin/sh\necho hi\n".into(),
+            },
+            PluginFile {
+                path: "s/SKILL.md".into(),
+                content: "# x".into(),
+            },
         ];
         write_plugin(&dir, &files).unwrap();
         let mode = |p: &str| std::fs::metadata(dir.join(p)).unwrap().permissions().mode() & 0o111;
@@ -137,7 +143,10 @@ mod tests {
     #[test]
     fn rewrites_the_folder_with_only_the_new_files() {
         let dir = std::env::temp_dir().join(format!("monobot-plugin-test-{}", std::process::id()));
-        let file = |path: &str| PluginFile { path: path.into(), content: "x".into() };
+        let file = |path: &str| PluginFile {
+            path: path.into(),
+            content: "x".into(),
+        };
         write_plugin(&dir, &[file("a/SKILL.md"), file("old.md")]).unwrap();
         write_plugin(&dir, &[file("a/SKILL.md")]).unwrap();
         assert!(dir.join("a/SKILL.md").exists());

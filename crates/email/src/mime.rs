@@ -35,7 +35,11 @@ pub struct Parsed {
 }
 
 pub fn parse(header: &[u8], body: &[u8]) -> Parsed {
-    let header = String::from_utf8_lossy(header).replace("\r\n ", " ").replace("\r\n\t", " ").replace("\n ", " ").replace("\n\t", " ");
+    let header = String::from_utf8_lossy(header)
+        .replace("\r\n ", " ")
+        .replace("\r\n\t", " ")
+        .replace("\n ", " ")
+        .replace("\n\t", " ");
     let field = |name: &str| header_field(&header, name);
     let (from_name, from_address) = split_from(&decode_words(&field("from")));
     let to = decode_words(&field("to"));
@@ -53,28 +57,50 @@ pub fn parse(header: &[u8], body: &[u8]) -> Parsed {
         reply_to: address_list(&decode_words(&field("reply-to"))),
         others,
         subject: one_line(&decode_words(&field("subject")), 240),
-        message_id: field("message-id").chars().filter(|c| !c.is_whitespace() && !c.is_control()).take(300).collect(),
-        text: part_text(&field("content-type"), &field("content-transfer-encoding"), body, 0),
+        message_id: field("message-id")
+            .chars()
+            .filter(|c| !c.is_whitespace() && !c.is_control())
+            .take(300)
+            .collect(),
+        text: part_text(
+            &field("content-type"),
+            &field("content-transfer-encoding"),
+            body,
+            0,
+        ),
         unsubscribe: !field("list-unsubscribe").is_empty(),
-        bulk: matches!(precedence.as_str(), "bulk" | "list" | "junk") || (!auto.is_empty() && auto != "no"),
-        auth_failed: ["spf=fail", "dkim=fail", "dmarc=fail"].iter().any(|bad| auth.contains(bad)),
+        bulk: matches!(precedence.as_str(), "bulk" | "list" | "junk")
+            || (!auto.is_empty() && auto != "no"),
+        auth_failed: ["spf=fail", "dkim=fail", "dmarc=fail"]
+            .iter()
+            .any(|bad| auth.contains(bad)),
     }
 }
 
 fn header_field(header: &str, name: &str) -> String {
-    header.lines().find_map(|l| named(l, name)).map(|value| value.trim().to_string()).unwrap_or_default()
+    header
+        .lines()
+        .find_map(|l| named(l, name))
+        .map(|value| value.trim().to_string())
+        .unwrap_or_default()
 }
 
 /// The value of a header line when it is the `name` one. (`get`: a line may hold a letter with an accent where the
 /// name would end, and cutting through it would panic.)
 fn named<'a>(line: &'a str, name: &str) -> Option<&'a str> {
     let (head, rest) = (line.get(..name.len())?, line.get(name.len()..)?);
-    head.eq_ignore_ascii_case(name).then(|| rest.strip_prefix(':')).flatten()
+    head.eq_ignore_ascii_case(name)
+        .then(|| rest.strip_prefix(':'))
+        .flatten()
 }
 
 /// Every line of a header that appears more than once (a server may add several `Authentication-Results`).
 fn header_fields(header: &str, name: &str) -> String {
-    header.lines().filter_map(|l| named(l, name)).collect::<Vec<_>>().join(" ")
+    header
+        .lines()
+        .filter_map(|l| named(l, name))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// «Ana Pérez <ana@ejemplo.test>», «"Ana" <ana@…>» or a bare address, as (name, address).
@@ -84,7 +110,14 @@ fn split_from(from: &str) -> (String, String) {
         if open < close {
             let address = from[open + 1..close].trim().to_lowercase();
             let name = one_line(from[..open].trim().trim_matches('"'), 120);
-            return (if name.is_empty() { address.clone() } else { name }, address);
+            return (
+                if name.is_empty() {
+                    address.clone()
+                } else {
+                    name
+                },
+                address,
+            );
         }
     }
     let address = from.to_lowercase();
@@ -128,16 +161,26 @@ pub fn address_list(list: &str) -> Vec<(String, String)> {
 fn part_text(content_type: &str, encoding: &str, body: &[u8], depth: u8) -> String {
     let kind = content_type.to_ascii_lowercase();
     if kind.starts_with("multipart/") && depth < 4 {
-        let Some(boundary) = parameter(content_type, "boundary") else { return String::new() };
+        let Some(boundary) = parameter(content_type, "boundary") else {
+            return String::new();
+        };
         let marker = format!("--{boundary}");
         let raw = String::from_utf8_lossy(body);
         let mut html = String::new();
         for part in raw.split(marker.as_str()).skip(1) {
             let part = part.trim_start_matches(['\r', '\n']);
-            let (head, content) = part.split_once("\r\n\r\n").or_else(|| part.split_once("\n\n")).unwrap_or((part, ""));
+            let (head, content) = part
+                .split_once("\r\n\r\n")
+                .or_else(|| part.split_once("\n\n"))
+                .unwrap_or((part, ""));
             let head = head.replace("\r\n ", " ").replace("\r\n\t", " ");
             let kind = header_field(&head, "content-type");
-            let text = part_text(&kind, &header_field(&head, "content-transfer-encoding"), content.as_bytes(), depth + 1);
+            let text = part_text(
+                &kind,
+                &header_field(&head, "content-transfer-encoding"),
+                content.as_bytes(),
+                depth + 1,
+            );
             if text.trim().is_empty() {
                 continue;
             }
@@ -154,8 +197,19 @@ fn part_text(content_type: &str, encoding: &str, body: &[u8], depth: u8) -> Stri
     if !(kind.is_empty() || kind.starts_with("text/")) {
         return String::new();
     }
-    let text = to_text(&parameter(content_type, "charset").unwrap_or_default(), &decode_transfer(encoding, body));
-    crate::clean::tidy(&if kind.starts_with("text/html") || text.contains("<html") || text.contains("<table") || text.contains("<div") { strip_html(&text) } else { text })
+    let text = to_text(
+        &parameter(content_type, "charset").unwrap_or_default(),
+        &decode_transfer(encoding, body),
+    );
+    crate::clean::tidy(&if kind.starts_with("text/html")
+        || text.contains("<html")
+        || text.contains("<table")
+        || text.contains("<div")
+    {
+        strip_html(&text)
+    } else {
+        text
+    })
 }
 
 /// The bytes of a part as its transfer encoding wrote them: base64, quoted-printable, or as they are.
@@ -163,10 +217,16 @@ fn decode_transfer(encoding: &str, body: &[u8]) -> Vec<u8> {
     match encoding.trim().to_ascii_lowercase().as_str() {
         "base64" => {
             use base64::Engine;
-            let compact: Vec<u8> = body.iter().copied().filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/')).collect();
+            let compact: Vec<u8> = body
+                .iter()
+                .copied()
+                .filter(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/'))
+                .collect();
             // The fetch may cut the text in the middle of a group: one loose character cannot be decoded.
             let whole = &compact[..compact.len() - usize::from(compact.len() % 4 == 1)];
-            base64::engine::general_purpose::STANDARD_NO_PAD.decode(whole).unwrap_or_default()
+            base64::engine::general_purpose::STANDARD_NO_PAD
+                .decode(whole)
+                .unwrap_or_default()
         }
         "quoted-printable" => quoted_printable(body),
         _ => body.to_vec(),
@@ -176,7 +236,12 @@ fn decode_transfer(encoding: &str, body: &[u8]) -> Vec<u8> {
 /// Text in its charset: the Latin ones byte by byte, the rest as UTF-8.
 fn to_text(charset: &str, bytes: &[u8]) -> String {
     let charset = charset.to_ascii_lowercase();
-    if charset.starts_with("iso-8859") || charset.starts_with("windows-125") || charset == "latin1" { bytes.iter().map(|b| *b as char).collect() } else { String::from_utf8_lossy(bytes).into_owned() }
+    if charset.starts_with("iso-8859") || charset.starts_with("windows-125") || charset == "latin1"
+    {
+        bytes.iter().map(|b| *b as char).collect()
+    } else {
+        String::from_utf8_lossy(bytes).into_owned()
+    }
 }
 
 /// The parts of a message read whole: its HTML and its text as they were written, and the pictures an HTML part can
@@ -212,14 +277,27 @@ pub fn parse_whole(message: &[u8]) -> Whole {
     let (head, body) = split_head(message);
     let mut leaves = Vec::new();
     collect_leaves(&unfold(head), body, 0, &mut leaves);
-    let mut whole = Whole { attachments: attachments_of(&leaves).0, ..Whole::default() };
+    let mut whole = Whole {
+        attachments: attachments_of(&leaves).0,
+        ..Whole::default()
+    };
     let mut plain = None;
     for leaf in leaves {
         match leaf.kind.as_str() {
-            "text/html" if whole.html.is_empty() && !leaf.attachment => whole.html = to_text(&leaf.charset, &leaf.bytes),
-            "text/plain" if plain.is_none() && !leaf.attachment => plain = Some(to_text(&leaf.charset, &leaf.bytes)),
-            kind if kind.starts_with("image/") && !leaf.content_id.is_empty() && !leaf.attachment => {
-                whole.pictures.entry(leaf.content_id).or_insert((kind.to_string(), leaf.bytes));
+            "text/html" if whole.html.is_empty() && !leaf.attachment => {
+                whole.html = to_text(&leaf.charset, &leaf.bytes)
+            }
+            "text/plain" if plain.is_none() && !leaf.attachment => {
+                plain = Some(to_text(&leaf.charset, &leaf.bytes))
+            }
+            kind if kind.starts_with("image/")
+                && !leaf.content_id.is_empty()
+                && !leaf.attachment =>
+            {
+                whole
+                    .pictures
+                    .entry(leaf.content_id)
+                    .or_insert((kind.to_string(), leaf.bytes));
             }
             _ => {}
         }
@@ -242,7 +320,10 @@ pub fn attachment_at(message: &[u8], index: usize) -> Option<(Attachment, Vec<u8
 /// A leaf is a file the owner would want when it says so (`Content-Disposition: attachment`), when it has a name and is not a
 /// picture the message shows inline, or when it is an application's data (a PDF, a spreadsheet, an archive, a signature).
 fn is_file(leaf: &Leaf) -> bool {
-    leaf.attachment || (!leaf.name.is_empty() && leaf.content_id.is_empty()) || leaf.kind.starts_with("application/") || leaf.kind == "message/rfc822"
+    leaf.attachment
+        || (!leaf.name.is_empty() && leaf.content_id.is_empty())
+        || leaf.kind.starts_with("application/")
+        || leaf.kind == "message/rfc822"
 }
 
 /// The biggest picture shown in place, and the most bytes all of one message's pictures may take.
@@ -257,16 +338,34 @@ fn attachments_of(leaves: &[Leaf]) -> (Vec<Attachment>, Vec<usize>) {
     let mut places = Vec::new();
     let mut shown = 0;
     for (place, leaf) in leaves.iter().enumerate().filter(|(_, leaf)| is_file(leaf)) {
-        let name = if leaf.name.is_empty() { format!("adjunto{}", extension_of(&leaf.kind)) } else { leaf.name.clone() };
+        let name = if leaf.name.is_empty() {
+            format!("adjunto{}", extension_of(&leaf.kind))
+        } else {
+            leaf.name.clone()
+        };
         let risk = crate::inspect::inspect(&name, &leaf.kind, &leaf.bytes);
         // Only a picture its bytes prove (never SVG), with nothing found against it.
         let preview = crate::inspect::picture_type(&leaf.bytes)
-            .filter(|_| risk.level == crate::inspect::Level::Safe && leaf.bytes.len() <= MAX_PREVIEW && shown + leaf.bytes.len() <= MAX_PREVIEWS)
+            .filter(|_| {
+                risk.level == crate::inspect::Level::Safe
+                    && leaf.bytes.len() <= MAX_PREVIEW
+                    && shown + leaf.bytes.len() <= MAX_PREVIEWS
+            })
             .map(|kind| {
                 shown += leaf.bytes.len();
-                format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(&leaf.bytes))
+                format!(
+                    "data:{kind};base64,{}",
+                    base64::engine::general_purpose::STANDARD.encode(&leaf.bytes)
+                )
             });
-        list.push(Attachment { index: list.len(), name, kind: leaf.kind.clone(), size: leaf.bytes.len(), risk, preview });
+        list.push(Attachment {
+            index: list.len(),
+            name,
+            kind: leaf.kind.clone(),
+            size: leaf.bytes.len(),
+            risk,
+            preview,
+        });
         places.push(place);
     }
     (list, places)
@@ -286,8 +385,23 @@ fn extension_of(kind: &str) -> &'static str {
 
 /// A name that is safe to give a file: no folder, no character a system refuses, no control character, not too long.
 fn safe_name(name: &str) -> String {
-    let cleaned: String = name.chars().map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { '_' } else { c }).collect();
-    cleaned.trim().trim_matches('.').trim().chars().take(120).collect()
+    let cleaned: String = name
+        .chars()
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect();
+    cleaned
+        .trim()
+        .trim_matches('.')
+        .trim()
+        .chars()
+        .take(120)
+        .collect()
 }
 
 /// The name a part says it has: `filename` of its disposition (also in its RFC 2231 form `filename*=UTF-8''…`), else `name` of
@@ -308,7 +422,11 @@ fn decode_extended(value: &str) -> String {
     let mut bytes = Vec::with_capacity(raw.len());
     let mut i = 0;
     while i < raw.len() {
-        let hex = (raw[i] == b'%').then(|| raw.get(i + 1..i + 3)).flatten().and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+        let hex = (raw[i] == b'%')
+            .then(|| raw.get(i + 1..i + 3))
+            .flatten()
+            .and_then(|h| std::str::from_utf8(h).ok())
+            .and_then(|h| u8::from_str_radix(h, 16).ok());
         match hex {
             Some(byte) => {
                 bytes.push(byte);
@@ -326,7 +444,12 @@ fn decode_extended(value: &str) -> String {
 /// The leaf parts of a body, in order: its headers (`head`, unfolded) and its bytes. A multipart goes into its parts.
 fn collect_leaves(head: &str, body: &[u8], depth: u8, out: &mut Vec<Leaf>) {
     let content_type = header_field(head, "content-type");
-    let kind = content_type.split(';').next().unwrap_or_default().trim().to_ascii_lowercase();
+    let kind = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
     if kind.starts_with("multipart/") {
         if depth < MAX_DEPTH {
             if let Some(boundary) = parameter(&content_type, "boundary") {
@@ -340,10 +463,18 @@ fn collect_leaves(head: &str, body: &[u8], depth: u8, out: &mut Vec<Leaf>) {
     }
     if out.len() < MAX_LEAVES {
         out.push(Leaf {
-            kind: if kind.is_empty() { "text/plain".to_string() } else { kind },
+            kind: if kind.is_empty() {
+                "text/plain".to_string()
+            } else {
+                kind
+            },
             charset: parameter(&content_type, "charset").unwrap_or_default(),
-            content_id: header_field(head, "content-id").trim_matches(|c: char| c == '<' || c == '>' || c.is_whitespace()).to_string(),
-            attachment: header_field(head, "content-disposition").to_ascii_lowercase().starts_with("attachment"),
+            content_id: header_field(head, "content-id")
+                .trim_matches(|c: char| c == '<' || c == '>' || c.is_whitespace())
+                .to_string(),
+            attachment: header_field(head, "content-disposition")
+                .to_ascii_lowercase()
+                .starts_with("attachment"),
             name: file_name(head, &content_type),
             bytes: decode_transfer(&header_field(head, "content-transfer-encoding"), body),
         });
@@ -355,7 +486,9 @@ fn parts_of<'a>(body: &'a [u8], boundary: &str) -> Vec<&'a [u8]> {
     let marker = format!("--{boundary}");
     let marker = marker.as_bytes();
     let mut parts = Vec::new();
-    let Some(mut at) = find(body, marker, 0) else { return parts };
+    let Some(mut at) = find(body, marker, 0) else {
+        return parts;
+    };
     while parts.len() < MAX_LEAVES {
         let line_end = find(body, b"\n", at + marker.len()).unwrap_or(body.len());
         // The closing boundary is `--boundary--`: no part follows it.
@@ -393,12 +526,20 @@ fn split_head(message: &[u8]) -> (&[u8], &[u8]) {
 
 /// Headers as text, a line that starts with a space or a tab going on the one before it.
 fn unfold(head: &[u8]) -> String {
-    String::from_utf8_lossy(head).replace("\r\n ", " ").replace("\r\n\t", " ").replace("\n ", " ").replace("\n\t", " ")
+    String::from_utf8_lossy(head)
+        .replace("\r\n ", " ")
+        .replace("\r\n\t", " ")
+        .replace("\n ", " ")
+        .replace("\n\t", " ")
 }
 
 /// Where `needle` first appears in `haystack`, from `from` on.
 fn find(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
-    haystack.get(from..)?.windows(needle.len()).position(|window| window == needle).map(|at| from + at)
+    haystack
+        .get(from..)?
+        .windows(needle.len())
+        .position(|window| window == needle)
+        .map(|at| from + at)
 }
 
 fn parameter(header: &str, name: &str) -> Option<String> {
@@ -407,7 +548,11 @@ fn parameter(header: &str, name: &str) -> Option<String> {
     let rest = &header[at..];
     Some(match rest.strip_prefix('"') {
         Some(quoted) => quoted.split('"').next().unwrap_or_default().to_string(),
-        None => rest.split([';', ' ', '\r', '\n']).next().unwrap_or_default().to_string(),
+        None => rest
+            .split([';', ' ', '\r', '\n'])
+            .next()
+            .unwrap_or_default()
+            .to_string(),
     })
 }
 
@@ -424,7 +569,10 @@ fn quoted_printable(body: &[u8]) -> Vec<u8> {
                 i += 2;
                 continue;
             }
-            let hex = body.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok());
+            let hex = body
+                .get(i + 1..i + 3)
+                .and_then(|h| std::str::from_utf8(h).ok())
+                .and_then(|h| u8::from_str_radix(h, 16).ok());
             if let Some(byte) = hex {
                 out.push(byte);
                 i += 3;
@@ -444,15 +592,24 @@ pub fn decode_words(text: &str) -> String {
     while let Some(start) = rest.find("=?") {
         let after = &rest[start + 2..];
         let mut parts = after.splitn(3, '?');
-        let (Some(charset), Some(kind), Some(tail)) = (parts.next(), parts.next(), parts.next()) else { break };
+        let (Some(charset), Some(kind), Some(tail)) = (parts.next(), parts.next(), parts.next())
+        else {
+            break;
+        };
         let Some(end) = tail.find("?=") else { break };
         let bytes = if kind.eq_ignore_ascii_case("b") {
             use base64::Engine;
-            base64::engine::general_purpose::STANDARD_NO_PAD.decode(tail[..end].trim_end_matches('=')).unwrap_or_default()
+            base64::engine::general_purpose::STANDARD_NO_PAD
+                .decode(tail[..end].trim_end_matches('='))
+                .unwrap_or_default()
         } else {
             quoted_printable(tail[..end].replace('_', " ").as_bytes())
         };
-        let word: String = if charset.to_ascii_lowercase().starts_with("utf") { String::from_utf8_lossy(&bytes).into_owned() } else { bytes.iter().map(|b| *b as char).collect() };
+        let word: String = if charset.to_ascii_lowercase().starts_with("utf") {
+            String::from_utf8_lossy(&bytes).into_owned()
+        } else {
+            bytes.iter().map(|b| *b as char).collect()
+        };
         // White space between two encoded words is not part of the text.
         let before = &rest[..start];
         if !(before.trim().is_empty() && !out.is_empty()) {
@@ -471,7 +628,10 @@ pub fn encode_word(text: &str) -> String {
         return text.to_string();
     }
     use base64::Engine;
-    format!("=?UTF-8?B?{}?=", base64::engine::general_purpose::STANDARD.encode(text))
+    format!(
+        "=?UTF-8?B?{}?=",
+        base64::engine::general_purpose::STANDARD.encode(text)
+    )
 }
 
 fn strip_html(html: &str) -> String {
@@ -482,15 +642,26 @@ fn strip_html(html: &str) -> String {
     while i < bytes.len() {
         if bytes[i] == b'<' {
             // Styles and scripts go whole; any other tag becomes a space, and the end of a block a new paragraph.
-            let skip = ["style", "script", "head", "title"].iter().find(|t| lower[i + 1..].starts_with(*t));
+            let skip = ["style", "script", "head", "title"]
+                .iter()
+                .find(|t| lower[i + 1..].starts_with(*t));
             let end = match skip {
-                Some(tag) => lower[i..].find(&format!("</{tag}")).map(|e| i + e).and_then(|e| lower[e..].find('>').map(|g| e + g)),
+                Some(tag) => lower[i..]
+                    .find(&format!("</{tag}"))
+                    .map(|e| i + e)
+                    .and_then(|e| lower[e..].find('>').map(|g| e + g)),
                 None => lower[i..].find('>').map(|g| i + g),
             };
             match end {
                 Some(end) => {
                     let tag = &lower[i + 1..end];
-                    let block = skip.is_none() && (tag.starts_with("br") || tag.starts_with("/p") || tag.starts_with("/div") || tag.starts_with("/tr") || tag.starts_with("/li") || tag.starts_with("/h"));
+                    let block = skip.is_none()
+                        && (tag.starts_with("br")
+                            || tag.starts_with("/p")
+                            || tag.starts_with("/div")
+                            || tag.starts_with("/tr")
+                            || tag.starts_with("/li")
+                            || tag.starts_with("/h"));
                     text.push_str(if block { "\n\n" } else { " " });
                     i = end + 1;
                 }
@@ -502,7 +673,20 @@ fn strip_html(html: &str) -> String {
             i += ch.len_utf8();
         }
     }
-    for (entity, plain) in [("&nbsp;", " "), ("&amp;", "&"), ("&lt;", "<"), ("&gt;", ">"), ("&quot;", "\""), ("&#39;", "'"), ("&aacute;", "á"), ("&eacute;", "é"), ("&iacute;", "í"), ("&oacute;", "ó"), ("&uacute;", "ú"), ("&ntilde;", "ñ")] {
+    for (entity, plain) in [
+        ("&nbsp;", " "),
+        ("&amp;", "&"),
+        ("&lt;", "<"),
+        ("&gt;", ">"),
+        ("&quot;", "\""),
+        ("&#39;", "'"),
+        ("&aacute;", "á"),
+        ("&eacute;", "é"),
+        ("&iacute;", "í"),
+        ("&oacute;", "ó"),
+        ("&uacute;", "ú"),
+        ("&ntilde;", "ñ"),
+    ] {
         text = text.replace(entity, plain);
     }
     text
@@ -511,7 +695,16 @@ fn strip_html(html: &str) -> String {
 /// One line of spaces between words, control characters out, at most `max` characters.
 pub fn one_line(text: &str, max: usize) -> String {
     let mut out = String::new();
-    for word in text.split(|c: char| c.is_whitespace() || c.is_control() || c == '\u{200c}' || c == '\u{feff}' || c == '\u{34f}').filter(|w| !w.is_empty()) {
+    for word in text
+        .split(|c: char| {
+            c.is_whitespace()
+                || c.is_control()
+                || c == '\u{200c}'
+                || c == '\u{feff}'
+                || c == '\u{34f}'
+        })
+        .filter(|w| !w.is_empty())
+    {
         if !out.is_empty() {
             out.push(' ');
         }
@@ -550,7 +743,10 @@ mod tests {
     fn it_reads_the_sender_the_subject_and_the_flags_of_the_headers() {
         let header = b"From: =?UTF-8?B?THVjw61hIFByYWRv?= <Lucia@Ejemplo.test>\r\nSubject: =?utf-8?Q?Cena_del_s=C3=A1bado?=\r\nMessage-ID: <abc@ejemplo.test>\r\nList-Unsubscribe: <mailto:x@y.test>\r\nPrecedence: bulk\r\nAuthentication-Results: mx.test; spf=pass; dkim=fail header.d=x.test\r\n";
         let parsed = parse(header, b"hola");
-        assert_eq!((parsed.from_name.as_str(), parsed.from_address.as_str()), ("Lucía Prado", "lucia@ejemplo.test"));
+        assert_eq!(
+            (parsed.from_name.as_str(), parsed.from_address.as_str()),
+            ("Lucía Prado", "lucia@ejemplo.test")
+        );
         assert_eq!(parsed.subject, "Cena del sábado");
         assert_eq!(parsed.message_id, "<abc@ejemplo.test>");
         assert!(parsed.unsubscribe && parsed.bulk && parsed.auth_failed);
@@ -558,9 +754,13 @@ mod tests {
 
     #[test]
     fn a_header_line_with_an_accent_where_a_name_would_end_does_not_panic() {
-        let parsed = parse("Subject: Tu pedido está en camino
+        let parsed = parse(
+            "Subject: Tu pedido está en camino
 From: a@b.test
-".as_bytes(), b"hola");
+"
+            .as_bytes(),
+            b"hola",
+        );
         assert_eq!(parsed.subject, "Tu pedido está en camino");
         assert_eq!(parsed.from_address, "a@b.test");
     }
@@ -569,9 +769,26 @@ From: a@b.test
     fn it_reads_who_replies_go_to_and_everyone_the_message_went_to() {
         let header = b"From: Tienda <noreply@tienda.test>\r\nReply-To: \"Soporte, Tienda\" <Ayuda@Tienda.test>\r\nTo: Ana <ana@ejemplo.test>, \"Prado, Luis\" <luis@ejemplo.test>\r\nCc: marta@ejemplo.test;\r\n undisclosed-recipients:;\r\n";
         let parsed = parse(header, b"hola");
-        assert_eq!(parsed.reply_to, [("Soporte, Tienda".to_string(), "ayuda@tienda.test".to_string())]);
-        let others: Vec<&str> = parsed.others.iter().map(|(_, address)| address.as_str()).collect();
-        assert_eq!(others, ["ana@ejemplo.test", "luis@ejemplo.test", "marta@ejemplo.test"]);
+        assert_eq!(
+            parsed.reply_to,
+            [(
+                "Soporte, Tienda".to_string(),
+                "ayuda@tienda.test".to_string()
+            )]
+        );
+        let others: Vec<&str> = parsed
+            .others
+            .iter()
+            .map(|(_, address)| address.as_str())
+            .collect();
+        assert_eq!(
+            others,
+            [
+                "ana@ejemplo.test",
+                "luis@ejemplo.test",
+                "marta@ejemplo.test"
+            ]
+        );
         assert_eq!(parsed.others[1].0, "Prado, Luis");
         assert!(parse(b"From: a@b.test\r\n", b"").reply_to.is_empty());
     }
@@ -579,21 +796,33 @@ From: a@b.test
     #[test]
     fn a_plain_message_has_none_of_the_flags() {
         let parsed = parse(b"From: ana@ejemplo.test\r\nSubject: Hola\r\nAuthentication-Results: mx; spf=softfail; dkim=pass\r\n", b"Hola\r\n");
-        assert_eq!((parsed.from_name.as_str(), parsed.from_address.as_str()), ("ana@ejemplo.test", "ana@ejemplo.test"));
+        assert_eq!(
+            (parsed.from_name.as_str(), parsed.from_address.as_str()),
+            ("ana@ejemplo.test", "ana@ejemplo.test")
+        );
         assert!(!parsed.unsubscribe && !parsed.bulk && !parsed.auth_failed);
     }
 
     #[test]
     fn it_takes_the_text_part_of_a_multipart_and_decodes_it() {
         let body = b"--b\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>solo html</p>\r\n--b\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: quoted-printable\r\n\r\nHola, ven a cenar. Ser=C3=A1 el s=C3=A1bado.\r\n--b--\r\n";
-        let parsed = parse(b"Content-Type: multipart/alternative; boundary=\"b\"\r\n", body);
+        let parsed = parse(
+            b"Content-Type: multipart/alternative; boundary=\"b\"\r\n",
+            body,
+        );
         assert_eq!(parsed.text.trim(), "Hola, ven a cenar. Será el sábado.");
     }
 
     #[test]
     fn html_loses_its_tags_and_keeps_its_paragraphs() {
-        let parsed = parse(b"Content-Type: text/html; charset=utf-8\r\n", b"<style>p{color:red}</style><p>Uno</p><p>Dos &amp; tres<br>cuatro</p>");
-        assert_eq!(paragraphs(&parsed.text), vec!["Uno", "Dos & tres", "cuatro"]);
+        let parsed = parse(
+            b"Content-Type: text/html; charset=utf-8\r\n",
+            b"<style>p{color:red}</style><p>Uno</p><p>Dos &amp; tres<br>cuatro</p>",
+        );
+        assert_eq!(
+            paragraphs(&parsed.text),
+            vec!["Uno", "Dos & tres", "cuatro"]
+        );
     }
 
     #[test]
@@ -603,14 +832,26 @@ From: a@b.test
     }
 
     #[test]
-    fn the_files_of_a_message_are_listed_by_name_and_one_is_read_by_its_place_and_never_by_a_path() {
+    fn the_files_of_a_message_are_listed_by_name_and_one_is_read_by_its_place_and_never_by_a_path()
+    {
         let message = b"Content-Type: multipart/mixed; boundary=\"m\"\r\n\r\n--m\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nAdjunto el contrato\r\n--m\r\nContent-Type: application/pdf; name=\"contrato.pdf\"\r\nContent-Disposition: attachment; filename=\"..\\..\\contrato final.pdf\"\r\nContent-Transfer-Encoding: base64\r\n\r\nAQID\r\n--m\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename*=UTF-8''informe%20mar%C3%A7o.xlsx\r\nContent-Transfer-Encoding: base64\r\n\r\nBAUG\r\n--m\r\nContent-Type: application/pkcs7-mime\r\nContent-Transfer-Encoding: base64\r\n\r\nBwgJ\r\n--m--\r\n";
         let whole = parse_whole(message);
         assert_eq!(whole.text.trim(), "Adjunto el contrato");
         let names: Vec<&str> = whole.attachments.iter().map(|a| a.name.as_str()).collect();
-        assert_eq!(names, ["_.._contrato final.pdf", "informe março.xlsx", "adjunto.p7m"], "a name never carries a folder, and a part without one gets its kind's ending");
+        assert_eq!(
+            names,
+            [
+                "_.._contrato final.pdf",
+                "informe março.xlsx",
+                "adjunto.p7m"
+            ],
+            "a name never carries a folder, and a part without one gets its kind's ending"
+        );
         assert_eq!(whole.attachments[0].size, 3);
-        assert_eq!(attachment_at(message, 1).map(|(info, bytes)| (info.index, bytes)), Some((1, vec![4, 5, 6])));
+        assert_eq!(
+            attachment_at(message, 1).map(|(info, bytes)| (info.index, bytes)),
+            Some((1, vec![4, 5, 6]))
+        );
         assert!(attachment_at(message, 3).is_none());
     }
 
@@ -621,7 +862,13 @@ From: a@b.test
         let whole = parse_whole(message);
         let (photo, bill) = (&whole.attachments[0], &whole.attachments[1]);
         assert_eq!(photo.risk.level, crate::inspect::Level::Safe);
-        assert!(photo.preview.as_deref().is_some_and(|p| p.starts_with("data:image/png;base64,")), "{photo:?}");
+        assert!(
+            photo
+                .preview
+                .as_deref()
+                .is_some_and(|p| p.starts_with("data:image/png;base64,")),
+            "{photo:?}"
+        );
         assert_eq!(bill.risk.level, crate::inspect::Level::Danger);
         assert!(bill.preview.is_none());
     }
@@ -630,9 +877,20 @@ From: a@b.test
     fn a_whole_message_keeps_its_html_its_pictures_by_content_id_and_not_its_attachments() {
         let message = b"Content-Type: multipart/mixed; boundary=\"m\"\r\n\r\n--m\r\nContent-Type: multipart/related; boundary=\"r\"\r\n\r\n--r\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<p>Total S/ 25.36</p><img src=\"cid:logo@echo.test\">\r\n--r\r\nContent-Type: image/png\r\nContent-ID: <logo@echo.test>\r\nContent-Transfer-Encoding: base64\r\n\r\nAQID\r\n--r--\r\n--m\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Disposition: attachment; filename=\"notas.txt\"\r\n\r\nNo debe leerse como cuerpo\r\n--m--\r\n";
         let whole = parse_whole(message);
-        assert!(whole.html.contains("<p>Total S/ 25.36</p>"), "{}", whole.html);
-        assert_eq!(whole.pictures.get("logo@echo.test"), Some(&("image/png".to_string(), vec![1, 2, 3])));
-        assert!(whole.text.contains("Total S/ 25.36") && !whole.text.contains("No debe leerse"), "{}", whole.text);
+        assert!(
+            whole.html.contains("<p>Total S/ 25.36</p>"),
+            "{}",
+            whole.html
+        );
+        assert_eq!(
+            whole.pictures.get("logo@echo.test"),
+            Some(&("image/png".to_string(), vec![1, 2, 3]))
+        );
+        assert!(
+            whole.text.contains("Total S/ 25.36") && !whole.text.contains("No debe leerse"),
+            "{}",
+            whole.text
+        );
     }
 
     #[test]

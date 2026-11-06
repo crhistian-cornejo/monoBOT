@@ -933,9 +933,12 @@ mod tests {
         let skill = |name: &str| format!("---\nname: {name}\ndescription: d\n---\n");
         write_skill(&pack.0.join("skills"), "impeccable", &skill("impeccable"));
         write_skill(&pack.0.join("skills"), "brandkit", &skill("brandkit"));
-        write_skill(&home.0.join(".claude/skills"), "brandkit", &skill("brandkit"));
-        let skills =
-            list_skills_with(&project.0, Some(&home.0), None, &[pack.0.join("skills")]);
+        write_skill(
+            &home.0.join(".claude/skills"),
+            "brandkit",
+            &skill("brandkit"),
+        );
+        let skills = list_skills_with(&project.0, Some(&home.0), None, &[pack.0.join("skills")]);
         let find = |name: &str| skills.iter().find(|s| s.name == name).unwrap();
         assert_eq!(find("impeccable").source, "monocode");
         assert_eq!(find("brandkit").source, "claude");

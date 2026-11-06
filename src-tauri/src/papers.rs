@@ -78,7 +78,9 @@ fn attr(tag: &str, name: &str) -> Option<String> {
     let mut from = 0;
     while let Some(found) = lower[from..].find(name) {
         let at = from + found;
-        let before_ok = at == 0 || !lower.as_bytes()[at - 1].is_ascii_alphanumeric() && lower.as_bytes()[at - 1] != b'-';
+        let before_ok = at == 0
+            || !lower.as_bytes()[at - 1].is_ascii_alphanumeric()
+                && lower.as_bytes()[at - 1] != b'-';
         let rest = &tag[at + name.len()..];
         let trimmed = rest.trim_start();
         if before_ok && trimmed.starts_with('=') {
@@ -106,9 +108,14 @@ fn pdf_links(html: &str, base: &Url) -> Vec<Url> {
     let mut from = 0;
     while let Some(found) = lower[from..].find('<') {
         let start = from + found;
-        let Some(len) = lower[start..].find('>') else { break };
+        let Some(len) = lower[start..].find('>') else {
+            break;
+        };
         let tag = &html[start..start + len + 1];
-        let name = lower[start + 1..].split(|c: char| !c.is_ascii_alphanumeric()).next().unwrap_or("");
+        let name = lower[start + 1..]
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .next()
+            .unwrap_or("");
         match name {
             "meta" => {
                 if attr(tag, "name").is_some_and(|n| n.eq_ignore_ascii_case("citation_pdf_url")) {
@@ -126,8 +133,14 @@ fn pdf_links(html: &str, base: &Url) -> Vec<Url> {
             }
             "a" => {
                 if let Some(href) = attr(tag, "href") {
-                    let path = href.split(['?', '#']).next().unwrap_or("").to_ascii_lowercase();
-                    if path.ends_with(".pdf") || path.contains("/bitstream/") && path.contains(".pdf") {
+                    let path = href
+                        .split(['?', '#'])
+                        .next()
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if path.ends_with(".pdf")
+                        || path.contains("/bitstream/") && path.contains(".pdf")
+                    {
                         anchors.push(href);
                     }
                 }
@@ -272,8 +285,11 @@ pub fn paper_text_write(app: AppHandle, key: String, text: String) -> Result<(),
     if text.len() > 16 * 1024 * 1024 {
         return Err("The paper's text is too large to keep".into());
     }
-    fs::write(cache_dir(&app)?.join(format!("{}.json", key_of(&key))), text)
-        .map_err(|e| e.to_string())
+    fs::write(
+        cache_dir(&app)?.join(format!("{}.json", key_of(&key))),
+        text,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Copies a PDF the user chose (one they got through their library, say) into
@@ -293,7 +309,11 @@ fn read_pdf_file(source: &std::path::Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn store_pdf_from(dir: &std::path::Path, key: &str, source: &std::path::Path) -> Result<CachedPdf, String> {
+fn store_pdf_from(
+    dir: &std::path::Path,
+    key: &str,
+    source: &std::path::Path,
+) -> Result<CachedPdf, String> {
     let bytes = read_pdf_file(source)?;
     let target = dir.join(format!("{}.pdf", key_of(key)));
     let partial = target.with_extension("part");
@@ -316,11 +336,17 @@ pub async fn paper_pdf_file(path: String) -> Result<tauri::ipc::Response, String
 }
 
 #[tauri::command]
-pub async fn paper_pdf_import(app: AppHandle, key: String, path: String) -> Result<CachedPdf, String> {
+pub async fn paper_pdf_import(
+    app: AppHandle,
+    key: String,
+    path: String,
+) -> Result<CachedPdf, String> {
     let dir = cache_dir(&app)?;
-    tauri::async_runtime::spawn_blocking(move || store_pdf_from(&dir, &key, std::path::Path::new(&path)))
-        .await
-        .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        store_pdf_from(&dir, &key, std::path::Path::new(&path))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
@@ -370,18 +396,34 @@ pub fn paper_image_write(
 pub(crate) fn safe_name(raw: &str, fallback: &str, max: usize) -> String {
     let cleaned: String = raw
         .chars()
-        .map(|c| if c.is_control() || "/\\:*?\"<>|".contains(c) { ' ' } else { c })
+        .map(|c| {
+            if c.is_control() || "/\\:*?\"<>|".contains(c) {
+                ' '
+            } else {
+                c
+            }
+        })
         .collect();
     let mut name = cleaned.split_whitespace().collect::<Vec<_>>().join(" ");
-    name = name.trim_matches(|c: char| c == '.' || c == ' ').to_string();
+    name = name
+        .trim_matches(|c: char| c == '.' || c == ' ')
+        .to_string();
     if name.chars().count() > max {
-        name = name.chars().take(max).collect::<String>().trim_end().to_string();
+        name = name
+            .chars()
+            .take(max)
+            .collect::<String>()
+            .trim_end()
+            .to_string();
     }
     let stem = name.split('.').next().unwrap_or("").to_ascii_uppercase();
     let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
         || (stem.len() == 4
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
-            && stem.chars().last().is_some_and(|c| c.is_ascii_digit() && c != '0'));
+            && stem
+                .chars()
+                .last()
+                .is_some_and(|c| c.is_ascii_digit() && c != '0'));
     if name.is_empty() {
         return fallback.to_string();
     }
@@ -402,7 +444,9 @@ fn export_pdf(
     name: &str,
 ) -> Result<PathBuf, String> {
     let bytes = fs::read(cached).map_err(|_| "That paper is not in the cache".to_string())?;
-    let folder = documents.join("MonoBOT").join(safe_name(agent, "General", 60));
+    let folder = documents
+        .join("MonoBOT")
+        .join(safe_name(agent, "General", 60));
     fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
     let stem = safe_name(name, "Paper", 120);
     for attempt in 1..=50 {
@@ -427,7 +471,12 @@ fn export_pdf(
 /// Puts a copy of a paper's PDF where the user can see it: Documents, in a
 /// folder named for the agent that fetched it.
 #[tauri::command(async)]
-pub fn paper_export(app: AppHandle, key: String, agent: String, name: String) -> Result<String, String> {
+pub fn paper_export(
+    app: AppHandle,
+    key: String,
+    agent: String,
+    name: String,
+) -> Result<String, String> {
     let cached = cache_dir(&app)?.join(format!("{}.pdf", key_of(&key)));
     let documents = app.path().document_dir().map_err(|e| e.to_string())?;
     export_pdf(&cached, &documents, &agent, &name).map(|path| path.to_string_lossy().into_owned())
@@ -445,7 +494,6 @@ pub fn paper_pdf_bytes(app: AppHandle, key: String) -> Result<tauri::ipc::Respon
 #[cfg(test)]
 mod tests {
     use super::*;
-
 
     /// Real open-access papers through the real network, by their DOI links.
     /// Run by hand: `cargo test -p monocode live_open_papers -- --ignored --nocapture`.
@@ -476,7 +524,10 @@ mod tests {
             <meta name='citation_pdf_url' content='/bitstream/handle/1/2894/paper.pdf?sequence=1&amp;isAllowed=y'>
             <link rel="alternate" type="application/pdf" href="https://cdn.example.org/alt.pdf">
           </head><body><a href="docs/extra.PDF">Extra</a><a href="/about">About</a></body></html>"#;
-        let links: Vec<String> = pdf_links(page, &base).iter().map(|u| u.to_string()).collect();
+        let links: Vec<String> = pdf_links(page, &base)
+            .iter()
+            .map(|u| u.to_string())
+            .collect();
         assert_eq!(
             links,
             [
@@ -486,14 +537,22 @@ mod tests {
             ]
         );
         assert!(pdf_links("<html><a href=\"/about\">x</a></html>", &base).is_empty());
-        assert!(pdf_links("<meta name=\"citation_pdf_url\" content=\"javascript:alert(1)\">", &base).is_empty());
+        assert!(pdf_links(
+            "<meta name=\"citation_pdf_url\" content=\"javascript:alert(1)\">",
+            &base
+        )
+        .is_empty());
     }
 
     #[test]
     fn knows_a_page_that_asks_for_a_human_and_a_refusal() {
-        assert!(looks_like_challenge("<title>Making sure you&#39;re not a bot!</title>"));
+        assert!(looks_like_challenge(
+            "<title>Making sure you&#39;re not a bot!</title>"
+        ));
         assert!(looks_like_challenge("<title>Just a moment...</title>"));
-        assert!(!looks_like_challenge("<html><body>An article about robots.</body></html>"));
+        assert!(!looks_like_challenge(
+            "<html><body>An article about robots.</body></html>"
+        ));
         assert!(is_refusal("Link preview request failed (403)"));
         assert!(!is_refusal("Link preview request failed (404)"));
     }
@@ -508,17 +567,23 @@ mod tests {
 
     #[test]
     fn a_chosen_pdf_is_copied_into_the_cache_only_when_it_is_a_pdf() {
-        let dir = std::env::temp_dir().join(format!("monobot-papers-import-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("monobot-papers-import-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let good = dir.join("paper.pdf");
         fs::write(&good, b"%PDF-1.7 body").unwrap();
         let stored = store_pdf_from(&dir, "10.1234/x", &good).unwrap();
         assert_eq!(fs::read(&stored.path).unwrap(), b"%PDF-1.7 body");
-        assert!(stored.path.ends_with(&format!("{}.pdf", key_of("10.1234/x"))));
+        assert!(stored
+            .path
+            .ends_with(&format!("{}.pdf", key_of("10.1234/x"))));
         let page = dir.join("page.pdf");
         fs::write(&page, b"<html>login</html>").unwrap();
-        assert_eq!(store_pdf_from(&dir, "10.1234/y", &page).unwrap_err(), "That file is not a PDF");
+        assert_eq!(
+            store_pdf_from(&dir, "10.1234/y", &page).unwrap_err(),
+            "That file is not a PDF"
+        );
         assert!(store_pdf_from(&dir, "10.1234/y", &dir.join("missing.pdf")).is_err());
         assert!(store_pdf_from(&dir, "10.1234/y", &dir).is_err());
         fs::remove_dir_all(&dir).unwrap();
@@ -543,7 +608,10 @@ mod tests {
     #[test]
     fn names_are_safe_on_macos_and_windows() {
         assert_eq!(safe_name("Research", "x", 60), "Research");
-        assert_eq!(safe_name("a/b\\c:d*e?f\"g<h>i|j", "x", 60), "a b c d e f g h i j");
+        assert_eq!(
+            safe_name("a/b\\c:d*e?f\"g<h>i|j", "x", 60),
+            "a b c d e f g h i j"
+        );
         assert_eq!(safe_name("  ..Name.. ", "x", 60), "Name");
         assert_eq!(safe_name("???", "Agent", 60), "Agent");
         assert_eq!(safe_name("CON", "x", 60), "_CON");
@@ -561,19 +629,41 @@ mod tests {
         let cached = root.join("cached.pdf");
         fs::write(&cached, b"%PDF one").unwrap();
         let docs = root.join("Documents");
-        let first = export_pdf(&cached, &docs, "Research", "Coron et al. (2017) - The suite").unwrap();
-        assert_eq!(first, docs.join("MonoBOT").join("Research").join("Coron et al. (2017) - The suite.pdf"));
+        let first = export_pdf(
+            &cached,
+            &docs,
+            "Research",
+            "Coron et al. (2017) - The suite",
+        )
+        .unwrap();
+        assert_eq!(
+            first,
+            docs.join("MonoBOT")
+                .join("Research")
+                .join("Coron et al. (2017) - The suite.pdf")
+        );
         assert_eq!(fs::read(&first).unwrap(), b"%PDF one");
         // The same paper read again is the same file.
-        assert_eq!(export_pdf(&cached, &docs, "Research", "Coron et al. (2017) - The suite").unwrap(), first);
+        assert_eq!(
+            export_pdf(
+                &cached,
+                &docs,
+                "Research",
+                "Coron et al. (2017) - The suite"
+            )
+            .unwrap(),
+            first
+        );
         // Another paper with the same name does not overwrite it.
         let other = root.join("other.pdf");
         fs::write(&other, b"%PDF two").unwrap();
-        let second = export_pdf(&other, &docs, "Research", "Coron et al. (2017) - The suite").unwrap();
+        let second =
+            export_pdf(&other, &docs, "Research", "Coron et al. (2017) - The suite").unwrap();
         assert!(second.ends_with("Coron et al. (2017) - The suite (2).pdf"));
         assert_eq!(fs::read(&first).unwrap(), b"%PDF one");
         // Each agent has its own folder.
-        let banana = export_pdf(&cached, &docs, "Banana", "Coron et al. (2017) - The suite").unwrap();
+        let banana =
+            export_pdf(&cached, &docs, "Banana", "Coron et al. (2017) - The suite").unwrap();
         assert!(banana.starts_with(docs.join("MonoBOT").join("Banana")));
         assert!(export_pdf(&root.join("missing.pdf"), &docs, "Research", "x").is_err());
         fs::remove_dir_all(&root).unwrap();
@@ -581,7 +671,10 @@ mod tests {
 
     #[test]
     fn a_key_is_the_same_whatever_its_case_or_spacing() {
-        assert_eq!(key_of(" 10.1016/J.ENVSOFT.2017.05.002 "), key_of("10.1016/j.envsoft.2017.05.002"));
+        assert_eq!(
+            key_of(" 10.1016/J.ENVSOFT.2017.05.002 "),
+            key_of("10.1016/j.envsoft.2017.05.002")
+        );
         assert_ne!(key_of("a"), key_of("b"));
     }
 }

@@ -11,7 +11,9 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use monobot_email::{Account, Action, Heard, Mail, Opened, Overview, Recipients, Triage, MAX_ACCOUNTS};
+use monobot_email::{
+    Account, Action, Heard, Mail, Opened, Overview, Recipients, Triage, MAX_ACCOUNTS,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -334,7 +336,9 @@ pub async fn mail_search(
             .into_iter()
             .filter(|account| {
                 addresses.as_ref().is_none_or(|wanted| {
-                    wanted.iter().any(|a| a.eq_ignore_ascii_case(&account.address))
+                    wanted
+                        .iter()
+                        .any(|a| a.eq_ignore_ascii_case(&account.address))
                 })
             })
             .collect();
@@ -343,10 +347,14 @@ pub async fn mail_search(
                 .iter()
                 .map(|account| {
                     let query = query.as_str();
-                    scope.spawn(move || (account, mail().search(account, query, limit, oldest_first)))
+                    scope.spawn(move || {
+                        (account, mail().search(account, query, limit, oldest_first))
+                    })
                 })
                 .collect();
-            jobs.into_iter().filter_map(|job| job.join().ok()).collect::<Vec<_>>()
+            jobs.into_iter()
+                .filter_map(|job| job.join().ok())
+                .collect::<Vec<_>>()
         });
         Ok(results
             .into_iter()
@@ -462,10 +470,23 @@ pub async fn mail_recipients(app: AppHandle, id: String, all: bool) -> Result<Re
 
 /// Saves the reply as a draft on the account's server. `subject` is the one the user chose, else «Re: » and theirs.
 #[tauri::command]
-pub async fn mail_draft(app: AppHandle, id: String, text: String, subject: Option<String>, all: bool) -> Result<(), String> {
+pub async fn mail_draft(
+    app: AppHandle,
+    id: String,
+    text: String,
+    subject: Option<String>,
+    all: bool,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         may_answer(&id)?;
-        mail().draft(&load(&app).accounts, &id, &text, subject.as_deref(), all, now_ms())
+        mail().draft(
+            &load(&app).accounts,
+            &id,
+            &text,
+            subject.as_deref(),
+            all,
+            now_ms(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -473,13 +494,26 @@ pub async fn mail_draft(app: AppHandle, id: String, text: String, subject: Optio
 
 /// Sends the reply to the people `mail_recipients` names. Only the user's own press calls this.
 #[tauri::command]
-pub async fn mail_send(app: AppHandle, id: String, text: String, subject: Option<String>, all: bool) -> Result<(), String> {
+pub async fn mail_send(
+    app: AppHandle,
+    id: String,
+    text: String,
+    subject: Option<String>,
+    all: bool,
+) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         may_answer(&id)?;
         if text.trim().is_empty() {
             return Err("Write the reply first.".into());
         }
-        mail().send(&load(&app).accounts, &id, &text, subject.as_deref(), all, now_ms())
+        mail().send(
+            &load(&app).accounts,
+            &id,
+            &text,
+            subject.as_deref(),
+            all,
+            now_ms(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?

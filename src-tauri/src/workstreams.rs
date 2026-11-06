@@ -6,11 +6,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
 fn valid_id(id: &str) -> bool {
-    !id.is_empty()
-        && id.len() <= 64
-        && id
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-')
+    !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
 }
 
 fn folder(app: &AppHandle, id: &str) -> Result<PathBuf, String> {

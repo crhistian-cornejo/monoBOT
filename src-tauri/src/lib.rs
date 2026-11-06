@@ -26,12 +26,11 @@ mod jsonc;
 mod keep_awake;
 mod linear;
 mod link_preview;
-mod mail;
-mod papers;
 #[cfg(target_os = "macos")]
 mod macos;
 #[cfg(target_os = "macos")]
 mod macos_background;
+mod mail;
 mod mcp;
 mod menu;
 mod mobile_access;
@@ -42,6 +41,7 @@ mod mono_chat;
 mod mono_transcript;
 mod notes;
 mod notifications;
+mod papers;
 mod pasteboard;
 mod pi_usage;
 mod plugins;
@@ -65,14 +65,14 @@ mod tool_detail;
 mod trackpad_zoom;
 #[cfg(target_os = "windows")]
 mod tray;
+pub mod visual_cli;
+mod visuals;
 mod voice;
 mod web;
 mod window;
 mod window_transfer;
 #[cfg(windows)]
 mod windows;
-pub mod visual_cli;
-mod visuals;
 mod workstreams;
 mod worktree_lifecycle;
 mod worktrees;

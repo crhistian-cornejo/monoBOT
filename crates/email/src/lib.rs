@@ -7,27 +7,29 @@
 //! (`crates/core/src/surfaces/mail.rs`) and the lines that name it (README).
 
 mod account;
+pub mod avatar;
 mod base;
 mod cache;
 mod clean;
 pub mod imap;
 pub mod inspect;
-pub mod avatar;
 pub mod mime;
-mod smtp;
 pub mod model;
 mod remote;
 mod sanitize;
 pub mod search;
 mod secrets;
 mod service;
-mod watch;
+mod smtp;
 #[cfg(test)]
 mod testkit;
 pub mod triage;
+mod watch;
 
 pub use account::{Account, MAX_ACCOUNTS, valid_address};
-pub use model::{AccountView, Action, Attachment, BoxTotal, Folder, Message, Opened, Overview, Triage};
+pub use model::{
+    AccountView, Action, Attachment, BoxTotal, Folder, Message, Opened, Overview, Triage,
+};
 pub use search::Found;
 pub use service::{Mail, Person, Recipients, view_of};
 pub use watch::{Heard, Interesting, Listener};

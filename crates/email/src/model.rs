@@ -101,7 +101,11 @@ pub struct BoxTotal {
 impl Overview {
     /// One more or one less in a mailbox, until the next reading says how many there are.
     pub(crate) fn recount(&mut self, account: &str, folder: Folder, by: i32) {
-        if let Some(entry) = self.totals.iter_mut().find(|t| t.account_id == account && t.folder == folder) {
+        if let Some(entry) = self
+            .totals
+            .iter_mut()
+            .find(|t| t.account_id == account && t.folder == folder)
+        {
             entry.total = entry.total.saturating_add_signed(by);
         }
     }
@@ -167,8 +171,21 @@ mod tests {
     #[test]
     fn a_message_is_said_to_the_page_in_camel_case_without_what_is_empty() {
         let message = Message {
-            id: "a.inbox.7".into(), account_id: "a".into(), folder: Folder::Inbox, from: "Ana".into(), address: "ana@ejemplo.test".into(), subject: "Hola".into(),
-            preview: "Hola".into(), body: vec!["Hola".into()], at: 1, unread: true, starred: false, triage: Triage::Held, labels: vec![], reason: None, auth_failed: false,
+            id: "a.inbox.7".into(),
+            account_id: "a".into(),
+            folder: Folder::Inbox,
+            from: "Ana".into(),
+            address: "ana@ejemplo.test".into(),
+            subject: "Hola".into(),
+            preview: "Hola".into(),
+            body: vec!["Hola".into()],
+            at: 1,
+            unread: true,
+            starred: false,
+            triage: Triage::Held,
+            labels: vec![],
+            reason: None,
+            auth_failed: false,
         };
         let json = serde_json::to_value(&message).unwrap();
         assert_eq!(json["accountId"], "a");

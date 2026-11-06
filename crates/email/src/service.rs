@@ -71,15 +71,27 @@ pub(crate) fn recipients_of(entry: &Entry, own: &str, all: bool) -> Recipients {
     let mut take = |people: &[(String, String)]| -> Vec<Person> {
         people
             .iter()
-            .filter(|(_, address)| address.contains('@') && seen.insert(address.trim().to_lowercase()))
-            .map(|(name, address)| Person { name: name.clone(), address: address.clone() })
+            .filter(|(_, address)| {
+                address.contains('@') && seen.insert(address.trim().to_lowercase())
+            })
+            .map(|(name, address)| Person {
+                name: name.clone(),
+                address: address.clone(),
+            })
             .collect()
     };
     let from = [(entry.from_name.clone(), entry.from_address.clone())];
-    let to = take(if entry.reply_to.is_empty() { &from } else { &entry.reply_to });
+    let to = take(if entry.reply_to.is_empty() {
+        &from
+    } else {
+        &entry.reply_to
+    });
     if to.is_empty() {
         // The account wrote it: the reply goes on to the people it was for.
-        return Recipients { to: take(&entry.others), cc: Vec::new() };
+        return Recipients {
+            to: take(&entry.others),
+            cc: Vec::new(),
+        };
     }
     let cc = if all { take(&entry.others) } else { Vec::new() };
     Recipients { to, cc }
@@ -127,19 +139,33 @@ pub struct Boxes {
 }
 
 pub fn boxes_of(list: &[Mailbox]) -> Boxes {
-    let flagged = |flag: &str| list.iter().find(|m| m.flags.iter().any(|f| f.eq_ignore_ascii_case(flag))).map(|m| m.name.clone());
-    let named = |names: &[&str]| list.iter().find(|m| names.iter().any(|n| m.name.eq_ignore_ascii_case(n))).map(|m| m.name.clone());
+    let flagged = |flag: &str| {
+        list.iter()
+            .find(|m| m.flags.iter().any(|f| f.eq_ignore_ascii_case(flag)))
+            .map(|m| m.name.clone())
+    };
+    let named = |names: &[&str]| {
+        list.iter()
+            .find(|m| names.iter().any(|n| m.name.eq_ignore_ascii_case(n)))
+            .map(|m| m.name.clone())
+    };
     Boxes {
         sent: flagged("\\Sent").or_else(|| named(&["Sent", "Sent Messages", "Enviados"])),
         drafts: flagged("\\Drafts").or_else(|| named(&["Drafts", "Borradores"])),
-        archive: flagged("\\Archive").or_else(|| flagged("\\All")).or_else(|| named(&["Archive", "Archives", "Archivo"])),
+        archive: flagged("\\Archive")
+            .or_else(|| flagged("\\All"))
+            .or_else(|| named(&["Archive", "Archives", "Archivo"])),
         archive_is_all: flagged("\\Archive").is_none() && flagged("\\All").is_some(),
     }
 }
 
 /// The UIDs of what the open archive holds, lowest first. `None` for an «all mail» box with no way to tell what no other
 /// mailbox holds (only Gmail's can be asked): its newest would be the inbox again.
-fn archived_uids(imap: &mut Imap, account: &Account, boxes: &Boxes) -> Result<Option<Vec<u64>>, String> {
+fn archived_uids(
+    imap: &mut Imap,
+    account: &Account,
+    boxes: &Boxes,
+) -> Result<Option<Vec<u64>>, String> {
     match (boxes.archive_is_all, account.is_gmail()) {
         (true, true) => imap.search("", Some(ARCHIVED_ONLY)).map(Some),
         (true, false) => Ok(None),
@@ -153,24 +179,50 @@ pub fn id(account: &str, folder: Folder, uid: u64) -> String {
 
 fn parse_id(id: &str) -> Option<(String, Folder, u64)> {
     let mut parts = id.splitn(3, '.');
-    let (account, folder, uid) = (parts.next()?, Folder::parse(parts.next()?)?, parts.next()?.parse().ok()?);
-    (account.len() == 16 && account.chars().all(|c| c.is_ascii_hexdigit())).then(|| (account.to_string(), folder, uid))
+    let (account, folder, uid) = (
+        parts.next()?,
+        Folder::parse(parts.next()?)?,
+        parts.next()?.parse().ok()?,
+    );
+    (account.len() == 16 && account.chars().all(|c| c.is_ascii_hexdigit()))
+        .then(|| (account.to_string(), folder, uid))
 }
 
 /// A message of the server as the page shows it, and what is kept to act on it.
-pub(crate) fn message_from(account: &Account, folder: Folder, raw: &Raw, interesting: &HashSet<String>) -> (Message, Entry) {
+pub(crate) fn message_from(
+    account: &Account,
+    folder: Folder,
+    raw: &Raw,
+    interesting: &HashSet<String>,
+) -> (Message, Entry) {
     let parsed: Parsed = mime::parse(&raw.header, &raw.text);
-    let (triage, reason) = if folder == Folder::Inbox { triage::classify(&parsed, interesting) } else { (Triage::Routine, None) };
+    let (triage, reason) = if folder == Folder::Inbox {
+        triage::classify(&parsed, interesting)
+    } else {
+        (Triage::Routine, None)
+    };
     let outgoing = matches!(folder, Folder::Sent | Folder::Drafts);
-    let (from, address) = if outgoing { (parsed.to_name.clone(), parsed.to_address.clone()) } else { (parsed.from_name.clone(), parsed.from_address.clone()) };
+    let (from, address) = if outgoing {
+        (parsed.to_name.clone(), parsed.to_address.clone())
+    } else {
+        (parsed.from_name.clone(), parsed.from_address.clone())
+    };
     let has = |flag: &str| raw.flags.iter().any(|f| f.eq_ignore_ascii_case(flag));
     let message = Message {
         id: id(&account.id, folder, raw.uid),
         account_id: account.id.clone(),
         folder,
-        from: if from.is_empty() { "(sin remitente)".into() } else { from },
+        from: if from.is_empty() {
+            "(sin remitente)".into()
+        } else {
+            from
+        },
         address,
-        subject: if parsed.subject.is_empty() { "(sin asunto)".into() } else { parsed.subject.clone() },
+        subject: if parsed.subject.is_empty() {
+            "(sin asunto)".into()
+        } else {
+            parsed.subject.clone()
+        },
         preview: mime::one_line(&parsed.text, 140),
         body: mime::paragraphs(&parsed.text),
         at: raw.date.unwrap_or(0),
@@ -228,8 +280,15 @@ impl Mail {
     /// message opened before comes from memory: no connection to its server.
     pub fn open(&self, accounts: &[Account], id: &str) -> Result<Opened, String> {
         let (account_id, folder, uid) = parse_id(id).ok_or("No reconozco ese correo.")?;
-        let account = accounts.iter().find(|a| a.id == account_id).ok_or("Esa cuenta ya no está conectada.")?;
-        let cached = self.opened.lock().unwrap_or_else(|p| p.into_inner()).get(id);
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("Esa cuenta ya no está conectada.")?;
+        let cached = self
+            .opened
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(id);
         if let Some(opened) = cached {
             self.remember_named(id, &opened.remote);
             return Ok(opened);
@@ -242,16 +301,28 @@ impl Mail {
 
     /// One file of a message, by its place among the message's attachments (`Opened::attachments`): its name and its bytes.
     /// It is read from the server when asked (never kept in memory) and nothing is marked as read.
-    pub fn attachment(&self, accounts: &[Account], id: &str, index: usize) -> Result<(String, Vec<u8>), String> {
+    pub fn attachment(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        index: usize,
+    ) -> Result<(String, Vec<u8>), String> {
         let (account_id, folder, uid) = parse_id(id).ok_or("No reconozco ese correo.")?;
-        let account = accounts.iter().find(|a| a.id == account_id).ok_or("Esa cuenta ya no está conectada.")?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("Esa cuenta ya no está conectada.")?;
         let mut imap = self.session(account, folder)?;
         let raw = imap.fetch_message(uid)?;
         imap.logout();
-        let (info, bytes) = mime::attachment_at(&raw, index).ok_or("Ese correo ya no trae ese archivo.")?;
+        let (info, bytes) =
+            mime::attachment_at(&raw, index).ok_or("Ese correo ya no trae ese archivo.")?;
         // What the look at its bytes blocked is never handed over to be opened, whatever the page asks.
         if info.risk.level == crate::inspect::Level::Danger {
-            return Err(format!("MonoBOT won't open this file. {}", info.risk.reasons.join(" ")));
+            return Err(format!(
+                "MonoBOT won't open this file. {}",
+                info.risk.reasons.join(" ")
+            ));
         }
         Ok((info.name, bytes))
     }
@@ -262,9 +333,15 @@ impl Mail {
         let mut imap = connect(&self.open, account, &password)?;
         let mailbox = match folder {
             Folder::Inbox => "INBOX".to_string(),
-            Folder::Sent => boxes_of(&imap.mailboxes()?).sent.ok_or("Esta cuenta no tiene carpeta de enviados.")?,
-            Folder::Drafts => boxes_of(&imap.mailboxes()?).drafts.ok_or("Esta cuenta no tiene carpeta de borradores.")?,
-            Folder::Archive => boxes_of(&imap.mailboxes()?).archive.ok_or("Esta cuenta no tiene carpeta de archivo.")?,
+            Folder::Sent => boxes_of(&imap.mailboxes()?)
+                .sent
+                .ok_or("Esta cuenta no tiene carpeta de enviados.")?,
+            Folder::Drafts => boxes_of(&imap.mailboxes()?)
+                .drafts
+                .ok_or("Esta cuenta no tiene carpeta de borradores.")?,
+            Folder::Archive => boxes_of(&imap.mailboxes()?)
+                .archive
+                .ok_or("Esta cuenta no tiene carpeta de archivo.")?,
         };
         imap.select(&mailbox, false)?;
         Ok(imap)
@@ -275,10 +352,27 @@ impl Mail {
         let whole = mime::parse_whole(raw);
         let cleaned = sanitize::clean(&whole.html, whole.pictures);
         self.remember_named(id, &cleaned.remote);
-        let opened = Opened { id: id.to_string(), html: cleaned.html, text: mime::paragraphs(&whole.text), remote: cleaned.remote, images_allowed: false, attachments: whole.attachments };
-        let previews: usize = opened.attachments.iter().filter_map(|a| a.preview.as_ref()).map(String::len).sum();
-        let size = opened.html.len() + opened.text.iter().map(String::len).sum::<usize>() + previews;
-        self.opened.lock().unwrap_or_else(|p| p.into_inner()).put(id.to_string(), opened.clone(), size);
+        let opened = Opened {
+            id: id.to_string(),
+            html: cleaned.html,
+            text: mime::paragraphs(&whole.text),
+            remote: cleaned.remote,
+            images_allowed: false,
+            attachments: whole.attachments,
+        };
+        let previews: usize = opened
+            .attachments
+            .iter()
+            .filter_map(|a| a.preview.as_ref())
+            .map(String::len)
+            .sum();
+        let size =
+            opened.html.len() + opened.text.iter().map(String::len).sum::<usize>() + previews;
+        self.opened.lock().unwrap_or_else(|p| p.into_inner()).put(
+            id.to_string(),
+            opened.clone(),
+            size,
+        );
         opened
     }
 
@@ -289,18 +383,27 @@ impl Mail {
         let _one = self.warming.lock().unwrap_or_else(|p| p.into_inner());
         let mut groups: Vec<((String, Folder), Vec<(String, u64)>)> = Vec::new();
         for id in ids.iter().take(PREFETCH_MAX) {
-            let Some((account_id, folder, uid)) = parse_id(id) else { continue };
+            let Some((account_id, folder, uid)) = parse_id(id) else {
+                continue;
+            };
             if self.is_warm(id) {
                 continue;
             }
-            match groups.iter_mut().find(|(key, _)| *key == (account_id.clone(), folder)) {
+            match groups
+                .iter_mut()
+                .find(|(key, _)| *key == (account_id.clone(), folder))
+            {
                 Some((_, list)) => list.push((id.clone(), uid)),
                 None => groups.push(((account_id, folder), vec![(id.clone(), uid)])),
             }
         }
         for ((account_id, folder), list) in groups {
-            let Some(account) = accounts.iter().find(|a| a.id == account_id) else { continue };
-            let Ok(mut imap) = self.session(account, folder) else { continue };
+            let Some(account) = accounts.iter().find(|a| a.id == account_id) else {
+                continue;
+            };
+            let Ok(mut imap) = self.session(account, folder) else {
+                continue;
+            };
             for (id, uid) in list {
                 match imap.fetch_message(uid) {
                     Ok(raw) => {
@@ -315,7 +418,11 @@ impl Mail {
 
     /// Whether the message already opens from memory (`prefetch` or an earlier `open` kept it).
     pub fn is_warm(&self, id: &str) -> bool {
-        self.opened.lock().unwrap_or_else(|p| p.into_inner()).get(id).is_some()
+        self.opened
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(id)
+            .is_some()
     }
 
     /// The last reading of the accounts, as it was: no connection. `None` before the first reading.
@@ -326,17 +433,30 @@ impl Mail {
     /// One picture on the web that the message `id` (opened lately) names, as a data URL, for the owner who allowed it.
     /// A picture fetched lately comes from memory.
     pub fn image(&self, id: &str, url: &str) -> Result<String, String> {
-        let named = self.named.lock().unwrap_or_else(|p| p.into_inner()).get(id).is_some_and(|urls| urls.contains(url));
+        let named = self
+            .named
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(id)
+            .is_some_and(|urls| urls.contains(url));
         if !named {
             return Err("Abre el correo de nuevo para ver sus imágenes.".into());
         }
-        let cached = self.pictures.lock().unwrap_or_else(|p| p.into_inner()).get(url);
+        let cached = self
+            .pictures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(url);
         if let Some(data) = cached {
             return Ok(data);
         }
         let data = remote::fetch(url)?;
         let size = data.len();
-        self.pictures.lock().unwrap_or_else(|p| p.into_inner()).put(url.to_string(), data.clone(), size);
+        self.pictures.lock().unwrap_or_else(|p| p.into_inner()).put(
+            url.to_string(),
+            data.clone(),
+            size,
+        );
         Ok(data)
     }
 
@@ -351,7 +471,11 @@ impl Mail {
     /// Checks that the server takes the password and keeps it in the system's store. Nothing is kept if it does not.
     pub fn add_account(&self, account: &Account, password: &str) -> Result<(), String> {
         // Google shows the app password in groups of four with spaces: they are not part of it.
-        let password: String = if account.is_gmail() { password.chars().filter(|c| !c.is_whitespace()).collect() } else { password.trim().to_string() };
+        let password: String = if account.is_gmail() {
+            password.chars().filter(|c| !c.is_whitespace()).collect()
+        } else {
+            password.trim().to_string()
+        };
         let password = password.as_str();
         if password.is_empty() {
             return Err("Escribe la contraseña de aplicación de la cuenta.".into());
@@ -365,22 +489,51 @@ impl Mail {
     /// The account's password is forgotten and so are its messages.
     pub fn remove_account(&self, account: &Account) {
         self.unwatch(&account.id);
-        self.boxes.lock().unwrap_or_else(|p| p.into_inner()).remove(&account.id);
+        self.boxes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(&account.id);
         secrets::forget(&account.address);
-        self.entries().retain(|_, entry| entry.account_id != account.id);
+        self.entries()
+            .retain(|_, entry| entry.account_id != account.id);
         let prefix = format!("{}.", account.id);
-        self.opened.lock().unwrap_or_else(|p| p.into_inner()).retain(|key| !key.starts_with(&prefix));
+        self.opened
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .retain(|key| !key.starts_with(&prefix));
         *self.last.lock().unwrap_or_else(|p| p.into_inner()) = None;
-        self.pictures.lock().unwrap_or_else(|p| p.into_inner()).clear();
+        self.pictures
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clear();
     }
 
     /// The newest messages of every account, newest first. An account that cannot be read says why in `problems`
     /// and the others are still shown.
     pub fn overview(&self, accounts: &[Account], interesting: &HashSet<String>) -> Overview {
-        let results: Vec<(&Account, Result<AccountReading, String>)> = std::thread::scope(|scope| {
-            let handles: Vec<_> = accounts.iter().map(|account| (account, scope.spawn(move || self.read_account(account, interesting)))).collect();
-            handles.into_iter().map(|(account, handle)| (account, handle.join().unwrap_or_else(|_| Err("No se pudo leer esta cuenta.".into())))).collect()
-        });
+        let results: Vec<(&Account, Result<AccountReading, String>)> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = accounts
+                    .iter()
+                    .map(|account| {
+                        (
+                            account,
+                            scope.spawn(move || self.read_account(account, interesting)),
+                        )
+                    })
+                    .collect();
+                handles
+                    .into_iter()
+                    .map(|(account, handle)| {
+                        (
+                            account,
+                            handle
+                                .join()
+                                .unwrap_or_else(|_| Err("No se pudo leer esta cuenta.".into())),
+                        )
+                    })
+                    .collect()
+            });
         let mut messages = Vec::new();
         let mut problems = Vec::new();
         let mut totals = Vec::new();
@@ -393,22 +546,39 @@ impl Mail {
                         entries.insert(message.id.clone(), entry);
                         messages.push(message);
                     }
-                    totals.extend(counted.into_iter().map(|(folder, total)| BoxTotal { account_id: account.id.clone(), folder, total }));
+                    totals.extend(counted.into_iter().map(|(folder, total)| BoxTotal {
+                        account_id: account.id.clone(),
+                        folder,
+                        total,
+                    }));
                 }
                 Err(why) => problems.push(format!("{}: {why}", account.name)),
             }
         }
         messages.sort_by(|a, b| b.at.cmp(&a.at));
-        let overview = Overview { accounts: accounts.iter().map(view_of).collect(), messages, problems, totals };
+        let overview = Overview {
+            accounts: accounts.iter().map(view_of).collect(),
+            messages,
+            problems,
+            totals,
+        };
         *self.last.lock().unwrap_or_else(|p| p.into_inner()) = Some(overview.clone());
         overview
     }
 
-    fn read_account(&self, account: &Account, interesting: &HashSet<String>) -> Result<AccountReading, String> {
+    fn read_account(
+        &self,
+        account: &Account,
+        interesting: &HashSet<String>,
+    ) -> Result<AccountReading, String> {
         // Durations only, never a name or a subject: where a reading's time goes (`correo: …` in echo.log).
         let began = Instant::now();
         let mut lap = Instant::now();
-        let mut took = || { let ms = lap.elapsed().as_millis(); lap = Instant::now(); ms };
+        let mut took = || {
+            let ms = lap.elapsed().as_millis();
+            lap = Instant::now();
+            ms
+        };
         let password = secrets::get(&account.address)?;
         let mut imap = (self.open)(account)?;
         let opened = took();
@@ -418,19 +588,35 @@ impl Mail {
         let mut folders = String::new();
         let mut counted = Vec::new();
         // The inbox first: it is what the page shows; the mailboxes it only names (sent, drafts) come after it.
-        let mut boxes = self.boxes.lock().unwrap_or_else(|p| p.into_inner()).get(&account.id).cloned();
-        for (folder, count) in [(Folder::Inbox, INBOX_COUNT), (Folder::Sent, SIDE_COUNT), (Folder::Drafts, SIDE_COUNT)] {
+        let mut boxes = self
+            .boxes
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .get(&account.id)
+            .cloned();
+        for (folder, count) in [
+            (Folder::Inbox, INBOX_COUNT),
+            (Folder::Sent, SIDE_COUNT),
+            (Folder::Drafts, SIDE_COUNT),
+        ] {
             let mailbox = match folder {
                 Folder::Inbox => Some("INBOX".to_string()),
                 _ => {
                     if boxes.is_none() {
                         let found = boxes_of(&imap.mailboxes().unwrap_or_default());
-                        self.boxes.lock().unwrap_or_else(|p| p.into_inner()).insert(account.id.clone(), found.clone());
+                        self.boxes
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .insert(account.id.clone(), found.clone());
                         folders.push_str(&format!(", carpetas {} ms", took()));
                         boxes = Some(found);
                     }
                     let known = boxes.as_ref();
-                    if folder == Folder::Sent { known.and_then(|b| b.sent.clone()) } else { known.and_then(|b| b.drafts.clone()) }
+                    if folder == Folder::Sent {
+                        known.and_then(|b| b.sent.clone())
+                    } else {
+                        known.and_then(|b| b.drafts.clone())
+                    }
                 }
             };
             let Some(mailbox) = mailbox else { continue };
@@ -442,8 +628,16 @@ impl Mail {
             let fetched = took();
             match read {
                 Ok(raws) => {
-                    out.extend(raws.iter().map(|raw| message_from(account, folder, raw, interesting)));
-                    folders.push_str(&format!(", {} {fetched} ms + proceso {} ms ({})", folder.as_str(), took(), raws.len()));
+                    out.extend(
+                        raws.iter()
+                            .map(|raw| message_from(account, folder, raw, interesting)),
+                    );
+                    folders.push_str(&format!(
+                        ", {} {fetched} ms + proceso {} ms ({})",
+                        folder.as_str(),
+                        took(),
+                        raws.len()
+                    ));
                 }
                 Err(why) if folder == Folder::Inbox => return Err(why),
                 Err(_) => {}
@@ -457,13 +651,24 @@ impl Mail {
                 match archived_uids(&mut imap, account, known) {
                     Ok(Some(uids)) => {
                         counted.push((Folder::Archive, uids.len() as u32));
-                        let newest: Vec<u64> = uids.iter().rev().take(SIDE_COUNT as usize).copied().collect();
+                        let newest: Vec<u64> = uids
+                            .iter()
+                            .rev()
+                            .take(SIDE_COUNT as usize)
+                            .copied()
+                            .collect();
                         if let Ok(raws) = imap.fetch_listed(&newest, account.is_gmail()) {
-                            out.extend(raws.iter().map(|raw| message_from(account, Folder::Archive, raw, interesting)));
+                            out.extend(raws.iter().map(|raw| {
+                                message_from(account, Folder::Archive, raw, interesting)
+                            }));
                         }
                     }
                     _ => {
-                        let elsewhere: u32 = if known.archive_is_all { counted.iter().map(|(_, n)| *n).sum() } else { 0 };
+                        let elsewhere: u32 = if known.archive_is_all {
+                            counted.iter().map(|(_, n)| *n).sum()
+                        } else {
+                            0
+                        };
                         counted.push((Folder::Archive, exists.saturating_sub(elsewhere)));
                     }
                 }
@@ -471,35 +676,72 @@ impl Mail {
             folders.push_str(&format!(", archivo {} ms", took()));
         }
         imap.logout();
-        crate::base::log::line(format!("correo: {} · conexión {opened} ms, acceso {login} ms{folders}, total {} ms", account.provider, began.elapsed().as_millis()));
+        crate::base::log::line(format!(
+            "correo: {} · conexión {opened} ms, acceso {login} ms{folders}, total {} ms",
+            account.provider,
+            began.elapsed().as_millis()
+        ));
         Ok((out, counted))
     }
 
     /// The next stretch of the archive of each account whose list has fewer than it holds, older than what it has: they
     /// join the last reading, which is returned. Read only. An account with all of it on the list is not connected to.
-    pub fn archive_more(&self, accounts: &[Account], interesting: &HashSet<String>) -> Result<Overview, String> {
-        let last = self.last().ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
+    pub fn archive_more(
+        &self,
+        accounts: &[Account],
+        interesting: &HashSet<String>,
+    ) -> Result<Overview, String> {
+        let last = self
+            .last()
+            .ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
         let mut read = Vec::new();
         for account in accounts {
-            let listed: Vec<u64> = last.messages.iter().filter_map(|m| parse_id(&m.id)).filter(|(owner, folder, _)| *owner == account.id && *folder == Folder::Archive).map(|(_, _, uid)| uid).collect();
-            let total = last.totals.iter().find(|t| t.account_id == account.id && t.folder == Folder::Archive).map_or(0, |t| t.total as usize);
+            let listed: Vec<u64> = last
+                .messages
+                .iter()
+                .filter_map(|m| parse_id(&m.id))
+                .filter(|(owner, folder, _)| *owner == account.id && *folder == Folder::Archive)
+                .map(|(_, _, uid)| uid)
+                .collect();
+            let total = last
+                .totals
+                .iter()
+                .find(|t| t.account_id == account.id && t.folder == Folder::Archive)
+                .map_or(0, |t| t.total as usize);
             if listed.len() >= total {
                 continue;
             }
             let password = secrets::get(&account.address)?;
             let mut imap = connect(&self.open, account, &password)?;
             let boxes = boxes_of(&imap.mailboxes()?);
-            imap.select(boxes.archive.as_deref().ok_or("Esta cuenta no tiene carpeta de archivo.")?, false)?;
+            imap.select(
+                boxes
+                    .archive
+                    .as_deref()
+                    .ok_or("Esta cuenta no tiene carpeta de archivo.")?,
+                false,
+            )?;
             let uids = archived_uids(&mut imap, account, &boxes)?.unwrap_or_default();
             let oldest = listed.iter().min().copied().unwrap_or(u64::MAX);
-            let next: Vec<u64> = uids.iter().rev().filter(|uid| **uid < oldest).take(ARCHIVE_MORE).copied().collect();
+            let next: Vec<u64> = uids
+                .iter()
+                .rev()
+                .filter(|uid| **uid < oldest)
+                .take(ARCHIVE_MORE)
+                .copied()
+                .collect();
             let raws = imap.fetch_listed(&next, account.is_gmail())?;
             imap.logout();
-            read.extend(raws.iter().map(|raw| message_from(account, Folder::Archive, raw, interesting)));
+            read.extend(
+                raws.iter()
+                    .map(|raw| message_from(account, Folder::Archive, raw, interesting)),
+            );
         }
         let mut entries = self.entries();
         let mut kept = self.last.lock().unwrap_or_else(|p| p.into_inner());
-        let overview = kept.as_mut().ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
+        let overview = kept
+            .as_mut()
+            .ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
         for (message, entry) in read {
             entries.insert(message.id.clone(), entry);
             overview.messages.retain(|m| m.id != message.id);
@@ -519,7 +761,13 @@ impl Mail {
         }
         let mut entries = self.entries();
         for message in &overview.messages {
-            entries.entry(message.id.clone()).or_insert_with(|| Entry { account_id: message.account_id.clone(), from_name: message.from.clone(), from_address: message.address.clone(), subject: message.subject.clone(), ..Entry::default() });
+            entries.entry(message.id.clone()).or_insert_with(|| Entry {
+                account_id: message.account_id.clone(),
+                from_name: message.from.clone(),
+                from_address: message.address.clone(),
+                subject: message.subject.clone(),
+                ..Entry::default()
+            });
         }
         *last = Some(overview);
     }
@@ -545,30 +793,63 @@ impl Mail {
     }
 
     /// Who a reply to a message of the last reading goes to: only to whom it asks, or `all`.
-    pub fn recipients(&self, accounts: &[Account], id: &str, all: bool) -> Result<Recipients, String> {
-        let entry = self.entries().get(id).cloned().ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
-        let account = accounts.iter().find(|a| a.id == entry.account_id).ok_or("Esa cuenta ya no está conectada.")?;
+    pub fn recipients(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        all: bool,
+    ) -> Result<Recipients, String> {
+        let entry = self
+            .entries()
+            .get(id)
+            .cloned()
+            .ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == entry.account_id)
+            .ok_or("Esa cuenta ya no está conectada.")?;
         Ok(recipients_of(&entry, &account.address, all))
     }
 
     /// The address a message of the last reading came from.
     pub fn sender_of(&self, id: &str) -> Option<String> {
-        self.entries().get(id).map(|entry| entry.from_address.clone()).filter(|a| !a.is_empty())
+        self.entries()
+            .get(id)
+            .map(|entry| entry.from_address.clone())
+            .filter(|a| !a.is_empty())
     }
 
     /// Reads, stars or archives a message on its server. Nothing is deleted.
     pub fn act(&self, accounts: &[Account], id: &str, action: Action) -> Result<(), String> {
         let (account_id, folder, uid) = parse_id(id).ok_or("No reconozco ese correo.")?;
-        let account = accounts.iter().find(|a| a.id == account_id).ok_or("Esa cuenta ya no está conectada.")?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("Esa cuenta ya no está conectada.")?;
         let password = secrets::get(&account.address)?;
         let mut imap = connect(&self.open, account, &password)?;
-        let boxes = if folder != Folder::Inbox || action == Action::Archive { boxes_of(&imap.mailboxes()?) } else { Boxes::default() };
+        let boxes = if folder != Folder::Inbox || action == Action::Archive {
+            boxes_of(&imap.mailboxes()?)
+        } else {
+            Boxes::default()
+        };
         let mailbox = match folder {
             Folder::Inbox => "INBOX".to_string(),
-            Folder::Sent => boxes.sent.clone().ok_or("Esta cuenta no tiene carpeta de enviados.")?,
-            Folder::Drafts => boxes.drafts.clone().ok_or("Esta cuenta no tiene carpeta de borradores.")?,
-            Folder::Archive if action == Action::Archive => return Err("Ese correo ya está archivado.".into()),
-            Folder::Archive => boxes.archive.clone().ok_or("Esta cuenta no tiene carpeta de archivo.")?,
+            Folder::Sent => boxes
+                .sent
+                .clone()
+                .ok_or("Esta cuenta no tiene carpeta de enviados.")?,
+            Folder::Drafts => boxes
+                .drafts
+                .clone()
+                .ok_or("Esta cuenta no tiene carpeta de borradores.")?,
+            Folder::Archive if action == Action::Archive => {
+                return Err("Ese correo ya está archivado.".into());
+            }
+            Folder::Archive => boxes
+                .archive
+                .clone()
+                .ok_or("Esta cuenta no tiene carpeta de archivo.")?,
         };
         imap.select(&mailbox, true)?;
         match action {
@@ -576,7 +857,9 @@ impl Mail {
             Action::Star => imap.flag(uid, "\\Flagged", true)?,
             Action::Unstar => imap.flag(uid, "\\Flagged", false)?,
             Action::Archive => {
-                let to = boxes.archive.ok_or("Esta cuenta no tiene carpeta de archivo.")?;
+                let to = boxes
+                    .archive
+                    .ok_or("Esta cuenta no tiene carpeta de archivo.")?;
                 imap.move_to(uid, &to)?;
                 self.entries().remove(id);
             }
@@ -589,8 +872,12 @@ impl Mail {
     /// The copy of the last reading follows what the owner did, so the page does not show the old state at its return.
     fn touch(&self, id: &str, action: Action) {
         let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
-        let Some(overview) = last.as_mut() else { return };
-        let Some(message) = overview.messages.iter_mut().find(|m| m.id == id) else { return };
+        let Some(overview) = last.as_mut() else {
+            return;
+        };
+        let Some(message) = overview.messages.iter_mut().find(|m| m.id == id) else {
+            return;
+        };
         match action {
             Action::Read => message.unread = false,
             Action::Star => message.starred = true,
@@ -607,13 +894,26 @@ impl Mail {
 
     /// Saves `text` as a draft of a reply to a message of the last reading.
     /// `subject` is the one the user chose for the reply; without it, «Re: » and the message's.
-    pub fn draft(&self, accounts: &[Account], id: &str, text: &str, subject: Option<&str>, all: bool, now_ms: i64) -> Result<(), String> {
+    pub fn draft(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        text: &str,
+        subject: Option<&str>,
+        all: bool,
+        now_ms: i64,
+    ) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
         let people = recipients_of(&entry, &account.address, all);
         let password = secrets::get(&account.address)?;
         let mut imap = connect(&self.open, &account, &password)?;
-        let drafts = boxes_of(&imap.mailboxes()?).drafts.ok_or("Esta cuenta no tiene carpeta de borradores.")?;
-        imap.save_draft(&drafts, &compose_reply(&account, &entry, &people, subject, &text, now_ms))?;
+        let drafts = boxes_of(&imap.mailboxes()?)
+            .drafts
+            .ok_or("Esta cuenta no tiene carpeta de borradores.")?;
+        imap.save_draft(
+            &drafts,
+            &compose_reply(&account, &entry, &people, subject, &text, now_ms),
+        )?;
         imap.logout();
         Ok(())
     }
@@ -621,10 +921,23 @@ impl Mail {
     /// Sends `text` as the reply to a message of the last reading, to the people `recipients_of` names and no one else.
     /// Only the owner's press gets here. Gmail keeps its own copy of what it sends; any other account gets one in its sent folder, and a failure there does
     /// not undo what already left.
-    pub fn send(&self, accounts: &[Account], id: &str, text: &str, subject: Option<&str>, all: bool, now_ms: i64) -> Result<(), String> {
+    pub fn send(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        text: &str,
+        subject: Option<&str>,
+        all: bool,
+        now_ms: i64,
+    ) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
         let people = recipients_of(&entry, &account.address, all);
-        let addresses: Vec<String> = people.to.iter().chain(&people.cc).map(|p| p.address.clone()).collect();
+        let addresses: Vec<String> = people
+            .to
+            .iter()
+            .chain(&people.cc)
+            .map(|p| p.address.clone())
+            .collect();
         let password = secrets::get(&account.address)?;
         let message = compose_reply(&account, &entry, &people, subject, &text, now_ms);
         crate::smtp::send(&account, &password, &addresses, &message)?;
@@ -640,7 +953,12 @@ impl Mail {
     }
 
     /// The account and the message a reply goes with, and its text, checked.
-    fn reply_parts(&self, accounts: &[Account], id: &str, text: &str) -> Result<(Account, Entry, String), String> {
+    fn reply_parts(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        text: &str,
+    ) -> Result<(Account, Entry, String), String> {
         let text = text.trim();
         if text.is_empty() {
             return Err("Escribe la respuesta.".into());
@@ -648,8 +966,16 @@ impl Mail {
         if text.chars().count() > MAX_REPLY {
             return Err("La respuesta es demasiado larga.".into());
         }
-        let entry = self.entries().get(id).cloned().ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
-        let account = accounts.iter().find(|a| a.id == entry.account_id).ok_or("Esa cuenta ya no está conectada.")?.clone();
+        let entry = self
+            .entries()
+            .get(id)
+            .cloned()
+            .ok_or("Actualiza la bandeja y vuelve a intentarlo.")?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == entry.account_id)
+            .ok_or("Esa cuenta ya no está conectada.")?
+            .clone();
         Ok((account, entry, text.to_string()))
     }
 
@@ -657,24 +983,48 @@ impl Mail {
     /// the oldest of them when `oldest_first` (to read a stretch of mail in order), else the newest. Also whether more
     /// matched. Gmail is searched over «Todos», so a filter that skips the inbox does not hide a message; any other
     /// server, its inbox. Read only: `EXAMINE` and `BODY.PEEK`, nothing is marked, moved or kept.
-    pub fn search(&self, account: &Account, query: &str, limit: usize, oldest_first: bool) -> Result<(Vec<Found>, bool), String> {
-        let query: String = query.chars().filter(|c| !c.is_control()).take(MAX_QUERY).collect();
+    pub fn search(
+        &self,
+        account: &Account,
+        query: &str,
+        limit: usize,
+        oldest_first: bool,
+    ) -> Result<(Vec<Found>, bool), String> {
+        let query: String = query
+            .chars()
+            .filter(|c| !c.is_control())
+            .take(MAX_QUERY)
+            .collect();
         let asked = Query::parse(&query);
         let password = secrets::get(&account.address)?;
         let mut imap = connect(&self.open, account, &password)?;
         let gmail = account.is_gmail();
         let mailbox = if gmail {
-            imap.mailboxes()?.into_iter().find(|m| m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\All"))).map_or_else(|| "INBOX".to_string(), |m| m.name)
+            imap.mailboxes()?
+                .into_iter()
+                .find(|m| m.flags.iter().any(|f| f.eq_ignore_ascii_case("\\All")))
+                .map_or_else(|| "INBOX".to_string(), |m| m.name)
         } else {
             "INBOX".to_string()
         };
         imap.select(&mailbox, false)?;
-        let uids = imap.search(&asked.criteria(), gmail.then_some(query.trim()).filter(|q| !q.is_empty()))?;
+        let uids = imap.search(
+            &asked.criteria(),
+            gmail.then_some(query.trim()).filter(|q| !q.is_empty()),
+        )?;
         let more = uids.len() > limit;
-        let chosen: Vec<u64> = if oldest_first { uids.iter().take(limit).copied().collect() } else { uids.iter().rev().take(limit).copied().collect() };
+        let chosen: Vec<u64> = if oldest_first {
+            uids.iter().take(limit).copied().collect()
+        } else {
+            uids.iter().rev().take(limit).copied().collect()
+        };
         let raws = imap.fetch_uids(&chosen, gmail)?;
         imap.logout();
-        let mut found: Vec<Found> = raws.iter().map(found_of).filter(|f| gmail || asked.holds(f)).collect();
+        let mut found: Vec<Found> = raws
+            .iter()
+            .map(found_of)
+            .filter(|f| gmail || asked.holds(f))
+            .collect();
         found.sort_by_key(|f| f.uid);
         if !oldest_first {
             found.reverse();
@@ -684,7 +1034,12 @@ impl Mail {
 }
 
 pub fn view_of(account: &Account) -> AccountView {
-    AccountView { id: account.id.clone(), name: account.name.clone(), address: account.address.clone(), provider: account.provider.clone() }
+    AccountView {
+        id: account.id.clone(),
+        name: account.name.clone(),
+        address: account.address.clone(),
+        provider: account.provider.clone(),
+    }
 }
 
 /// A header value with nothing that could end the line or start another header.
@@ -699,7 +1054,11 @@ fn header_people(people: &[Person]) -> String {
         .map(|p| {
             let address = safe(&p.address);
             let name = safe(&p.name);
-            if name.is_empty() || name.eq_ignore_ascii_case(&address) { address } else { format!("{} <{address}>", mime::encode_word(&name.replace('"', ""))) }
+            if name.is_empty() || name.eq_ignore_ascii_case(&address) {
+                address
+            } else {
+                format!("{} <{address}>", mime::encode_word(&name.replace('"', "")))
+            }
         })
         .collect::<Vec<_>>()
         .join(", ")
@@ -708,25 +1067,54 @@ fn header_people(people: &[Person]) -> String {
 /// The subject a reply goes with: the one the user chose, on one line and cut to `MAX_SUBJECT`; else «Re: » and the
 /// message's. It still answers their message (`In-Reply-To`) whatever it says.
 fn reply_subject(entry: &Entry, chosen: Option<&str>) -> String {
-    let chosen: String = chosen.map(safe).unwrap_or_default().trim().chars().take(MAX_SUBJECT).collect();
+    let chosen: String = chosen
+        .map(safe)
+        .unwrap_or_default()
+        .trim()
+        .chars()
+        .take(MAX_SUBJECT)
+        .collect();
     if !chosen.is_empty() {
         return chosen;
     }
     let subject = safe(&entry.subject);
-    if subject.to_ascii_lowercase().starts_with("re:") { subject } else { format!("Re: {subject}") }
+    if subject.to_ascii_lowercase().starts_with("re:") {
+        subject
+    } else {
+        format!("Re: {subject}")
+    }
 }
 
 /// The reply as a message: to `people`, in reply to theirs, its text in base64 so no server can alter it.
-fn compose_reply(account: &Account, entry: &Entry, people: &Recipients, subject: Option<&str>, text: &str, now_ms: i64) -> String {
+fn compose_reply(
+    account: &Account,
+    entry: &Entry,
+    people: &Recipients,
+    subject: Option<&str>,
+    text: &str,
+    now_ms: i64,
+) -> String {
     use base64::Engine;
     let subject = reply_subject(entry, subject);
-    let mut message = format!("From: {} <{}>\r\nTo: {}\r\n", mime::encode_word(&safe(&account.name)), account.address, header_people(&people.to));
+    let mut message = format!(
+        "From: {} <{}>\r\nTo: {}\r\n",
+        mime::encode_word(&safe(&account.name)),
+        account.address,
+        header_people(&people.to)
+    );
     if !people.cc.is_empty() {
         message.push_str(&format!("Cc: {}\r\n", header_people(&people.cc)));
     }
-    message.push_str(&format!("Subject: {}\r\nDate: {}\r\n", mime::encode_word(&subject), rfc2822(now_ms)));
+    message.push_str(&format!(
+        "Subject: {}\r\nDate: {}\r\n",
+        mime::encode_word(&subject),
+        rfc2822(now_ms)
+    ));
     if !entry.message_id.is_empty() {
-        message.push_str(&format!("In-Reply-To: {0}\r\nReferences: {0}\r\n", safe(&entry.message_id)));
+        message.push_str(&format!(
+            "In-Reply-To: {0}\r\nReferences: {0}\r\n",
+            safe(&entry.message_id)
+        ));
     }
     message.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
     let body = base64::engine::general_purpose::STANDARD.encode(text);
@@ -743,9 +1131,17 @@ fn rfc2822(ms: i64) -> String {
     let days = seconds.div_euclid(86_400);
     let rest = seconds.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
-    let weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(days + 4).rem_euclid(7) as usize];
-    let month_name = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][(month - 1) as usize];
-    format!("{weekday}, {day:02} {month_name} {year} {:02}:{:02}:{:02} +0000", rest / 3600, rest % 3600 / 60, rest % 60)
+    let weekday =
+        ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][(days + 4).rem_euclid(7) as usize];
+    let month_name = [
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+    ][(month - 1) as usize];
+    format!(
+        "{weekday}, {day:02} {month_name} {year} {:02}:{:02}:{:02} +0000",
+        rest / 3600,
+        rest % 3600 / 60,
+        rest % 60
+    )
 }
 
 /// The civil date of a day count since 1970-01-01 (Howard Hinnant's algorithm).
@@ -782,7 +1178,8 @@ mod tests {
     fn mail_on(port: u16) -> Mail {
         Mail::with_opener(Box::new(move |_| {
             let tcp = TcpStream::connect(("127.0.0.1", port)).map_err(|e| e.to_string())?;
-            tcp.set_read_timeout(Some(Duration::from_secs(5))).map_err(|e| e.to_string())?;
+            tcp.set_read_timeout(Some(Duration::from_secs(5)))
+                .map_err(|e| e.to_string())?;
             Imap::over(Box::new(tcp))
         }))
     }
@@ -792,13 +1189,19 @@ mod tests {
         for (y, m, d) in [(1970, 1, 1), (2000, 2, 29), (2026, 10, 24), (1969, 12, 31)] {
             assert_eq!(civil_from_days(days_from_civil(y, m, d)), (y, m, d));
         }
-        assert_eq!(rfc2822(1_792_231_200_000), "Sat, 17 Oct 2026 10:00:00 +0000");
+        assert_eq!(
+            rfc2822(1_792_231_200_000),
+            "Sat, 17 Oct 2026 10:00:00 +0000"
+        );
     }
 
     #[test]
     fn an_id_says_its_account_folder_and_uid_and_nothing_else_is_accepted() {
         let a = account();
-        assert_eq!(parse_id(&id(&a.id, Folder::Drafts, 12)), Some((a.id.clone(), Folder::Drafts, 12)));
+        assert_eq!(
+            parse_id(&id(&a.id, Folder::Drafts, 12)),
+            Some((a.id.clone(), Folder::Drafts, 12))
+        );
         assert_eq!(parse_id("../../x.inbox.1"), None);
         assert_eq!(parse_id(&format!("{}.trash.1", a.id)), None);
         assert_eq!(parse_id(&format!("{}.inbox.x", a.id)), None);
@@ -806,11 +1209,37 @@ mod tests {
 
     #[test]
     fn it_finds_the_special_mailboxes_by_flag_and_by_name() {
-        let list = |name: &str, flags: &[&str]| Mailbox { name: name.into(), flags: flags.iter().map(|f| f.to_string()).collect() };
-        let gmail = boxes_of(&[list("INBOX", &[]), list("[Gmail]/Enviados", &["\\Sent"]), list("[Gmail]/Borradores", &["\\Drafts"]), list("[Gmail]/Todos", &["\\All"])]);
-        assert_eq!((gmail.sent.as_deref(), gmail.drafts.as_deref(), gmail.archive.as_deref()), (Some("[Gmail]/Enviados"), Some("[Gmail]/Borradores"), Some("[Gmail]/Todos")));
+        let list = |name: &str, flags: &[&str]| Mailbox {
+            name: name.into(),
+            flags: flags.iter().map(|f| f.to_string()).collect(),
+        };
+        let gmail = boxes_of(&[
+            list("INBOX", &[]),
+            list("[Gmail]/Enviados", &["\\Sent"]),
+            list("[Gmail]/Borradores", &["\\Drafts"]),
+            list("[Gmail]/Todos", &["\\All"]),
+        ]);
+        assert_eq!(
+            (
+                gmail.sent.as_deref(),
+                gmail.drafts.as_deref(),
+                gmail.archive.as_deref()
+            ),
+            (
+                Some("[Gmail]/Enviados"),
+                Some("[Gmail]/Borradores"),
+                Some("[Gmail]/Todos")
+            )
+        );
         let plain = boxes_of(&[list("INBOX", &[]), list("Sent", &[]), list("Archive", &[])]);
-        assert_eq!((plain.sent.as_deref(), plain.drafts, plain.archive.as_deref()), (Some("Sent"), None, Some("Archive")));
+        assert_eq!(
+            (
+                plain.sent.as_deref(),
+                plain.drafts,
+                plain.archive.as_deref()
+            ),
+            (Some("Sent"), None, Some("Archive"))
+        );
     }
 
     #[test]
@@ -818,13 +1247,24 @@ mod tests {
         let a = account();
         let raw = Raw { uid: 9, flags: vec!["\\Flagged".into()], date: Some(5), header: b"From: Tienda <noreply@tienda.test>\r\nSubject: Tu pedido est\xc3\xa1 en camino\r\nList-Unsubscribe: <mailto:x@y.test>\r\n".to_vec(), text: "Seguimiento".as_bytes().to_vec(), ..Raw::default() };
         let (held, entry) = message_from(&a, Folder::Inbox, &raw, &HashSet::new());
-        assert_eq!((held.triage, held.unread, held.starred, held.at), (Triage::Held, true, true, 5));
+        assert_eq!(
+            (held.triage, held.unread, held.starred, held.at),
+            (Triage::Held, true, true, 5)
+        );
         assert!(held.reason.as_deref().unwrap().contains("envío"));
         assert_eq!(entry.from_address, "noreply@tienda.test");
         let mut interesting = HashSet::new();
         interesting.insert("noreply@tienda.test".to_string());
-        assert_eq!(message_from(&a, Folder::Inbox, &raw, &interesting).0.triage, Triage::Priority);
-        assert_eq!(message_from(&a, Folder::Sent, &raw, &HashSet::new()).0.triage, Triage::Routine);
+        assert_eq!(
+            message_from(&a, Folder::Inbox, &raw, &interesting).0.triage,
+            Triage::Priority
+        );
+        assert_eq!(
+            message_from(&a, Folder::Sent, &raw, &HashSet::new())
+                .0
+                .triage,
+            Triage::Routine
+        );
     }
 
     #[test]
@@ -834,44 +1274,119 @@ mod tests {
             from_name: "Tienda".into(),
             from_address: "noreply@tienda.test".into(),
             reply_to: vec![person("Soporte", "ayuda@tienda.test")],
-            others: vec![person("Ana", "Ana@Ejemplo.test"), person("Luis", "luis@ejemplo.test"), person("Soporte", "ayuda@tienda.test")],
+            others: vec![
+                person("Ana", "Ana@Ejemplo.test"),
+                person("Luis", "luis@ejemplo.test"),
+                person("Soporte", "ayuda@tienda.test"),
+            ],
             ..Entry::default()
         };
-        let addresses = |people: &[Person]| people.iter().map(|p| p.address.clone()).collect::<Vec<_>>();
+        let addresses =
+            |people: &[Person]| people.iter().map(|p| p.address.clone()).collect::<Vec<_>>();
         let one = recipients_of(&entry, "ana@ejemplo.test", false);
-        assert_eq!((addresses(&one.to), addresses(&one.cc)), (vec!["ayuda@tienda.test".to_string()], vec![]));
+        assert_eq!(
+            (addresses(&one.to), addresses(&one.cc)),
+            (vec!["ayuda@tienda.test".to_string()], vec![])
+        );
         let all = recipients_of(&entry, "ana@ejemplo.test", true);
-        assert_eq!(addresses(&all.cc), ["luis@ejemplo.test"], "never the account, never anyone twice");
-        let plain = Entry { reply_to: vec![], ..entry.clone() };
-        assert_eq!(addresses(&recipients_of(&plain, "ana@ejemplo.test", false).to), ["noreply@tienda.test"]);
-        let mine = Entry { from_address: "ana@ejemplo.test".into(), reply_to: vec![], others: vec![person("Luis", "luis@ejemplo.test")], ..Entry::default() };
-        assert_eq!(addresses(&recipients_of(&mine, "Ana@ejemplo.test", false).to), ["luis@ejemplo.test"]);
+        assert_eq!(
+            addresses(&all.cc),
+            ["luis@ejemplo.test"],
+            "never the account, never anyone twice"
+        );
+        let plain = Entry {
+            reply_to: vec![],
+            ..entry.clone()
+        };
+        assert_eq!(
+            addresses(&recipients_of(&plain, "ana@ejemplo.test", false).to),
+            ["noreply@tienda.test"]
+        );
+        let mine = Entry {
+            from_address: "ana@ejemplo.test".into(),
+            reply_to: vec![],
+            others: vec![person("Luis", "luis@ejemplo.test")],
+            ..Entry::default()
+        };
+        assert_eq!(
+            addresses(&recipients_of(&mine, "Ana@ejemplo.test", false).to),
+            ["luis@ejemplo.test"]
+        );
         let message = compose_reply(&account(), &entry, &all, None, "Hola", 1_792_231_200_000);
-        assert!(message.contains("To: Soporte <ayuda@tienda.test>\r\nCc: Luis <luis@ejemplo.test>\r\n"), "{message}");
+        assert!(
+            message.contains("To: Soporte <ayuda@tienda.test>\r\nCc: Luis <luis@ejemplo.test>\r\n"),
+            "{message}"
+        );
     }
 
     #[test]
     fn a_reply_names_its_recipient_and_cannot_add_headers() {
-        let entry = Entry { account_id: "a".into(), from_address: "lucia@ejemplo.test\r\nBcc: x@y.test".into(), subject: "Cena del sábado".into(), message_id: "<abc@ejemplo.test>".into(), ..Entry::default() };
+        let entry = Entry {
+            account_id: "a".into(),
+            from_address: "lucia@ejemplo.test\r\nBcc: x@y.test".into(),
+            subject: "Cena del sábado".into(),
+            message_id: "<abc@ejemplo.test>".into(),
+            ..Entry::default()
+        };
         let people = recipients_of(&entry, "ana@ejemplo.test", false);
-        let reply = compose_reply(&account(), &entry, &people, None, "Gracias, ¡nos vemos!", 1_792_231_200_000);
-        assert!(reply.contains("To: lucia@ejemplo.testBcc: x@y.test\r\n"), "{reply}");
+        let reply = compose_reply(
+            &account(),
+            &entry,
+            &people,
+            None,
+            "Gracias, ¡nos vemos!",
+            1_792_231_200_000,
+        );
+        assert!(
+            reply.contains("To: lucia@ejemplo.testBcc: x@y.test\r\n"),
+            "{reply}"
+        );
         assert!(!reply.contains("\r\nBcc:"));
         assert!(reply.contains("Subject: =?UTF-8?B?"));
         assert!(reply.contains("In-Reply-To: <abc@ejemplo.test>\r\n"));
         assert!(reply.contains("Date: Sat, 17 Oct 2026 10:00:00 +0000\r\n"));
-        assert!(reply.ends_with("\r\n") && !reply.contains("Gracias"), "the text goes in base64");
+        assert!(
+            reply.ends_with("\r\n") && !reply.contains("Gracias"),
+            "the text goes in base64"
+        );
     }
 
     #[test]
     fn a_reply_takes_the_subject_the_user_chose_on_one_line() {
-        let entry = Entry { subject: "Cena del sábado".into(), ..Entry::default() };
+        let entry = Entry {
+            subject: "Cena del sábado".into(),
+            ..Entry::default()
+        };
         assert_eq!(reply_subject(&entry, None), "Re: Cena del sábado");
         assert_eq!(reply_subject(&entry, Some("   ")), "Re: Cena del sábado");
-        assert_eq!(reply_subject(&Entry { subject: "RE: hola".into(), ..Entry::default() }, None), "RE: hola");
-        assert_eq!(reply_subject(&entry, Some(" Nos vemos el sábado\r\nBcc: x@y.test ")), "Nos vemos el sábadoBcc: x@y.test");
-        assert_eq!(reply_subject(&entry, Some(&"a".repeat(300))).chars().count(), MAX_SUBJECT);
-        let reply = compose_reply(&account(), &entry, &recipients_of(&entry, "ana@ejemplo.test", false), Some("Nos vemos"), "Hola", 0);
+        assert_eq!(
+            reply_subject(
+                &Entry {
+                    subject: "RE: hola".into(),
+                    ..Entry::default()
+                },
+                None
+            ),
+            "RE: hola"
+        );
+        assert_eq!(
+            reply_subject(&entry, Some(" Nos vemos el sábado\r\nBcc: x@y.test ")),
+            "Nos vemos el sábadoBcc: x@y.test"
+        );
+        assert_eq!(
+            reply_subject(&entry, Some(&"a".repeat(300)))
+                .chars()
+                .count(),
+            MAX_SUBJECT
+        );
+        let reply = compose_reply(
+            &account(),
+            &entry,
+            &recipients_of(&entry, "ana@ejemplo.test", false),
+            Some("Nos vemos"),
+            "Hola",
+            0,
+        );
         assert!(reply.contains("Subject: Nos vemos\r\n"), "{reply}");
     }
 
@@ -883,22 +1398,37 @@ mod tests {
         let (port, handle) = server(vec![
             ("LOGIN", vec![]),
             ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()),
-            ("FETCH 1:1", fetch_answer(1, 7, "", header, "¿Vienes el sábado?")),
-            ("LIST", b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n".to_vec()),
+            (
+                "FETCH 1:1",
+                fetch_answer(1, 7, "", header, "¿Vienes el sábado?"),
+            ),
+            (
+                "LIST",
+                b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n".to_vec(),
+            ),
             ("LOGOUT", vec![]),
         ]);
         let overview = mail_on(port).overview(std::slice::from_ref(&a), &HashSet::new());
         assert!(overview.problems.is_empty(), "{:?}", overview.problems);
         assert_eq!(overview.accounts.len(), 1);
         let message = &overview.messages[0];
-        assert_eq!((message.from.as_str(), message.subject.as_str(), message.unread, message.triage), ("Lucía", "Cena", true, Triage::Routine));
+        assert_eq!(
+            (
+                message.from.as_str(),
+                message.subject.as_str(),
+                message.unread,
+                message.triage
+            ),
+            ("Lucía", "Cena", true, Triage::Routine)
+        );
         assert_eq!(message.body, vec!["¿Vienes el sábado?"]);
         handle.join().unwrap();
         secrets::forget(&a.address);
     }
 
     #[test]
-    fn a_reading_says_how_many_each_mailbox_holds_and_an_all_mail_box_it_cannot_tell_apart_is_an_estimate_with_no_list() {
+    fn a_reading_says_how_many_each_mailbox_holds_and_an_all_mail_box_it_cannot_tell_apart_is_an_estimate_with_no_list()
+     {
         let a = account_of("conteo@ejemplo.test");
         secrets::save(&a.address, "abcd efgh").unwrap();
         let (port, handle) = server(vec![
@@ -916,34 +1446,76 @@ mod tests {
         let overview = mail.overview(std::slice::from_ref(&a), &HashSet::new());
         let asked = handle.join().unwrap();
         assert!(overview.problems.is_empty(), "{:?}", overview.problems);
-        let total = |overview: &Overview, folder: Folder| overview.totals.iter().find(|t| t.account_id == a.id && t.folder == folder).map(|t| t.total);
-        assert_eq!(total(&overview, Folder::Inbox), Some(120), "the server's count, not the forty read");
+        let total = |overview: &Overview, folder: Folder| {
+            overview
+                .totals
+                .iter()
+                .find(|t| t.account_id == a.id && t.folder == folder)
+                .map(|t| t.total)
+        };
+        assert_eq!(
+            total(&overview, Folder::Inbox),
+            Some(120),
+            "the server's count, not the forty read"
+        );
         assert_eq!(total(&overview, Folder::Sent), Some(30));
         assert_eq!(total(&overview, Folder::Drafts), Some(0));
-        assert_eq!(total(&overview, Folder::Archive), Some(850), "all mail, less what the other mailboxes hold");
-        assert!(!overview.messages.iter().any(|m| m.folder == Folder::Archive), "it holds the inbox too: nothing to list");
-        assert!(asked.iter().all(|line| !line.contains("STORE") && !line.contains("SELECT")), "counting is read only: {asked:?}");
+        assert_eq!(
+            total(&overview, Folder::Archive),
+            Some(850),
+            "all mail, less what the other mailboxes hold"
+        );
+        assert!(
+            !overview
+                .messages
+                .iter()
+                .any(|m| m.folder == Folder::Archive),
+            "it holds the inbox too: nothing to list"
+        );
+        assert!(
+            asked
+                .iter()
+                .all(|line| !line.contains("STORE") && !line.contains("SELECT")),
+            "counting is read only: {asked:?}"
+        );
         // What the owner archives, and what arrives, move the count until the next reading.
         mail.touch(&id(&a.id, Folder::Inbox, 7), Action::Archive);
-        let raw = Raw { uid: 8, date: Some(30), header: b"From: Ana <ana@ejemplo.test>\r\nSubject: Otra\r\n".to_vec(), text: b"Hola".to_vec(), ..Raw::default() };
+        let raw = Raw {
+            uid: 8,
+            date: Some(30),
+            header: b"From: Ana <ana@ejemplo.test>\r\nSubject: Otra\r\n".to_vec(),
+            text: b"Hola".to_vec(),
+            ..Raw::default()
+        };
         let pair = || message_from(&a, Folder::Inbox, &raw, &HashSet::new());
         mail.arrived(vec![pair()]);
         mail.arrived(vec![pair()]);
         let last = mail.last().unwrap();
-        assert_eq!((total(&last, Folder::Inbox), total(&last, Folder::Archive)), (Some(120), Some(851)), "one out and one in, heard twice");
+        assert_eq!(
+            (total(&last, Folder::Inbox), total(&last, Folder::Archive)),
+            (Some(120), Some(851)),
+            "one out and one in, heard twice"
+        );
         secrets::forget(&a.address);
     }
 
     /// The answer of a `UID SEARCH`: these UIDs.
     fn found(uids: std::ops::RangeInclusive<u64>) -> Vec<u8> {
-        format!("* SEARCH {}\r\n", uids.map(|uid| uid.to_string()).collect::<Vec<_>>().join(" ")).into_bytes()
+        format!(
+            "* SEARCH {}\r\n",
+            uids.map(|uid| uid.to_string())
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+        .into_bytes()
     }
 
     #[test]
     fn a_real_archive_mailbox_is_counted_whole_and_its_newest_are_listed() {
         let a = account_of("archivo-real@ejemplo.test");
         secrets::save(&a.address, "abcd efgh").unwrap();
-        let list = b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST () \"/\" \"Archive\"\r\n".to_vec();
+        let list =
+            b"* LIST (\\HasNoChildren) \"/\" \"INBOX\"\r\n* LIST () \"/\" \"Archive\"\r\n".to_vec();
         let (port, handle) = server(vec![
             ("LOGIN", vec![]),
             ("EXAMINE \"INBOX\"", b"* 5 EXISTS\r\n".to_vec()),
@@ -951,16 +1523,51 @@ mod tests {
             ("LIST", list),
             ("EXAMINE \"Archive\"", b"* 70 EXISTS\r\n".to_vec()),
             ("UID SEARCH ALL", found(1..=70)),
-            ("UID FETCH 70,69,68,67,66,65,64,63,62,61,60,59,58,57,56 (UID FLAGS", fetch_answer(70, 70, "\\Seen \\Flagged", "From: Ana <ana@ejemplo.test>\r\nSubject: Guardado\r\n\r\n", "Hola")),
+            (
+                "UID FETCH 70,69,68,67,66,65,64,63,62,61,60,59,58,57,56 (UID FLAGS",
+                fetch_answer(
+                    70,
+                    70,
+                    "\\Seen \\Flagged",
+                    "From: Ana <ana@ejemplo.test>\r\nSubject: Guardado\r\n\r\n",
+                    "Hola",
+                ),
+            ),
             ("LOGOUT", vec![]),
         ]);
         let overview = mail_on(port).overview(std::slice::from_ref(&a), &HashSet::new());
         let asked = handle.join().unwrap();
-        let of = |folder: Folder| overview.totals.iter().find(|t| t.folder == folder).map(|t| t.total);
-        assert_eq!((of(Folder::Inbox), of(Folder::Archive), of(Folder::Sent)), (Some(5), Some(70), None));
-        let archived = overview.messages.iter().find(|m| m.folder == Folder::Archive).unwrap();
-        assert_eq!((archived.id.clone(), archived.subject.as_str(), archived.starred, archived.unread), (id(&a.id, Folder::Archive, 70), "Guardado", true, false));
-        assert!(asked.iter().all(|line| !line.contains("STORE") && !line.contains("SELECT")), "listing is read only: {asked:?}");
+        let of = |folder: Folder| {
+            overview
+                .totals
+                .iter()
+                .find(|t| t.folder == folder)
+                .map(|t| t.total)
+        };
+        assert_eq!(
+            (of(Folder::Inbox), of(Folder::Archive), of(Folder::Sent)),
+            (Some(5), Some(70), None)
+        );
+        let archived = overview
+            .messages
+            .iter()
+            .find(|m| m.folder == Folder::Archive)
+            .unwrap();
+        assert_eq!(
+            (
+                archived.id.clone(),
+                archived.subject.as_str(),
+                archived.starred,
+                archived.unread
+            ),
+            (id(&a.id, Folder::Archive, 70), "Guardado", true, false)
+        );
+        assert!(
+            asked
+                .iter()
+                .all(|line| !line.contains("STORE") && !line.contains("SELECT")),
+            "listing is read only: {asked:?}"
+        );
         secrets::forget(&a.address);
     }
 
@@ -984,8 +1591,24 @@ mod tests {
         let overview = mail_on(port).overview(std::slice::from_ref(&a), &HashSet::new());
         handle.join().unwrap();
         assert!(overview.problems.is_empty(), "{:?}", overview.problems);
-        assert_eq!(overview.totals.iter().find(|t| t.folder == Folder::Archive).map(|t| t.total), Some(3), "what was found, not all the mail");
-        assert_eq!(overview.messages.iter().filter(|m| m.folder == Folder::Archive).map(|m| m.id.clone()).collect::<Vec<_>>(), [id(&a.id, Folder::Archive, 9)]);
+        assert_eq!(
+            overview
+                .totals
+                .iter()
+                .find(|t| t.folder == Folder::Archive)
+                .map(|t| t.total),
+            Some(3),
+            "what was found, not all the mail"
+        );
+        assert_eq!(
+            overview
+                .messages
+                .iter()
+                .filter(|m| m.folder == Folder::Archive)
+                .map(|m| m.id.clone())
+                .collect::<Vec<_>>(),
+            [id(&a.id, Folder::Archive, 9)]
+        );
         secrets::forget(&a.address);
     }
 
@@ -994,29 +1617,79 @@ mod tests {
         let a = account_of("archivo-mas@ejemplo.test");
         secrets::save(&a.address, "abcd efgh").unwrap();
         let listed = |uid: u64| {
-            let raw = Raw { uid, date: Some(uid as i64), header: b"From: Ana <ana@ejemplo.test>\r\nSubject: Viejo\r\n".to_vec(), text: b"Hola".to_vec(), ..Raw::default() };
+            let raw = Raw {
+                uid,
+                date: Some(uid as i64),
+                header: b"From: Ana <ana@ejemplo.test>\r\nSubject: Viejo\r\n".to_vec(),
+                text: b"Hola".to_vec(),
+                ..Raw::default()
+            };
             message_from(&a, Folder::Archive, &raw, &HashSet::new()).0
         };
-        let total = BoxTotal { account_id: a.id.clone(), folder: Folder::Archive, total: 60 };
+        let total = BoxTotal {
+            account_id: a.id.clone(),
+            folder: Folder::Archive,
+            total: 60,
+        };
         let (port, handle) = server(vec![
             ("LOGIN", vec![]),
             ("LIST", b"* LIST () \"/\" \"Archive\"\r\n".to_vec()),
             ("EXAMINE \"Archive\"", b"* 60 EXISTS\r\n".to_vec()),
             ("UID SEARCH ALL", found(1..=60)),
-            ("UID FETCH 45,44,", fetch_answer(45, 45, "\\Seen", "From: Ana <ana@ejemplo.test>\r\nSubject: Otro\r\n\r\n", "Hola")),
+            (
+                "UID FETCH 45,44,",
+                fetch_answer(
+                    45,
+                    45,
+                    "\\Seen",
+                    "From: Ana <ana@ejemplo.test>\r\nSubject: Otro\r\n\r\n",
+                    "Hola",
+                ),
+            ),
             ("LOGOUT", vec![]),
         ]);
         let mail = mail_on(port);
-        mail.restore(Overview { accounts: vec![view_of(&a)], messages: (46..=60).map(listed).collect(), totals: vec![total.clone()], ..Overview::default() });
-        let overview = mail.archive_more(std::slice::from_ref(&a), &HashSet::new()).unwrap();
+        mail.restore(Overview {
+            accounts: vec![view_of(&a)],
+            messages: (46..=60).map(listed).collect(),
+            totals: vec![total.clone()],
+            ..Overview::default()
+        });
+        let overview = mail
+            .archive_more(std::slice::from_ref(&a), &HashSet::new())
+            .unwrap();
         let asked = handle.join().unwrap();
-        assert!(asked[4].contains("UID FETCH 45,44,") && asked[4].contains(",7,6 (UID FLAGS"), "the next forty, from the newest down: {}", asked[4]);
-        assert_eq!(overview.messages.len(), 16, "the fifteen it had, and what came");
-        assert_eq!(mail.sender_of(&id(&a.id, Folder::Archive, 45)).as_deref(), Some("ana@ejemplo.test"), "what came can be acted on");
+        assert!(
+            asked[4].contains("UID FETCH 45,44,") && asked[4].contains(",7,6 (UID FLAGS"),
+            "the next forty, from the newest down: {}",
+            asked[4]
+        );
+        assert_eq!(
+            overview.messages.len(),
+            16,
+            "the fifteen it had, and what came"
+        );
+        assert_eq!(
+            mail.sender_of(&id(&a.id, Folder::Archive, 45)).as_deref(),
+            Some("ana@ejemplo.test"),
+            "what came can be acted on"
+        );
         // With everything listed it connects to nothing (the server above is gone).
         let whole = Mail::with_opener(Box::new(|_| Err("no debe conectar".to_string())));
-        whole.restore(Overview { accounts: vec![view_of(&a)], messages: (1..=60).map(listed).collect(), totals: vec![total], ..Overview::default() });
-        assert_eq!(whole.archive_more(std::slice::from_ref(&a), &HashSet::new()).unwrap().messages.len(), 60);
+        whole.restore(Overview {
+            accounts: vec![view_of(&a)],
+            messages: (1..=60).map(listed).collect(),
+            totals: vec![total],
+            ..Overview::default()
+        });
+        assert_eq!(
+            whole
+                .archive_more(std::slice::from_ref(&a), &HashSet::new())
+                .unwrap()
+                .messages
+                .len(),
+            60
+        );
         secrets::forget(&a.address);
     }
 
@@ -1029,15 +1702,40 @@ mod tests {
         fetch.extend_from_slice(raw.as_bytes());
         fetch.extend_from_slice(b")\r\n");
         let list = b"* LIST (\\Archive) \"/\" \"Archive\"\r\n".to_vec();
-        let (port, handle) = server(vec![("LOGIN", vec![]), ("LIST", list.clone()), ("EXAMINE \"Archive\"", b"* 40 EXISTS\r\n".to_vec()), ("UID FETCH 31 (BODY.PEEK[])", fetch), ("LOGOUT", vec![])]);
+        let (port, handle) = server(vec![
+            ("LOGIN", vec![]),
+            ("LIST", list.clone()),
+            ("EXAMINE \"Archive\"", b"* 40 EXISTS\r\n".to_vec()),
+            ("UID FETCH 31 (BODY.PEEK[])", fetch),
+            ("LOGOUT", vec![]),
+        ]);
         let message_id = id(&a.id, Folder::Archive, 31);
-        assert!(mail_on(port).open(std::slice::from_ref(&a), &message_id).unwrap().html.contains("Reserva lista"));
+        assert!(
+            mail_on(port)
+                .open(std::slice::from_ref(&a), &message_id)
+                .unwrap()
+                .html
+                .contains("Reserva lista")
+        );
         handle.join().unwrap();
-        let (port, handle) = server(vec![("LOGIN", vec![]), ("LIST", list.clone()), ("SELECT \"Archive\"", b"* 40 EXISTS\r\n".to_vec()), ("UID STORE 31 +FLAGS.SILENT (\\Flagged)", vec![]), ("LOGOUT", vec![])]);
-        mail_on(port).act(std::slice::from_ref(&a), &message_id, Action::Star).unwrap();
+        let (port, handle) = server(vec![
+            ("LOGIN", vec![]),
+            ("LIST", list.clone()),
+            ("SELECT \"Archive\"", b"* 40 EXISTS\r\n".to_vec()),
+            ("UID STORE 31 +FLAGS.SILENT (\\Flagged)", vec![]),
+            ("LOGOUT", vec![]),
+        ]);
+        mail_on(port)
+            .act(std::slice::from_ref(&a), &message_id, Action::Star)
+            .unwrap();
         handle.join().unwrap();
         let (port, handle) = server(vec![("LOGIN", vec![]), ("LIST", list)]);
-        assert!(mail_on(port).act(std::slice::from_ref(&a), &message_id, Action::Archive).unwrap_err().contains("ya está archivado"));
+        assert!(
+            mail_on(port)
+                .act(std::slice::from_ref(&a), &message_id, Action::Archive)
+                .unwrap_err()
+                .contains("ya está archivado")
+        );
         handle.join().unwrap();
         secrets::forget(&a.address);
     }
@@ -1046,21 +1744,49 @@ mod tests {
     fn what_was_kept_of_a_reading_is_shown_at_once_and_arrivals_join_it_newest_first() {
         let a = account_of("guardado@ejemplo.test");
         let message = |uid: u64, at: i64| {
-            let raw = Raw { uid, date: Some(at), header: format!("From: Lucía <lucia@ejemplo.test>\r\nSubject: Asunto {uid}\r\n").into_bytes(), text: b"Hola".to_vec(), ..Raw::default() };
+            let raw = Raw {
+                uid,
+                date: Some(at),
+                header: format!("From: Lucía <lucia@ejemplo.test>\r\nSubject: Asunto {uid}\r\n")
+                    .into_bytes(),
+                text: b"Hola".to_vec(),
+                ..Raw::default()
+            };
             message_from(&a, Folder::Inbox, &raw, &HashSet::new())
         };
         let mail = Mail::new();
         assert!(mail.last().is_none());
-        mail.restore(Overview { accounts: vec![view_of(&a)], messages: vec![message(1, 10).0], ..Overview::default() });
+        mail.restore(Overview {
+            accounts: vec![view_of(&a)],
+            messages: vec![message(1, 10).0],
+            ..Overview::default()
+        });
         assert_eq!(mail.last().unwrap().messages.len(), 1);
-        assert_eq!(mail.sender_of(&id(&a.id, Folder::Inbox, 1)).as_deref(), Some("lucia@ejemplo.test"), "the ids of what was kept can be acted on");
+        assert_eq!(
+            mail.sender_of(&id(&a.id, Folder::Inbox, 1)).as_deref(),
+            Some("lucia@ejemplo.test"),
+            "the ids of what was kept can be acted on"
+        );
         // A reading already made is not replaced by an older snapshot.
         mail.restore(Overview::default());
         assert_eq!(mail.last().unwrap().messages.len(), 1);
         mail.arrived(vec![message(2, 20)]);
         mail.arrived(vec![message(2, 20), message(3, 30)]);
-        let ids: Vec<_> = mail.last().unwrap().messages.iter().map(|m| m.id.clone()).collect();
-        assert_eq!(ids, vec![id(&a.id, Folder::Inbox, 3), id(&a.id, Folder::Inbox, 2), id(&a.id, Folder::Inbox, 1)]);
+        let ids: Vec<_> = mail
+            .last()
+            .unwrap()
+            .messages
+            .iter()
+            .map(|m| m.id.clone())
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                id(&a.id, Folder::Inbox, 3),
+                id(&a.id, Folder::Inbox, 2),
+                id(&a.id, Folder::Inbox, 1)
+            ]
+        );
     }
 
     #[test]
@@ -1069,7 +1795,11 @@ mod tests {
         secrets::forget(&a.address);
         let overview = Mail::new().overview(&[a], &HashSet::new());
         assert!(overview.messages.is_empty());
-        assert!(overview.problems[0].starts_with("Ana: Falta la contraseña"), "{:?}", overview.problems);
+        assert!(
+            overview.problems[0].starts_with("Ana: Falta la contraseña"),
+            "{:?}",
+            overview.problems
+        );
     }
 
     #[test]
@@ -1080,18 +1810,48 @@ mod tests {
         let mut fetch = format!("* 1 FETCH (UID 7 BODY[] {{{}}}\r\n", raw.len()).into_bytes();
         fetch.extend_from_slice(raw.as_bytes());
         fetch.extend_from_slice(b")\r\n");
-        let (port, handle) = server(vec![("LOGIN", vec![]), ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()), ("UID FETCH 7 (BODY.PEEK[])", fetch), ("LOGOUT", vec![])]);
+        let (port, handle) = server(vec![
+            ("LOGIN", vec![]),
+            ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()),
+            ("UID FETCH 7 (BODY.PEEK[])", fetch),
+            ("LOGOUT", vec![]),
+        ]);
         let mail = mail_on(port);
         let message_id = id(&a.id, Folder::Inbox, 7);
         let opened = mail.open(std::slice::from_ref(&a), &message_id).unwrap();
         handle.join().unwrap();
-        assert!(opened.html.contains("data:image/png;base64,AQID") && opened.html.contains("Total S/ 25.36"), "{}", opened.html);
-        assert!(!opened.html.contains("robar") && !opened.html.contains("<script"), "{}", opened.html);
-        assert_eq!(opened.remote, vec!["https://imagenes.ejemplo.test/banner.png"]);
-        assert!(opened.text.iter().any(|paragraph| paragraph.contains("Total S/ 25.36")), "{:?}", opened.text);
+        assert!(
+            opened.html.contains("data:image/png;base64,AQID")
+                && opened.html.contains("Total S/ 25.36"),
+            "{}",
+            opened.html
+        );
+        assert!(
+            !opened.html.contains("robar") && !opened.html.contains("<script"),
+            "{}",
+            opened.html
+        );
+        assert_eq!(
+            opened.remote,
+            vec!["https://imagenes.ejemplo.test/banner.png"]
+        );
+        assert!(
+            opened
+                .text
+                .iter()
+                .any(|paragraph| paragraph.contains("Total S/ 25.36")),
+            "{:?}",
+            opened.text
+        );
         // Only a picture the message named is fetched, and only after the owner asks: any other address is refused first.
-        assert!(mail.image(&message_id, "https://127.0.0.1/interno.png").is_err());
-        assert!(mail.image("otra.inbox.7", "https://imagenes.ejemplo.test/banner.png").is_err());
+        assert!(
+            mail.image(&message_id, "https://127.0.0.1/interno.png")
+                .is_err()
+        );
+        assert!(
+            mail.image("otra.inbox.7", "https://imagenes.ejemplo.test/banner.png")
+                .is_err()
+        );
         secrets::forget(&a.address);
     }
 
@@ -1104,7 +1864,12 @@ mod tests {
         fetch.extend_from_slice(raw.as_bytes());
         fetch.extend_from_slice(b")\r\n");
         // The server answers once: a second connection would fail, so a second reading must come from memory.
-        let (port, handle) = server(vec![("LOGIN", vec![]), ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()), ("UID FETCH 9 (BODY.PEEK[])", fetch), ("LOGOUT", vec![])]);
+        let (port, handle) = server(vec![
+            ("LOGIN", vec![]),
+            ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()),
+            ("UID FETCH 9 (BODY.PEEK[])", fetch),
+            ("LOGOUT", vec![]),
+        ]);
         let mail = mail_on(port);
         let message_id = id(&a.id, Folder::Inbox, 9);
         let first = mail.open(std::slice::from_ref(&a), &message_id).unwrap();
@@ -1112,8 +1877,16 @@ mod tests {
         let second = mail.open(std::slice::from_ref(&a), &message_id).unwrap();
         assert_eq!(first, second);
         // The address is named by the message, so its picture is kept once fetched: the second request takes memory.
-        mail.pictures.lock().unwrap().put("https://imagenes.ejemplo.test/banner.png".into(), "data:image/png;base64,AQID".into(), 24);
-        assert_eq!(mail.image(&message_id, "https://imagenes.ejemplo.test/banner.png").unwrap(), "data:image/png;base64,AQID");
+        mail.pictures.lock().unwrap().put(
+            "https://imagenes.ejemplo.test/banner.png".into(),
+            "data:image/png;base64,AQID".into(),
+            24,
+        );
+        assert_eq!(
+            mail.image(&message_id, "https://imagenes.ejemplo.test/banner.png")
+                .unwrap(),
+            "data:image/png;base64,AQID"
+        );
         secrets::forget(&a.address);
     }
 
@@ -1126,14 +1899,27 @@ mod tests {
         fetch.extend_from_slice(raw.as_bytes());
         fetch.extend_from_slice(b")\r\n");
         // One connection serves the whole read-ahead; the open afterwards finds no server at all.
-        let (port, handle) = server(vec![("LOGIN", vec![]), ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()), ("UID FETCH 11 (BODY.PEEK[])", fetch), ("LOGOUT", vec![])]);
+        let (port, handle) = server(vec![
+            ("LOGIN", vec![]),
+            ("EXAMINE \"INBOX\"", b"* 1 EXISTS\r\n".to_vec()),
+            ("UID FETCH 11 (BODY.PEEK[])", fetch),
+            ("LOGOUT", vec![]),
+        ]);
         let mail = mail_on(port);
         let message_id = id(&a.id, Folder::Inbox, 11);
         assert!(!mail.is_warm(&message_id));
-        mail.prefetch(std::slice::from_ref(&a), &[message_id.clone(), "no-es-un-id".into()]);
+        mail.prefetch(
+            std::slice::from_ref(&a),
+            &[message_id.clone(), "no-es-un-id".into()],
+        );
         handle.join().unwrap();
         assert!(mail.is_warm(&message_id));
-        assert!(mail.open(std::slice::from_ref(&a), &message_id).unwrap().html.contains("Total S/ 25.36"));
+        assert!(
+            mail.open(std::slice::from_ref(&a), &message_id)
+                .unwrap()
+                .html
+                .contains("Total S/ 25.36")
+        );
         // Asking again for what is already kept connects to nothing.
         mail.prefetch(std::slice::from_ref(&a), &[message_id]);
         secrets::forget(&a.address);
@@ -1143,15 +1929,34 @@ mod tests {
     fn the_last_reading_follows_what_the_owner_did_to_a_message() {
         let mail = Mail::new();
         let message = Message {
-            id: "a.inbox.3".into(), account_id: "a".into(), folder: Folder::Inbox, from: "Ana".into(), address: "ana@ejemplo.test".into(), subject: "Hola".into(),
-            preview: "Hola".into(), body: vec!["Hola".into()], at: 1, unread: true, starred: false, triage: Triage::Routine, labels: vec![], reason: None, auth_failed: false,
+            id: "a.inbox.3".into(),
+            account_id: "a".into(),
+            folder: Folder::Inbox,
+            from: "Ana".into(),
+            address: "ana@ejemplo.test".into(),
+            subject: "Hola".into(),
+            preview: "Hola".into(),
+            body: vec!["Hola".into()],
+            at: 1,
+            unread: true,
+            starred: false,
+            triage: Triage::Routine,
+            labels: vec![],
+            reason: None,
+            auth_failed: false,
         };
-        *mail.last.lock().unwrap() = Some(Overview { messages: vec![message], ..Overview::default() });
+        *mail.last.lock().unwrap() = Some(Overview {
+            messages: vec![message],
+            ..Overview::default()
+        });
         mail.touch("a.inbox.3", Action::Star);
         mail.touch("a.inbox.3", Action::Read);
         mail.touch("a.inbox.3", Action::Archive);
         let kept = mail.last().unwrap().messages.remove(0);
-        assert_eq!((kept.starred, kept.unread, kept.folder), (true, false, Folder::Archive));
+        assert_eq!(
+            (kept.starred, kept.unread, kept.folder),
+            (true, false, Folder::Archive)
+        );
     }
 
     #[test]
@@ -1160,7 +1965,10 @@ mod tests {
         secrets::save(&a.address, "abcd efgh").unwrap();
         let (port, handle) = server(vec![
             ("LOGIN", vec![]),
-            ("LIST", b"* LIST (\\HasNoChildren \\Archive) \"/\" \"Archive\"\r\n".to_vec()),
+            (
+                "LIST",
+                b"* LIST (\\HasNoChildren \\Archive) \"/\" \"Archive\"\r\n".to_vec(),
+            ),
             ("SELECT \"INBOX\"", b"* 3 EXISTS\r\n".to_vec()),
             ("CAPABILITY", b"* CAPABILITY IMAP4rev1 MOVE\r\n".to_vec()),
             ("UID MOVE 7 \"Archive\"", vec![]),
@@ -1168,8 +1976,17 @@ mod tests {
         ]);
         let mail = mail_on(port);
         let message_id = id(&a.id, Folder::Inbox, 7);
-        mail.entries().insert(message_id.clone(), Entry { account_id: a.id.clone(), from_address: "x@y.test".into(), subject: "S".into(), ..Entry::default() });
-        mail.act(std::slice::from_ref(&a), &message_id, Action::Archive).unwrap();
+        mail.entries().insert(
+            message_id.clone(),
+            Entry {
+                account_id: a.id.clone(),
+                from_address: "x@y.test".into(),
+                subject: "S".into(),
+                ..Entry::default()
+            },
+        );
+        mail.act(std::slice::from_ref(&a), &message_id, Action::Archive)
+            .unwrap();
         handle.join().unwrap();
         assert_eq!(mail.sender_of(&message_id), None);
         secrets::forget(&a.address);
@@ -1178,34 +1995,88 @@ mod tests {
     #[test]
     fn a_gmail_app_password_is_kept_without_the_spaces_google_shows_in_it() {
         let a = Account::new("claves@ejemplo.test", "Ana", "gmail", None).unwrap();
-        let (port, handle) = server(vec![("LOGIN \"claves@ejemplo.test\" \"abcdefghijklmnop\"", vec![]), ("EXAMINE \"INBOX\"", b"* 0 EXISTS\r\n".to_vec()), ("LOGOUT", vec![])]);
-        mail_on(port).add_account(&a, " abcd efgh ijkl mnop ").unwrap();
+        let (port, handle) = server(vec![
+            ("LOGIN \"claves@ejemplo.test\" \"abcdefghijklmnop\"", vec![]),
+            ("EXAMINE \"INBOX\"", b"* 0 EXISTS\r\n".to_vec()),
+            ("LOGOUT", vec![]),
+        ]);
+        mail_on(port)
+            .add_account(&a, " abcd efgh ijkl mnop ")
+            .unwrap();
         handle.join().unwrap();
         assert_eq!(secrets::get(&a.address).unwrap(), "abcdefghijklmnop");
         secrets::forget(&a.address);
-        assert!(Mail::new().add_account(&a, "   ").unwrap_err().contains("contraseña"));
+        assert!(
+            Mail::new()
+                .add_account(&a, "   ")
+                .unwrap_err()
+                .contains("contraseña")
+        );
     }
 
     #[test]
-    fn a_search_reads_the_oldest_of_a_stretch_first_says_more_are_left_and_checks_what_the_server_cannot() {
+    fn a_search_reads_the_oldest_of_a_stretch_first_says_more_are_left_and_checks_what_the_server_cannot()
+     {
         let a = account_of("busca@ejemplo.test");
         secrets::save(&a.address, "abcd efgh").unwrap();
-        let mut fetched = fetch_answer(1, 7, "\\Seen", "From: BCP <avisos@bcp.com.pe>\r\nSubject: Consumo\r\n\r\n", "Consumo de S/ 45.00");
-        fetched.extend(fetch_answer(2, 9, "", "From: Ana <ana@ejemplo.test>\r\nSubject: Hola\r\n\r\n", "Hola"));
+        let mut fetched = fetch_answer(
+            1,
+            7,
+            "\\Seen",
+            "From: BCP <avisos@bcp.com.pe>\r\nSubject: Consumo\r\n\r\n",
+            "Consumo de S/ 45.00",
+        );
+        fetched.extend(fetch_answer(
+            2,
+            9,
+            "",
+            "From: Ana <ana@ejemplo.test>\r\nSubject: Hola\r\n\r\n",
+            "Hola",
+        ));
         let (port, handle) = server(vec![
             ("LOGIN", vec![]),
             ("EXAMINE \"INBOX\"", b"* 3 EXISTS\r\n".to_vec()),
-            ("UID SEARCH SINCE 17-Oct-2026 OR FROM \"bcp.com.pe\" FROM \"yape.pe\"", b"* SEARCH 12 7 9\r\n".to_vec()),
-            ("UID FETCH 7,9 (UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID", fetched),
+            (
+                "UID SEARCH SINCE 17-Oct-2026 OR FROM \"bcp.com.pe\" FROM \"yape.pe\"",
+                b"* SEARCH 12 7 9\r\n".to_vec(),
+            ),
+            (
+                "UID FETCH 7,9 (UID INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID",
+                fetched,
+            ),
             ("LOGOUT", vec![]),
         ]);
-        let (found, more) = mail_on(port).search(&a, "{from:bcp.com.pe from:yape.pe} after:1792200000", 2, true).unwrap();
+        let (found, more) = mail_on(port)
+            .search(
+                &a,
+                "{from:bcp.com.pe from:yape.pe} after:1792200000",
+                2,
+                true,
+            )
+            .unwrap();
         let asked = handle.join().unwrap();
         assert!(more, "a third message is left for the next reading");
-        assert_eq!(found.len(), 1, "the one whose sender was not asked for is left out: {found:?}");
-        assert_eq!((found[0].uid, found[0].at, found[0].from_address.as_str(), found[0].text.as_str()), (7, 1_792_231_200, "avisos@bcp.com.pe", "Consumo de S/ 45.00"));
+        assert_eq!(
+            found.len(),
+            1,
+            "the one whose sender was not asked for is left out: {found:?}"
+        );
+        assert_eq!(
+            (
+                found[0].uid,
+                found[0].at,
+                found[0].from_address.as_str(),
+                found[0].text.as_str()
+            ),
+            (7, 1_792_231_200, "avisos@bcp.com.pe", "Consumo de S/ 45.00")
+        );
         assert!(found[0].gmail_id.is_empty());
-        assert!(asked.iter().all(|line| !line.contains("STORE") && !line.contains("SELECT")), "read only: {asked:?}");
+        assert!(
+            asked
+                .iter()
+                .all(|line| !line.contains("STORE") && !line.contains("SELECT")),
+            "read only: {asked:?}"
+        );
         secrets::forget(&a.address);
     }
 
@@ -1213,8 +2084,23 @@ mod tests {
     fn an_action_on_an_unknown_message_or_account_is_refused_before_any_connection() {
         let mail = Mail::new();
         assert!(mail.act(&[account()], "basura", Action::Read).is_err());
-        assert!(mail.act(&[], &id(&account().id, Folder::Inbox, 1), Action::Read).unwrap_err().contains("ya no está conectada"));
+        assert!(
+            mail.act(&[], &id(&account().id, Folder::Inbox, 1), Action::Read)
+                .unwrap_err()
+                .contains("ya no está conectada")
+        );
         assert!(mail.draft(&[account()], "x", "  ", None, false, 0).is_err());
-        assert!(mail.draft(&[account()], &id(&account().id, Folder::Inbox, 1), "hola", None, false, 0).unwrap_err().contains("Actualiza"));
+        assert!(
+            mail.draft(
+                &[account()],
+                &id(&account().id, Folder::Inbox, 1),
+                "hola",
+                None,
+                false,
+                0
+            )
+            .unwrap_err()
+            .contains("Actualiza")
+        );
     }
 }

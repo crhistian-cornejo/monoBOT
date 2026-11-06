@@ -1108,8 +1108,8 @@ pub fn harness_spawn(
         // Deliver the final batched lines before the exit that follows them.
         let drain_deadline = Instant::now() + OUTPUT_DRAIN_WAIT;
         let _ = stdout_drained.recv_timeout(OUTPUT_DRAIN_WAIT);
-        let _ = stderr_drained
-            .recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
+        let _ =
+            stderr_drained.recv_timeout(drain_deadline.saturating_duration_since(Instant::now()));
         if let Some(store) = wait_store {
             store.sync_auth();
         }

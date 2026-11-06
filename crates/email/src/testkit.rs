@@ -24,7 +24,9 @@ pub fn server(script: Vec<(&'static str, Vec<u8>)>) -> (u16, std::thread::JoinHa
             buffer.read_line(&mut line).unwrap();
             let line = line.trim_end().to_string();
             assert!(line.contains(expect), "asked «{line}», expected «{expect}»");
-            let tag = waiting.take().unwrap_or_else(|| line.split(' ').next().unwrap().to_string());
+            let tag = waiting
+                .take()
+                .unwrap_or_else(|| line.split(' ').next().unwrap().to_string());
             asked.push(line);
             if answer.starts_with(b"+") {
                 socket.write_all(&answer).unwrap();

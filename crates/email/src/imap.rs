@@ -73,21 +73,36 @@ pub struct Imap {
 impl Imap {
     /// A TLS connection to `host:port` (certificates checked as the rest of Echo does).
     pub fn open(host: &str, port: u16) -> Result<Self, String> {
-        let offline = || "No hay conexión con el servidor de correo. Revisa tu internet.".to_string();
-        let address = (host, port).to_socket_addrs().map_err(|_| offline())?.next().ok_or_else(offline)?;
-        let tcp = TcpStream::connect_timeout(&address, Duration::from_secs(20)).map_err(|_| offline())?;
+        let offline =
+            || "No hay conexión con el servidor de correo. Revisa tu internet.".to_string();
+        let address = (host, port)
+            .to_socket_addrs()
+            .map_err(|_| offline())?
+            .next()
+            .ok_or_else(offline)?;
+        let tcp =
+            TcpStream::connect_timeout(&address, Duration::from_secs(20)).map_err(|_| offline())?;
         let _ = tcp.set_read_timeout(Some(Duration::from_secs(30)));
         let _ = tcp.set_write_timeout(Some(Duration::from_secs(30)));
         let config = crate::base::tls::client()?;
-        let name = rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
-        let tls = rustls::ClientConnection::new(Arc::new(config), name).map_err(|e| format!("TLS: {e}"))?;
+        let name =
+            rustls::pki_types::ServerName::try_from(host.to_string()).map_err(|e| e.to_string())?;
+        let tls = rustls::ClientConnection::new(Arc::new(config), name)
+            .map_err(|e| format!("TLS: {e}"))?;
         Self::over(Box::new(rustls::StreamOwned::new(tls, tcp)))
     }
 
     /// A connection over any stream, after reading the server's greeting.
     pub fn over(stream: Box<dyn Wire>) -> Result<Self, String> {
-        let mut imap = Self { stream: BufReader::new(stream), tag: 0, pending: Vec::new(), literal_limit: MAX_LITERAL };
-        let greeting = imap.read_line(Duration::from_secs(30))?.ok_or("El servidor de correo no respondió.")?;
+        let mut imap = Self {
+            stream: BufReader::new(stream),
+            tag: 0,
+            pending: Vec::new(),
+            literal_limit: MAX_LITERAL,
+        };
+        let greeting = imap
+            .read_line(Duration::from_secs(30))?
+            .ok_or("El servidor de correo no respondió.")?;
         if !greeting.text().starts_with("* OK") && !greeting.text().starts_with("* PREAUTH") {
             return Err("El servidor de correo no aceptó la conexión.".into());
         }
@@ -108,7 +123,12 @@ impl Imap {
                     return Ok(Some(line));
                 }
                 Ok(_) => {}
-                Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) =>
+                {
                     if Instant::now() >= deadline {
                         return Ok(None);
                     }
@@ -128,14 +148,23 @@ impl Imap {
         let mut wait = wait;
         loop {
             let Some(raw) = self.read_raw(wait)? else {
-                return if line.pieces.is_empty() { Ok(None) } else { Err("El servidor de correo dejó una respuesta a medias.".into()) };
+                return if line.pieces.is_empty() {
+                    Ok(None)
+                } else {
+                    Err("El servidor de correo dejó una respuesta a medias.".into())
+                };
             };
             // Inside a line the rest must follow: give it time.
             wait = WAIT;
             let text = String::from_utf8_lossy(&raw).into_owned();
-            let size = text.strip_suffix('}').and_then(|t| t.rsplit_once('{')).and_then(|(_, n)| n.parse::<usize>().ok());
+            let size = text
+                .strip_suffix('}')
+                .and_then(|t| t.rsplit_once('{'))
+                .and_then(|(_, n)| n.parse::<usize>().ok());
             line.pieces.push(text);
-            let Some(size) = size else { return Ok(Some(line)) };
+            let Some(size) = size else {
+                return Ok(Some(line));
+            };
             if size > self.literal_limit {
                 return Err("El servidor de correo envió un bloque demasiado grande.".into());
             }
@@ -146,9 +175,18 @@ impl Imap {
                 match Read::read(&mut self.stream, &mut literal[filled..]) {
                     Ok(0) => return Err("El servidor de correo cerró la conexión.".into()),
                     Ok(n) => filled += n,
-                    Err(e) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted) => {
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::WouldBlock
+                                | std::io::ErrorKind::TimedOut
+                                | std::io::ErrorKind::Interrupted
+                        ) =>
+                    {
                         if Instant::now() >= deadline {
-                            return Err("El servidor de correo tardó demasiado en responder.".into());
+                            return Err(
+                                "El servidor de correo tardó demasiado en responder.".into()
+                            );
                         }
                     }
                     Err(_) => return Err("Se cortó la conexión con el servidor de correo.".into()),
@@ -160,7 +198,10 @@ impl Imap {
 
     fn send(&mut self, text: &str) -> Result<(), String> {
         let stream = self.stream.get_mut();
-        stream.write_all(text.as_bytes()).and_then(|_| stream.flush()).map_err(|_| "Se cortó la conexión con el servidor de correo.".to_string())
+        stream
+            .write_all(text.as_bytes())
+            .and_then(|_| stream.flush())
+            .map_err(|_| "Se cortó la conexión con el servidor de correo.".to_string())
     }
 
     /// Sends a command and returns the untagged lines of its answer; `Err` with the server's reason on NO / BAD.
@@ -176,7 +217,9 @@ impl Imap {
         self.tag += 1;
         let tag = format!("E{}", self.tag);
         self.send(&format!("{tag} {command} {{{}}}\r\n", literal.len()))?;
-        let go = self.read_line(WAIT)?.ok_or("El servidor de correo tardó demasiado en responder.")?;
+        let go = self
+            .read_line(WAIT)?
+            .ok_or("El servidor de correo tardó demasiado en responder.")?;
         if !go.text().starts_with('+') {
             return Err(go.text().chars().take(160).collect());
         }
@@ -188,18 +231,30 @@ impl Imap {
     fn answer(&mut self, tag: &str) -> Result<Vec<Line>, String> {
         let mut lines = Vec::new();
         loop {
-            let line = self.read_line(WAIT)?.ok_or("El servidor de correo tardó demasiado en responder.")?;
+            let line = self
+                .read_line(WAIT)?
+                .ok_or("El servidor de correo tardó demasiado en responder.")?;
             let text = line.text();
             if let Some(rest) = text.strip_prefix(&format!("{tag} ")) {
-                return if rest.starts_with("OK") { Ok(lines) } else { Err(rest.chars().take(160).collect()) };
+                return if rest.starts_with("OK") {
+                    Ok(lines)
+                } else {
+                    Err(rest.chars().take(160).collect())
+                };
             }
             lines.push(line);
         }
     }
 
     pub fn login(&mut self, address: &str, password: &str, provider: &str) -> Result<(), String> {
-        if address.chars().chain(password.chars()).any(|c| c.is_control()) {
-            return Err("La dirección o la contraseña tienen caracteres que no se pueden usar.".into());
+        if address
+            .chars()
+            .chain(password.chars())
+            .any(|c| c.is_control())
+        {
+            return Err(
+                "La dirección o la contraseña tienen caracteres que no se pueden usar.".into(),
+            );
         }
         self.command(&format!("LOGIN {} {}", quote(address), quote(password))).map(|_| ()).map_err(|reason| {
             let reason = reason.to_lowercase();
@@ -218,8 +273,21 @@ impl Imap {
 
     /// The server's extensions, in capitals (`MOVE`, `UIDPLUS`…).
     pub fn capabilities(&mut self) -> Vec<String> {
-        let Ok(lines) = self.command("CAPABILITY") else { return Vec::new() };
-        lines.iter().map(Line::text).filter_map(|t| t.strip_prefix("* CAPABILITY ").map(|rest| rest.split_whitespace().map(str::to_ascii_uppercase).collect::<Vec<_>>())).flatten().collect()
+        let Ok(lines) = self.command("CAPABILITY") else {
+            return Vec::new();
+        };
+        lines
+            .iter()
+            .map(Line::text)
+            .filter_map(|t| {
+                t.strip_prefix("* CAPABILITY ").map(|rest| {
+                    rest.split_whitespace()
+                        .map(str::to_ascii_uppercase)
+                        .collect::<Vec<_>>()
+                })
+            })
+            .flatten()
+            .collect()
     }
 
     /// Every mailbox of the account with what it is for.
@@ -230,7 +298,11 @@ impl Imap {
 
     /// Opens a mailbox (read-only unless `write`) and says how many messages it holds.
     pub fn select(&mut self, mailbox: &str, write: bool) -> Result<u32, String> {
-        let lines = self.command(&format!("{} {}", if write { "SELECT" } else { "EXAMINE" }, quote(mailbox)))?;
+        let lines = self.command(&format!(
+            "{} {}",
+            if write { "SELECT" } else { "EXAMINE" },
+            quote(mailbox)
+        ))?;
         for line in &lines {
             let text = line.text();
             if let Some(rest) = text.strip_prefix("* ") {
@@ -247,16 +319,26 @@ impl Imap {
     /// What a list reading asks of each message: flags, date, the headers the rules read and the first bytes of the text.
     fn list_items(gmail: bool) -> String {
         let labels = if gmail { " X-GM-LABELS" } else { "" };
-        format!("(UID FLAGS INTERNALDATE{labels} BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING LIST-UNSUBSCRIBE PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)")
+        format!(
+            "(UID FLAGS INTERNALDATE{labels} BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING LIST-UNSUBSCRIBE PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)"
+        )
     }
 
     /// The newest `count` messages of the open mailbox, with no message marked as read.
-    pub fn fetch_recent(&mut self, exists: u32, count: u32, gmail: bool) -> Result<Vec<Raw>, String> {
+    pub fn fetch_recent(
+        &mut self,
+        exists: u32,
+        count: u32,
+        gmail: bool,
+    ) -> Result<Vec<Raw>, String> {
         if exists == 0 || count == 0 {
             return Ok(Vec::new());
         }
         let first = exists.saturating_sub(count - 1).max(1);
-        let lines = self.command(&format!("FETCH {first}:{exists} {}", Self::list_items(gmail)))?;
+        let lines = self.command(&format!(
+            "FETCH {first}:{exists} {}",
+            Self::list_items(gmail)
+        ))?;
         Ok(raws_of(lines))
     }
 
@@ -264,7 +346,10 @@ impl Imap {
     /// does. A server answers `UID n:*` with the last message even when it is older than `n`: that one is left out.
     pub fn fetch_from(&mut self, uid: u64, gmail: bool) -> Result<Vec<Raw>, String> {
         let lines = self.command(&format!("UID FETCH {uid}:* {}", Self::list_items(gmail)))?;
-        Ok(raws_of(lines).into_iter().filter(|raw| raw.uid >= uid).collect())
+        Ok(raws_of(lines)
+            .into_iter()
+            .filter(|raw| raw.uid >= uid)
+            .collect())
     }
 
     /// The UIDs of the open mailbox that `criteria` finds (`UID SEARCH`), lowest first. With `gmail_raw`, the words of
@@ -275,8 +360,16 @@ impl Imap {
             Some(raw) => self.command_with("UID SEARCH CHARSET UTF-8 X-GM-RAW", raw)?,
             None => self.command(&format!("UID SEARCH {criteria}"))?,
         };
-        let mut uids: Vec<u64> = lines.iter().map(Line::text).filter_map(|l| l.strip_prefix("* SEARCH").map(str::to_string))
-            .flat_map(|rest| rest.split_whitespace().filter_map(|n| n.parse().ok()).collect::<Vec<u64>>()).collect();
+        let mut uids: Vec<u64> = lines
+            .iter()
+            .map(Line::text)
+            .filter_map(|l| l.strip_prefix("* SEARCH").map(str::to_string))
+            .flat_map(|rest| {
+                rest.split_whitespace()
+                    .filter_map(|n| n.parse().ok())
+                    .collect::<Vec<u64>>()
+            })
+            .collect();
         uids.sort_unstable();
         uids.dedup();
         Ok(uids)
@@ -293,7 +386,10 @@ impl Imap {
             "UID FETCH {} (UID INTERNALDATE{ids} BODY.PEEK[HEADER.FIELDS (FROM SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)",
             set.join(",")
         ))?;
-        Ok(raws_of(lines).into_iter().filter(|raw| uids.contains(&raw.uid)).collect())
+        Ok(raws_of(lines)
+            .into_iter()
+            .filter(|raw| uids.contains(&raw.uid))
+            .collect())
     }
 
     /// The messages of the open mailbox with these UIDs, as `fetch_recent` reads its own: for a list of messages.
@@ -302,8 +398,15 @@ impl Imap {
             return Ok(Vec::new());
         }
         let set: Vec<String> = uids.iter().map(u64::to_string).collect();
-        let lines = self.command(&format!("UID FETCH {} {}", set.join(","), Self::list_items(gmail)))?;
-        Ok(raws_of(lines).into_iter().filter(|raw| uids.contains(&raw.uid)).collect())
+        let lines = self.command(&format!(
+            "UID FETCH {} {}",
+            set.join(","),
+            Self::list_items(gmail)
+        ))?;
+        Ok(raws_of(lines)
+            .into_iter()
+            .filter(|raw| uids.contains(&raw.uid))
+            .collect())
     }
 
     /// The whole message as the server keeps it (`BODY.PEEK[]`: nothing is marked as read). Its literal may be as big
@@ -324,7 +427,11 @@ impl Imap {
 
     /// Adds or removes one flag (`\Seen`, `\Flagged`) of a message of the open mailbox.
     pub fn flag(&mut self, uid: u64, flag: &str, on: bool) -> Result<(), String> {
-        self.command(&format!("UID STORE {uid} {}FLAGS.SILENT ({flag})", if on { "+" } else { "-" })).map(|_| ())
+        self.command(&format!(
+            "UID STORE {uid} {}FLAGS.SILENT ({flag})",
+            if on { "+" } else { "-" }
+        ))
+        .map(|_| ())
     }
 
     /// Moves a message of the open mailbox to `to`. With no `MOVE`, it is copied and only that message is marked
@@ -332,7 +439,9 @@ impl Imap {
     pub fn move_to(&mut self, uid: u64, to: &str) -> Result<(), String> {
         let capabilities = self.capabilities();
         if capabilities.iter().any(|c| c == "MOVE") {
-            return self.command(&format!("UID MOVE {uid} {}", quote(to))).map(|_| ());
+            return self
+                .command(&format!("UID MOVE {uid} {}", quote(to)))
+                .map(|_| ());
         }
         if !capabilities.iter().any(|c| c == "UIDPLUS") {
             return Err("Este servidor no permite archivar con seguridad.".into());
@@ -344,12 +453,17 @@ impl Imap {
 
     /// Saves a message in `mailbox` as a draft, read and not sent.
     pub fn save_draft(&mut self, mailbox: &str, message: &str) -> Result<(), String> {
-        self.command_with(&format!("APPEND {} (\\Draft \\Seen)", quote(mailbox)), message).map(|_| ())
+        self.command_with(
+            &format!("APPEND {} (\\Draft \\Seen)", quote(mailbox)),
+            message,
+        )
+        .map(|_| ())
     }
 
     /// Keeps a copy of what was sent in the account's sent folder.
     pub fn save_sent(&mut self, mailbox: &str, message: &str) -> Result<(), String> {
-        self.command_with(&format!("APPEND {} (\\Seen)", quote(mailbox)), message).map(|_| ())
+        self.command_with(&format!("APPEND {} (\\Seen)", quote(mailbox)), message)
+            .map(|_| ())
     }
 
     /// Ends the session without waiting for the server's goodbye (a reading does not need it, and it costs half a second).
@@ -368,7 +482,11 @@ impl Imap {
         for line in &lines {
             let text = line.text();
             if text.starts_with("* ") && text.trim_end().ends_with(" EXISTS") {
-                exists = text[2..].split_whitespace().next().and_then(|n| n.parse().ok()).unwrap_or(0);
+                exists = text[2..]
+                    .split_whitespace()
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .unwrap_or(0);
             }
             if let Some(n) = number_after(&text, "UIDNEXT ") {
                 next = Some(n);
@@ -383,7 +501,9 @@ impl Imap {
         self.tag += 1;
         let tag = format!("E{}", self.tag);
         self.send(&format!("{tag} IDLE\r\n"))?;
-        let go = self.read_line(WAIT)?.ok_or("El servidor de correo tardó demasiado en responder.")?;
+        let go = self
+            .read_line(WAIT)?
+            .ok_or("El servidor de correo tardó demasiado en responder.")?;
         if !go.text().starts_with('+') {
             return Err("El servidor de correo no admite la espera de correo nuevo.".into());
         }
@@ -395,7 +515,11 @@ impl Imap {
                 Some(line) => {
                     let text = line.text();
                     if let Some(rest) = text.strip_prefix(&format!("{tag} ")) {
-                        return if rest.starts_with("OK") { Ok(idled) } else { Err(rest.chars().take(160).collect()) };
+                        return if rest.starts_with("OK") {
+                            Ok(idled)
+                        } else {
+                            Err(rest.chars().take(160).collect())
+                        };
                     }
                     if text.ends_with(" EXISTS") {
                         idled.arrived = true;
@@ -407,7 +531,9 @@ impl Imap {
                         done = true;
                     }
                 }
-                None if done => return Err("El servidor de correo tardó demasiado en responder.".into()),
+                None if done => {
+                    return Err("El servidor de correo tardó demasiado en responder.".into());
+                }
                 None => {}
             }
             if !done && (!alive() || started.elapsed() > limit) {
@@ -433,8 +559,16 @@ fn raws_of(lines: Vec<Line>) -> Vec<Raw> {
         if !text.contains(" FETCH ") {
             continue;
         }
-        let Some(uid) = number_after(&text, "UID ") else { continue };
-        let mut raw = Raw { uid, flags: parenthesized(&text, "FLAGS (").map(|f| f.split_whitespace().map(str::to_string).collect()).unwrap_or_default(), ..Raw::default() };
+        let Some(uid) = number_after(&text, "UID ") else {
+            continue;
+        };
+        let mut raw = Raw {
+            uid,
+            flags: parenthesized(&text, "FLAGS (")
+                .map(|f| f.split_whitespace().map(str::to_string).collect())
+                .unwrap_or_default(),
+            ..Raw::default()
+        };
         raw.date = quoted_after(&text, "INTERNALDATE \"").and_then(|d| parse_date(&d));
         raw.labels = labels_of(&text);
         raw.gmail_id = number_after(&text, "X-GM-MSGID ");
@@ -464,7 +598,11 @@ pub fn parse_list(text: &str) -> Option<Mailbox> {
     let (flags, rest) = rest.split_once(") ")?;
     let rest = rest.trim_start();
     // The delimiter: a quoted character or NIL.
-    let rest = if let Some(after) = rest.strip_prefix('"') { after.split_once('"')?.1 } else { rest.split_once(' ')?.1 };
+    let rest = if let Some(after) = rest.strip_prefix('"') {
+        after.split_once('"')?.1
+    } else {
+        rest.split_once(' ')?.1
+    };
     let name = rest.trim();
     let name = match name.strip_prefix('"').and_then(|n| n.strip_suffix('"')) {
         Some(quoted) => quoted.replace("\\\"", "\"").replace("\\\\", "\\"),
@@ -473,12 +611,18 @@ pub fn parse_list(text: &str) -> Option<Mailbox> {
     if name.is_empty() {
         return None;
     }
-    Some(Mailbox { flags: flags.split_whitespace().map(str::to_string).collect(), name })
+    Some(Mailbox {
+        flags: flags.split_whitespace().map(str::to_string).collect(),
+        name,
+    })
 }
 
 fn number_after(text: &str, marker: &str) -> Option<u64> {
     let at = text.find(marker)? + marker.len();
-    let digits: String = text[at..].chars().take_while(char::is_ascii_digit).collect();
+    let digits: String = text[at..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
     digits.parse().ok()
 }
 
@@ -497,9 +641,12 @@ fn quoted_after(text: &str, marker: &str) -> Option<String> {
 
 /// Gmail's labels of a message, the user's own ones: `X-GM-LABELS ("\\Inbox" "Trabajo" Reembolsos)`.
 fn labels_of(text: &str) -> Vec<String> {
-    let Some(at) = text.find("X-GM-LABELS (") else { return Vec::new() };
+    let Some(at) = text.find("X-GM-LABELS (") else {
+        return Vec::new();
+    };
     let rest = &text[at + "X-GM-LABELS (".len()..];
-    let (mut labels, mut current, mut quoted, mut escaped) = (Vec::new(), String::new(), false, false);
+    let (mut labels, mut current, mut quoted, mut escaped) =
+        (Vec::new(), String::new(), false, false);
     for c in rest.chars() {
         if escaped {
             current.push(c);
@@ -525,7 +672,9 @@ fn labels_of(text: &str) -> Vec<String> {
     labels
 }
 
-const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+const MONTHS: [&str; 12] = [
+    "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec",
+];
 
 /// «17-Oct-2026 12:00:00 +0200» → milliseconds since the epoch.
 pub fn parse_date(text: &str) -> Option<i64> {
@@ -539,10 +688,15 @@ pub fn parse_date(text: &str) -> Option<i64> {
     let year: i64 = d.next()?.parse().ok()?;
     let month = MONTHS.iter().position(|m| name.eq_ignore_ascii_case(m))? as i64 + 1;
     let mut t = time.split(':');
-    let (h, m, s): (i64, i64, i64) = (t.next()?.parse().ok()?, t.next()?.parse().ok()?, t.next()?.parse().ok()?);
+    let (h, m, s): (i64, i64, i64) = (
+        t.next()?.parse().ok()?,
+        t.next()?.parse().ok()?,
+        t.next()?.parse().ok()?,
+    );
     let sign = if zone.starts_with('-') { -1 } else { 1 };
     let zone = zone.trim_start_matches(['+', '-']);
-    let offset = sign * (zone.get(..2)?.parse::<i64>().ok()? * 3600 + zone.get(2..4)?.parse::<i64>().ok()? * 60);
+    let offset = sign
+        * (zone.get(..2)?.parse::<i64>().ok()? * 3600 + zone.get(2..4)?.parse::<i64>().ok()? * 60);
     Some((days_from_civil(year, month, day) * 86_400 + h * 3600 + m * 60 + s - offset) * 1000)
 }
 
@@ -565,10 +719,22 @@ mod tests {
 
     #[test]
     fn a_list_line_gives_its_flags_and_name() {
-        let gmail = parse_list("* LIST (\\HasNoChildren \\Sent) \"/\" \"[Gmail]/Enviados\"").unwrap();
-        assert_eq!((gmail.flags.as_slice(), gmail.name.as_str()), (&["\\HasNoChildren".to_string(), "\\Sent".to_string()][..], "[Gmail]/Enviados"));
+        let gmail =
+            parse_list("* LIST (\\HasNoChildren \\Sent) \"/\" \"[Gmail]/Enviados\"").unwrap();
+        assert_eq!(
+            (gmail.flags.as_slice(), gmail.name.as_str()),
+            (
+                &["\\HasNoChildren".to_string(), "\\Sent".to_string()][..],
+                "[Gmail]/Enviados"
+            )
+        );
         assert_eq!(parse_list("* LIST () NIL INBOX").unwrap().name, "INBOX");
-        assert_eq!(parse_list("* LIST (\\All) \".\" \"A \\\"x\\\"\"").unwrap().name, "A \"x\"");
+        assert_eq!(
+            parse_list("* LIST (\\All) \".\" \"A \\\"x\\\"\"")
+                .unwrap()
+                .name,
+            "A \"x\""
+        );
         assert!(parse_list("* OK nothing").is_none());
     }
 
@@ -587,14 +753,25 @@ mod tests {
     #[test]
     fn it_reads_dates_with_their_zone() {
         assert_eq!(parse_date("01-Jan-1970 00:00:00 +0000"), Some(0));
-        assert_eq!(parse_date("17-Oct-2026 12:00:00 +0200"), Some(1_792_231_200_000));
-        assert_eq!(parse_date("17-Oct-2026 10:00:00 +0000"), Some(1_792_231_200_000));
+        assert_eq!(
+            parse_date("17-Oct-2026 12:00:00 +0200"),
+            Some(1_792_231_200_000)
+        );
+        assert_eq!(
+            parse_date("17-Oct-2026 10:00:00 +0000"),
+            Some(1_792_231_200_000)
+        );
         assert_eq!(parse_date("nonsense"), None);
     }
 
     #[test]
     fn labels_keep_the_users_own_and_drop_the_systems() {
-        assert_eq!(labels_of("12 FETCH (X-GM-LABELS (\\\\Inbox \"Trabajo\" Reembolsos \"Con espacio\" CATEGORY_PROMOTIONS) UID 5"), vec!["Trabajo", "Reembolsos", "Con espacio"]);
+        assert_eq!(
+            labels_of(
+                "12 FETCH (X-GM-LABELS (\\\\Inbox \"Trabajo\" Reembolsos \"Con espacio\" CATEGORY_PROMOTIONS) UID 5"
+            ),
+            vec!["Trabajo", "Reembolsos", "Con espacio"]
+        );
         assert!(labels_of("12 FETCH (UID 5)").is_empty());
     }
 
@@ -613,9 +790,17 @@ mod tests {
         fetch.extend_from_slice(format!(" BODY[TEXT]<0> {{{}}}\r\n", text.len()).as_bytes());
         fetch.extend_from_slice(text.as_bytes());
         fetch.extend_from_slice(b")\r\n");
-        let (port, handle) = server(vec![("LOGIN \"ana@ejemplo.test\" \"abcd efgh\"", vec![]), ("EXAMINE \"INBOX\"", b"* 2 EXISTS\r\n".to_vec()), ("FETCH 1:2 (UID FLAGS INTERNALDATE X-GM-LABELS BODY.PEEK[HEADER.FIELDS", fetch)]);
+        let (port, handle) = server(vec![
+            ("LOGIN \"ana@ejemplo.test\" \"abcd efgh\"", vec![]),
+            ("EXAMINE \"INBOX\"", b"* 2 EXISTS\r\n".to_vec()),
+            (
+                "FETCH 1:2 (UID FLAGS INTERNALDATE X-GM-LABELS BODY.PEEK[HEADER.FIELDS",
+                fetch,
+            ),
+        ]);
         let mut imap = client(port);
-        imap.login("ana@ejemplo.test", "abcd efgh", "gmail").unwrap();
+        imap.login("ana@ejemplo.test", "abcd efgh", "gmail")
+            .unwrap();
         let exists = imap.select("INBOX", false).unwrap();
         assert_eq!(exists, 2);
         let messages = imap.fetch_recent(exists, 40, true).unwrap();
@@ -627,7 +812,11 @@ mod tests {
         assert_eq!(message.header, header.as_bytes());
         assert_eq!(String::from_utf8(message.text.clone()).unwrap(), text);
         let asked = handle.join().unwrap();
-        assert!(asked[2].contains("BODY.PEEK[TEXT]<0.12000>"), "nothing is marked as read: {}", asked[2]);
+        assert!(
+            asked[2].contains("BODY.PEEK[TEXT]<0.12000>"),
+            "nothing is marked as read: {}",
+            asked[2]
+        );
     }
 
     #[test]
@@ -640,25 +829,46 @@ mod tests {
                 socket.write_all(b"* OK ready\r\n").unwrap();
                 let mut line = [0u8; 256];
                 let n = socket.read(&mut line).unwrap();
-                let tag = String::from_utf8_lossy(&line[..n]).split(' ').next().unwrap().to_string();
-                socket.write_all(format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n").as_bytes()).unwrap();
+                let tag = String::from_utf8_lossy(&line[..n])
+                    .split(' ')
+                    .next()
+                    .unwrap()
+                    .to_string();
+                socket
+                    .write_all(
+                        format!("{tag} NO [AUTHENTICATIONFAILED] Invalid credentials\r\n")
+                            .as_bytes(),
+                    )
+                    .unwrap();
             });
             (port, handle)
         };
         let mut imap = client(port);
         let why = imap.login("ana@ejemplo.test", "mala", "gmail").unwrap_err();
         assert!(why.contains("contraseña de aplicación"), "{why}");
-        assert!(imap.login("ana@ejemplo.test", "mal\r\na", "gmail").unwrap_err().contains("caracteres"));
+        assert!(
+            imap.login("ana@ejemplo.test", "mal\r\na", "gmail")
+                .unwrap_err()
+                .contains("caracteres")
+        );
     }
 
     #[test]
     fn a_message_is_moved_when_the_server_can_and_not_at_all_when_it_cannot_do_it_safely() {
-        let (port, handle) = server(vec![("CAPABILITY", b"* CAPABILITY IMAP4rev1 MOVE\r\n".to_vec()), ("UID MOVE 41 \"[Gmail]/Todos\"", vec![])]);
+        let (port, handle) = server(vec![
+            ("CAPABILITY", b"* CAPABILITY IMAP4rev1 MOVE\r\n".to_vec()),
+            ("UID MOVE 41 \"[Gmail]/Todos\"", vec![]),
+        ]);
         let mut imap = client(port);
         imap.move_to(41, "[Gmail]/Todos").unwrap();
         handle.join().unwrap();
         let (port, _handle) = server(vec![("CAPABILITY", b"* CAPABILITY IMAP4rev1\r\n".to_vec())]);
-        assert!(client(port).move_to(41, "Archive").unwrap_err().contains("con seguridad"));
+        assert!(
+            client(port)
+                .move_to(41, "Archive")
+                .unwrap_err()
+                .contains("con seguridad")
+        );
     }
 
     #[test]
@@ -675,12 +885,18 @@ mod tests {
             let mut body = String::new();
             reader.read_line(&mut body).unwrap();
             let tag = first.split(' ').next().unwrap().to_string();
-            socket.write_all(format!("{tag} OK appended\r\n").as_bytes()).unwrap();
+            socket
+                .write_all(format!("{tag} OK appended\r\n").as_bytes())
+                .unwrap();
             (first, body)
         });
         let mut imap = client(port);
-        imap.save_draft("Drafts", "Subject: Re: Hola\r\n\r\nGracias").unwrap_or_default();
+        imap.save_draft("Drafts", "Subject: Re: Hola\r\n\r\nGracias")
+            .unwrap_or_default();
         let (first, _body) = handle.join().unwrap();
-        assert!(first.contains("APPEND \"Drafts\" (\\Draft \\Seen) {"), "{first}");
+        assert!(
+            first.contains("APPEND \"Drafts\" (\\Draft \\Seen) {"),
+            "{first}"
+        );
     }
 }

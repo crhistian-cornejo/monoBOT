@@ -51,7 +51,9 @@ pub const FILES: [ModelFile; 5] = [
         name: "silero_vad.onnx",
         bytes: 643_854,
         sha256: "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6",
-        url: Some("https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx"),
+        url: Some(
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
+        ),
     },
 ];
 
@@ -83,9 +85,9 @@ pub fn total_bytes() -> u64 {
 /// Every file present at its pinned size. The full checksum is verified when
 /// a file is downloaded, not on every launch.
 pub fn installed(dir: &Path) -> bool {
-    FILES.iter().all(|file| {
-        fs::metadata(dir.join(file.name)).is_ok_and(|meta| meta.len() == file.bytes)
-    })
+    FILES
+        .iter()
+        .all(|file| fs::metadata(dir.join(file.name)).is_ok_and(|meta| meta.len() == file.bytes))
 }
 
 pub fn path(dir: &Path, name: &str) -> Result<String, Error> {
@@ -215,7 +217,9 @@ fn unpack(dir: &Path, archive: &Path) -> Result<(), Error> {
         let name = entry.path().map_err(|_| bad())?.into_owned();
         let mut parts = name.components();
         if parts.next() != Some(Component::Normal(ARCHIVE_FOLDER.as_ref()))
-            || !parts.clone().all(|part| matches!(part, Component::Normal(_)))
+            || !parts
+                .clone()
+                .all(|part| matches!(part, Component::Normal(_)))
         {
             return Err(bad());
         }
@@ -295,7 +299,11 @@ fn agent() -> ureq::Agent {
 /// instead of the file. Anything that is not the file (a web page, another
 /// length, a connection cut short) is a failed download, so Parakeet still
 /// has GitHub to try; the right length with other bytes is a checksum error.
-pub fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) -> Result<(), Error> {
+pub fn download(
+    file: &ModelFile,
+    target: &Path,
+    mut on_chunk: impl FnMut(u64),
+) -> Result<(), Error> {
     let failed = |why: String| Error::Download(format!("{}: {why}", file.name));
     let partial = target.with_extension("part");
     let response = agent()
@@ -320,14 +328,20 @@ pub fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) 
             }
             written += read as u64;
             if written > file.bytes {
-                return Err(failed(format!("more than the {} bytes expected", file.bytes)));
+                return Err(failed(format!(
+                    "more than the {} bytes expected",
+                    file.bytes
+                )));
             }
             hasher.update(&buffer[..read]);
             out.write_all(&buffer[..read])?;
             on_chunk(read as u64);
         }
         if written != file.bytes {
-            return Err(failed(format!("{written} of the {} bytes expected", file.bytes)));
+            return Err(failed(format!(
+                "{written} of the {} bytes expected",
+                file.bytes
+            )));
         }
         out.flush()?;
         Ok(hasher)
@@ -352,8 +366,11 @@ pub fn download(file: &ModelFile, target: &Path, mut on_chunk: impl FnMut(u64)) 
 /// page, or a stated length other than the file's.
 fn not_the_file(response: &ureq::Response, file: &ModelFile) -> Option<String> {
     let kind = response.content_type().trim();
-    if kind.eq_ignore_ascii_case("text/html") || kind.eq_ignore_ascii_case("application/xhtml+xml") {
-        return Some(format!("the network answered with a web page ({kind}), not the file"));
+    if kind.eq_ignore_ascii_case("text/html") || kind.eq_ignore_ascii_case("application/xhtml+xml")
+    {
+        return Some(format!(
+            "the network answered with a web page ({kind}), not the file"
+        ));
     }
     match response.header("content-length").map(str::parse::<u64>) {
         Some(Ok(length)) if length != file.bytes => Some(format!(
@@ -441,7 +458,8 @@ mod tests {
     /// Downloads SMALL's tokens.txt ("hello") from a server that answers
     /// with `reply`; returns what landed in place.
     fn fetch(tag: &str, reply: &[u8]) -> Result<Vec<u8>, Error> {
-        let dir = std::env::temp_dir().join(format!("monobot-dictation-{tag}-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("monobot-dictation-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let file = ModelFile {
@@ -476,12 +494,16 @@ mod tests {
     #[test]
     fn a_proxy_page_instead_of_the_file_is_a_failed_download() {
         let page = "<html><body>Blocked by your organization</body></html>";
-        let got = fetch("page", &reply("text/html; charset=utf-8", Some(page.len()), page));
+        let got = fetch(
+            "page",
+            &reply("text/html; charset=utf-8", Some(page.len()), page),
+        );
         assert!(matches!(got, Err(Error::Download(_))), "{got:?}");
         // A page is a page even at the file's length.
         let got = fetch("page5", &reply("TEXT/HTML", Some(5), "hello"));
         assert!(matches!(got, Err(Error::Download(_))), "{got:?}");
-        let refused = b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\nContent-Length: 2\r\n\r\nno";
+        let refused =
+            b"HTTP/1.1 403 Forbidden\r\nContent-Type: text/html\r\nContent-Length: 2\r\n\r\nno";
         let got = fetch("refused", refused);
         assert!(matches!(got, Err(Error::Download(_))), "{got:?}");
     }
@@ -501,7 +523,10 @@ mod tests {
 
     #[test]
     fn the_right_length_with_other_bytes_fails_its_checksum() {
-        let got = fetch("tampered", &reply("application/octet-stream", Some(5), "hellO"));
+        let got = fetch(
+            "tampered",
+            &reply("application/octet-stream", Some(5), "hellO"),
+        );
         assert!(matches!(got, Err(Error::Integrity(_))), "{got:?}");
     }
 
@@ -512,7 +537,8 @@ mod tests {
     #[test]
     #[ignore]
     fn downloads_through_this_network() {
-        let dir = std::env::temp_dir().join(format!("monobot-dictation-net-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("monobot-dictation-net-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let named = |name: &str| FILES.iter().find(|file| file.name == name).unwrap();
@@ -536,12 +562,17 @@ mod tests {
     #[test]
     #[ignore]
     fn installs_through_this_network() {
-        let dir = std::env::temp_dir().join(format!("monobot-dictation-full-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("monobot-dictation-full-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         let started = std::time::Instant::now();
         let mut last = (0, 0);
         install(&dir, |done, total| {
-            assert!(done >= last.0 && done <= total, "{done} after {} of {total}", last.0);
+            assert!(
+                done >= last.0 && done <= total,
+                "{done} after {} of {total}",
+                last.0
+            );
             last = (done, total);
         })
         .unwrap();

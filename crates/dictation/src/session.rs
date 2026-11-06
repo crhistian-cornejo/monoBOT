@@ -44,8 +44,9 @@ impl Session {
         recognizer: Arc<OfflineRecognizer>,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Self, Error> {
-        let vad = VoiceActivityDetector::create(&silero(model::path(dir, "silero_vad.onnx")?), 30.0)
-            .ok_or(Error::Load)?;
+        let vad =
+            VoiceActivityDetector::create(&silero(model::path(dir, "silero_vad.onnx")?), 30.0)
+                .ok_or(Error::Load)?;
         let mic = Microphone::open()?;
         let resampler = (mic.sample_rate as i32 != RATE)
             .then(|| LinearResampler::create(mic.sample_rate as i32, RATE).ok_or(Error::Load))
@@ -220,7 +221,10 @@ fn transcribe(recognizer: &OfflineRecognizer, samples: &[f32]) -> String {
     let stream = recognizer.create_stream();
     stream.accept_waveform(RATE, samples);
     recognizer.decode(&stream);
-    stream.get_result().map(|result| result.text).unwrap_or_default()
+    stream
+        .get_result()
+        .map(|result| result.text)
+        .unwrap_or_default()
 }
 
 fn silero(model: String) -> VadModelConfig {

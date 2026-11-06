@@ -87,10 +87,7 @@ pub(crate) fn fetch_resource_within(
     max_bytes: usize,
     timeout: Duration,
 ) -> Result<FetchedResource, String> {
-    let agent = monobot_http::agent()
-        .timeout(timeout)
-        .redirects(0)
-        .build();
+    let agent = monobot_http::agent().timeout(timeout).redirects(0).build();
 
     for _ in 0..=MAX_REDIRECTS {
         validate_public_target(&url)?;
