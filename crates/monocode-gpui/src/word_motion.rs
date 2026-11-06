@@ -48,9 +48,12 @@ fn is_space(c: u8) -> bool {
 /// A word that reads on its own. A Markdown mark alone (a list's `-`, `##`,
 /// `|`, `>`, `1.`) goes out with the word after it.
 pub(crate) fn word_reads(word: &str) -> bool {
-    let numbered = word.len() > 1
-        && word[..word.len() - 1].bytes().all(|b| b.is_ascii_digit())
-        && matches!(word.as_bytes()[word.len() - 1], b'.' | b')');
+    // Bytes, not a `str` slice: a word ending in "á" or an emoji has no char
+    // boundary one byte before its end.
+    let numbered = match word.as_bytes() {
+        [digits @ .., b'.' | b')'] => !digits.is_empty() && digits.iter().all(u8::is_ascii_digit),
+        _ => false,
+    };
     word.chars().any(char::is_alphanumeric) && !numbered
 }
 
@@ -214,6 +217,24 @@ mod tests {
         assert_eq!(reveal_end("Intro\n- it", 6, true), 6);
         assert_eq!(reveal_end("Intro\n## ", 7, true), 6);
         assert_eq!(reveal_end("Intro\n- ", 6, false), 8);
+    }
+
+    #[test]
+    fn words_ending_in_accents_or_emoji_read_without_panicking() {
+        // A word whose last character takes more than one byte once sliced
+        // the string inside it and aborted the app.
+        for word in ["está", "Mamá", "ñandú", "café", "listo🎉", "¿cómo"] {
+            assert!(word_reads(word), "{word}");
+        }
+        assert!(!word_reads("¿"));
+        let reply = "Hola, ¿cómo está? Todo está listo 🎉 y funciona.";
+        for at in 0..=reply.len() {
+            let end = reveal_end(reply, at, true);
+            assert!(reply.is_char_boundary(end), "{at} -> {end}");
+            assert!(reply.is_char_boundary(reveal_end(reply, at, false)));
+        }
+        assert_eq!(reveal_end("Está bien", 0, true), "Está".len());
+        assert_eq!(reveal_end("Todo está", 5, false), "Todo está".len());
     }
 
     #[test]
