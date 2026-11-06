@@ -271,7 +271,7 @@ jobs:
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           node --input-type=module -e 'import { readFileSync } from "node:fs"; for (const file of JSON.parse(readFileSync("native-dist/release-files.json"))) console.log(file);' > "$RUNNER_TEMP/native-files.txt"
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --draft --prerelease --latest=false --target "$GITHUB_SHA" --title "Monocode Native ${MONOCODE_NATIVE_VERSION}" --notes-file docs/native/preview-release-notes.md
+            gh release create "$GITHUB_REF_NAME" --draft --prerelease --latest=false --target "$GITHUB_SHA" --title "MonoBOT Native ${MONOCODE_NATIVE_VERSION}" --notes-file docs/native/preview-release-notes.md
           fi
           IS_DRAFT=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)
           if [ "$IS_DRAFT" != true ]; then

@@ -1,7 +1,11 @@
 //! Generated HTML lives in an opaque sandbox with no app bridge or network.
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+use super::html_windows::{Frame, Hosted};
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use gpui::canvas;
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 use gpui::div;
-use gpui::{Context, Window, canvas, prelude::*};
+use gpui::{Context, Window, prelude::*};
 #[cfg(target_os = "macos")]
 use objc2::{
     DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
@@ -18,9 +22,9 @@ use objc2_web_kit::{
     WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKNavigationType,
     WKWebView, WKWebViewConfiguration, WKWebsiteDataStore,
 };
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 #[cfg(target_os = "macos")]
 define_class!(
@@ -88,7 +92,7 @@ struct Hosted {
     _guard: Retained<NavigationGuard>,
     markup: Arc<str>,
 }
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", target_os = "windows"))]
 struct Markup {
     ink: gpui::Hsla,
     accent: gpui::Hsla,
@@ -97,9 +101,9 @@ struct Markup {
 pub(super) struct Html {
     body: String,
     interactive: bool,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     markup: Option<Markup>,
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     view: Rc<RefCell<Option<Hosted>>>,
 }
 fn escape(text: &str) -> String {
@@ -127,7 +131,7 @@ fn sandbox(body: &str) -> String {
     let surface = if light { "#eeeeee" } else { "#222222" };
     let border = if light { "#d4d4d4" } else { "#383838" };
     let source = format!(
-        "<!doctype html><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; worker-src blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\"><meta name=viewport content=\"width=device-width,initial-scale=1\"><style>:root{{--background:{background};--foreground:{foreground};--muted:{muted};--surface:{surface};--border:{border};--accent:{accent};--link:{accent};--positive:#10b981;--negative:#f43f5e;--chart-1:{accent};--chart-2:#10b981;--chart-3:#f59e0b;--chart-4:#f43f5e;--chart-5:#a78bfa;--chart-6:#22d3ee;--font-sans:system-ui;--font-mono:ui-monospace,monospace;--radius:10px;color-scheme:{scheme}}}body{{font:14px var(--font-sans);margin:20px;color:var(--foreground);background:var(--background)}}a{{color:var(--link)}}</style>{body}",
+        "<!doctype html><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline' https:; style-src 'unsafe-inline' https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; worker-src blob:; connect-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'\"><meta name=viewport content=\"width=device-width,initial-scale=1\"><style>:root{{--background:{background};--foreground:{foreground};--muted:{muted};--surface:{surface};--border:{border};--accent:{accent};--link:{accent};--positive:#10b981;--negative:#f43f5e;--chart-1:{accent};--chart-2:#10b981;--chart-3:#f59e0b;--chart-4:#f43f5e;--chart-5:#a78bfa;--chart-6:#22d3ee;--font-sans:system-ui;--font-mono:ui-monospace,monospace;--radius:0;color-scheme:{scheme}}}body{{font:14px var(--font-sans);margin:20px;color:var(--foreground);background:var(--background)}}a{{color:var(--link)}}</style>{body}",
         scheme = if light { "light" } else { "dark" }
     );
     format!(
@@ -140,13 +144,13 @@ impl Html {
         Self {
             body,
             interactive: true,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             markup: None,
-            #[cfg(target_os = "macos")]
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             view: Rc::new(RefCell::new(None)),
         }
     }
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
     fn markup(&mut self) -> Arc<str> {
         let ink = crate::theme::content(1.);
         let accent = crate::theme::accent_color();
@@ -172,6 +176,10 @@ impl Html {
         #[cfg(target_os = "macos")]
         if let Some(view) = self.view.borrow().as_ref() {
             view.clip.setHidden(true);
+        }
+        #[cfg(target_os = "windows")]
+        if let Some(view) = self.view.borrow().as_ref() {
+            view.hide();
         }
     }
 }
@@ -293,7 +301,70 @@ impl gpui::Render for Html {
             .size_full()
             .into_any_element()
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            let _ = cx;
+            let view = self.view.clone();
+            let html = self.markup();
+            let interactive = self.interactive;
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+                        return;
+                    };
+                    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+                        return;
+                    };
+                    let parent = windows::Win32::Foundation::HWND(handle.hwnd.get() as _);
+                    // Win32 child windows are in physical pixels; GPUI's are
+                    // logical and divided by the interface zoom.
+                    let zoom = window.content_zoom();
+                    let scale = zoom * window.scale_factor();
+                    let clipped = bounds.intersect(&window.content_mask().bounds);
+                    let mut view = view.borrow_mut();
+                    if clipped.size.width <= gpui::px(0.) || clipped.size.height <= gpui::px(0.) {
+                        if let Some(view) = view.as_ref() {
+                            view.hide();
+                        }
+                        return;
+                    }
+                    let pixel = |value: gpui::Pixels| (f32::from(value) * scale).round() as i32;
+                    let rect = |left, top, right, bottom| windows::Win32::Foundation::RECT {
+                        left: pixel(left),
+                        top: pixel(top),
+                        right: pixel(right),
+                        bottom: pixel(bottom),
+                    };
+                    // The page keeps its full layout size inside the clip,
+                    // which follows GPUI's moving content mask.
+                    let frame = Frame {
+                        clip: rect(
+                            clipped.left(),
+                            clipped.top(),
+                            clipped.right(),
+                            clipped.bottom(),
+                        ),
+                        page: rect(
+                            bounds.left() - clipped.left(),
+                            bounds.top() - clipped.top(),
+                            bounds.right() - clipped.left(),
+                            bounds.bottom() - clipped.top(),
+                        ),
+                        zoom: f64::from(zoom),
+                    };
+                    if view.is_none() {
+                        *view = Hosted::new(parent);
+                    }
+                    if let Some(view) = view.as_ref() {
+                        view.show(&html, frame, interactive);
+                    }
+                },
+            )
+            .size_full()
+            .into_any_element()
+        }
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         {
             let _ = cx;
             div().p_4().child(self.body.clone()).into_any_element()

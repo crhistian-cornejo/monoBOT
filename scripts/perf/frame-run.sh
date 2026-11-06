@@ -11,7 +11,7 @@
 set -eu
 
 here=$(cd "$(dirname "$0")" && pwd)
-app=${1:-"/Applications/Monocode Native.app/Contents/MacOS/monocode-gpui"}
+app=${1:-"/Applications/MonoBOT Native.app/Contents/MacOS/monocode-gpui"}
 seconds=${2:-20}
 replay="$here/fake-claude-stream.py"
 

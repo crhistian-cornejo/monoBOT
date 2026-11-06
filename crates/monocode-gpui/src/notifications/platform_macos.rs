@@ -73,7 +73,7 @@ fn center() -> Option<Retained<UNUserNotificationCenter>> {
     Some(UNUserNotificationCenter::currentNotificationCenter())
 }
 
-pub fn initialize() -> bool {
+pub fn initialize(_: &gpui::App) -> bool {
     if MainThreadMarker::new().is_none() {
         return false;
     }
@@ -157,7 +157,7 @@ pub fn request_permission() -> Receiver<Permission> {
 
 /// Result arrives only when the OS accepts/rejects dispatch. The host should
 /// wait at most five seconds in a background task and then play its fallback.
-pub fn show(notification: Notification) -> Receiver<Result<(), String>> {
+pub fn show(notification: Notification, _: &gpui::App) -> Receiver<Result<(), String>> {
     let Some(center) = center() else {
         return resolved(Err("Notifications require an app bundle".into()));
     };
@@ -212,7 +212,7 @@ pub fn set_dock_badge(count: usize) {
         .setBadgeLabel(label.as_deref());
 }
 
-pub fn dismiss(tag: &str) {
+pub fn dismiss(tag: &str, _: &gpui::App) {
     if let Some(center) = center() {
         let identifiers = NSArray::from_retained_slice(&[NSString::from_str(tag)]);
         center.removePendingNotificationRequestsWithIdentifiers(&identifiers);

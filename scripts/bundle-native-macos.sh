@@ -20,7 +20,7 @@ case "$native_data_mode" in
   dev-data|monocode-data) ;;
   *) echo "Unknown data mode: $native_data_mode" >&2; exit 1 ;;
 esac
-native_bundle="$native_target/Monocode Native.app"
+native_bundle="$native_target/MonoBOT Native.app"
 native_binary="$native_target/monocode-gpui"
 if [ ! -f "$native_binary" ]; then
   echo "Missing native executable: $native_binary" >&2
@@ -61,8 +61,8 @@ cat > "$native_bundle/Contents/Info.plist" <<PLIST
 <key>CFBundleExecutable</key><string>$native_executable</string>
 <key>MonocodeDataMode</key><string>$native_data_mode</string>
 <key>CFBundleIdentifier</key><string>dev.usemono.gpui</string>
-<key>CFBundleName</key><string>Monocode Native</string>
-<key>CFBundleDisplayName</key><string>Monocode Native</string>
+<key>CFBundleName</key><string>MonoBOT Native</string>
+<key>CFBundleDisplayName</key><string>MonoBOT Native</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>$native_short_version</string>
 <key>CFBundleVersion</key><string>$native_build_version</string>

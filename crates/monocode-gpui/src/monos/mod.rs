@@ -10,6 +10,8 @@ mod filters;
 mod floating;
 mod host;
 mod html;
+#[cfg(target_os = "windows")]
+mod html_windows;
 mod memory_ui;
 mod mobile;
 mod notifications;

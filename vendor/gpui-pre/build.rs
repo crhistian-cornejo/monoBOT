@@ -3,7 +3,7 @@
 
 #[cfg(feature = "screen-capture")]
 compile_error!(
-    "Screen capture is disabled in Monocode: zed-scap is excluded pending license review."
+    "Screen capture is disabled in MonoBOT: zed-scap is excluded pending license review."
 );
 
 fn main() {

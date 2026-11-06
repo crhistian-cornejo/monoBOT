@@ -60,9 +60,11 @@ a Windows 10 x64 source build passed manual title-bar interaction checks;
 broader Windows GUI behavior and the downloadable packages still need runtime
 testing.
 
-On Linux and Windows, HTML panels currently use a text fallback, native
-notification delivery is unavailable, and media hosting still needs platform support.
-Windows close-to-tray behavior also needs implementation/verification.
+On Windows, HTML panels are hosted in an InPrivate WebView2 and notifications
+are delivered as toasts; both still need runtime checks on more machines. On
+Linux, HTML panels use a text fallback and native notification delivery is
+unavailable. Media hosting still needs Linux and Windows support, and Windows
+close-to-tray behavior also needs implementation/verification.
 Desktop webview preferences (theme, projects, model defaults, and related
 settings) are read from the installed app on Linux as well as macOS. The Windows
 WebView2 reader has synthetic fixture coverage on Linux; real Windows profile

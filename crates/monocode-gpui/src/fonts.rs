@@ -1,8 +1,22 @@
 use gpui::{App, Font, FontFallbacks};
-use std::sync::OnceLock;
+use std::{borrow::Cow, sync::OnceLock};
 
-/// GPUI resolves this family to the platform system UI font.
-pub(crate) const UI: &str = ".SystemUIFont";
+/// The interface face, as the web build's `--font-sans`: Geist, bundled.
+pub(crate) const UI: &str = "Geist";
+/// Code, as the web build's `--font-mono`: Geist Mono, bundled.
+const CODE: &str = "Geist Mono";
+
+/// Static instances of the Geist and Geist Mono files the web build ships
+/// (@fontsource-variable 5.3.0, Latin), one per weight the app draws.
+const BUNDLED: &[&[u8]] = &[
+    include_bytes!("../assets/fonts/Geist-Regular.ttf"),
+    include_bytes!("../assets/fonts/Geist-Medium.ttf"),
+    include_bytes!("../assets/fonts/Geist-SemiBold.ttf"),
+    include_bytes!("../assets/fonts/Geist-Bold.ttf"),
+    include_bytes!("../assets/fonts/GeistMono-Regular.ttf"),
+    include_bytes!("../assets/fonts/GeistMono-Medium.ttf"),
+    include_bytes!("../assets/fonts/GeistMono-Bold.ttf"),
+];
 
 /// GPUI matches family names literally outside macOS, so the CSS generic
 /// `monospace` resolves to nothing there and text falls back to a
@@ -27,9 +41,18 @@ const MONO_CANDIDATES: &[&str] = &[
 ];
 
 static MONO: OnceLock<String> = OnceLock::new();
+static BUNDLED_LOADED: OnceLock<bool> = OnceLock::new();
 
-/// The monospace family for code and the terminal.
+/// The monospace family for code: Geist Mono once loaded.
 pub(crate) fn mono() -> &'static str {
+    if BUNDLED_LOADED.get() == Some(&true) {
+        return CODE;
+    }
+    system_monospace()
+}
+
+/// The installed monospace the terminal falls back to, as `--font-terminal`.
+fn system_monospace() -> &'static str {
     MONO.get().map_or(
         if cfg!(target_os = "macos") {
             "Menlo"
@@ -65,7 +88,7 @@ static TERMINAL: OnceLock<Font> = OnceLock::new();
 /// with any installed Nerd Font as the fallback for icon glyphs.
 pub(crate) fn terminal(cx: &App) -> Font {
     TERMINAL
-        .get_or_init(|| terminal_font(&cx.text_system().all_font_names(), mono()))
+        .get_or_init(|| terminal_font(&cx.text_system().all_font_names(), system_monospace()))
         .clone()
 }
 
@@ -87,6 +110,11 @@ fn terminal_font(installed: &[String], mono: &str) -> Font {
 }
 
 pub(crate) fn init(cx: &App) {
+    let loaded = cx
+        .text_system()
+        .add_fonts(BUNDLED.iter().map(|font| Cow::Borrowed(*font)).collect())
+        .is_ok();
+    let _ = BUNDLED_LOADED.set(loaded);
     if cfg!(target_os = "macos") {
         return;
     }

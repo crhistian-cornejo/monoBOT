@@ -256,8 +256,7 @@ impl Conversation {
                 .capabilities
                 .contains("attachments.upload")
         {
-            self.status =
-                "Update MonoBOT Host in Connections settings to send attachments.".into();
+            self.status = "Update MonoBOT Host in Connections settings to send attachments.".into();
             cx.notify();
             return true;
         }

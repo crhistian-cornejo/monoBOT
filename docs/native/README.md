@@ -1,6 +1,6 @@
-# Monocode Native preview
+# MonoBOT Native preview
 
-Monocode Native is the experimental Rust + GPUI app. The production app still
+MonoBOT Native is the experimental Rust + GPUI app. The production app still
 uses React/Tauri. Native builds have their own Cargo workspace and lockfile.
 
 ## Requirements
@@ -71,7 +71,7 @@ Type `r` then Enter in the terminal to rebuild and restart. The current app stay
 open until the new build succeeds. Ctrl+C stops the app and runner. There is no
 hot reload or automatic rebuild on save.
 
-On macOS, the command packages and launches `Monocode Native.app`. Other
+On macOS, the command packages and launches `MonoBOT Native.app`. Other
 platforms launch the executable directly.
 
 ## Build
@@ -86,7 +86,7 @@ installed MonoBOT database, and changes save there.** No extra flags are needed.
 On macOS, open:
 
 ```sh
-open "crates/monocode-gpui/target/release/Monocode Native.app"
+open "crates/monocode-gpui/target/release/MonoBOT Native.app"
 ```
 
 The app has a separate name and application ID (`dev.usemono.gpui`) so it can be
@@ -96,7 +96,7 @@ produce a standalone executable
 under `crates/monocode-gpui/target/release/`. `CARGO_TARGET_DIR` and
 `CARGO_BUILD_TARGET` can change these output paths.
 
-The **Monocode Native Preview** GitHub Actions workflow runs checks and build
+The **MonoBOT Native Preview** GitHub Actions workflow runs checks and build
 verification.
 
 ## Data and configuration

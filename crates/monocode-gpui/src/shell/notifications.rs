@@ -320,7 +320,7 @@ impl Shell {
 
     pub(super) fn start_native_notifications(&mut self, cx: &mut Context<Self>) {
         platform::set_dock_badge(0);
-        if platform::initialize() {
+        if platform::initialize(cx) {
             self.notification_state.permission = Permission::Prompt;
             self.notification_state.permission_probe = Some(platform::permission());
         }
@@ -679,16 +679,19 @@ impl Shell {
         } else {
             body.to_owned()
         };
-        let receiver = platform::show(platform::Notification {
-            tag: target.tag(self.notification_state.sequence),
-            subtitle: if category == "reminders" {
-                "Session reminder".into()
-            } else {
-                summary.title.clone()
+        let receiver = platform::show(
+            platform::Notification {
+                tag: target.tag(self.notification_state.sequence),
+                subtitle: if category == "reminders" {
+                    "Session reminder".into()
+                } else {
+                    summary.title.clone()
+                },
+                body: delivery::clip_body(&body),
+                sound: prefs.sounds,
             },
-            body: delivery::clip_body(&body),
-            sound: prefs.sounds,
-        });
+            cx,
+        );
         let directory = summary.cwd.clone();
         let category = category.to_owned();
         let work = cx.background_executor().spawn(async move {
@@ -702,7 +705,8 @@ impl Shell {
             let _ = this.update(cx, |this, _| {
                 let now = monocode_core::time::now_ms();
                 let prefs = &this.workspace.preferences;
-                if !accepted
+                // Silent toasts (Windows) get the app's cue as if none showed.
+                if !(accepted && platform::PLAYS_SOUND)
                     && prefs.sounds
                     && occurred >= this.notification_state.sounds_enabled_at
                     && prefs.allows_project_notification(&directory, &category, Some(occurred), now)
@@ -805,6 +809,7 @@ impl Shell {
                 due_at: expected,
             }
             .tag(0),
+            cx,
         );
         let store = self.store.clone();
         let previous = self.group_writes.take();
@@ -868,6 +873,7 @@ impl Shell {
                             due_at: expected,
                         }
                         .tag(0),
+                        cx,
                     );
                     this.notification_state.reminder_error = None;
                     this.reload_notification_reminders(cx);

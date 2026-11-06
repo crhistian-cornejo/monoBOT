@@ -28,7 +28,7 @@ test(
     const binary = join(release, "monocode-gpui");
     await writeFile(
       binary,
-      "#!/bin/sh\nprintf 'Monocode Native 0.16.0-preview.2\\n'\n",
+      "#!/bin/sh\nprintf 'MonoBOT Native 0.16.0-preview.2\\n'\n",
     );
     await chmod(binary, 0o755);
     const fakeTool = `#!/usr/bin/env node
@@ -132,7 +132,7 @@ if (name === 'xcrun' && args[0] === 'stapler' && process.env.NATIVE_TEST_STAPLER
       "Applications symlink is not traversed",
     );
     const plist = await readFile(
-      join(release, "Monocode Native.app/Contents/Info.plist"),
+      join(release, "MonoBOT Native.app/Contents/Info.plist"),
       "utf8",
     );
     assert.ok(
@@ -220,7 +220,7 @@ if (name === 'xcrun' && args[0] === 'stapler' && process.env.NATIVE_TEST_STAPLER
     );
     await writeFile(
       binary,
-      "#!/bin/sh\nprintf 'Monocode Native 0.16.0-preview.3\\n'\n",
+      "#!/bin/sh\nprintf 'MonoBOT Native 0.16.0-preview.3\\n'\n",
     );
     await assert.rejects(
       () =>

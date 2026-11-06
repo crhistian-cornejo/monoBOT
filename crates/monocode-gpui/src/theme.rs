@@ -4,7 +4,8 @@ use gpui::{AnyElement, Div, Hsla, Role, Stateful, Svg, div, img, prelude::*, px,
 pub(crate) const CHAT: u32 = 0x141414;
 pub(crate) const TEXT: u32 = 0xebebeb;
 pub(crate) const MUTED: u32 = 0x969696;
-pub(crate) const ACCENT: u32 = 0x4da3f5;
+/// Tauri's `--color-accent` default, Factory-inspired orange.
+pub(crate) const ACCENT: u32 = 0xef6f2e;
 pub(crate) const COLUMN: f32 = 832.;
 /// The transcript's side padding inside `COLUMN`: the docked composer's
 /// 10px inset, 1px border and 12px text padding, so prose lines up with the
@@ -99,7 +100,8 @@ pub(crate) fn configure_project(
         hue.min(360) as f32 / 360.,
         saturation.min(100) as f32 / 100.,
         if light {
-            0.97
+            // Tauri's faintly grey light sidebar, hsl(… 97.5%).
+            0.975
         } else {
             dark_lightness.min(30) as f32 / 100.
         },
@@ -164,6 +166,11 @@ pub(crate) fn tweening() -> bool {
 impl Tokens {
     fn mix(&self, to: &Self, t: f32) -> Self {
         let color = |a: Hsla, b: Hsla| -> Hsla {
+            // The first frame keeps the colors on screen exactly; an RGB
+            // round trip would nudge some hues (the orange accent).
+            if t <= 0. {
+                return a;
+            }
             let (a, b) = (a.to_rgb(), b.to_rgb());
             gpui::Rgba {
                 r: a.r + (b.r - a.r) * t,
@@ -682,7 +689,7 @@ mod composer_tests {
         preferences.theme_hue = 180;
         preferences.theme_saturation = 20;
         configure(&preferences, false);
-        assert_eq!(composer_fill(), gpui::hsla(0.5, 0.2, 0.97, 1.));
+        assert_eq!(composer_fill(), gpui::hsla(0.5, 0.2, 0.975, 1.));
         assert_eq!(composer_blur(), 0.);
         assert_eq!(composer_border(false), content(0.1));
         assert_eq!(composer_border(true), content(0.2));
@@ -713,5 +720,25 @@ mod composer_tests {
         assert!(configure_project(&preferences, None, false, false));
         assert!(!tweening());
         assert_eq!(accent_color(), app_accent);
+    }
+}
+
+#[cfg(test)]
+mod corner_tests {
+    use gpui::{Corners, px, size, squared_corners};
+
+    /// Tauri's radius tokens are all 0; only `9999px` shapes stay round.
+    #[test]
+    fn corners_are_square_unless_the_shape_is_fully_round() {
+        gpui::set_square_corners(true);
+        let card = squared_corners(Corners::all(px(10.)), size(px(200.), px(80.)));
+        let avatar = squared_corners(Corners::all(px(12.)), size(px(24.), px(24.)));
+        let pill = squared_corners(Corners::all(px(14.)), size(px(90.), px(28.)));
+        gpui::set_square_corners(false);
+        assert_eq!(card, Corners::all(px(0.)));
+        assert_eq!(avatar, Corners::all(px(12.)));
+        assert_eq!(pill, Corners::all(px(14.)));
+        let off = squared_corners(Corners::all(px(10.)), size(px(200.), px(80.)));
+        assert_eq!(off, Corners::all(px(10.)));
     }
 }

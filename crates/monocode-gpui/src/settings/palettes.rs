@@ -11,19 +11,21 @@ pub(crate) const PALETTES: &[(&str, &str, Palette, Palette)] = &[
     (
         "default",
         "Default",
+        // Tauri's Factory look (5b15a18e): orange accent; light mode with a
+        // white workspace, #f9f9f9 inset surface and near-black (9%) text.
         Palette {
             surface: 0x0d0d0d,
             panel: 0x060606,
             solid: 0x141414,
             content: 0xebebeb,
-            accent: 0x4da3f5,
+            accent: 0xef6f2e,
         },
         Palette {
-            surface: 0xf5f5f5,
+            surface: 0xf9f9f9,
             panel: 0xffffff,
             solid: 0xffffff,
-            content: 0x2e2e2e,
-            accent: 0x4da3f5,
+            content: 0x171717,
+            accent: 0xef6f2e,
         },
     ),
     (

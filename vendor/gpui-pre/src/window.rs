@@ -4658,6 +4658,7 @@ impl Window {
     ) {
         self.invalidator.debug_assert_paint();
 
+        let corner_radii = squared_corners(corner_radii, bounds.size);
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
@@ -4694,6 +4695,7 @@ impl Window {
     ) {
         self.invalidator.debug_assert_paint();
 
+        let corner_radii = squared_corners(corner_radii, bounds.size);
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
@@ -4788,7 +4790,8 @@ impl Window {
             content_mask: self.snapped_content_mask(),
             background: quad.background.opacity(opacity),
             border_color: quad.border_color.opacity(opacity),
-            corner_radii: quad.corner_radii.scale(self.scale_factor()),
+            corner_radii: squared_corners(quad.corner_radii, quad.bounds.size)
+                .scale(self.scale_factor()),
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
         };
@@ -5225,9 +5228,11 @@ impl Window {
         };
 
         let content_mask = self.snapped_content_mask();
-        let corner_radii = corner_radii
-            .clamp_radii_for_quad_size(visible_bounds.size)
-            .scale(self.scale_factor());
+        let corner_radii = squared_corners(
+            corner_radii.clamp_radii_for_quad_size(visible_bounds.size),
+            visible_bounds.size,
+        )
+        .scale(self.scale_factor());
         let opacity = self.element_opacity();
 
         self.next_frame.scene.insert_primitive(PolychromeSprite {
@@ -7924,6 +7929,36 @@ pub fn quad(
 }
 
 /// Creates a filled quad with the given bounds and background color.
+static SQUARE_CORNERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// MonoBOT: draw square corners everywhere, as its web app sets every radius
+/// token to 0. A corner keeps its radius only when it makes the shape fully
+/// round (circles, pills, switches), like the web app's `9999px`.
+pub fn set_square_corners(enabled: bool) {
+    SQUARE_CORNERS.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The radii to paint for a shape of this size under [`set_square_corners`].
+pub fn squared_corners(radii: Corners<Pixels>, size: Size<Pixels>) -> Corners<Pixels> {
+    if !SQUARE_CORNERS.load(std::sync::atomic::Ordering::Relaxed) {
+        return radii;
+    }
+    let round = size.width.min(size.height) * 0.5 - px(0.5);
+    let keep = |radius: Pixels| {
+        if radius > Pixels::ZERO && radius >= round {
+            radius
+        } else {
+            Pixels::ZERO
+        }
+    };
+    Corners {
+        top_left: keep(radii.top_left),
+        top_right: keep(radii.top_right),
+        bottom_right: keep(radii.bottom_right),
+        bottom_left: keep(radii.bottom_left),
+    }
+}
+
 pub fn fill(bounds: impl Into<Bounds<Pixels>>, background: impl Into<Background>) -> PaintQuad {
     PaintQuad {
         bounds: bounds.into(),

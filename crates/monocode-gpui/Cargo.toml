@@ -56,6 +56,12 @@ embed-resource = "3"
 [dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.9", default-features = false, features = ["test-support"] }
 
+# Toast settings, and the WebView2 host for generated HTML documents.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.62", features = ["UI_Notifications", "Win32_Foundation", "Win32_System_LibraryLoader", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
+webview2-com = "0.39"
+raw-window-handle = "0.6"
+
 # The vendored renderer's backdrop-blur marker for frosted popovers.
 [target.'cfg(target_os = "macos")'.dependencies]
 gpui_apple = { package = "gpui-pre-apple", version = "=0.3.9" }

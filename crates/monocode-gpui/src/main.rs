@@ -185,7 +185,7 @@ fn main() {
         .first()
         .is_some_and(|arg| arg == "--version" || arg == "-V")
     {
-        println!("Monocode Native {}", notifications::updater::version());
+        println!("MonoBOT Native {}", notifications::updater::version());
         return;
     }
     if cli_args.first().is_some_and(|a| a == "visual-mcp") {
@@ -417,6 +417,8 @@ fn main() {
     gpui::Application::with_platform(platform)
         .with_assets(assets::Assets)
         .run(move |cx: &mut App| {
+            // Square corners everywhere, as Tauri's radius tokens (all 0).
+            gpui::set_square_corners(true);
             #[cfg(debug_assertions)]
             dev_reload::install(cx);
             cx.set_global(title_raster);
@@ -469,7 +471,7 @@ fn main() {
                     // its controls as native titlebar double-click/drag gestures.
                     app_owns_titlebar_drag: cfg!(target_os = "macos"),
                     titlebar: Some(TitlebarOptions {
-                        title: Some("Monocode Native".into()),
+                        title: Some("MonoBOT Native".into()),
                         // Windows also drops its caption: the app's drag areas
                         // hit-test as the caption and the frame still resizes.
                         appears_transparent: cfg!(any(target_os = "macos", target_os = "windows")),

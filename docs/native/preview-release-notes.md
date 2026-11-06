@@ -1,6 +1,6 @@
-# Monocode Native 0.16.0-preview.13
+# MonoBOT Native 0.16.0-preview.13
 
-This experimental Monocode Native preview is built with Rust + GPUI. React/Tauri remains the production app.
+This experimental MonoBOT Native preview is built with Rust + GPUI. React/Tauri remains the production app.
 
 ## Changes since preview 12
 

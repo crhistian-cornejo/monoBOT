@@ -1282,6 +1282,8 @@ fn next_run_preview(timestamp: i64) -> String {
     else {
         return "Next run —".into();
     };
+    // Unix replaces the offset with the zone's abbreviation (BST, PDT…).
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut zone = gmt_offset();
     #[cfg(unix)]
     {

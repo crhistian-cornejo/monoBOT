@@ -127,14 +127,26 @@ mod tests {
         assert!(validate("sessions.start", &json!({"prompt":"x","draft":"false"})).is_err());
         assert!(validate("sessions.delete", &json!({"sessionId":1,"force":true})).is_err());
         assert!(validate("sessions.start", &json!({"runtimeMode":"unsafe"})).is_err());
-        assert!(validate("papers.find", &json!({"query":"GR4J","limit":5,"fromYear":2015})).is_ok());
+        assert!(validate(
+            "papers.find",
+            &json!({"query":"GR4J","limit":5,"fromYear":2015})
+        )
+        .is_ok());
         assert!(validate("papers.find", &json!({"query":"GR4J","fromYear":"2015"})).is_err());
-        assert!(validate("papers.read", &json!({"ref":"10.1016/j.envsoft.2017.05.002","pages":"1-3"})).is_ok());
+        assert!(validate(
+            "papers.read",
+            &json!({"ref":"10.1016/j.envsoft.2017.05.002","pages":"1-3"})
+        )
+        .is_ok());
         assert!(validate("papers.read", &json!({"ref":"x","download":true})).is_err());
         assert!(validate("papers.read", &json!({"ref":"x","section":"methods"})).is_ok());
         assert!(validate("papers.figure", &json!({"ref":"x","page":4})).is_ok());
         assert!(validate("papers.figure", &json!({"ref":"x","page":"4"})).is_err());
-        assert!(validate("papers.add", &json!({"path":"/Users/me/paper.pdf","ref":"10.1234/x","title":"T"})).is_ok());
+        assert!(validate(
+            "papers.add",
+            &json!({"path":"/Users/me/paper.pdf","ref":"10.1234/x","title":"T"})
+        )
+        .is_ok());
         assert!(validate("papers.add", &json!({"path":"/p.pdf","url":"https://x"})).is_err());
         assert!(validate(
             "sessions.start",

@@ -195,7 +195,10 @@ fn spawn(cwd: &str, size: GridSize, id: u64) -> Spawned {
         cell_width: 8,
         cell_height: 16,
     };
+    // Only Unix reads the PTY's foreground process; Windows keeps the defaults.
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut master_fd = -1;
+    #[cfg_attr(not(unix), allow(unused_mut))]
     let mut shell_pid = 0;
     let sender = match tty::new(&options, window, id) {
         Ok(pty) => {
@@ -1455,6 +1458,7 @@ impl Terminal {
         agent_cli(self.foreground.as_deref()?)
     }
 }
+#[cfg(any(unix, test))]
 fn is_shell_name(name: &str) -> bool {
     matches!(
         name,

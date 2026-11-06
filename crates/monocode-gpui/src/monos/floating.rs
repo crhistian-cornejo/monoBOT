@@ -1,6 +1,8 @@
 //! FloatingMonoChat.tsx: the menu bar's chat panel. It floats over other
 //! apps without activating MonoBOT, and its rail moves between Monos without
 //! touching the workspace window's selection.
+//! Like Tauri's, it opens only from the macOS menu bar; tests drive it anywhere.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 use super::*;
 use gpui::{Bounds, WindowBounds, WindowKind, WindowOptions, point, size};
 /// A 384pt conversation plus the 56pt Mono rail beside it.

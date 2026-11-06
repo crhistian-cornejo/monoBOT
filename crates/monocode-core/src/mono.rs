@@ -432,7 +432,7 @@ pub fn context(
         format!("{}\n\n", instructions(mono, executable))
     };
     format!(
-        "<monocode_context>\nMonoCode adds this context, not the user. Act on it without quoting or describing it.\n\n{rules}<soul>\n{}\n</soul>\n\n<memory>\n{}\nTopic notes: {}\n</memory>\n</monocode_context>",
+        "<monocode_context>\nMonoBOT adds this context, not the user. Act on it without quoting or describing it.\n\n{rules}<soul>\n{}\n</soul>\n\n<memory>\n{}\nTopic notes: {}\n</memory>\n</monocode_context>",
         files.soul.as_deref().unwrap_or_default(),
         memory::within_budget(&files.memory),
         files.topics.join(", ")

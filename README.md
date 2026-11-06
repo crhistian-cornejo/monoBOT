@@ -9,7 +9,7 @@
 </p>
 
 > [!NOTE]
-> **Try the new [Monocode Native preview](https://github.com/hardbeat920/monocode/releases)**, our experimental Rust + GPUI app for macOS, Linux and Windows. Read the [preview details](#monocode-native-preview) before installing.
+> **Try the new [MonoBOT Native preview](https://github.com/hardbeat920/monocode/releases)**, our experimental Rust + GPUI app for macOS, Linux and Windows. Read the [preview details](#monobot-native-preview) before installing.
 
 Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin. If they’re installed and logged in, MonoBOT can run them. Tabs are sessions. The composer is the input. MonoBOT does not sell tokens.
 
@@ -59,7 +59,7 @@ pnpm tauri dev
 
 Small, focused contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 
-## Monocode Native preview
+## MonoBOT Native preview
 
 The Rust + GPUI app is an experimental preview. React/Tauri remains the
 production app.

@@ -184,27 +184,35 @@ impl MediaPreview {
                     .timer(Duration::from_millis(250))
                     .await;
                 if this
-                    .update(cx, |this, cx| {
-                        #[cfg(target_os = "macos")]
-                        if this.visible
-                            && let Some(video) = &this.video
-                            && let Some((width, height, duration, failed)) = video.metadata()
-                            && (this.width != width
-                                || this.height != height
-                                || this.duration != Some(duration)
-                                || this.failed != failed)
+                            // Only the macOS player reports metadata; elsewhere this is idle.
+                            .update(
+                                cx,
+                                |#[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+                                 this,
+                                 #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
+                                 cx| {
+                                    #[cfg(target_os = "macos")]
+                                    if this.visible
+                                        && let Some(video) = &this.video
+                                        && let Some((width, height, duration, failed)) =
+                                            video.metadata()
+                                        && (this.width != width
+                                            || this.height != height
+                                            || this.duration != Some(duration)
+                                            || this.failed != failed)
+                                    {
+                                        this.width = width;
+                                        this.height = height;
+                                        this.duration = Some(duration);
+                                        this.failed = failed;
+                                        cx.notify();
+                                    }
+                                },
+                            )
+                            .is_err()
                         {
-                            this.width = width;
-                            this.height = height;
-                            this.duration = Some(duration);
-                            this.failed = failed;
-                            cx.notify();
+                            break;
                         }
-                    })
-                    .is_err()
-                {
-                    break;
-                }
             }
         }));
         this
@@ -334,6 +342,7 @@ impl MediaPreview {
     }
 }
 impl gpui::Render for MediaPreview {
+    #[cfg_attr(not(target_os = "macos"), allow(unused_variables))]
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let is_image = self.image.is_some();
         #[cfg(target_os = "macos")]
