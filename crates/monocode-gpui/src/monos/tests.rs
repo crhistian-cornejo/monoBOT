@@ -1025,7 +1025,7 @@ fn queued_messages_are_saved_before_dispatch_and_do_not_run_while_blocked(cx: &m
 }
 
 #[gpui::test]
-fn chat_composer_matches_the_session_box_and_opens_the_model_list(cx: &mut TestAppContext) {
+fn chat_composer_matches_tauri_and_opens_the_model_list(cx: &mut TestAppContext) {
     let s = setup(cx);
     cx.update(|cx| cx.set_reduce_motion(true));
     let handle: gpui::AnyWindowHandle = s.window.into();
@@ -1040,11 +1040,11 @@ fn chat_composer_matches_the_session_box_and_opens_the_model_list(cx: &mut TestA
     let send = visual.debug_bounds("mono-send").unwrap();
     let attach = visual.debug_bounds("mono-attach").unwrap();
     let model = visual.debug_bounds("mono-model").unwrap();
-    // A click anywhere in the box, toolbar included, focuses the field.
+    // A click anywhere in the box, beside the field included, focuses it.
     let toolbar = visual.debug_bounds("mono-composer-toolbar").unwrap();
     for point in [
-        gpui::point(toolbar.center().x, toolbar.top() + px(13.)),
-        gpui::point(send.left() - px(4.), toolbar.top() + px(13.)),
+        toolbar.center(),
+        gpui::point(send.left() - px(3.), send.center().y),
     ] {
         handle.update(visual, |_, w, cx| w.blur(cx)).unwrap();
         visual.simulate_click(point, Default::default());
@@ -1061,17 +1061,20 @@ fn chat_composer_matches_the_session_box_and_opens_the_model_list(cx: &mut TestA
             "a click at {point:?} focuses the composer"
         );
     }
-    // One line: the session composer's 84px box; send sits 10px above the border.
-    assert_eq!(field.size.height, px(84.));
-    assert_eq!(field.bottom() - send.bottom(), px(11.));
-    // The session composer's box: the model picker and send inside it,
-    // attach underneath on the left.
+    // MonoComposer's box: one line with the field, dictation and send, its
+    // 5px padding centring send; nothing about the model or access inside.
+    assert_eq!(field.size.height, px(38.));
+    assert_eq!(field.bottom() - send.bottom(), px(6.));
     assert!(field.contains(&send.center()));
-    assert!(field.contains(&model.center()));
-    assert!(model.right() < send.left());
+    assert!(visual.debug_bounds("mono-access").is_none());
+    // Underneath: attach on the left, the model as text on the right, then
+    // the context meter straight under send.
     assert!(attach.top() >= field.bottom());
+    assert!(model.top() >= field.bottom());
+    assert!(model.left() > attach.right());
     assert_eq!(attach.size, gpui::size(px(26.), px(26.)));
     let meter = visual.debug_bounds("mono-context-meter").unwrap();
+    assert!(meter.left() >= model.right());
     assert!(
         (f32::from(meter.center().x) - f32::from(send.center().x)).abs() < 0.5,
         "the context meter sits under send: {meter:?} vs {send:?}"

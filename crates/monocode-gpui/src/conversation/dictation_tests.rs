@@ -120,7 +120,8 @@ fn the_mono_composer_has_the_mic_beside_send(cx: &mut TestAppContext) {
         .expect("the Mono composer shows the mic");
     let send = visual.debug_bounds("mono-send").unwrap();
     let composer = visual.debug_bounds("mono-composer").unwrap();
-    assert_eq!(mic.right() + px(4.), send.left());
+    // MonoComposer: `gap-1.5` between dictation and send.
+    assert_eq!(mic.right() + px(6.), send.left());
     assert!(composer.contains(&mic.center()));
     visual.simulate_click(mic.center(), Default::default());
     visual.run_until_parked();

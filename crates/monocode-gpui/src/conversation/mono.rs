@@ -602,6 +602,9 @@ impl Conversation {
         // The floating panel's square composer: no model or access, which
         // each personal agent sets in its own settings.
         let compact = crate::monos::is_floating_window(window, cx);
+        // A group's agents come with their own models: its line keeps attach,
+        // emoji and how full the thread is.
+        let group = mono.is_group();
         // MonoHeader's greeting: it shows only before the first message.
         let body = if !self.summary.has_messages {
             let greeting = div().flex().flex_col().items_center().justify_center().px_6().py_12()
@@ -744,12 +747,8 @@ impl Conversation {
                     .child(self.approval_shelf(window, cx))
                     .child({
                         let composer = div()
-                            .child(if compact {
-                                self.mono_compact_box(window, cx)
-                            } else {
-                                self.mono_composer_box(window, cx)
-                            })
-                            .child(self.mono_composer_tools(compact, cx))
+                            .child(self.mono_composer_box(compact, group, window, cx))
+                            .children(self.mono_composer_tools(compact, group, cx))
                             .into_any_element();
                         let focus = self.input.focus_handle(cx);
                         let card = self.questions.front().map(|(card, _)| card);
@@ -1058,162 +1057,6 @@ impl Conversation {
         }
         ("Model setting", items, 210., MenuStyle::Explorer)
     }
-    /// The session composer's box: the field, then a toolbar with the model
-    /// picker, its settings, access and send.
-    fn mono_composer_box(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let radius = COMPOSER_RADIUS;
-        let has_value = self.input.read(cx).has_message_text()
-            || !self.attachments.is_empty()
-            || !self.quotes.is_empty();
-        // As the session composer: setting pills only with controls beside
-        // the model, otherwise the effort rides inside the model pill.
-        let beside = cx
-            .try_global::<crate::settings::Preferences>()
-            .is_some_and(|p| p.model_controls == "beside");
-        let trigger_effort = (!beside).then(|| self.trigger_effort_label()).flatten();
-        let controls = if beside {
-            self.model_controls(cx)
-        } else {
-            Vec::new()
-        };
-        let models_open = self.menu_is(ComposerMenu::Model)
-            || self.menu_is(ComposerMenu::Recent)
-            || self.mono_ui.models.is_some();
-        let kind = Kind::from_id(&self.summary.provider);
-        div()
-            .id("mono-composer")
-            .debug_selector(|| "mono-composer".into())
-            .relative()
-            .rounded(px(radius))
-            .border_1()
-            .border_color(composer_border(
-                self.input.focus_handle(cx).is_focused(window),
-            ))
-            .shadow(composer_shadow())
-            .when(self.file_drag, |d| {
-                d.border_color(accent_color().opacity(0.6))
-            })
-            .flex()
-            .flex_col()
-            .capture_key_down(crate::dictation::capture_escape(&self.dictation))
-            .on_mouse_down(
-                MouseButton::Left,
-                // Keep a focus-tracking ancestor from taking focus back.
-                cx.listener(|this, _, window, cx| {
-                    window.focus(&this.input.focus_handle(cx), cx);
-                    window.prevent_default();
-                }),
-            )
-            .child(self.composer_anchor.probe())
-            .child(composer_surface(radius))
-            .children(self.attachment_chips(cx))
-            .child(
-                div()
-                    .px_3()
-                    .pt(px(10.))
-                    .pb(px(14.))
-                    .child(self.input.clone()),
-            )
-            .child(
-                div()
-                    .debug_selector(|| "mono-composer-toolbar".into())
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .px_2()
-                    .pb(px(10.))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .overflow_hidden()
-                            .flex()
-                            .items_center()
-                            .gap_1()
-                            .child(
-                                tool_pill("mono-model", "Model")
-                                    .debug_selector(|| "mono-model".into())
-                                    .min_w_0()
-                                    .max_w(px(220.))
-                                    .flex_shrink(1.)
-                                    .aria_label(format!(
-                                        "{}, {}{}",
-                                        kind.label(),
-                                        self.model_label(),
-                                        trigger_effort
-                                            .as_ref()
-                                            .map(|effort| format!(", effort {effort}"))
-                                            .unwrap_or_default()
-                                    ))
-                                    .aria_expanded(models_open)
-                                    .child(self.model_anchor.probe())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.mono_ui.models = None;
-                                        this.toggle_menu(ComposerMenu::Model, window, cx)
-                                    }))
-                                    .on_mouse_down(
-                                        MouseButton::Right,
-                                        cx.listener(|this, _, window, cx| {
-                                            cx.stop_propagation();
-                                            this.open_recent_models(window, cx)
-                                        }),
-                                    )
-                                    .child(provider_icon(&self.summary.provider, 16.))
-                                    .child(pill_label(self.model_label()))
-                                    .when_some(trigger_effort, |d, effort| {
-                                        d.child(
-                                            div()
-                                                .flex_shrink_0()
-                                                .text_size(px(11.))
-                                                .text_color(content(0.5))
-                                                .child(effort),
-                                        )
-                                    })
-                                    .child(icon("chevron-down", 12.)),
-                            )
-                            .children(controls)
-                            .child(
-                                tool_pill("mono-access", "Access")
-                                    .aria_label(format!("Access, {}", self.settings.access.label()))
-                                    .aria_expanded(self.menu_is(ComposerMenu::Access))
-                                    .child(self.access_anchor.probe())
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.toggle_menu(ComposerMenu::Access, window, cx)
-                                    }))
-                                    .child(
-                                        icon(
-                                            match self.settings.access {
-                                                AccessMode::FullAccess => "shield-alert",
-                                                AccessMode::AutoAcceptEdits => "pencil-edit",
-                                                AccessMode::Auto => "sparkles",
-                                                _ => "square-lock",
-                                            },
-                                            14.,
-                                        )
-                                        .text_color(
-                                            if self.settings.access == AccessMode::FullAccess {
-                                                tint(AMBER_400, 0.9)
-                                            } else {
-                                                content(1.)
-                                            },
-                                        ),
-                                    )
-                                    .child(pill_label(self.settings.access.label()))
-                                    .child(icon("chevron-down", 12.)),
-                            ),
-                    )
-                    .child(crate::dictation::mic(&self.dictation, cx))
-                    .child(
-                        div()
-                            .debug_selector(|| "mono-send".into())
-                            .flex_shrink_0()
-                            .child(self.action(has_value, window, cx)),
-                    ),
-            )
-            .child(self.dictation.clone())
-            .children(self.attachment_drop_overlay(12.))
-            .into_any_element()
-    }
     pub(super) fn model_controls(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let text_control = |id: SharedString, open: bool| {
             div()
@@ -1346,20 +1189,33 @@ impl Conversation {
         }
         pills
     }
-    /// MonoComposer `square`, in the floating panel: one row with the field,
-    /// dictation and send, square corners, and nothing about the model.
-    fn mono_compact_box(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// MonoComposer's box: one row with the field, dictation and send, as
+    /// Tauri's. Square in the floating panel. A group's chat also puts attach,
+    /// emoji and the context meter on that line (its `fieldTools`), since its
+    /// agents come with their own models.
+    fn mono_composer_box(
+        &mut self,
+        square: bool,
+        group: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let radius = if square { 1. } else { COMPOSER_RADIUS };
         let has_value = self.input.read(cx).has_message_text()
             || !self.attachments.is_empty()
             || !self.quotes.is_empty();
+        let tools = group.then(|| [self.mono_attach(cx), self.mono_emoji(cx)]);
+        let meter = group.then(|| self.mono_context_meter(cx));
         div()
             .id("mono-composer")
             .debug_selector(|| "mono-composer".into())
             .relative()
+            .rounded(px(radius - 1.))
             .border_1()
             .border_color(composer_border(
                 self.input.focus_handle(cx).is_focused(window),
             ))
+            .when(!square, |d| d.shadow(composer_shadow()))
             .when(self.file_drag, |d| {
                 d.border_color(accent_color().opacity(0.6))
             })
@@ -1368,20 +1224,25 @@ impl Conversation {
             .capture_key_down(crate::dictation::capture_escape(&self.dictation))
             .on_mouse_down(
                 MouseButton::Left,
+                // Keep a focus-tracking ancestor from taking focus back.
                 cx.listener(|this, _, window, cx| {
                     window.focus(&this.input.focus_handle(cx), cx);
                     window.prevent_default();
                 }),
             )
             .child(self.composer_anchor.probe())
-            .child(composer_surface(1.))
+            .child(composer_surface(radius))
             .children(self.attachment_chips(cx))
             .child(
+                // Even padding centres send beside one line and keeps it at
+                // the bottom as the text grows.
                 div()
+                    .debug_selector(|| "mono-composer-toolbar".into())
                     .flex()
                     .items_end()
-                    .gap(px(6.))
+                    .gap(px(if group { 2. } else { 6. }))
                     .p(px(5.))
+                    .children(tools.into_iter().flatten())
                     .child(
                         div()
                             .flex_1()
@@ -1390,6 +1251,7 @@ impl Conversation {
                             .px(px(6.))
                             .child(self.input.clone()),
                     )
+                    .children(meter)
                     .child(crate::dictation::mic(&self.dictation, cx))
                     .child(
                         div()
@@ -1399,26 +1261,84 @@ impl Conversation {
                     ),
             )
             .child(self.dictation.clone())
-            .children(self.attachment_drop_overlay(0.))
+            .children(self.attachment_drop_overlay(radius))
             .into_any_element()
     }
-    /// Under the box: attach and emoji on the left, the context meter on the
-    /// right. The floating panel's square composer keeps only attach and
-    /// emoji, as Tauri's.
-    fn mono_composer_tools(&mut self, compact: bool, cx: &mut Context<Self>) -> AnyElement {
-        let tool = |id: &'static str, label: &'static str| {
+    fn mono_tool(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
+        div()
+            .id(id)
+            .role(Role::Button)
+            .aria_label(label)
+            .group(id)
+            .flex_shrink_0()
+            .size(px(26.))
+            .flex()
+            .items_center()
+            .justify_center()
+            .hover(|s| s.bg(content(0.08)))
+    }
+    fn mono_attach(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        Self::mono_tool("mono-attach", "Attach files")
+            .debug_selector(|| "mono-attach".into())
+            .child(
+                icon("mono-attach", 17.)
+                    .text_color(content(0.55))
+                    .group_hover("mono-attach", |s| s.text_color(content(1.))),
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.choose_attachments(cx)))
+            .into_any_element()
+    }
+    fn mono_emoji(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        Self::mono_tool("mono-emoji", "Add emoji")
+            .when(self.mono_ui.emoji, |d| d.bg(content(0.08)))
+            .child(
+                icon("smile", 13.)
+                    .text_color(content(if self.mono_ui.emoji { 1. } else { 0.55 }))
+                    .group_hover("mono-emoji", |s| s.text_color(content(1.))),
+            )
+            .on_click(cx.listener(|this, _, window, cx| {
+                if cfg!(target_os = "macos") {
+                    window.focus(&this.input.focus_handle(cx), cx);
+                    window.show_character_palette();
+                    return;
+                }
+                this.mono_ui.emoji = !this.mono_ui.emoji;
+                cx.notify();
+            }))
+            .into_any_element()
+    }
+    /// Without the system's character palette, a short row of emoji.
+    fn mono_emoji_row(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        self.mono_ui.emoji.then(|| {
             div()
-                .id(id)
-                .role(Role::Button)
-                .aria_label(label)
-                .group(id)
-                .flex_shrink_0()
-                .size(px(26.))
                 .flex()
-                .items_center()
-                .justify_center()
-                .hover(|s| s.bg(content(0.08)))
-        };
+                .gap_1()
+                .children(
+                    ["👍", "❤️", "🙂", "🎉", "👀", "✨", "🙏", "🚀"]
+                        .into_iter()
+                        .enumerate()
+                        .map(|(ix, emoji)| {
+                            div()
+                                .id(("mono-emoji", ix))
+                                .text_size(px(18.))
+                                .rounded_md()
+                                .hover(|s| s.bg(content(0.1)))
+                                .child(emoji)
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.input.update(cx, |i, cx| {
+                                        i.replace_text_in_range(None, emoji, window, cx)
+                                    });
+                                    this.mono_ui.emoji = false;
+                                    cx.notify();
+                                }))
+                        }),
+                )
+                .into_any_element()
+        })
+    }
+    /// A Mono is one long conversation; this is how full its current thread
+    /// is. It rotates threads itself, so there is nothing to compact here.
+    fn mono_context_meter(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let ratio = self.context.and_then(|usage| usage.ratio());
         let headline = ratio
             .map(|r| format!("{:.0}% context used", r * 100.))
@@ -1431,134 +1351,148 @@ impl Conversation {
             )
         });
         div()
-            .min_w_0()
+            .id("mono-context-meter")
+            .debug_selector(|| "mono-context-meter".into())
+            .role(Role::Image)
+            .aria_label(format!(
+                "{headline}{}",
+                detail
+                    .as_ref()
+                    .map(|s| format!(", {s}"))
+                    .unwrap_or_default()
+            ))
+            .flex_shrink_0()
+            .size(px(26.))
             .flex()
             .items_center()
-            .gap(px(2.))
-            .pt_1()
-            .pl_1()
-            // The box's 1px border plus its toolbar's 8px: the meter sits
-            // straight under send.
-            .pr(px(9.))
-            .child(
-                tool("mono-attach", "Attach files")
-                    .debug_selector(|| "mono-attach".into())
-                    .child(
-                        icon("mono-attach", 17.)
-                            .text_color(content(0.55))
-                            .group_hover("mono-attach", |s| s.text_color(content(1.))),
-                    )
-                    .on_click(cx.listener(|this, _, _, cx| this.choose_attachments(cx))),
-            )
-            .child(
-                tool("mono-emoji", "Add emoji")
-                    .when(self.mono_ui.emoji, |d| d.bg(content(0.08)))
-                    .child(
-                        icon("smile", 13.)
-                            .text_color(content(if self.mono_ui.emoji { 1. } else { 0.55 }))
-                            .group_hover("mono-emoji", |s| s.text_color(content(1.))),
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        if cfg!(target_os = "macos") {
-                            window.focus(&this.input.focus_handle(cx), cx);
-                            window.show_character_palette();
-                            return;
-                        }
-                        this.mono_ui.emoji = !this.mono_ui.emoji;
-                        cx.notify();
-                    })),
-            )
-            .when(self.mono_ui.emoji, |d| {
+            .justify_center()
+            .hover(|s| s.bg(content(0.08)))
+            .child(self.context_anchor.probe())
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.context_hovered = *hovered;
+                cx.notify();
+            }))
+            .child(crate::context_meter::ring(ratio.unwrap_or(0.)))
+            .when(self.context_hovered, |d| {
                 d.child(
-                    div().flex().gap_1().children(
-                        ["👍", "❤️", "🙂", "🎉", "👀", "✨", "🙏", "🚀"]
-                            .into_iter()
-                            .enumerate()
-                            .map(|(ix, emoji)| {
-                                div()
-                                    .id(("mono-emoji", ix))
-                                    .text_size(px(18.))
-                                    .rounded_md()
-                                    .hover(|s| s.bg(content(0.1)))
-                                    .child(emoji)
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        this.input.update(cx, |i, cx| {
-                                            i.replace_text_in_range(None, emoji, window, cx)
-                                        });
-                                        this.mono_ui.emoji = false;
-                                        cx.notify();
-                                    }))
+                    popover(
+                        "mono-context-tooltip",
+                        Anchor::Slot(self.context_anchor.clone()),
+                    )
+                    .side(Side::Top)
+                    .align(Align::End)
+                    .max_width(240.)
+                    .padding(10.)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .text_size(px(12.))
+                            .line_height(px(16.))
+                            .text_color(content(1.))
+                            .child(headline)
+                            .when_some(detail, |d, detail| {
+                                d.child(
+                                    div()
+                                        .text_size(px(11.))
+                                        .text_color(content(0.5))
+                                        .child(detail),
+                                )
                             }),
                     ),
                 )
             })
-            .when(!compact, |d| {
-                d.child(
-                    div()
-                        .ml_auto()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap_1()
-                        .child(
-                            // A Mono is one long conversation; this is how full its
-                            // current thread is. It rotates threads itself.
-                            div()
-                                .id("mono-context-meter")
-                                .debug_selector(|| "mono-context-meter".into())
-                                .role(Role::Image)
-                                .aria_label(format!(
-                                    "{headline}{}",
-                                    detail
-                                        .as_ref()
-                                        .map(|s| format!(", {s}"))
-                                        .unwrap_or_default()
-                                ))
-                                .flex_shrink_0()
-                                .size(px(26.))
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .hover(|s| s.bg(content(0.08)))
-                                .child(self.context_anchor.probe())
-                                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                                    this.context_hovered = *hovered;
-                                    cx.notify();
-                                }))
-                                .child(crate::context_meter::ring(ratio.unwrap_or(0.)))
-                                .when(self.context_hovered, |d| {
-                                    d.child(
-                                        popover(
-                                            "mono-context-tooltip",
-                                            Anchor::Slot(self.context_anchor.clone()),
-                                        )
-                                        .side(Side::Top)
-                                        .align(Align::End)
-                                        .max_width(240.)
-                                        .padding(10.)
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .text_size(px(12.))
-                                                .line_height(px(16.))
-                                                .text_color(content(1.))
-                                                .child(headline)
-                                                .when_some(detail, |d, detail| {
-                                                    d.child(
-                                                        div()
-                                                            .text_size(px(11.))
-                                                            .text_color(content(0.5))
-                                                            .child(detail),
-                                                    )
-                                                }),
-                                        ),
-                                    )
-                                }),
-                        ),
-                )
-            })
             .into_any_element()
+    }
+    /// ModelPicker's `text` look with `hideSettings`: the provider's icon
+    /// and the model, and the model list opens on its own.
+    fn mono_model_trigger(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let open = self.menu_is(ComposerMenu::Model)
+            || self.menu_is(ComposerMenu::Recent)
+            || self.mono_ui.models.is_some();
+        let kind = Kind::from_id(&self.summary.provider);
+        div()
+            .id("mono-model")
+            .debug_selector(|| "mono-model".into())
+            .role(Role::Button)
+            .aria_label(format!("{}, {}", kind.label(), self.model_label()))
+            .aria_expanded(open)
+            .group("mono-model")
+            .flex_shrink_0()
+            .max_w(px(200.))
+            .h(px(26.))
+            .px(px(6.))
+            .gap(px(6.))
+            .flex()
+            .items_center()
+            .text_size(px(12.))
+            .text_color(content(if open { 1. } else { 0.55 }))
+            .when(open, |d| d.bg(content(0.08)))
+            .hover(|s| s.bg(content(0.08)).text_color(content(1.)))
+            .child(self.model_anchor.probe())
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.mono_ui.models = None;
+                this.toggle_menu(ComposerMenu::Model, window, cx)
+            }))
+            .on_mouse_down(
+                MouseButton::Right,
+                cx.listener(|this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.open_recent_models(window, cx)
+                }),
+            )
+            .child(provider_icon(&self.summary.provider, 14.))
+            .child(div().min_w_0().truncate().child(self.model_label()))
+            .into_any_element()
+    }
+    /// Under the box, as MonoComposer: attach and emoji on the left; on the
+    /// right the model as text, its settings and how full the thread is. The
+    /// floating panel's square composer keeps attach and emoji only, and a
+    /// group's line already holds them.
+    fn mono_composer_tools(
+        &mut self,
+        floating: bool,
+        group: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let emoji = self.mono_emoji_row(cx);
+        if group {
+            return emoji.map(|row| div().pt_1().pl_1().child(row).into_any_element());
+        }
+        let attach = self.mono_attach(cx);
+        let face = self.mono_emoji(cx);
+        let right = (!floating).then(|| {
+            let model = self.mono_model_trigger(cx);
+            let controls = self.model_controls(cx);
+            let meter = self.mono_context_meter(cx);
+            div()
+                .ml_auto()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .child(model)
+                .children(controls)
+                .child(meter)
+        });
+        Some(
+            div()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(2.))
+                .pt_1()
+                .pl_1()
+                // The box's 1px border plus its row's 5px: the meter sits
+                // straight under send.
+                .pr(px(6.))
+                .child(attach)
+                .child(face)
+                .children(emoji)
+                .children(right)
+                .into_any_element(),
+        )
     }
 }
 
