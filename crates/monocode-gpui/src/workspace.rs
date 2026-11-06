@@ -134,6 +134,8 @@ pub(crate) struct Workspace {
     /// The sidebar shows the Agents zone (bots and groups) instead of Code
     /// (RailZoneSwitch's "personal").
     pub agents_zone: bool,
+    /// The bot or group Agents opens on: the last one used, else the Principal.
+    pub last_bot: Option<String>,
     /// The new single-sidebar layout can keep its full-height, square frame.
     pub new_layout_boxy: bool,
     pub project_rail_open: bool,
@@ -350,6 +352,7 @@ impl Default for Workspace {
             last_actions: HashMap::new(),
             classic_layout: false,
             agents_zone: false,
+            last_bot: None,
             // Fresh installs start on the boxy frame; saved choices are kept.
             new_layout_boxy: true,
             project_rail_open: true,

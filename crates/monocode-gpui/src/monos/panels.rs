@@ -19,6 +19,24 @@ pub(super) enum OverviewTab {
     News,
     /// The Principal's bots: who it handed work to.
     Bots,
+    /// A bot's subagents: what it ran in parallel.
+    Subagents,
+}
+/// MonoOverview's tab sets, in the order they show. A personal bot works in
+/// no project: no sessions to list and no code changes, but the subagents it
+/// runs in parallel; the Principal also reads every bot's news and leads the
+/// bots. Activity sits apart, beside them, since it follows the chat.
+pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
+    use OverviewTab::*;
+    if mono.is_group() {
+        &[Documents, Habits]
+    } else if mono.is_principal() {
+        &[News, Habits, Documents, Bots]
+    } else if mono.is_bot() {
+        &[Habits, Documents, Subagents]
+    } else {
+        &[Overview, Sessions, Documents, Habits, Changes]
+    }
 }
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum SettingsSection {
@@ -947,6 +965,16 @@ impl Monos {
             )
             .into_any_element()
     }
+    /// The tab shown: one the other kind of agent was left on falls back to
+    /// this kind's first.
+    pub(super) fn shown_overview_tab(&self, mono: &Mono) -> OverviewTab {
+        let tabs = overview_tabs(mono);
+        if self.overview_tab == OverviewTab::Activity || tabs.contains(&self.overview_tab) {
+            self.overview_tab
+        } else {
+            tabs[0]
+        }
+    }
     pub(super) fn select_overview(&mut self, tab: OverviewTab, cx: &mut Context<Self>) {
         if tab != OverviewTab::Changes {
             self.pause_changes(cx);
@@ -1028,56 +1056,40 @@ impl Monos {
         let Some(mono) = self.current() else {
             return div().into_any_element();
         };
+        let current = self.shown_overview_tab(mono);
         let progress = self
             .overview_reveal
             .as_ref()
-            .and_then(|r| r.progress(self.overview_tab, window, cx));
-        let overview = (OverviewTab::Overview, "Overview", "dashboard", 0);
-        let documents = (
-            OverviewTab::Documents,
-            "Documents",
-            "file",
-            mono.documents.len(),
-        );
-        let habits = (OverviewTab::Habits, "Habits", "clock", self.habits.len());
-        // A personal bot does not work in projects: no sessions to list and no
-        // code changes; the Principal also reads every bot's news and leads
-        // the bots (MonoOverview's BOT_TABS and PRINCIPAL_TABS).
-        let tabs: Vec<(OverviewTab, &str, &str, usize)> = if mono.is_principal() {
-            let unseen = self
-                .news
-                .feed_items()
-                .iter()
-                .filter(|item| !item.seen)
-                .count();
-            vec![
-                overview,
-                (OverviewTab::News, "News", "bell", unseen),
-                habits,
-                documents,
-                (OverviewTab::Bots, "Bots", "users", 0),
-            ]
-        } else if mono.is_bot() || mono.is_group() {
-            vec![overview, habits, documents]
-        } else {
-            vec![
-                overview,
-                (
-                    OverviewTab::Sessions,
-                    "Sub-agents",
-                    "message-multiple",
-                    mono.launches.len(),
-                ),
-                documents,
-                habits,
-                (
-                    OverviewTab::Changes,
+            .and_then(|r| r.progress(current, window, cx));
+        let tabs: Vec<(OverviewTab, &str, &str, usize)> = overview_tabs(mono)
+            .iter()
+            .map(|&tab| match tab {
+                OverviewTab::Overview => (tab, "Overview", "dashboard", 0),
+                OverviewTab::Sessions => {
+                    (tab, "Sub-agents", "message-multiple", mono.launches.len())
+                }
+                OverviewTab::Documents => (tab, "Documents", "file", mono.documents.len()),
+                OverviewTab::Habits => (tab, "Habits", "clock", self.habits.len()),
+                OverviewTab::Changes => (
+                    tab,
                     "Changes",
                     "file-diff",
                     self.project_changes.count(&mono.id),
                 ),
-            ]
-        };
+                OverviewTab::News => {
+                    let unseen = self
+                        .news
+                        .feed_items()
+                        .iter()
+                        .filter(|item| !item.seen)
+                        .count();
+                    (tab, "News", "bell", unseen)
+                }
+                OverviewTab::Bots => (tab, "Bots", "users", 0),
+                OverviewTab::Subagents => (tab, "Sub-agents", "users", 0),
+                OverviewTab::Activity => (tab, "Activity", "list-bullet", 0),
+            })
+            .collect();
         div()
             .id("mono-overview-tabs")
             .debug_selector(|| "mono-overview-tabs".into())
@@ -1091,7 +1103,7 @@ impl Monos {
             .items_center()
             .gap(px(2.))
             .children(tabs.into_iter().map(|(tab, label, glyph, count)| {
-                let selected = self.overview_tab == tab;
+                let selected = current == tab;
                 let unfolded = match progress {
                     Some((_, p)) if selected => p,
                     Some((closing, p)) if tab == closing => 1. - p,
@@ -1106,6 +1118,7 @@ impl Monos {
                     OverviewTab::Changes => "mono-overview-Changes",
                     OverviewTab::News => "mono-overview-News",
                     OverviewTab::Bots => "mono-overview-Bots",
+                    OverviewTab::Subagents => "mono-overview-Subagents",
                     OverviewTab::Activity => unreachable!(),
                 };
                 crate::project_tabs::tab_button(
@@ -1120,7 +1133,7 @@ impl Monos {
                 .on_click(cx.listener(move |this, _, _, cx| this.select_overview(tab, cx)))
             }))
             .child(crate::shell::titlebar_drag_area().flex_1().min_w_0())
-            .when(self.overview_tab == OverviewTab::Habits, |d| {
+            .when(current == OverviewTab::Habits, |d| {
                 d.child(
                     icon_button("mono-new-habit", "New habit", "plus")
                         .debug_selector(|| "mono-new-habit".into())
@@ -1134,9 +1147,7 @@ impl Monos {
             .child(
                 icon_button("mono-activity", "Show activity", "list-bullet")
                     .debug_selector(|| "mono-activity".into())
-                    .when(self.overview_tab == OverviewTab::Activity, |d| {
-                        d.bg(content(0.1))
-                    })
+                    .when(current == OverviewTab::Activity, |d| d.bg(content(0.1)))
                     .on_click(cx.listener(|this, _, _, cx| {
                         let tab = if this.overview_tab == OverviewTab::Activity {
                             this.overview_previous
@@ -1154,6 +1165,7 @@ impl Monos {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        self.overview_tab = self.shown_overview_tab(mono);
         self.ensure_changes_summary(mono, cx);
         if self.overview_tab == OverviewTab::Changes {
             self.ensure_changes(mono, window, cx);
@@ -1168,6 +1180,7 @@ impl Monos {
             OverviewTab::Changes => self.changes_list(mono, cx),
             OverviewTab::News => self.news_list(cx),
             OverviewTab::Bots => self.delegations_list(mono, cx),
+            OverviewTab::Subagents => self.subagents_list(mono, cx),
             OverviewTab::Activity => self.activity_view(mono, cx),
         };
         div()
@@ -1867,6 +1880,19 @@ impl Monos {
                 .hover(|s| s.bg(content(0.06)))
                 .child(label)
         };
+        // A bot is not a coding Mono: no heartbeat over projects and no
+        // defaults for sessions it starts. A group answers through its lead.
+        let personal = mono.is_personal();
+        let group = mono.is_group();
+        let group_model = format!(
+            "{} answers here with its own model, effort and permissions. Change them in its settings.",
+            self.roster
+                .monos
+                .iter()
+                .find(|m| m.is_principal())
+                .map(|m| m.label())
+                .unwrap_or_else(|| "The Principal".into())
+        );
         div().id("mono-general-settings").debug_selector(||"mono-general-settings".into())
             .flex_1().min_h_0().overflow_y_scroll().px_8().pt_6().pb_8()
             .child(div().text_size(px(14.)).font_weight(FontWeight::MEDIUM).child("General"))
@@ -1882,7 +1908,8 @@ impl Monos {
                     .rounded_md().font_weight(FontWeight::MEDIUM).hover(|s|s.bg(content(0.05))).child(name))
                 .when(mono.is_principal(),|d|d.child(super::bot_settings::orchestrator_badge())))
             .children(self.bot_identity_settings(mono, cx))
-            .child(heading("Model", None))
+            .when(group, |d| d.child(heading("Model", Some(&group_model))))
+            .when(!group, |d| d.child(heading("Model", None))
             .child(card()
                 .child(setting("Model",Some("What it thinks and replies with."),
                     div().id("mono-settings-model").role(Role::Button).aria_label(format!("Choose model, {model}"))
@@ -1911,7 +1938,7 @@ impl Monos {
                         .child(self.access_anchor.probe()).child(icon(access_icon,14.).when(mode==AccessMode::FullAccess,|i|i.text_color(rgb(0xffb900))))
                         .child(mode.label()).child(icon("chevron-down",12.))
                         .on_click(cx.listener(|this,_,w,cx|this.open_access_picker(w,cx))).into_any_element())
-                    .border_t_1().border_color(content(0.04))))
+                    .border_t_1().border_color(content(0.04)))))
             .children(self.bot_tools_settings(mono, cx))
             .child(heading("Projects",Some("It can see every session, note and folder in these.")))
             .child(card()
@@ -1947,7 +1974,7 @@ impl Monos {
                 .child(switch_setting("Group in a folder",&format!("Sessions it starts go in a “{}” folder in your project sidebar.",mono.label()),!mono.show_started_sessions_in_sidebar,
                     self.switch("mono-group-started",mono.show_started_sessions_in_sidebar&&mono.use_sidebar_folders,!mono.show_started_sessions_in_sidebar,|m,on|m.use_sidebar_folders=on,cx))
                     .border_t_1().border_color(content(0.04)))
-                .child(setting("Model",Some("For sessions it starts without naming one."),
+                .when(!personal, |d| d.child(setting("Model",Some("For sessions it starts without naming one."),
                     div().id("mono-subsession-model").role(Role::Button).aria_label(format!("Model for sessions it starts, {}",sub.model_label))
                         .h(px(28.)).px_1p5().mx(px(-6.)).rounded_md().flex().items_center().gap_2()
                         .text_size(px(12.)).text_color(content(0.85)).hover(|s|s.bg(content(0.06)))
@@ -1958,13 +1985,13 @@ impl Monos {
                 .when(!sub.efforts.is_empty(),|d|d.child(setting("Effort",None,
                     plain(SharedString::from("mono-subsession-effort"),sub.effort_label.clone()).child(self.subsession_effort_anchor.probe())
                         .on_click(cx.listener(|this,_,w,cx|this.open_subsession_effort_picker(w,cx))).into_any_element())
-                    .border_t_1().border_color(content(0.04)))))
-            .child(heading("Heartbeat",Some("When it has been quiet for a while, it looks over its recent work, sessions you left, your notes and inbox, and suggests what to do next. It never acts without asking.")))
+                    .border_t_1().border_color(content(0.04))))))
+            .when(!personal, |d| d.child(heading("Heartbeat",Some("When it has been quiet for a while, it looks over its recent work, sessions you left, your notes and inbox, and suggests what to do next. It never acts without asking.")))
             .child(card()
                 .child(switch_setting("Check in on its own","Quiet check-ins leave nothing behind; you only hear from it when it has an idea.",false,
                     self.switch("mono-heartbeat",mono.heartbeat_minutes>0,false,|m,on|m.heartbeat_minutes=if on {heartbeat::DEFAULT_MINUTES} else {0},cx)))
                 .child(setting("After it has been quiet for",None,self.heartbeat_intervals(mono,cx))
-                    .when(mono.heartbeat_minutes==0,|d|d.opacity(0.4)).border_t_1().border_color(content(0.04))))
+                    .when(mono.heartbeat_minutes==0,|d|d.opacity(0.4)).border_t_1().border_color(content(0.04)))))
             .child(heading("Conversation",None))
             .child(card().child(setting("Reset conversation",Some("Clear all messages and start fresh. Its soul, memory and habits stay."),
                 div().id("mono-reset").role(Role::Button).aria_label("Reset").flex().items_center().px_3().py_1p5().rounded_md().text_size(px(12.)).border_1().border_color(content(0.04)).text_color(rgb(0xff6467)).hover(|s|s.bg(rgb(0xfb2c36).opacity(0.1))).child("Reset")

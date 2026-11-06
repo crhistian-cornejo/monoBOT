@@ -17,7 +17,7 @@ impl Shell {
 
     /// The visible Mono as a drop target: its whole view, by edge.
     pub(super) fn mono_view_hit(&self, position: Point<Pixels>, cx: &App) -> Option<(i64, Edge)> {
-        if !self.mono_active(cx) || self.app_view_open() {
+        if !self.mono_active(cx) || self.app_view_open() || self.personal_mono_active(cx) {
             return None;
         }
         let bounds = self.mono_bounds.get()?;

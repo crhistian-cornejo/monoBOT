@@ -94,7 +94,7 @@ impl Monos {
         if let Some(waiting) = self.roster.get_mut(mono).and_then(|m| {
             m.pending_reports
                 .iter_mut()
-                .find(|report| report.strip_prefix("mono-card:").is_some_and(&same))
+                .find(|report| report.strip_prefix("mono-card:").is_some_and(same))
         }) {
             *waiting = format!("mono-card:{card}");
             self.save(cx);

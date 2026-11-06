@@ -192,6 +192,10 @@ impl Mono {
     pub fn is_principal(&self) -> bool {
         self.is_bot() && self.bot_role.as_deref() == Some("principal")
     }
+    /// Bots and groups live in the Agents zone, apart from the code workspace.
+    pub fn is_personal(&self) -> bool {
+        self.is_bot() || self.is_group()
+    }
     pub fn label(&self) -> String {
         if !self.name.trim().is_empty() {
             return self.name.clone();

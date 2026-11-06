@@ -13,6 +13,7 @@ mod dashboard;
 mod files;
 mod filters;
 mod floating;
+pub(crate) use floating::is_floating_window;
 mod groups;
 mod host;
 pub(crate) mod html;
@@ -160,6 +161,8 @@ pub(crate) struct Monos {
     groups: groups::Groups,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
+    /// The open bot's subagent runs, read from its chat until it changes.
+    subagent_runs: Option<(agents::RunsKey, Vec<agents::SubagentRun>)>,
     running: HashMap<i64, RunningHabit>,
     active_run: Option<i64>,
     completion_work: HashSet<(String, u64)>,
@@ -279,9 +282,9 @@ impl Monos {
                     }
                 });
             });
-            let monos = self
-                .roster
-                .monos
+            // The menu opens the floating chat, which moves between the
+            // personal agents only.
+            let monos = floating::personal_agents(&self.roster.monos)
                 .iter()
                 .map(|m| (m.id.clone(), m.label()))
                 .collect::<Vec<_>>();
@@ -416,6 +419,7 @@ impl Monos {
             activity_turn: None,
             rail_ids: Vec::new(),
             roles_menu: None,
+            subagent_runs: None,
             agent_calls: Default::default(),
             news: Default::default(),
             bot_settings: Default::default(),
@@ -466,9 +470,12 @@ impl Monos {
                 }
             }
         }));
-        if this.prefs.monos
-            && let Some(id) = active.filter(|id| this.roster.get(id).is_some())
-        {
+        // The Monos switch hides the coding Monos; bots and groups stay open.
+        if let Some(id) = active.filter(|id| {
+            this.roster
+                .get(id)
+                .is_some_and(|m| this.prefs.monos || m.is_personal())
+        }) {
             this.active = Some(id.clone());
             this.ensure_chat(&id, cx);
             this.reload_files(&id, cx);
@@ -1164,6 +1171,7 @@ impl Monos {
         if self.roster.get(id).is_some_and(Mono::is_principal) {
             self.mark_news_seen(cx);
         }
+        let mut overview = false;
         if self.active.as_deref() != Some(id) {
             self.save_open_file(cx);
             self.pause_changes(cx);
@@ -1175,8 +1183,24 @@ impl Monos {
             self.memory_adding = false;
             self.memory_edit = None;
             self.settings = None;
+            // A bot opens on what a person checks first: the Principal on
+            // its news, any other bot or group on what it is doing.
+            if let Some(mono) = self.roster.get(id).filter(|m| m.is_personal()) {
+                let first = panels::overview_tabs(mono)[0];
+                self.overview_previous = first;
+                self.overview_tab = if mono.is_principal() {
+                    OverviewTab::News
+                } else {
+                    OverviewTab::Activity
+                };
+                self.overview_reveal = None;
+                overview = true;
+            }
         }
         self.active = Some(id.into());
+        if overview {
+            self.show_overview(cx);
+        }
         self.ensure_chat(id, cx);
         self.reload_files(id, cx);
         cx.emit(TabOpened(id.into()));
@@ -1188,6 +1212,37 @@ impl Monos {
             }
         }
         self.save(cx);
+    }
+    /// App.tsx's openPersonalBot: the last bot or group used, else the
+    /// Principal, made now if there is none yet.
+    pub(crate) fn open_personal(
+        &mut self,
+        last: Option<&str>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let found = last
+            .filter(|id| self.roster.get(id).is_some_and(Mono::is_personal))
+            .map(str::to_owned)
+            .or_else(|| {
+                self.roster
+                    .monos
+                    .iter()
+                    .find(|m| m.is_principal())
+                    .map(|m| m.id.clone())
+            });
+        let created = found.is_none();
+        let Some(id) = found.or_else(|| {
+            self.roster
+                .create_bot(&self.root, "principal", false)
+                .map(|m| m.id.clone())
+        }) else {
+            return;
+        };
+        self.open(&id, window, cx);
+        if created {
+            self.changed(cx);
+        }
     }
     pub(crate) fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings.is_none()

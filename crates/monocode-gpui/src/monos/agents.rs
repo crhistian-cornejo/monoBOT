@@ -5,6 +5,27 @@
 use super::*;
 use gpui::{MouseDownEvent, Pixels, Point};
 use monocode_core::mono::bots;
+use monocode_core::tool::{
+    ToolCall, ToolState,
+    tasks::{AgentRun, Panel},
+};
+
+/// Which chat, how many rows and how much text they hold: a run's progress
+/// changes the text even when no row is added.
+pub(super) type RunsKey = (String, usize, usize);
+pub(super) type SubagentRun = (ToolCall, AgentRun);
+
+/// The subagents a chat ran, oldest first.
+fn subagent_runs(rows: &[monocode_core::transcript::Row]) -> Vec<SubagentRun> {
+    rows.iter()
+        .filter(|row| row.role == "tool")
+        .filter_map(|row| serde_json::from_str::<ToolCall>(&row.text).ok())
+        .filter_map(|call| match call.panel() {
+            Some(Panel::Agent(run)) => Some((call, run)),
+            _ => None,
+        })
+        .collect()
+}
 
 /// Which Monos a rail section lists.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -117,6 +138,91 @@ impl Monos {
             .children(intro.map(|card| div().px_2().pb_3().child(card)))
             .when_some(groups, |d, groups| d.child(divider()).child(groups))
             .children(self.roles_surface(cx))
+            .into_any_element()
+    }
+
+    /// A bot's Sub-agents tab (App.tsx's SubagentStack over its chat): each
+    /// subagent it ran in parallel, newest first.
+    pub(super) fn subagents_list(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
+        let (busy, key) = match self.chats.get(&mono.id) {
+            Some(chat) => {
+                let chat = chat.read(cx);
+                let rows = chat.mono_rows(cx);
+                let text: usize = rows.iter().map(|row| row.text.len()).sum();
+                (chat.busy, (mono.id.clone(), rows.len(), text))
+            }
+            None => (false, (mono.id.clone(), 0, 0)),
+        };
+        if self.subagent_runs.as_ref().is_none_or(|(at, _)| *at != key) {
+            let runs = self
+                .chats
+                .get(&mono.id)
+                .map(|chat| subagent_runs(chat.read(cx).mono_rows(cx)))
+                .unwrap_or_default();
+            self.subagent_runs = Some((key, runs));
+        }
+        let runs = self
+            .subagent_runs
+            .as_ref()
+            .map(|(_, runs)| runs.as_slice())
+            .unwrap_or_default();
+        if runs.is_empty() {
+            return panels::empty_state(
+                "users",
+                &format!(
+                    "Ask {} to research something in parallel, like comparing options or collecting news, and each subagent it runs shows up here.",
+                    mono.label()
+                ),
+            );
+        }
+        div()
+            .id("bot-subagents")
+            .debug_selector(|| "bot-subagents".into())
+            .size_full()
+            .overflow_y_scroll()
+            .px_2()
+            .py_2()
+            .flex()
+            .flex_col()
+            .gap(px(1.))
+            .children(runs.iter().rev().enumerate().map(|(ix, (call, run))| {
+                let name = run.display_name();
+                let status = run.status_line(&call.state);
+                let active = busy && call.state == ToolState::Running;
+                div()
+                    .id(("bot-subagent", ix))
+                    .role(Role::Label)
+                    .aria_label(format!("Subagent: {name}"))
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_2()
+                    .py_1()
+                    .text_size(px(13.))
+                    .line_height(px(20.))
+                    .child(crate::transcript::subagent_mascot(
+                        &name,
+                        &call.state,
+                        active,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .truncate()
+                            .text_color(content(0.8))
+                            .child(name),
+                    )
+                    .when(!status.is_empty(), |d| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(12.))
+                                .text_color(content(0.45))
+                                .child(status),
+                        )
+                    })
+            }))
             .into_any_element()
     }
 

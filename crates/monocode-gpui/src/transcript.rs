@@ -11,6 +11,7 @@ pub(crate) use history::{HistoryPager, PreparedHistory};
 mod links;
 mod live_phase;
 mod mascot;
+pub(crate) use mascot::subagent_mascot;
 mod measurements;
 mod mono_divider;
 mod outline;

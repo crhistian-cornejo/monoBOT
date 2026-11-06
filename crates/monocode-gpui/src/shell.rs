@@ -1212,14 +1212,18 @@ impl Shell {
         this.load_note_count(cx);
         this.observe_picker_preferences(cx);
         let mono_owner = cx.weak_entity();
-        let mono_active =
+        // Agents comes back on its bot; Code on the project's own Mono tab.
+        let mono_active = if this.workspace.agents_zone {
+            this.workspace.last_bot.clone()
+        } else {
             this.workspace
                 .scope_focus
                 .get(&this.tab_scope())
                 .and_then(|tab| match tab {
                     TitleTab::Mono { id, .. } => Some(id.clone()),
                     _ => None,
-                });
+                })
+        };
         let monos = cx.new(|cx| {
             crate::monos::Monos::new(
                 this.store.clone(),
@@ -1286,6 +1290,14 @@ impl Shell {
                 }
             }));
         this.monos = Some(monos);
+        // The restored Mono decides the zone, as opening it would.
+        if let Some(id) = this.monos.as_ref().and_then(|m| m.read(cx).active.clone()) {
+            let personal = this.mono_is_personal(&id, cx);
+            this.workspace.agents_zone = personal;
+            if personal && !this.workspace.classic_layout {
+                this.remember_title_tab(this.mono_tab(id, cx));
+            }
+        }
         this.bind_notices(cx);
         this.init_app_bridge(cx);
         for summary in summaries {
@@ -4171,6 +4183,7 @@ impl Shell {
         }
     }
     fn activate_session(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.leave_agents_zone(cx);
         if self.workspace.review_owners.contains_key(&id) {
             self.open_file_pane(id, window, cx);
             return;
@@ -5383,7 +5396,7 @@ impl Shell {
             | MenuTarget::AppTab(_) => {
                 let tab = match target {
                     MenuTarget::Tab(id) => TitleTab::Session(*id),
-                    MenuTarget::MonoTab(id) => self.mono_tab(id.clone()),
+                    MenuTarget::MonoTab(id) => self.mono_tab(id.clone(), cx),
                     MenuTarget::SearchTab => TitleTab::Search,
                     MenuTarget::AppTab(view) => TitleTab::App(*view),
                     _ => unreachable!(),
@@ -5812,7 +5825,7 @@ impl Shell {
                 self.run_title_tab_menu(TitleTab::Session(id), action, window, cx)
             }
             MenuTarget::MonoTab(id) => {
-                self.run_title_tab_menu(self.mono_tab(id), action, window, cx)
+                self.run_title_tab_menu(self.mono_tab(id, cx), action, window, cx)
             }
             MenuTarget::SearchTab => self.run_title_tab_menu(TitleTab::Search, action, window, cx),
             MenuTarget::AppTab(view) => {
@@ -7658,6 +7671,8 @@ impl Shell {
         let own = self.active_title_tab(cx).as_ref() == Some(&id);
         let source = match &id {
             TitleTab::Session(tab) => Some(DragSource::Tab(*tab)),
+            // A bot's tab only reorders: splits belong to the code workspace.
+            TitleTab::Mono { project, .. } if project.is_empty() => None,
             TitleTab::Mono { .. } => Some(DragSource::MonoTab),
             TitleTab::Search | TitleTab::App(_) => None,
         };
@@ -8483,6 +8498,12 @@ impl Render for Shell {
         if let Some(m) = &self.monos {
             m.read(cx).hide_html(cx);
             m.update(cx, |m, cx| m.bind_window(window, cx));
+        }
+        if self.workspace.agents_zone && self.settings.is_none() && !self.personal_mono_active(cx) {
+            let this = cx.entity();
+            window.defer(cx, move |window, cx| {
+                this.update(cx, |this, cx| this.settle_agents_zone(window, cx));
+            });
         }
         if let Some(inbox) = &self.inbox {
             inbox.read(cx).hide_html(cx);

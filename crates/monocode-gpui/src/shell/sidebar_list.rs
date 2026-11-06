@@ -674,25 +674,86 @@ impl Shell {
             .border_1()
             .border_color(content(0.1))
             .text_size(px(12.))
-            .child(
-                option("code", "Code", "code", !agents)
-                    .on_click(cx.listener(|this, _, _, cx| this.set_agents_zone(false, cx))),
-            )
-            .child(
-                option("agents", "Agents", "bot", agents)
-                    .on_click(cx.listener(|this, _, _, cx| this.set_agents_zone(true, cx))),
-            )
+            .child(option("code", "Code", "code", !agents).on_click(
+                cx.listener(|this, _, window, cx| this.set_agents_zone(false, window, cx)),
+            ))
+            .child(option("agents", "Agents", "bot", agents).on_click(
+                cx.listener(|this, _, window, cx| this.set_agents_zone(true, window, cx)),
+            ))
             .into_any_element()
     }
 
-    pub(super) fn set_agents_zone(&mut self, agents: bool, cx: &mut Context<Self>) {
+    /// App.tsx's onRailZoneChange: Agents always shows one of the bots, and
+    /// Code puts the open bot away for the project's own tab.
+    pub(super) fn set_agents_zone(
+        &mut self,
+        agents: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.workspace.agents_zone == agents {
             return;
         }
         self.workspace.agents_zone = agents;
         self.refresh_sidebar_structure(cx);
+        if agents {
+            self.open_personal_bot(window, cx);
+        } else if self.personal_mono_active(cx) {
+            if let Some(monos) = self.monos.clone() {
+                monos.update(cx, |m, cx| m.close(cx));
+            }
+            if !self.restore_scope_tab(window, cx) {
+                self.ensure_project_session(window, cx);
+            }
+            self.focus_active(window, cx);
+        }
         self.persist(cx);
         cx.notify();
+    }
+
+    /// The bot Agents opens on: the last one used, else the Principal.
+    pub(super) fn open_personal_bot(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(monos) = self.monos.clone() else {
+            return;
+        };
+        let last = self.workspace.last_bot.clone();
+        monos.update(cx, |m, cx| m.open_personal(last.as_deref(), window, cx));
+    }
+
+    pub(super) fn personal_mono_active(&self, cx: &App) -> bool {
+        self.monos
+            .as_ref()
+            .and_then(|m| m.read(cx).active.clone())
+            .is_some_and(|id| self.mono_is_personal(&id, cx))
+    }
+
+    /// What leaves Agents for the code workspace (a session, an app view,
+    /// Search) takes the sidebar back to Code. Agents left with nothing open
+    /// opens a bot, as Personal never shows a coding workspace.
+    pub(super) fn settle_agents_zone(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !self.workspace.agents_zone
+            || self.settings.is_some()
+            || self.monos.is_none()
+            || self.personal_mono_active(cx)
+        {
+            return;
+        }
+        if self.mono_active(cx) || self.app_view_open() || self.search_page() {
+            self.workspace.agents_zone = false;
+            self.refresh_sidebar_structure(cx);
+            self.persist(cx);
+            cx.notify();
+        } else {
+            self.open_personal_bot(window, cx);
+        }
+    }
+
+    /// Opening a session belongs to Code.
+    pub(super) fn leave_agents_zone(&mut self, cx: &mut Context<Self>) {
+        if self.workspace.agents_zone {
+            self.workspace.agents_zone = false;
+            self.refresh_sidebar_structure(cx);
+        }
     }
 
     pub(super) fn sidebar_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {

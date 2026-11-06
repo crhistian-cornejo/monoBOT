@@ -769,7 +769,9 @@ impl Shell {
         )
         .debug_selector(|| "rail-zone-toggle".into())
         .size(px(32.))
-        .on_click(cx.listener(move |this, _, _, cx| this.set_agents_zone(!agents, cx)));
+        .on_click(
+            cx.listener(move |this, _, window, cx| this.set_agents_zone(!agents, window, cx)),
+        );
         if agents {
             let rail = self
                 .monos
@@ -2206,7 +2208,7 @@ mod tests {
     fn the_agents_zone_lists_bots_and_makes_one_from_the_role_menu(cx: &mut TestAppContext) {
         let (window, _, _) = super::super::tests::window(cx);
         window
-            .update(cx, |shell, _, cx| shell.set_agents_zone(true, cx))
+            .update(cx, |shell, w, cx| shell.set_agents_zone(true, w, cx))
             .unwrap();
         cx.run_until_parked();
         let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
@@ -2218,7 +2220,28 @@ mod tests {
         assert!(visual.debug_bounds("sidebar-agents-title").is_some());
         assert!(visual.debug_bounds("sidebar-project-button").is_none());
         assert!(visual.debug_bounds("sidebar-mono-button").is_none());
-        // No bot yet: the "New bot" row opens the role menu.
+        // As Tauri, the zone never stands empty: with no bot yet it makes
+        // the Principal and opens it, which then wears Orchestrator.
+        window
+            .update(visual, |shell, _, cx| {
+                let monos = shell.monos.clone().unwrap();
+                let monos = monos.read(cx);
+                let principal = monos
+                    .roster
+                    .monos
+                    .iter()
+                    .find(|m| m.is_principal())
+                    .unwrap();
+                assert_eq!(monos.active.as_deref(), Some(principal.id.as_str()));
+                assert_eq!(
+                    shell.workspace.last_bot.as_deref(),
+                    Some(principal.id.as_str())
+                );
+            })
+            .unwrap();
+        assert!(visual.debug_bounds("agents-principal-new").is_none());
+        assert!(visual.debug_bounds("mono-rail-orchestrator").is_some());
+        // The "New bot" row opens the role menu.
         let row = visual.debug_bounds("new-bot").unwrap();
         visual.simulate_click(row.center(), Default::default());
         visual.run_until_parked();
@@ -2230,7 +2253,11 @@ mod tests {
             .update(visual, |shell, _, cx| {
                 let monos = shell.monos.clone().unwrap();
                 let roster = &monos.read(cx).roster;
-                let bot = roster.monos.iter().find(|m| m.is_bot()).unwrap();
+                let bot = roster
+                    .monos
+                    .iter()
+                    .find(|m| m.is_bot() && !m.is_principal())
+                    .unwrap();
                 assert_eq!(bot.bot_role.as_deref(), Some("finance"));
                 assert_eq!(bot.name, "Finance");
                 assert!(bot.specialty.as_deref().unwrap().starts_with("Money"));
@@ -2240,17 +2267,28 @@ mod tests {
         // A new bot opens on its settings; close them first.
         visual.simulate_keystrokes("escape");
         visual.run_until_parked();
-        // With no Principal, its row makes one; it then wears Orchestrator.
-        let principal = visual.debug_bounds("agents-principal-new").unwrap();
-        visual.simulate_click(principal.center(), Default::default());
-        visual.run_until_parked();
+        // Leaving for Code closes the open bot; coming back reopens it.
         window
-            .update(visual, |shell, _, cx| {
+            .update(visual, |shell, w, cx| {
                 let monos = shell.monos.clone().unwrap();
-                assert!(monos.read(cx).roster.monos.iter().any(|m| m.is_principal()));
+                let finance = monos
+                    .read(cx)
+                    .roster
+                    .monos
+                    .iter()
+                    .find(|m| m.bot_role.as_deref() == Some("finance"))
+                    .unwrap()
+                    .id
+                    .clone();
+                assert_eq!(shell.workspace.last_bot.as_deref(), Some(finance.as_str()));
+                shell.set_agents_zone(false, w, cx);
+                assert!(!shell.workspace.agents_zone);
+                assert!(!shell.personal_mono_active(cx));
+                shell.set_agents_zone(true, w, cx);
+                assert_eq!(monos.read(cx).active.as_deref(), Some(finance.as_str()));
             })
             .unwrap();
-        assert!(visual.debug_bounds("mono-rail-orchestrator").is_some());
+        visual.run_until_parked();
         // The original layout: the project rail holds the zone, without
         // Search, Inbox and Notes.
         window

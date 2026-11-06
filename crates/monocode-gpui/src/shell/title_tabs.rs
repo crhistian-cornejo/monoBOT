@@ -40,7 +40,7 @@ impl Shell {
         if std::mem::take(&mut self.skip_tab_click) {
             return;
         }
-        self.open_title_tab(&self.mono_tab(id.into()), window, cx);
+        self.open_title_tab(&self.mono_tab(id.into(), cx), window, cx);
     }
     pub(super) fn tab_scope(&self) -> String {
         format!(
@@ -50,12 +50,33 @@ impl Shell {
         )
     }
 
-    pub(super) fn mono_tab(&self, id: String) -> TitleTab {
+    pub(super) fn mono_tab(&self, id: String, cx: &App) -> TitleTab {
+        // A bot or group works in no project: one tab, shown only in Agents.
+        if self.mono_is_personal(&id, cx) {
+            return TitleTab::Mono {
+                id,
+                project: String::new(),
+                worktree: String::new(),
+            };
+        }
         TitleTab::Mono {
             id,
             project: self.workspace.project.clone(),
             worktree: self.working_copy().into(),
         }
+    }
+
+    pub(super) fn mono_is_personal(&self, id: &str, cx: &App) -> bool {
+        self.monos
+            .as_ref()
+            .and_then(|m| m.read(cx).roster.get(id))
+            .is_some_and(|m| m.is_personal())
+    }
+
+    /// App.tsx's agentsTitleBar: in the Agents zone the strip holds only the
+    /// open bots and groups; the project's tabs wait for Code.
+    pub(super) fn agents_title_bar(&self) -> bool {
+        !self.workspace.classic_layout && self.workspace.agents_zone
     }
 
     /// Every tab this scope shows, pinned ones first in pin order, then the
@@ -78,17 +99,20 @@ impl Shell {
     }
 
     fn scoped_tabs(&self, cx: &App) -> Vec<TitleTab> {
+        let agents = self.agents_title_bar();
+        let roster = self.monos.as_ref().map(|m| &m.read(cx).roster);
         self.workspace
             .title_order
             .iter()
             .filter(|tab| match tab {
-                TitleTab::Search => !self.workspace.preferences.search_panel,
+                TitleTab::Search => !agents && !self.workspace.preferences.search_panel,
                 TitleTab::App(view) => {
-                    !self.workspace.classic_layout
+                    !agents
+                        && !self.workspace.classic_layout
                         && (*view != app_views::AppView::Notes || self.workspace.preferences.notes)
                 }
                 TitleTab::Session(tab) => {
-                    self.workspace.tabs.contains(tab) && {
+                    !agents && self.workspace.tabs.contains(tab) && {
                         let id = self.workspace.scope_pane(*tab);
                         self.session_summaries
                             .contains_key(&self.workspace.session_for_pane(id))
@@ -104,16 +128,19 @@ impl Shell {
                     id,
                     project,
                     worktree,
-                } => {
-                    !self.workspace.classic_layout
-                        && *project == self.workspace.project
-                        && path_key(worktree) == path_key(self.working_copy())
-                        && self.workspace.preferences.monos
-                        && self
-                            .monos
-                            .as_ref()
-                            .is_some_and(|m| m.read(cx).roster.get(id).is_some())
-                }
+                } => match roster.and_then(|r| r.get(id)) {
+                    // A tab saved before bots left the projects has a scope
+                    // of its own; the scopeless one stands for it.
+                    Some(mono) if mono.is_personal() => agents && project.is_empty(),
+                    Some(_) => {
+                        !agents
+                            && !self.workspace.classic_layout
+                            && *project == self.workspace.project
+                            && path_key(worktree) == path_key(self.working_copy())
+                            && self.workspace.preferences.monos
+                    }
+                    None => false,
+                },
             })
             .cloned()
             .collect()
@@ -129,7 +156,7 @@ impl Shell {
         self.monos
             .as_ref()
             .and_then(|m| m.read(cx).active.clone())
-            .map(|id| self.mono_tab(id))
+            .map(|id| self.mono_tab(id, cx))
             .or_else(|| self.workspace.active_tab().map(TitleTab::Session))
     }
 
@@ -152,7 +179,10 @@ impl Shell {
         if !self.workspace.title_order.contains(&tab) {
             self.workspace.title_order.push(tab.clone());
         }
-        self.workspace.scope_focus.insert(self.tab_scope(), tab);
+        // A project scope returns to its own tab, never to a bot's.
+        if !matches!(&tab, TitleTab::Mono { project, .. } if project.is_empty()) {
+            self.workspace.scope_focus.insert(self.tab_scope(), tab);
+        }
     }
 
     pub(super) fn mono_opened(&mut self, id: String, cx: &mut Context<Self>) {
@@ -164,6 +194,19 @@ impl Shell {
         {
             return;
         }
+        // A bot or group belongs to Agents; a coding Mono, to Code.
+        let personal = self.mono_is_personal(&id, cx);
+        if personal {
+            self.workspace.last_bot = Some(id.clone());
+            self.workspace.title_order.retain(|tab| {
+                !matches!(tab, TitleTab::Mono { id: other, project, .. }
+                    if *other == id && !project.is_empty())
+            });
+        }
+        if self.workspace.agents_zone != personal {
+            self.workspace.agents_zone = personal;
+            self.refresh_sidebar_structure(cx);
+        }
         self.navigation_revision += 1;
         self.selected_sessions.clear();
         self.selection_anchor = None;
@@ -173,7 +216,7 @@ impl Shell {
         self.leave_app_search(cx);
         self.close_preview(cx);
         self.review_focused = false;
-        self.remember_title_tab(self.mono_tab(id));
+        self.remember_title_tab(self.mono_tab(id, cx));
         self.reveal_active_tab(cx);
         self.persist(cx);
         cx.notify();
@@ -239,7 +282,7 @@ impl Shell {
             }
             return;
         }
-        self.close_title_tabs(&[self.mono_tab(id.into())], None, window, cx);
+        self.close_title_tabs(&[self.mono_tab(id.into(), cx)], None, window, cx);
     }
 
     pub(super) fn run_title_tab_menu(
@@ -364,6 +407,9 @@ impl Shell {
             self.pane_motion = None;
             if let Some(tab) = next {
                 self.open_title_tab(&tab, window, cx);
+            } else if self.agents_title_bar() {
+                // Agents never falls back to the code workspace.
+                self.open_personal_bot(window, cx);
             } else {
                 self.ensure_project_session(window, cx);
             }

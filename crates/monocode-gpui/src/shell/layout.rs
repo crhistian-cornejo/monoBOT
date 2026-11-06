@@ -181,7 +181,7 @@ impl Shell {
         if !self.workspace.classic_layout
             && let Some(id) = self.monos.as_ref().and_then(|m| m.read(cx).active.clone())
         {
-            self.remember_title_tab(self.mono_tab(id));
+            self.remember_title_tab(self.mono_tab(id, cx));
             self.reveal_active_tab(cx);
         }
         if let Some(search) = &self.app_search {

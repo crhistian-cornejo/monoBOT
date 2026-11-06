@@ -591,11 +591,12 @@ fn floating_chat_leaves_the_workspace_selection_alone(cx: &mut TestAppContext) {
     let other = cx.update(|cx| {
         s.manager.update(cx, |m, cx| {
             let before = m.active.clone();
-            let id = m.create_floating(Vec::new(), cx);
+            let id = m.create_floating(cx).unwrap();
             assert_eq!(
                 m.active, before,
-                "a panel's new Mono stays out of the workspace"
+                "a panel's new bot stays out of the workspace"
             );
+            assert!(m.roster.get(&id).unwrap().is_bot());
             m.open_floating(id.clone(), cx);
             assert_eq!(m.active, before);
             id
@@ -2404,4 +2405,62 @@ fn the_principal_reads_its_bots_news_and_who_it_asked(cx: &mut TestAppContext) {
     visual.run_until_parked();
     assert!(visual.debug_bounds("bot-delegations").is_some());
     let _ = bot;
+}
+
+#[gpui::test]
+fn bots_open_on_their_own_overview_tabs(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let (principal, bot) = s.manager.update(cx, |m, _| {
+        let root = m.root.clone();
+        let principal = m
+            .roster
+            .create_bot(&root, "principal", false)
+            .unwrap()
+            .id
+            .clone();
+        let bot = m
+            .roster
+            .create_bot(&root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        (principal, bot)
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    let open = |visual: &mut gpui::VisualTestContext, id: &str| {
+        s.window
+            .update(visual, |_, w, cx| s.manager.update(cx, |m, cx| m.open(id, w, cx)))
+            .unwrap();
+        visual.run_until_parked();
+    };
+    open(visual, &principal);
+    s.manager.update(visual, |m, _| {
+        let mono = m.roster.get(&principal).unwrap();
+        assert!(m.overview_tab == OverviewTab::News);
+        assert!(m.shown_overview_tab(mono) == OverviewTab::News);
+    });
+    open(visual, &bot);
+    s.manager.update(visual, |m, _| {
+        let mono = m.roster.get(&bot).unwrap();
+        assert!(m.overview_tab == OverviewTab::Activity);
+        assert!(m.overview_previous == OverviewTab::Habits);
+        assert!(
+            panels::overview_tabs(mono)
+                == [
+                    OverviewTab::Habits,
+                    OverviewTab::Documents,
+                    OverviewTab::Subagents
+                ]
+        );
+    });
+    // A coding Mono keeps whatever overview tab was open.
+    s.manager
+        .update(visual, |m, cx| m.select_overview(OverviewTab::Documents, cx));
+    open(visual, &s.id);
+    s.manager.update(visual, |m, _| {
+        let mono = m.roster.get(&s.id).unwrap();
+        assert!(m.shown_overview_tab(mono) == OverviewTab::Documents);
+        assert!(panels::overview_tabs(mono).contains(&OverviewTab::Sessions));
+    });
 }

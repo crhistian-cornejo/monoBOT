@@ -95,7 +95,7 @@ const TALK: [Frame; 10] = [
 
 /// A 12px sprite centered in the same 14px icon slot as the React row.
 /// Activity is independent of state: a pending run can already have settled.
-pub(super) fn subagent_mascot(name: &str, state: &ToolState, active: bool) -> AnyElement {
+pub(crate) fn subagent_mascot(name: &str, state: &ToolState, active: bool) -> AnyElement {
     let color = match state {
         ToolState::Failed | ToolState::Cancelled => rgb(0xf87171).into(),
         ToolState::Running => content(0.70),

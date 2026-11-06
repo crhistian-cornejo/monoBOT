@@ -502,7 +502,7 @@ fn new_layout_projects_restore_the_last_session_or_mono_tab(cx: &mut TestAppCont
                     assert!(
                         shell
                             .visible_tabs(cx)
-                            .contains(&shell.mono_tab(targets[ix].2.clone()))
+                            .contains(&shell.mono_tab(targets[ix].2.clone(), cx))
                     );
                 })
                 .unwrap();
@@ -634,7 +634,7 @@ fn original_layout_hides_saved_mono_tabs_until_returning_to_new_layout(cx: &mut 
         let (mono_tab, mono_selector) = window
             .update(visual, |shell, _, cx| {
                 let id = shell.mono_manager().read(cx).active.clone().unwrap();
-                let tab = shell.mono_tab(id.clone());
+                let tab = shell.mono_tab(id.clone(), cx);
                 assert!(shell.visible_tabs(cx).contains(&tab));
                 shell.toggle_layout(cx);
                 (

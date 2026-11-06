@@ -1332,6 +1332,9 @@ impl Monos {
         self.roster
             .monos
             .iter()
+            // Bots and groups keep their own wakes and habits; the heartbeat
+            // looks over projects, which is a coding Mono's work.
+            .filter(|m| !m.is_personal())
             .filter(|m| m.heartbeat_minutes > 0 && m.session_id.is_some() && m.outbox.is_empty())
             .filter(|m| !self.chats.get(&m.id).is_some_and(|v| v.read(cx).busy))
             .filter(|m| !self.inflight.contains_key(&m.id))
