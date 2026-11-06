@@ -613,6 +613,9 @@ impl SpreadsheetView {
             .overflow_hidden()
             .bg(background_base());
         for col in cols.0..=cols.1.min(grid.cols().saturating_sub(1)) {
+            if col >= grid.cols() {
+                break;
+            }
             let size = grid.xs[col + 1] - grid.xs[col];
             if size <= 0. {
                 continue;
@@ -658,6 +661,9 @@ impl SpreadsheetView {
             .overflow_hidden()
             .bg(background_base());
         for row in rows.0..=rows.1.min(grid.rows().saturating_sub(1)) {
+            if row >= grid.rows() {
+                break;
+            }
             let size = grid.ys[row + 1] - grid.ys[row];
             if size <= 0. {
                 continue;

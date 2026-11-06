@@ -238,6 +238,8 @@ Traducir `src/features/groups/model/*` (rondas, asientos, menciones, actividad, 
 | `468bec43` `580a9d13` | Lector de papers: PDFs en Documentos, pasajes citados, sitio de la cita en el PDF, añadir al chat las palabras seleccionadas |
 | `70fe70f1` `a7e33ad4` | Gráficos y explicaciones en línea: Tauri ya usa el mismo `crates/visual`; solo hay que verificar que se ven igual en las dos apps |
 
+Hecho en la nativa (`crates/monocode-gpui/src/file_editor/`): visores de `.xlsx/.xlsm` (`spreadsheet.rs`, `spreadsheet_chart.rs`, `chart_scale.rs`), de `.csv/.tsv` como vista previa de la hoja, de `.docx` (`word.rs`) y de `.pptx` (`deck.rs`), con la lectura del core en segundo plano (`office.rs`). Pendiente: PDF; girar y voltear formas en las diapositivas; título vertical del eje Y en los gráficos; paginación exacta de Word (las páginas se llenan con una estimación de la altura de cada bloque); archivos remotos.
+
 ### Fase 10: dictado y voz
 
 | Commit | Qué |
