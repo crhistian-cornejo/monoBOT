@@ -142,6 +142,20 @@ pub(crate) fn floating_panel(window: &Window, resizable: bool) {
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
 }
+/// Tauri's floating chat is undecorated: drop the title bar so AppKit draws
+/// square corners, and keep the panel's shadow.
+#[cfg(not(test))]
+pub(crate) fn square_corners(window: &Window) {
+    use objc2_app_kit::NSWindowStyleMask;
+    let Some(window) = ns_window(window) else {
+        return;
+    };
+    window.setStyleMask(
+        window.styleMask() & !(NSWindowStyleMask::Titled | NSWindowStyleMask::FullSizeContentView),
+    );
+    window.setHasShadow(true);
+    window.invalidateShadow();
+}
 /// quick_composer.rs's `quick_composer_fit`: grow or shrink to the card in
 /// one frame update, keeping the top edge where it was so the prompt never
 /// moves while a picker opens below it.

@@ -5,8 +5,8 @@
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 use super::*;
 use gpui::{Bounds, WindowBounds, WindowKind, WindowOptions, point, size};
-/// A 384pt conversation plus the 56pt Mono rail beside it.
-const WIDTH: f32 = 440.;
+/// A 384pt conversation plus the 36pt agent rail beside it.
+const WIDTH: f32 = 420.;
 const HEIGHT: f32 = 560.;
 const MARGIN: f32 = 12.;
 struct Floating {
@@ -31,14 +31,32 @@ fn drag(window: &mut Window) {
     #[cfg(not(target_os = "macos"))]
     let _ = window;
 }
-/// A header button: 28pt, and it never starts a window move.
+/// The windows that hold a floating chat. Their conversations draw the
+/// square, compact composer, as Tauri's `MonoComposer square`.
+#[derive(Default)]
+struct FloatingWindows(std::collections::HashSet<gpui::WindowId>);
+impl gpui::Global for FloatingWindows {}
+/// Whether this window is a floating chat panel.
+pub(crate) fn is_floating_window(window: &Window, cx: &App) -> bool {
+    cx.try_global::<FloatingWindows>()
+        .is_some_and(|w| w.0.contains(&window.window_handle().window_id()))
+}
+/// The personal agents the panel moves between: the Principal first, then
+/// the bots and the groups, as the Agents zone lists them. Coding Monos
+/// stay in the workspace.
+pub(crate) fn personal_agents(monos: &[Mono]) -> Vec<Mono> {
+    let mut agents: Vec<Mono> = monos.iter().filter(|m| m.is_personal()).cloned().collect();
+    agents.sort_by_key(|m| (!m.is_principal(), m.is_group()));
+    agents
+}
+/// A header button: 22pt, and it never starts a window move.
 fn header_button(
     id: &'static str,
     label: &'static str,
     path: &'static str,
 ) -> gpui::Stateful<gpui::Div> {
     icon_button_hover(id, label, path, 0.08)
-        .size(px(28.))
+        .size(px(22.))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 fn status_label(state: &str) -> &'static str {
@@ -100,18 +118,18 @@ impl Floating {
         div()
             .id("floating-mono-rail")
             .role(Role::Navigation)
-            .aria_label("Monos")
-            .w(px(56.))
+            .aria_label("Agents")
+            .w(px(36.))
             .h_full()
             .flex_shrink_0()
             .overflow_y_scroll()
             // Puts the first mascot's center level with the header's.
-            .pt(px(17.))
-            .pb_3()
+            .pt(px(4.))
+            .pb(px(6.))
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(6.))
+            .gap(px(2.))
             .on_mouse_down(MouseButton::Left, |_, window, _| drag(window))
             .children(roster.into_iter().map(|mono| {
                 let id = mono.id.clone();
@@ -134,7 +152,7 @@ impl Floating {
                             .items_center()
                             .child(
                                 div()
-                                    .w(px(4.))
+                                    .w(px(2.))
                                     .h(px(if selected { 20. } else { 8. }))
                                     .bg(content(1.))
                                     .when(!selected, |d| {
@@ -148,15 +166,14 @@ impl Floating {
                             .id(SharedString::from(format!("floating-mono-button-{id}")))
                             .role(Role::Button)
                             .aria_label(mono.label())
-                            .size(px(32.))
-                            .rounded_lg()
+                            .size(px(26.))
                             .flex()
                             .items_center()
                             .justify_center()
                             .cursor_pointer()
                             .when(!selected, |d| d.opacity(0.4).hover(|s| s.opacity(1.)))
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                            .child(avatar::avatar(&mono.mascot, mono.color, "idle", 28., true))
+                            .child(avatar::avatar(&mono.mascot, mono.color, "idle", 20., true))
                             .on_click(cx.listener(move |this, _, window, cx| {
                                 if this.selected != id {
                                     this.select(id.clone(), window, cx);
@@ -167,11 +184,9 @@ impl Floating {
                         div()
                             .absolute()
                             .top(px(2.))
-                            .right(px(10.))
-                            .size(px(8.))
+                            .right(px(7.))
+                            .size(px(6.))
                             .rounded_full()
-                            .border_1()
-                            .border_color(shell_fill())
                             .bg(status_fill(&state, mono.color)),
                     )
             }))
@@ -179,10 +194,9 @@ impl Floating {
                 div()
                     .id("floating-new-mono")
                     .role(Role::Button)
-                    .aria_label("New mono")
-                    .size(px(32.))
+                    .aria_label("New bot")
+                    .size(px(26.))
                     .flex_shrink_0()
-                    .rounded_lg()
                     .border_1()
                     .border_color(content(0.1))
                     .bg(content(0.05))
@@ -199,17 +213,13 @@ impl Floating {
                             .group_hover("floating-new-mono", |s| s.text_color(content(1.))),
                     )
                     .on_click(cx.listener(|this, _, window, cx| {
-                        // Shown here in place of the chat that asked, as in
-                        // Tauri; the workspace keeps its own selection.
-                        let id = this.owner.update(cx, |owner, cx| {
-                            let projects = owner
-                                .roster
-                                .get(&this.selected)
-                                .map(|m| m.projects.clone())
-                                .unwrap_or_default();
-                            owner.create_floating(projects, cx)
-                        });
-                        this.select(id, window, cx);
+                        // A blank bot, shown here in place of the chat that
+                        // asked, as in Tauri; the workspace keeps its own
+                        // selection. Its model is set in its own settings.
+                        let id = this.owner.update(cx, |owner, cx| owner.create_floating(cx));
+                        if let Some(id) = id {
+                            this.select(id, window, cx);
+                        }
                     })),
             )
     }
@@ -225,8 +235,8 @@ impl Floating {
             .flex()
             .items_center()
             .gap_2()
-            .px_3()
-            .py_3()
+            .px_2()
+            .py(px(6.))
             .border_b_1()
             .border_color(content(0.08))
             .on_mouse_down(MouseButton::Left, |_, window, _| drag(window))
@@ -234,27 +244,29 @@ impl Floating {
                 &mono.mascot,
                 mono.color,
                 state,
-                28.,
+                20.,
                 state == "idle",
             ))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .min_h(px(28.))
+                    .min_h(px(22.))
                     .flex()
-                    .flex_col()
-                    .justify_center()
+                    .items_center()
+                    .gap_2()
                     .child(
                         div()
+                            .min_w_0()
                             .truncate()
-                            .text_size(px(13.))
+                            .text_size(px(12.))
                             .line_height(px(16.))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .child(mono.label()),
                     )
                     .child(
                         div()
+                            .flex_shrink_0()
                             .flex()
                             .items_center()
                             .gap(px(6.))
@@ -263,7 +275,7 @@ impl Floating {
                             .text_color(content(0.45))
                             .child(
                                 div()
-                                    .size(px(8.))
+                                    .size(px(6.))
                                     .flex_shrink_0()
                                     .rounded_full()
                                     .bg(status_fill(state, mono.color)),
@@ -326,14 +338,13 @@ impl gpui::Render for Floating {
         }
         let owner = self.owner.read(cx);
         let chat = owner.chats.get(&self.selected).cloned();
-        let roster = owner.roster.monos.clone();
+        let roster = personal_agents(&owner.roster.monos);
         let mono = owner.roster.get(&self.selected).cloned();
         let failure = owner.error.clone();
         let (state, busy) = chat.as_ref().map_or(("idle".to_owned(), false), |c| {
             let c = c.read(cx);
             (c.mono_status().to_owned(), c.busy)
         });
-        let light = is_light();
         div()
             .id("floating-mono")
             .size_full()
@@ -346,32 +357,25 @@ impl gpui::Render for Floating {
                 }
             }))
             .child(
-                // The card's spread shadow: it shades the rail and the gaps
-                // around the chat, never the chat itself.
-                div()
-                    .size_full()
-                    .bg(black(if light { 0.05 } else { 0.28 }))
-                    .flex()
-                    .child(self.rail(roster, cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .my(px(6.))
-                            .mr(px(6.))
-                            .rounded(px(10.))
-                            .overflow_hidden()
-                            .bg(floating_fill())
-                            .when_some(mono.clone(), |d, mono| {
-                                d.child(self.header(&mono, &state, busy, cx))
-                            })
-                            .map(|d| match (chat, mono) {
-                                (Some(chat), Some(_)) => {
-                                    d.child(div().flex_1().min_h_0().child(chat))
-                                }
-                                (_, mono) => d.child(
+                // Flush with the rail and the window: square, divided by a
+                // single line, as Tauri's card.
+                div().size_full().flex().child(self.rail(roster, cx)).child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .overflow_hidden()
+                        .border_l_1()
+                        .border_color(content(0.1))
+                        .bg(floating_fill())
+                        .when_some(mono.clone(), |d, mono| {
+                            d.child(self.header(&mono, &state, busy, cx))
+                        })
+                        .map(|d| match (chat, mono) {
+                            (Some(chat), Some(_)) => d.child(div().flex_1().min_h_0().child(chat)),
+                            (_, mono) => {
+                                d.child(
                                     div()
                                         .flex_1()
                                         .min_h_0()
@@ -399,9 +403,10 @@ impl gpui::Render for Floating {
                                                     "Loading conversation…".into()
                                                 })),
                                         ),
-                                ),
-                            }),
-                    ),
+                                )
+                            }
+                        }),
+                ),
             )
     }
 }
@@ -484,18 +489,18 @@ impl Monos {
         }
         cx.notify();
     }
-    /// Tauri's floating `create`: add a Mono without opening it in the
+    /// Tauri's floating `create`: add a blank bot without opening it in the
     /// workspace, so the panel that asked can show it.
-    pub(super) fn create_floating(
-        &mut self,
-        projects: Vec<String>,
-        cx: &mut Context<Self>,
-    ) -> String {
-        let id = self.roster.create(projects).id.clone();
+    pub(super) fn create_floating(&mut self, cx: &mut Context<Self>) -> Option<String> {
+        let id = self
+            .roster
+            .create_bot(&self.root, "custom", true)?
+            .id
+            .clone();
         self.save(cx);
         self.ensure_chat(&id, cx);
         self.changed(cx);
-        id
+        Some(id)
     }
     pub(super) fn open_floating(&mut self, id: String, cx: &mut Context<Self>) {
         if self.roster.get(&id).is_none() {
@@ -577,9 +582,15 @@ impl Monos {
             let window_owner = owner.clone();
             let result = cx.open_window(options, |window, cx| {
                 #[cfg(all(target_os = "macos", not(test)))]
-                crate::traffic_lights::floating_panel(window, true);
-                #[cfg(any(not(target_os = "macos"), test))]
-                let _ = window;
+                {
+                    crate::traffic_lights::floating_panel(window, true);
+                    // Borderless, as Tauri's undecorated panel: no rounded
+                    // window corners.
+                    crate::traffic_lights::square_corners(window);
+                }
+                cx.default_global::<FloatingWindows>()
+                    .0
+                    .insert(window.window_handle().window_id());
                 cx.new(|cx| {
                     let observation = cx.observe(&window_owner, |_, _, cx| cx.notify());
                     Floating {
