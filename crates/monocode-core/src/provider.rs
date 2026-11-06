@@ -1310,7 +1310,26 @@ pub fn run_with_controls(
 
 /// A bounded, separate conversation for titles and other background text work.
 /// Never resume the user's conversation or inherit its app capabilities/tools.
-pub fn run_text(mut request: Request, cancel: Arc<AtomicBool>) -> Result<String, String> {
+pub fn run_text(request: Request, cancel: Arc<AtomicBool>) -> Result<String, String> {
+    run_text_streaming(request, cancel, |_| {})
+}
+
+/// What a streamed background answer has done so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextProgress<'a> {
+    /// The whole answer so far, every message of it.
+    Text(&'a str),
+    /// The model finished its message; the harness may take a moment more to exit.
+    Done,
+}
+
+/// [`run_text`], telling `on_progress` the whole answer so far as each piece arrives, and
+/// when the model's message is complete.
+pub fn run_text_streaming(
+    mut request: Request,
+    cancel: Arc<AtomicBool>,
+    mut on_progress: impl FnMut(TextProgress<'_>),
+) -> Result<String, String> {
     request.provider_id = None;
     request.settings = Settings {
         account: request.settings.account.clone(),
@@ -1324,8 +1343,10 @@ pub fn run_text(mut request: Request, cancel: Arc<AtomicBool>) -> Result<String,
         for event in events {
             match event {
                 Event::Text(text) if output.len() + text.len() <= 64 * 1024 => {
-                    output.push_str(&text)
+                    output.push_str(&text);
+                    on_progress(TextProgress::Text(&output));
                 }
+                Event::Done => on_progress(TextProgress::Done),
                 Event::Text(_) => return Err("Background text response exceeded its limit".into()),
                 Event::Tool(tool) if tool.is_compaction() => {}
                 Event::Tool(_) | Event::Approval(_) | Event::Question(_) => {

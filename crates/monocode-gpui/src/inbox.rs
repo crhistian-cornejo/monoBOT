@@ -3,6 +3,7 @@
 mod avatar;
 mod diff;
 mod document;
+mod mail;
 mod ui;
 pub(crate) use avatar::image as avatar_image;
 pub(crate) use ui::relative_time;
@@ -110,6 +111,8 @@ pub(crate) struct Inbox {
     refresh_queued: bool,
     notifications: model::NotificationTracker,
     last_refresh: Instant,
+    /// The Email tab: the user's mail, beside GitHub and the trackers.
+    mailbox: Entity<mail::Mailbox>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -186,7 +189,17 @@ impl Inbox {
         let connect_token =
             cx.new(|cx| Input::field("API token", "Personal access token", content(0.4), cx));
         let diff_view = cx.new(DiffView::new);
+        let mailbox = cx.new(|cx| mail::Mailbox::new(data_dir.clone(), state.mail_auto_images, cx));
         let subscriptions = vec![
+            cx.subscribe(
+                &mailbox,
+                |this, _, event: &mail::MailEvent, _| match event {
+                    mail::MailEvent::AutoImages(on) => {
+                        this.state.mail_auto_images = *on;
+                        this.save();
+                    }
+                },
+            ),
             cx.subscribe(&search, |_, _, _: &input::Changed, cx| cx.notify()),
             cx.subscribe(&comment, |this, _, _: &input::Changed, cx| {
                 let count = this.summary_scroll.item_count();
@@ -314,6 +327,7 @@ impl Inbox {
             refresh_queued: false,
             notifications: model::NotificationTracker::default(),
             last_refresh: Instant::now(),
+            mailbox,
             _subscriptions: subscriptions,
         }
     }
@@ -374,6 +388,9 @@ impl Inbox {
             return;
         }
         self.active = active;
+        if active && self.state.email_open {
+            self.mailbox.update(cx, |mailbox, cx| mailbox.activate(cx));
+        }
         if active {
             if let Some(item) = self.item() {
                 self.state.seen.mark(&item);
@@ -605,7 +622,24 @@ impl Inbox {
         self.comment
             .update(cx, |input, cx| input.set_text(String::new(), cx));
     }
+    /// Opens the Email tab, or leaves it for the source tabs.
+    fn set_email_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if open {
+            self.mailbox.update(cx, |mailbox, cx| mailbox.activate(cx));
+        }
+        if self.state.email_open != open {
+            self.state.email_open = open;
+            self.save();
+        }
+        cx.notify();
+    }
+    /// The message's page is a native web view drawn over the window: hidden until the
+    /// Email tab paints it again.
+    pub(crate) fn hide_html(&self, cx: &App) {
+        self.mailbox.read(cx).hide_html(cx);
+    }
     fn change_source(&mut self, source: String, cx: &mut Context<Self>) {
+        self.set_email_open(false, cx);
         self.state.source = source;
         self.selected = None;
         self.details = None;

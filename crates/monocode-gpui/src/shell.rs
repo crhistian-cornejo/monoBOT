@@ -8476,6 +8476,9 @@ impl Render for Shell {
             m.read(cx).hide_html(cx);
             m.update(cx, |m, cx| m.bind_window(window, cx));
         }
+        if let Some(inbox) = &self.inbox {
+            inbox.read(cx).hide_html(cx);
+        }
         self.render_passes += 1;
         if let Some((id, tab)) = self.pending_review.take()
             && self.workspace.tab_of(id).is_some()

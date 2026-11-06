@@ -18,13 +18,25 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "memory.add"=>"fact topic until","memory.replace"=>"find fact topic until","memory.remove"=>"find topic",
         "habits.add"=>"name instructions schedule","habits.update"=>"id name instructions schedule enabled","habits.run"|"habits.remove"=>"id",
         "chat.card"=>"type repo number note sessionId options name instructions schedule",
+        "mail.list"=>"view query unread limit","mail.read"=>"id maxChars","mail.draft"=>"id text",
+        "mail.search"=>"query account limit oldestFirst","mail.connect"=>"address provider name shared",
         _=>return Err("Unknown app action. Run app help".into()),
     };
     for (key, value) in input.as_object().ok_or("Input must be an object")? {
         if !fields.split_whitespace().any(|f| f == key) {
             return Err(format!("{action} does not take {key}"));
         }
-        if ["draft", "reveal", "notifyOnComplete", "existing", "enabled"].contains(&key.as_str())
+        if [
+            "draft",
+            "reveal",
+            "notifyOnComplete",
+            "existing",
+            "enabled",
+            "unread",
+            "oldestFirst",
+            "shared",
+        ]
+        .contains(&key.as_str())
             && !value.is_boolean()
         {
             return Err(format!("{key} must be true or false"));
@@ -49,6 +61,9 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "notifyOnComplete",
             "existing",
             "enabled",
+            "unread",
+            "oldestFirst",
+            "shared",
             "before",
             "limit",
             "offset",
@@ -142,6 +157,20 @@ mod tests {
         assert!(validate("papers.read", &json!({"ref":"x","section":"methods"})).is_ok());
         assert!(validate("papers.figure", &json!({"ref":"x","page":4})).is_ok());
         assert!(validate("papers.figure", &json!({"ref":"x","page":"4"})).is_err());
+        assert!(validate(
+            "mail.list",
+            &json!({"view":"inbox","unread":true,"limit":20})
+        )
+        .is_ok());
+        assert!(validate("mail.list", &json!({"unread":"yes"})).is_err());
+        assert!(validate("mail.draft", &json!({"id":"a.inbox.1","text":"Hola"})).is_ok());
+        assert!(validate("mail.draft", &json!({"id":"a.inbox.1","to":"x@y.z"})).is_err());
+        assert!(validate(
+            "mail.search",
+            &json!({"query":"from:bcp","oldestFirst":true})
+        )
+        .is_ok());
+        assert!(validate("mail.connect", &json!({"address":"a@b.c","shared":"no"})).is_err());
         assert!(validate(
             "papers.add",
             &json!({"path":"/Users/me/paper.pdf","ref":"10.1234/x","title":"T"})

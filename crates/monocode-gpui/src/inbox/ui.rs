@@ -349,6 +349,100 @@ impl Inbox {
         )
     }
 
+    /// The source tabs: GitHub and the trackers, then the user's email. Beside the email,
+    /// the row spans the whole view, its line from edge to edge, and the tabs keep their own
+    /// width instead of sharing the row's.
+    fn source_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
+        let email = self.state.email_open;
+        let connected = model::PROVIDERS
+            .into_iter()
+            .filter(|provider| {
+                self.snapshot
+                    .connections
+                    .get(*provider)
+                    .is_some_and(|s| s.connected)
+            })
+            .collect::<Vec<_>>();
+        let tab = |id: SharedString, label: &'static str| {
+            div()
+                .id(id)
+                .role(Role::Tab)
+                .aria_label(label)
+                .h(px(24.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.))
+                .rounded(px(6.))
+                .text_size(px(12.))
+                .map(|d| {
+                    if email {
+                        d.flex_none().px(px(12.))
+                    } else {
+                        d.flex_1().min_w_0().px(px(8.))
+                    }
+                })
+        };
+        div()
+            .h(px(36.))
+            .w_full()
+            .px(px(8.))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .gap(px(1.))
+            .border_b_1()
+            .border_color(content(0.07))
+            .children(connected.iter().map(|provider| {
+                let source = provider.to_string();
+                let selected = !email && self.state.source == *provider;
+                tab(
+                    SharedString::from(format!("inbox-source-{provider}")),
+                    model::provider_label(provider),
+                )
+                .text_color(content(if selected { 1. } else { 0.5 }))
+                .when(selected, |d| d.bg(content(0.1)))
+                .hover(|s| s.bg(content(0.05)))
+                .child(provider_mark(provider))
+                .child(
+                    div()
+                        .min_w_0()
+                        .truncate()
+                        .child(model::provider_label(provider)),
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.change_source(source.clone(), cx)))
+            }))
+            .child(
+                tab("inbox-source-email".into(), "Email")
+                    .text_color(content(if email { 1. } else { 0.5 }))
+                    .when(email, |d| d.bg(content(0.1)))
+                    .when(!email, |d| {
+                        d.hover(|s| s.bg(content(0.05)).text_color(content(1.)))
+                    })
+                    .child(icon("mail", 14.).text_color(content(if email { 1. } else { 0.5 })))
+                    .child(div().truncate().child("Email"))
+                    .on_click(cx.listener(|this, _, _, cx| this.set_email_open(true, cx))),
+            )
+            .child(
+                tab("inbox-add-connection".into(), "Add connection")
+                    .role(Role::Button)
+                    .relative()
+                    .text_color(content(0.4))
+                    .hover(|s| s.bg(content(0.05)))
+                    .child(self.connection_anchor.probe())
+                    .child(icon("plus", 14.))
+                    .when(connected.len() < 2 && !email, |d| {
+                        d.child(div().truncate().child("Add connection"))
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.connections_open = !this.connections_open;
+                        this.filters_open = false;
+                        cx.notify();
+                    })),
+            )
+            .into_any_element()
+    }
+
     fn list_view(&self, cx: &mut Context<Self>) -> AnyElement {
         let connected = model::PROVIDERS
             .into_iter()
@@ -360,78 +454,7 @@ impl Inbox {
             })
             .collect::<Vec<_>>();
         let items = self.visible_items(cx);
-        let sources = div()
-            .h(px(36.))
-            .px(px(8.))
-            .flex_shrink_0()
-            .flex()
-            .items_center()
-            .gap(px(1.))
-            .border_b_1()
-            .border_color(content(0.07))
-            .children(connected.iter().map(|provider| {
-                let source = provider.to_string();
-                div()
-                    .id(SharedString::from(format!("inbox-source-{provider}")))
-                    .role(Role::Tab)
-                    .aria_label(model::provider_label(provider))
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(24.))
-                    .px(px(8.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.))
-                    .rounded(px(6.))
-                    .text_size(px(12.))
-                    .text_color(content(if self.state.source == *provider {
-                        1.
-                    } else {
-                        0.5
-                    }))
-                    .when(self.state.source == *provider, |d| d.bg(content(0.1)))
-                    .hover(|s| s.bg(content(0.05)))
-                    .child(provider_mark(provider))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .truncate()
-                            .child(model::provider_label(provider)),
-                    )
-                    .on_click(
-                        cx.listener(move |this, _, _, cx| this.change_source(source.clone(), cx)),
-                    )
-            }))
-            .child(
-                div()
-                    .id("inbox-add-connection")
-                    .role(Role::Button)
-                    .aria_label("Add connection")
-                    .relative()
-                    .h(px(24.))
-                    .flex_1()
-                    .min_w_0()
-                    .px(px(6.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.))
-                    .rounded(px(6.))
-                    .text_size(px(12.))
-                    .text_color(content(0.4))
-                    .hover(|s| s.bg(content(0.05)))
-                    .child(self.connection_anchor.probe())
-                    .child(icon("plus", 14.))
-                    .when(connected.len() < 2, |d| {
-                        d.child(div().truncate().child("Add connection"))
-                    })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.connections_open = !this.connections_open;
-                        this.filters_open = false;
-                        cx.notify();
-                    })),
-            );
+        let sources = self.source_tabs(cx);
         let tools = div()
             .h(px(36.))
             .px(px(8.))
@@ -2816,8 +2839,36 @@ impl gpui::Render for Inbox {
             self.focus_comment = false;
             window.focus(&self.comment.focus_handle(cx), cx);
         }
-        let list = self.list_view(cx);
-        let detail = self.detail_view(window, cx);
+        // The message's page shows again when the Email tab paints it.
+        self.hide_html(cx);
+        let body = if self.state.email_open {
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(self.source_tabs(cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .child(self.mailbox.clone()),
+                )
+        } else {
+            let list = self.list_view(cx);
+            let detail = self.detail_view(window, cx);
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .flex()
+                .child(list)
+                .child(div().flex_1().min_w_0().min_h_0().child(detail))
+        };
         div()
             .id("inbox-view")
             .role(Role::Group)
@@ -2833,6 +2884,9 @@ impl gpui::Render for Inbox {
                         this.connect_provider = None;
                     } else if this.confirm_action.is_some() && !this.acting {
                         this.confirm_action = None;
+                    } else if this.state.email_open
+                        && this.mailbox.update(cx, |mailbox, cx| mailbox.escape(cx))
+                    {
                     } else if this.filters_open
                         || this.connections_open
                         || this.project_picker
@@ -2877,16 +2931,7 @@ impl gpui::Render for Inbox {
                     }
                 }),
             )
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .min_w_0()
-                    .flex()
-                    .child(list)
-                    .child(div().flex_1().min_w_0().min_h_0().child(detail)),
-            )
+            .child(body)
             .when_some(self.error.clone(), |d, text| d.child(error(text)))
             .when(self.filters_open, |d| d.child(self.filters_menu(cx)))
             .when(self.connections_open, |d| d.child(self.connection_menu(cx)))
