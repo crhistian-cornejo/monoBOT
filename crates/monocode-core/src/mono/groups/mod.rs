@@ -6,10 +6,14 @@
 //! and `agent-app/model`) is the reference: same texts, same decisions. This
 //! module is pure: it reads what it needs as arguments and returns new values,
 //! and the caller keeps sessions, the roster and anything persisted.
+pub mod activity;
+pub mod app;
 pub mod block;
 pub mod brief;
 pub mod group;
+pub mod learning;
 pub mod mentions;
+pub mod project;
 pub mod replies;
 pub mod round;
 pub mod seats;
