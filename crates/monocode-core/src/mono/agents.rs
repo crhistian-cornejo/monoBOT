@@ -68,19 +68,21 @@ pub struct Wait {
 #[derive(Default)]
 pub struct Messaging {
     waits: Vec<(String, Wait)>,
-    answering: HashMap<i64, u64>,
+    /// By Mono id: the native host knows a chat's Mono before its session.
+    answering: HashMap<String, u64>,
 }
 
 impl Messaging {
     /// Marks a chat as answering another agent until the window passes.
-    pub fn mark_answering(&mut self, session: i64, now: u64) {
-        self.answering.insert(session, now + ANSWERING_WINDOW_MS);
+    pub fn mark_answering(&mut self, mono: &str, now: u64) {
+        self.answering
+            .insert(mono.to_owned(), now + ANSWERING_WINDOW_MS);
     }
-    pub fn is_answering(&mut self, session: i64, now: u64) -> bool {
-        match self.answering.get(&session) {
+    pub fn is_answering(&mut self, mono: &str, now: u64) -> bool {
+        match self.answering.get(mono) {
             Some(until) if *until > now => true,
             Some(_) => {
-                self.answering.remove(&session);
+                self.answering.remove(mono);
                 false
             }
             None => false,
@@ -129,19 +131,18 @@ pub fn reply_after(
 
 /// What a waited message returns: the answer, or how to keep waiting
 /// (waitedAnswer). `done` is the reply when the agent's turn is over.
-pub fn waited(id: &str, wait: &Wait, done: Option<&str>) -> Value {
+pub fn waited(id: &str, name: &str, done: Option<&str>) -> Value {
     match done {
         Some(reply) => json!({
-            "from": wait.name,
+            "from": name,
             "reply": if reply.is_empty() { "(no written answer)" } else { reply },
         }),
         None => json!({
-            "from": wait.name,
+            "from": name,
             "pending": true,
             "waitId": id,
             "note": format!(
-                "{} is still working. Call app agents.wait {{\"waitId\":\"{id}\"}} to keep waiting; do not end your turn while you wait for it.",
-                wait.name
+                "{name} is still working. Call app agents.wait {{\"waitId\":\"{id}\"}} to keep waiting; do not end your turn while you wait for it."
             ),
         }),
     }
@@ -505,7 +506,7 @@ mod tests {
             reply_after(&rows, 1, false),
             Some((true, "Found it.\n\nTotal 30.".into()))
         );
-        assert_eq!(reply_after(&rows, 1, true).unwrap().0, false);
+        assert!(!reply_after(&rows, 1, true).unwrap().0);
         assert_eq!(reply_after(&rows, 2, false), None);
         assert_eq!(
             reply_after(&rows[..2], 1, false),
@@ -516,9 +517,9 @@ mod tests {
     #[test]
     fn answering_blocks_chains_and_waits_are_bounded() {
         let mut messaging = Messaging::default();
-        messaging.mark_answering(7, 0);
-        assert!(messaging.is_answering(7, ANSWERING_WINDOW_MS - 1));
-        assert!(!messaging.is_answering(7, ANSWERING_WINDOW_MS));
+        messaging.mark_answering("f", 0);
+        assert!(messaging.is_answering("f", ANSWERING_WINDOW_MS - 1));
+        assert!(!messaging.is_answering("f", ANSWERING_WINDOW_MS));
         for i in 0..60 {
             messaging.remember(
                 &i.to_string(),
@@ -534,10 +535,10 @@ mod tests {
         assert!(messaging.find("0").is_none() && messaging.find("59").is_some());
         let wait = messaging.find("59").unwrap().clone();
         assert_eq!(
-            waited("59", &wait, Some(""))["reply"],
+            waited("59", &wait.name, Some(""))["reply"],
             "(no written answer)"
         );
-        assert_eq!(waited("59", &wait, None)["waitId"], "59");
+        assert_eq!(waited("59", &wait.name, None)["waitId"], "59");
     }
 
     #[test]

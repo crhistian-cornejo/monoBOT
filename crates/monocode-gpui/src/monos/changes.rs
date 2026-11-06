@@ -442,7 +442,7 @@ impl Monos {
                             }
                         }
                         crate::review::ReviewEvent::Comment(text) => {
-                            this.enqueue(&review_key.0, text.clone(), Vec::new(), false, cx)
+                            this.enqueue(&review_key.0, text.clone(), Vec::new(), false, cx);
                         }
                         _ => (),
                     }

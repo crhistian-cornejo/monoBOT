@@ -20,6 +20,15 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "chat.card"=>"type repo number note sessionId options name instructions schedule",
         "mail.list"=>"view query unread limit","mail.read"=>"id maxChars","mail.draft"=>"id text",
         "mail.search"=>"query account limit oldestFirst","mail.connect"=>"address provider name shared",
+        // The agents' own actions (agentApp.ts): bots, tools, other agents, wakes and names.
+        "bots.list"|"tools.read"|"agents.list"|"group.members"=>"",
+        "bots.create"=>"name role specialty instructions services skills access connectors",
+        "tools.update"=>"services skills access connectors",
+        "agents.message"=>"to message wait","agents.wait"=>"waitId",
+        "group.ask"=>"member message wait","group.access"=>"target reason group",
+        "wakes.add"=>"in at note","name.update"=>"name",
+        "web.read"=>"url query maxChars","web.download"=>"url name",
+        "images.generate"=>"prompt count aspect source",
         _=>return Err("Unknown app action. Run app help".into()),
     };
     for (key, value) in input.as_object().ok_or("Input must be an object")? {
@@ -35,13 +44,27 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "unread",
             "oldestFirst",
             "shared",
+            "wait",
         ]
         .contains(&key.as_str())
             && !value.is_boolean()
         {
             return Err(format!("{key} must be true or false"));
         }
-        if ["limit", "offset", "maxChars", "number", "fromYear", "page"].contains(&key.as_str())
+        if ["services", "skills", "access", "connectors"].contains(&key.as_str())
+            && !value
+                .as_array()
+                .is_some_and(|items| items.iter().all(Value::is_string))
+        {
+            return Err(format!("{key} must be an array"));
+        }
+        if key == "in" && !value.is_number() {
+            return Err("in must be a number of minutes".into());
+        }
+        if [
+            "limit", "offset", "maxChars", "number", "fromYear", "page", "count",
+        ]
+        .contains(&key.as_str())
             && value.as_u64().is_none()
         {
             return Err(format!("{key} must be a non-negative integer"));
@@ -78,6 +101,13 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "schedule",
             "tags",
             "options",
+            "wait",
+            "services",
+            "skills",
+            "access",
+            "connectors",
+            "in",
+            "count",
         ]
         .contains(&key.as_str())
             && !value.is_string()
@@ -163,6 +193,17 @@ mod tests {
         )
         .is_ok());
         assert!(validate("mail.list", &json!({"unread":"yes"})).is_err());
+        assert!(validate(
+            "agents.message",
+            &json!({"to":"Finance","message":"m","wait":true})
+        )
+        .is_ok());
+        assert!(validate("agents.message", &json!({"to":"Finance","wait":"yes"})).is_err());
+        assert!(validate("bots.create", &json!({"name":"S","services":["gmail"]})).is_ok());
+        assert!(validate("bots.create", &json!({"name":"S","services":"gmail"})).is_err());
+        assert!(validate("wakes.add", &json!({"in":30,"note":"check"})).is_ok());
+        assert!(validate("wakes.add", &json!({"in":"30"})).is_err());
+        assert!(validate("tools.update", &json!({"connectors":[]})).is_ok());
         assert!(validate("mail.draft", &json!({"id":"a.inbox.1","text":"Hola"})).is_ok());
         assert!(validate("mail.draft", &json!({"id":"a.inbox.1","to":"x@y.z"})).is_err());
         assert!(validate(

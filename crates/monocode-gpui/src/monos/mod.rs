@@ -1,5 +1,6 @@
 //! Mono workspaces: one runtime per identity, shared by the rail, title tabs,
 //! overview, settings and floating windows.
+mod agent_calls;
 pub(crate) mod agents;
 pub(crate) mod avatar;
 pub(crate) mod cards;
@@ -138,6 +139,8 @@ pub(crate) struct Monos {
     activity: Option<(String, Entity<crate::transcript::TranscriptView>)>,
     activity_turn: Option<usize>,
     rail_ids: Vec<String>,
+    /// Messages between agents, waits and delegations.
+    agent_calls: agent_calls::AgentCalls,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
     running: HashMap<i64, RunningHabit>,
@@ -374,6 +377,7 @@ impl Monos {
             activity_turn: None,
             rail_ids: Vec::new(),
             roles_menu: None,
+            agent_calls: Default::default(),
             running: HashMap::new(),
             active_run: None,
             completion_work: HashSet::new(),
@@ -765,7 +769,7 @@ impl Monos {
                 this.observations.push(cx.subscribe(
                     &view,
                     move |this, _, event: &MonoSubmitted, cx| {
-                        this.enqueue(
+                        let _ = this.enqueue(
                             &source,
                             event.text.clone(),
                             event
@@ -775,7 +779,7 @@ impl Monos {
                                 .collect(),
                             false,
                             cx,
-                        )
+                        );
                     },
                 ));
                 let source = id.clone();
@@ -923,10 +927,11 @@ impl Monos {
         attachments: Vec<String>,
         internal: bool,
         cx: &mut Context<Self>,
-    ) {
+    ) -> Option<String> {
+        let message_id = mono::new_id();
         if let Some(mono) = self.roster.get_mut(id) {
             mono.outbox.push(Message {
-                id: mono::new_id(),
+                id: message_id.clone(),
                 text,
                 sent_at: Some(monocode_core::time::now_ms()),
                 internal,
@@ -936,7 +941,9 @@ impl Monos {
             self.save(cx);
             self.configure_chat(id, cx);
             self.dispatch(id, cx);
+            return Some(message_id);
         }
+        None
     }
     fn dispatch(&mut self, id: &str, cx: &mut Context<Self>) {
         let delivered = self
@@ -1052,6 +1059,9 @@ impl Monos {
             mono.seen_rows = row_count;
         }
         if finished {
+            if let Some(sent) = self.inflight.get(id).map(|m| m.id.clone()) {
+                self.agent_answered(id, &sent, cx);
+            }
             if let Some(mut sent) = self.inflight.remove(id) {
                 let (ok, status) = self.chats[id].read(cx).external_outcome(cx);
                 if !ok && !status.starts_with("Stopped") {

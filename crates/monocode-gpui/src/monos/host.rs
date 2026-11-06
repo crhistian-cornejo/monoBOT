@@ -55,7 +55,12 @@ impl Monos {
         }
         Ok(mono)
     }
-    fn finish_call(&mut self, call: Call, result: Result<Value, String>, cx: &mut Context<Self>) {
+    pub(super) fn finish_call(
+        &mut self,
+        call: Call,
+        result: Result<Value, String>,
+        cx: &mut Context<Self>,
+    ) {
         let key = (call.session, call.request_id.clone());
         self.app_pending.remove(&key);
         if self.app_results.len() > 1024
@@ -253,6 +258,10 @@ impl Monos {
         }
         let mut input = call.input.clone();
         let action = call.action.clone();
+        // The agents' own actions: other agents, bots and names.
+        let Some(call) = self.agent_call(call, &mono, &action, &input, cx) else {
+            return;
+        };
         // A session it starts without naming a model takes the one set for
         // its sessions, if any; the receipt still keys on what it sent.
         if action == "sessions.start"
