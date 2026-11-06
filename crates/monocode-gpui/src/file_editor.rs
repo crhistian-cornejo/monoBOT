@@ -15,14 +15,22 @@ use gpui::{
 use monocode_core::files::document::{self, Document, TextDocument};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
+mod chart_scale;
 mod chrome;
+mod deck;
 mod diff;
 mod media;
+mod office;
+#[cfg(test)]
+mod office_tests;
 #[cfg(test)]
 #[path = "file_editor/tests.rs"]
 mod parity_tests;
 mod search;
 mod selection;
+mod spreadsheet;
+mod spreadsheet_chart;
+mod word;
 
 actions!(
     file_editor,
@@ -159,6 +167,12 @@ pub(crate) struct FileEditor {
     image: Option<Arc<Image>>,
     media: Option<Entity<media::MediaPreview>>,
     media_events: Option<Subscription>,
+    /// A spreadsheet, Word document or deck, read by the core.
+    office: Option<gpui::AnyView>,
+    office_stamp: Option<office::Stamp>,
+    /// A CSV or TSV file's text drawn as a sheet.
+    sheet_preview: Option<gpui::AnyView>,
+    sheet_task: Option<Task<()>>,
     /// Each edit renders a fresh sprite; the one it replaces is given back.
     svg_preview: Option<Arc<RenderImage>>,
     svg_failed: bool,
@@ -303,6 +317,10 @@ impl FileEditor {
             image: None,
             media: None,
             media_events: None,
+            office: None,
+            office_stamp: None,
+            sheet_preview: None,
+            sheet_task: None,
             svg_preview: None,
             svg_failed: false,
             svg_render: None,
@@ -382,6 +400,15 @@ impl FileEditor {
             return;
         }
         self.loading = true;
+        // A CSV past the editor's limit can only be read as a sheet.
+        let too_big_to_edit = office::is_delimited(&self.path)
+            && std::fs::metadata(&self.path).is_ok_and(|m| m.len() > document::MAX_TEXT_BYTES as u64);
+        if let Some(kind) = office::kind_of(&self.path)
+            .or_else(|| too_big_to_edit.then_some(office::Kind::Sheet))
+        {
+            self.load_office(kind, force, cx);
+            return;
+        }
         let path = PathBuf::from(&self.path);
         let work = cx
             .background_executor()
@@ -390,6 +417,10 @@ impl FileEditor {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
                 this.loading = false;
+                if result.is_ok() {
+                    this.office = None;
+                    this.office_stamp = None;
+                }
                 match result {
                     Ok(Document::Text(doc)) => {
                         if !force
@@ -417,7 +448,12 @@ impl FileEditor {
                             input.reload_file(text, !first && !force, cx);
                         });
                         this.dirty = false;
-                        if first && !this.show_diff && (this.is_markdown() || this.is_svg()) {
+                        if first
+                            && !this.show_diff
+                            && (this.is_markdown()
+                                || this.is_svg()
+                                || office::is_delimited(&this.path))
+                        {
                             this.preview = cx
                                 .try_global::<crate::settings::Preferences>()
                                 .is_none_or(|prefs| prefs.file_view_mode != "source");
@@ -533,6 +569,50 @@ impl FileEditor {
                         cx.emit(FileEvent::Dirty);
                     }
                     Err(error) => {
+                        this.error = Some(error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+    /// Read a spreadsheet, document or deck. A file that has not changed
+    /// since the last read is left alone, so the poll costs a stat.
+    fn load_office(&mut self, kind: office::Kind, force: bool, cx: &mut Context<Self>) {
+        let path = PathBuf::from(&self.path);
+        let known = if force { None } else { self.office_stamp };
+        let work = cx.background_executor().spawn(async move {
+            if known.is_some() && known == office::stamp(&path) {
+                return Ok(None);
+            }
+            office::read(&path, kind).map(Some)
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.loading = false;
+                match result {
+                    Ok(None) => {}
+                    Ok(Some((loaded, stamp))) => {
+                        let path = this.path.clone();
+                        this.office = Some(office::view(loaded, &path, cx));
+                        this.office_stamp = stamp;
+                        this.error = None;
+                        this.unsupported = None;
+                        this.document = None;
+                        this.image = None;
+                        this.media = None;
+                        this.dirty = false;
+                        this.disk_changed = false;
+                        cx.emit(FileEvent::Dirty);
+                    }
+                    // A file caught half-written keeps what is shown; the next
+                    // poll reads it again.
+                    Err(_) if this.office.is_some() && !force => {}
+                    Err(error) => {
+                        this.office = None;
+                        this.office_stamp = None;
                         this.error = Some(error);
                     }
                 }
@@ -808,6 +888,29 @@ impl FileEditor {
             .is_some_and(|s| s.eq_ignore_ascii_case("svg"))
     }
     fn update_preview(&mut self, cx: &mut Context<Self>) {
+        if self.preview && office::is_delimited(&self.path) {
+            let bytes = self.input.read(cx).content.as_bytes().to_vec();
+            let path = self.path.clone();
+            let work = cx.background_executor().spawn(async move {
+                monocode_core::office::xlsx::parse_workbook(
+                    bytes,
+                    &path,
+                    &monocode_core::office::numfmt::Locale::default(),
+                )
+            });
+            self.sheet_task = Some(cx.spawn(async move |this, cx| {
+                let result = work.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.sheet_preview = result.ok().map(|workbook| {
+                        let path = this.path.clone();
+                        gpui::AnyView::from(cx.new(|cx| {
+                            spreadsheet::SpreadsheetView::new(&path, workbook, cx)
+                        }))
+                    });
+                    cx.notify();
+                });
+            }));
+        }
         if self.preview && self.is_svg() {
             let bytes = self.input.read(cx).content.as_bytes().to_vec();
             let renderer = cx.svg_renderer();
@@ -991,9 +1094,10 @@ impl gpui::Render for FileEditor {
                 .items_center()
                 .gap_1p5()
                 .when(!self.preview, |d| d.child(self.word_wrap_control(cx)))
-                .when(self.is_markdown() || self.is_svg(), |d| {
-                    d.child(self.view_mode_control(cx))
-                })
+                .when(
+                    self.is_markdown() || self.is_svg() || office::is_delimited(&self.path),
+                    |d| d.child(self.view_mode_control(cx)),
+                )
                 .into_any_element()
         });
         let selection_menu = self.code_selection_menu(window, cx);
@@ -1020,7 +1124,9 @@ impl gpui::Render for FileEditor {
             None if self.preview => self.svg_preview.clone().map(ImageSource::Render),
             None => None,
         };
-        let body: AnyElement = if let Some(media) = &self.media {
+        let body: AnyElement = if let Some(office) = &self.office {
+            office.clone().into_any_element()
+        } else if let Some(media) = &self.media {
             media.clone().into_any_element()
         } else if let Some(image) = preview_image {
             div()
@@ -1043,7 +1149,12 @@ impl gpui::Render for FileEditor {
                 )
                 .into_any_element()
         } else if ready {
-            if self.preview {
+            if self.preview && office::is_delimited(&self.path) {
+                self.sheet_preview
+                    .clone()
+                    .map(|sheet| sheet.into_any_element())
+                    .unwrap_or_else(|| div().into_any_element())
+            } else if self.preview {
                 self.markdown
                     .clone()
                     .map(|m| m.into_any_element())

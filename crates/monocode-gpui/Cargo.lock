@@ -4165,6 +4165,7 @@ dependencies = [
  "unicode-segmentation",
  "webview2-com",
  "windows 0.62.2",
+ "zip",
 ]
 
 [[package]]
