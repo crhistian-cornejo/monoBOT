@@ -20,7 +20,7 @@ mod thread_files;
 use crate::transcript::{Row, Transcript};
 pub use edit::EditSnapshot;
 pub use monocode_import::native_model;
-pub use monocode_import::{monocode_database, ImportReport};
+pub use monocode_import::{monocode_data_dir, monocode_database, ImportReport};
 use rusqlite::{params, Connection};
 pub use shared::{HistoryPage, PAGE_TURNS};
 pub use side_threads::DesktopSideThread;
