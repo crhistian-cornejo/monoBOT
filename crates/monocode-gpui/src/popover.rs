@@ -230,6 +230,7 @@ impl AnchorSlot {
                 slot.set(Some(bounds));
                 if changed {
                     window.refresh();
+                    window.request_animation_frame();
                 }
             },
             |_, _, _, _| {},

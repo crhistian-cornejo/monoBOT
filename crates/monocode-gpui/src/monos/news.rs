@@ -17,6 +17,10 @@ pub(super) struct NewsState {
     pub(super) only: Option<String>,
     /// Reports opened past their clamp.
     pub(super) expanded: std::collections::HashSet<String>,
+    /// The report whose summary shows beside its header, on hover.
+    pub(super) summary: super::hover_cards::Hover,
+    /// Each report header's bounds, for its summary to open against.
+    pub(super) anchors: HashMap<String, AnchorSlot>,
 }
 
 impl NewsState {

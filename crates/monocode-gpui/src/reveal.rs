@@ -208,6 +208,21 @@ impl PacedText {
             fades: WordFades::default(),
         }
     }
+    /// Full text in layout immediately (for Mono and Group replies whose height
+    /// drives bottom-chat follow motion) while every word fades and staggers in.
+    pub fn new_full(text: &str, animate: bool, now: Instant) -> Self {
+        Self {
+            target: text.into(),
+            shown: text.len(),
+            position: text.len() as f64,
+            last: now,
+            burst: now,
+            animate,
+            gap_ms: 160.,
+            skip_fade: false,
+            fades: WordFades::default(),
+        }
+    }
     pub fn update(&mut self, text: &str, now: Instant) {
         if self.target == text {
             return;

@@ -160,28 +160,22 @@ pub(crate) fn square_corners(window: &Window) {
 /// one frame update, keeping the top edge where it was so the prompt never
 /// moves while a picker opens below it.
 ///
-/// Called while rendering, so the resize waits for the frame to finish: GPUI
-/// reports AppKit's new size by updating the window, which fails mid-render
-/// and would leave the enlarged panel showing a stale, unpainted frame.
+/// Called while rendering: resizes the native panel synchronously so the
+/// window frame, shadow, and GPUI viewport stay in lockstep on every tween
+/// frame without a one-frame lag.
 #[cfg(not(test))]
-pub(crate) fn fit_height(window: &Window, cx: &gpui::App, height: f64) {
-    let Some(window) = ns_window(window) else {
+pub(crate) fn fit_height(window: &mut Window, cx: &mut gpui::App, height: f64) {
+    let Some(ns_window) = ns_window(window) else {
         return;
     };
-    if (window.frame().size.height - height).abs() < 0.5 {
+    let mut frame = ns_window.frame();
+    if (frame.size.height - height).abs() < 0.5 {
         return;
     }
-    cx.foreground_executor()
-        .spawn(async move {
-            let mut frame = window.frame();
-            if (frame.size.height - height).abs() < 0.5 {
-                return;
-            }
-            // AppKit's origin is the bottom left.
-            frame.origin.y += frame.size.height - height;
-            frame.size.height = height;
-            window.setFrame_display(frame, true);
-            window.invalidateShadow();
-        })
-        .detach();
+    // AppKit's origin is the bottom left.
+    frame.origin.y += frame.size.height - height;
+    frame.size.height = height;
+    ns_window.setFrame_display(frame, false);
+    ns_window.invalidateShadow();
+    window.bounds_changed(cx);
 }

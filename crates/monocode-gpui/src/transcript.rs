@@ -3089,12 +3089,20 @@ impl TranscriptView {
             }
         }
         // Messages that arrive while the chat is open slide and fade in;
-        // history that loads or replays does not.
-        if self.mono && self.streaming && self.visible && !cx.reduce_motion() {
+        // history that loads or replays does not. Group member posts and @-asks
+        // arrive via mono_append while streaming is false (`known > 0`).
+        if self.mono && (self.streaming || known > 0) && self.visible && !cx.reduce_motion() {
             let now = Instant::now();
+            let mut entered = false;
             for ix in start.max(known)..self.source.len() {
                 let row = &self.source[ix];
                 if !row.first || !matches!(row.role.as_str(), "user" | "assistant") {
+                    continue;
+                }
+                if row.role == "assistant"
+                    && (self.mono_prose_hidden(ix)
+                        || row.text.trim_start().starts_with("<reaction>"))
+                {
                     continue;
                 }
                 let queued = if row.role == "user" {
@@ -3132,7 +3140,11 @@ impl TranscriptView {
                 });
                 if let Some(born) = entrance {
                     self.entrances.insert(ix, born);
+                    entered = true;
                 }
+            }
+            if entered && !self.streaming {
+                self.follow.until = Some(now + std::time::Duration::from_millis(1200));
             }
         }
         self.outline.patched(&self.source, start);
@@ -4135,28 +4147,20 @@ impl TranscriptView {
         now: Instant,
         reduced: bool,
     ) {
-        if !self.reveals.contains_key(&at)
-            && !(self.visible
-                && self.smooth_reveal
-                && !reduced
-                && self.streaming
-                && end == self.source.len()
-                && at >= self.live_start
-                && assistant)
-        {
+        let live_stream = self.streaming && end == self.source.len() && at >= self.live_start;
+        let mono_arrival = self.mono && self.entrances.contains_key(&at);
+        let can_animate =
+            self.visible && self.smooth_reveal && !reduced && assistant && (live_stream || mono_arrival);
+        if !self.reveals.contains_key(&at) && !can_animate {
             return;
         }
+        let mono = self.mono;
         let paced = self.reveals.entry(at).or_insert_with(|| {
-            PacedText::new(
-                text,
-                self.visible
-                    && self.smooth_reveal
-                    && !reduced
-                    && self.streaming
-                    && at >= self.live_start
-                    && assistant,
-                now,
-            )
+            if mono {
+                PacedText::new_full(text, can_animate, now)
+            } else {
+                PacedText::new(text, can_animate, now)
+            }
         });
         paced.update(text, now);
         if !self.visible || !self.smooth_reveal || reduced {

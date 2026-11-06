@@ -42,7 +42,7 @@ const WIDTH: f64 = 680.0;
 const INITIAL_HEIGHT: f64 = 128.0;
 /// Must match the card's CSS radius so the blur, border, and native shadow
 /// share one outline.
-const CORNER_RADIUS: f64 = 16.0;
+const CORNER_RADIUS: f64 = 0.0;
 const MAX_HEIGHT: f64 = 520.0;
 /// Down from the top of the screen's work area, like Spotlight.
 const TOP_FRACTION: f64 = 0.22;

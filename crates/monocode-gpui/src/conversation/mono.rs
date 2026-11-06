@@ -1204,7 +1204,7 @@ impl Conversation {
         let has_value = self.input.read(cx).has_message_text()
             || !self.attachments.is_empty()
             || !self.quotes.is_empty();
-        let tools = group.then(|| [self.mono_attach(cx), self.mono_emoji(cx)]);
+        let tools = (square || group).then(|| [self.mono_attach(cx), self.mono_emoji(cx)]);
         let meter = group.then(|| self.mono_context_meter(cx));
         div()
             .id("mono-composer")
@@ -1240,7 +1240,7 @@ impl Conversation {
                     .debug_selector(|| "mono-composer-toolbar".into())
                     .flex()
                     .items_end()
-                    .gap(px(if group { 2. } else { 6. }))
+                    .gap(px(if square || group { 2. } else { 6. }))
                     .p(px(5.))
                     .children(tools.into_iter().flatten())
                     .child(
@@ -1457,7 +1457,7 @@ impl Conversation {
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         let emoji = self.mono_emoji_row(cx);
-        if group {
+        if floating || group {
             return emoji.map(|row| div().pt_1().pl_1().child(row).into_any_element());
         }
         let attach = self.mono_attach(cx);

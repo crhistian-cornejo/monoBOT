@@ -494,7 +494,7 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
         if (picker) closePicker();
         else dismiss();
       }}
-      className="relative flex max-h-[520px] flex-col overflow-clip rounded-2xl border border-content/10 bg-background-base/45 text-content"
+      className="relative flex max-h-[520px] flex-col overflow-clip rounded-none border border-content/10 bg-background-base/45 text-content"
     >
       <div
         title="Drag to move"
@@ -519,7 +519,7 @@ export function QuickComposer({ onShown }: { onShown: () => void }) {
         <X className="size-3" />
       </button>
       {attachments.dragging ? (
-        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-2xl border border-dashed border-accent/60 bg-background-base/90 text-sm text-accent">
+        <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center rounded-none border border-dashed border-accent/60 bg-background-base/90 text-sm text-accent">
           Drop to attach
         </div>
       ) : null}

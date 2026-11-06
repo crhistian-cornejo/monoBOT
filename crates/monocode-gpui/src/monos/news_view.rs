@@ -48,7 +48,7 @@ impl Monos {
     }
 
     /// A bot's face, as the rail draws it.
-    fn face(&self, id: &str, side: f32, cx: &App) -> AnyElement {
+    pub(super) fn face(&self, id: &str, side: f32, cx: &App) -> AnyElement {
         match self.roster.get(id) {
             Some(mono) => {
                 avatar::avatar(&mono.mascot, mono.color, self.status_of(id, cx), side, true)
@@ -202,7 +202,25 @@ impl Monos {
                     })),
             );
         }
+        // A report's header shows a short summary of it on hover.
+        self.news
+            .anchors
+            .retain(|id, _| feed.items.iter().any(|item| &item.id == id));
+        for item in &feed.items {
+            self.news.anchors.entry(item.id.clone()).or_default();
+        }
+        if self
+            .news
+            .summary
+            .shown
+            .as_ref()
+            .is_some_and(|id| !feed.items.iter().any(|item| &item.id == id))
+        {
+            self.news.summary.close();
+        }
         list = list.children(feed.shown(only.as_deref()).into_iter().map(|item| {
+            let anchor = self.news.anchors[&item.id].clone();
+            let hover_id = item.id.clone();
             let open = self.news.expanded.contains(&item.id);
             let needs_you = item.status == Some(ReportStatus::NeedsAttention);
             let bot = item.mono_id.clone();
@@ -250,6 +268,7 @@ impl Monos {
                                 .id(SharedString::from(format!("news-bot-{}", item.id)))
                                 .role(Role::Button)
                                 .aria_label(format!("Open {}", item.bot_name))
+                                .relative()
                                 .flex()
                                 .min_w_0()
                                 .items_center()
@@ -281,7 +300,18 @@ impl Monos {
                                         .child(item.bot_name.clone()),
                                 )
                                 .child(div().min_w_0().truncate().child(item.source.clone()))
+                                .child(anchor.probe())
+                                .on_hover(cx.listener(move |this, hovered: &bool, window, cx| {
+                                    this.news_header_hover(
+                                        &hover_id,
+                                        anchor.clone(),
+                                        *hovered,
+                                        window,
+                                        cx,
+                                    )
+                                }))
                                 .on_click(cx.listener(move |this, _, window, cx| {
+                                    this.news.summary.close();
                                     this.open(&bot, window, cx)
                                 })),
                         )
@@ -393,7 +423,8 @@ impl Monos {
                         ),
                 )
         }));
-        list.into_any_element()
+        list.children(self.news_summary_card(&feed.items, when, cx))
+            .into_any_element()
     }
 
     /// Bots: one row per bot the Principal asked, what it asked last and

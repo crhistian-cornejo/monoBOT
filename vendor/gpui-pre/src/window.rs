@@ -1986,17 +1986,21 @@ impl Window {
         platform_window.on_resize(Box::new({
             let mut cx = cx.to_async();
             move |_, _| {
-                handle
-                    .update(&mut cx, |_, window, cx| window.bounds_changed(cx))
-                    .log_err();
+                if !draw_in_progress() {
+                    handle
+                        .update(&mut cx, |_, window, cx| window.bounds_changed(cx))
+                        .log_err();
+                }
             }
         }));
         platform_window.on_moved(Box::new({
             let mut cx = cx.to_async();
             move || {
-                handle
-                    .update(&mut cx, |_, window, cx| window.bounds_changed(cx))
-                    .log_err();
+                if !draw_in_progress() {
+                    handle
+                        .update(&mut cx, |_, window, cx| window.bounds_changed(cx))
+                        .log_err();
+                }
             }
         }));
         platform_window.on_display_changed(Box::new({
@@ -3771,6 +3775,15 @@ impl Window {
         }
 
         let _inspector_width: Pixels = rems(30.0).to_pixels(self.rem_size());
+
+        // Layout all root elements. Like the root element on the web, which
+        // stretches to fill the viewport unless explicitly sized, window roots
+        // fill the window when their size is `auto`.
+        let scale_factor = self.scale_factor();
+        #[cfg(feature = "profiler")]
+        let request_layout_start = Instant::now();
+        let mut root_element = self.root.as_ref().unwrap().clone().into_any_element();
+        let root_layout_id = root_element.request_layout(self, cx);
         let root_size = {
             #[cfg(any(feature = "inspector", debug_assertions))]
             {
@@ -3787,15 +3800,6 @@ impl Window {
                 self.viewport_size
             }
         };
-
-        // Layout all root elements. Like the root element on the web, which
-        // stretches to fill the viewport unless explicitly sized, window roots
-        // fill the window when their size is `auto`.
-        let scale_factor = self.scale_factor();
-        #[cfg(feature = "profiler")]
-        let request_layout_start = Instant::now();
-        let mut root_element = self.root.as_ref().unwrap().clone().into_any_element();
-        let root_layout_id = root_element.request_layout(self, cx);
         #[cfg(feature = "profiler")]
         let prepaint_start = Instant::now();
         self.layout_engine

@@ -16,6 +16,7 @@ mod floating;
 pub(crate) use floating::is_floating_window;
 mod groups;
 mod host;
+mod hover_cards;
 pub(crate) mod html;
 #[cfg(target_os = "windows")]
 mod html_windows;
@@ -175,6 +176,8 @@ pub(crate) struct Monos {
     backgrounds: HashMap<String, Entity<crate::project_background::ProjectBackground>>,
     drag: Option<(String, gpui::Point<gpui::Pixels>, Option<String>)>,
     rail_bounds: HashMap<String, AnchorSlot>,
+    /// The agent card beside the rail row under the pointer.
+    mono_preview: hover_cards::Hover,
     skip_click: bool,
     floating: Vec<gpui::AnyWindowHandle>,
     scheduling: bool,
@@ -432,6 +435,7 @@ impl Monos {
             backgrounds: HashMap::new(),
             drag: None,
             rail_bounds: HashMap::new(),
+            mono_preview: Default::default(),
             skip_click: false,
             floating: Vec::new(),
             scheduling: false,
@@ -1372,6 +1376,7 @@ impl Monos {
             return div().into_any_element();
         }
         let add_project = project.clone();
+        let preview = self.mono_preview_card(&roster, cx);
         let heading = if original {
             div()
                 .h(px(30.))
@@ -1653,12 +1658,21 @@ impl Monos {
                                         })
                                         .on_click(cx.listener(move |this, _, w, cx| {
                                             cx.stop_propagation();
+                                            this.close_mono_preview(cx);
                                             this.open_options(&options, None, w, cx);
                                         })),
                                 ),
                         )
                     })
                     .child(slot.probe())
+                    // MonoCardPreview: the row's card opens beside it.
+                    .on_hover({
+                        let id = id.clone();
+                        let slot = slot.clone();
+                        cx.listener(move |this, hovered: &bool, w, cx| {
+                            this.mono_row_hover(&id, slot.clone(), *hovered, w, cx)
+                        })
+                    })
                     .on_click(cx.listener(move |this, _, w, cx| {
                         if std::mem::take(&mut this.skip_click) {
                             return;
@@ -1668,6 +1682,7 @@ impl Monos {
                     .on_mouse_down(
                         MouseButton::Right,
                         cx.listener(move |this, event: &gpui::MouseDownEvent, w, cx| {
+                            this.close_mono_preview(cx);
                             this.open_options(&context, Some(event.position), w, cx)
                         }),
                     )
@@ -1679,6 +1694,7 @@ impl Monos {
                         }),
                     )
             }))
+            .children(preview)
             // MonoRailSection owns its menu and background dialog; the Mono
             // view paints them instead while it is open.
             .when(self.current().is_none(), |d| {
@@ -1861,6 +1877,7 @@ impl gpui::Render for Monos {
                     && (event.position - *start).magnitude() > 5.
                 {
                     this.skip_click = true;
+                    this.mono_preview.close();
                     *over = this.rail_bounds.iter().find_map(|(id, s)| {
                         s.get()
                             .filter(|b| b.contains(&event.position))

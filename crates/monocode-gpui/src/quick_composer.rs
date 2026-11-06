@@ -26,8 +26,6 @@ pub(crate) const INITIAL_HEIGHT: f32 = 128.;
 /// Down from the top of the screen's work area, like Spotlight.
 pub(crate) const TOP_FRACTION: f32 = 0.22;
 const MAX_HEIGHT: f32 = 520.;
-/// Must match the window's corners so the blur and border share one outline.
-const RADIUS: f32 = 16.;
 /// Tallest the prompt grows before it scrolls.
 const PROMPT_MAX_HEIGHT: f32 = 220.;
 /// useQuickPickerMotion: the card's height tween, and the picker's fade-in.
@@ -835,7 +833,18 @@ impl QuickComposer {
     /// the card is mid-tween and must be held to that height.
     fn picker_motion(&mut self, window: &mut Window, cx: &App) -> (f32, f32, bool) {
         // The probe sits inside the 1px border on each side.
-        let natural = self.card.get().map(|b| f32::from(b.size.height) + 2.);
+        let natural = self
+            .card
+            .get()
+            .map(|b| (f32::from(b.size.height) + 2.).min(MAX_HEIGHT));
+        if self.motion.is_none()
+            && let Some(h) = natural
+        {
+            self.height = h;
+        }
+        if self.height <= 0. {
+            self.height = natural.unwrap_or(INITIAL_HEIGHT);
+        }
         if self.motion_picker != self.picker {
             self.motion_picker = self.picker;
             self.motion = (!cx.reduce_motion() && self.height > 0.)
@@ -866,7 +875,7 @@ impl QuickComposer {
         (self.height, fade, true)
     }
 
-    fn fit(&mut self, height: f32, window: &mut Window, cx: &App) {
+    fn fit(&mut self, height: f32, window: &mut Window, cx: &mut App) {
         if height <= 0. {
             return;
         }
@@ -1933,14 +1942,13 @@ impl Render for QuickComposer {
             }))
             .child(
                 // The window is exactly this card, so the native shadow and
-                // blur follow its rounded outline.
+                // blur follow its outline.
                 div()
                     .relative()
                     .w_full()
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .rounded(px(RADIUS))
                     .border_1()
                     .border_color(content(0.1))
                     .bg(fill)
@@ -2075,7 +2083,6 @@ impl Render for QuickComposer {
                             div()
                                 .absolute()
                                 .inset_0()
-                                .rounded(px(RADIUS))
                                 .border_1()
                                 .border_dashed()
                                 .border_color(accent_color().opacity(0.6))
