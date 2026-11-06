@@ -45,6 +45,11 @@ impl Monos {
                     .get(&call.session)
                     .and_then(|r| self.roster.get(&r.mono))
             })
+            // A member's seat in a group acts as the member.
+            .or_else(|| {
+                self.seat_owner(call.session)
+                    .and_then(|(_, member)| self.roster.get(&member))
+            })
             .cloned()
             .ok_or("This Mono no longer owns an active app capability")?;
         if (call.action.starts_with("habits.") || call.action == "wakes.add")
@@ -258,6 +263,10 @@ impl Monos {
         }
         let mut input = call.input.clone();
         let action = call.action.clone();
+        // A group's own actions: its members and access to paths and links.
+        let Some(call) = self.group_call(call, &mono, &action, &input, cx) else {
+            return;
+        };
         // The agents' own actions: other agents, bots and names.
         let Some(call) = self.agent_call(call, &mono, &action, &input, cx) else {
             return;
@@ -731,6 +740,12 @@ impl Monos {
                 let caller = call.session;
                 let request = call.request_id.clone();
                 let projects = mono.projects.clone();
+                // What a member learns in its group's seat is the group's.
+                let target = if action.starts_with("memory.") {
+                    self.memory_owner(caller, &mono, &input)
+                } else {
+                    target
+                };
                 self.call_work(call,target.clone(),move|store|{
                     let value=match action.as_str(){
                         "soul.read"=>json!(files::read(&root,&target,None,"SOUL.md")?),

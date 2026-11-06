@@ -25,6 +25,19 @@ pub(super) struct AgentRoute {
     call: Option<Call>,
     /// The answer, once it came while no call was waiting.
     reply: Option<String>,
+    /// A group member asked with group.ask: the answer names it too.
+    member: bool,
+}
+
+impl AgentRoute {
+    /// What the waiting call returns; a group member's names it as such.
+    fn waited(&self, id: &str, reply: Option<&str>) -> Value {
+        let mut value = agents::waited(id, &self.name, reply);
+        if self.member {
+            value["member"] = self.name.clone().into();
+        }
+        value
+    }
 }
 
 #[derive(Default)]
@@ -254,6 +267,7 @@ impl Monos {
             delegation: Some(delegation),
             call: None,
             reply: None,
+            member: false,
         };
         if !wait {
             self.agent_calls.routes.insert(message_id, route);
@@ -299,7 +313,7 @@ impl Monos {
         {
             let route = self.agent_calls.routes.remove(&key).unwrap();
             self.answer_delegation(&route, &reply, cx);
-            self.finish_call(call, Ok(agents::waited(&id, &route.name, Some(&reply))), cx);
+            self.finish_call(call, Ok(route.waited(&id, Some(&reply))), cx);
             return None;
         }
         if let Some(route) = self.agent_calls.routes.get_mut(&key) {
@@ -323,8 +337,8 @@ impl Monos {
                     return;
                 };
                 let id = route.wait.clone().unwrap_or_default();
-                let name = route.name.clone();
-                this.finish_call(call, Ok(agents::waited(&id, &name, None)), cx);
+                let pending = route.waited(&id, None);
+                this.finish_call(call, Ok(pending), cx);
             });
         })
         .detach();
@@ -349,6 +363,38 @@ impl Monos {
             .get(chat)
             .map(|view| view.read(cx).notification_reply_body(cx))
             .unwrap_or_default();
+        self.route_answered(sent, reply, cx);
+    }
+
+    /// A group's chat waits for one member's answer to group.ask, keyed by
+    /// the request it went out as (waitedAnswer); agents.wait keeps waiting.
+    pub(super) fn wait_for_member(
+        &mut self,
+        call: Call,
+        from_mono: &str,
+        request: String,
+        name: String,
+        cx: &mut Context<Self>,
+    ) {
+        let route = AgentRoute {
+            from_mono: from_mono.to_owned(),
+            from_session: call.session,
+            name,
+            wait: Some(call.request_id.clone()),
+            delegation: None,
+            call: Some(call),
+            reply: None,
+            member: true,
+        };
+        self.agent_calls.routes.insert(request.clone(), route);
+        self.expire_wait(request, cx);
+    }
+
+    /// An answer came back for the message or request `sent`.
+    pub(super) fn route_answered(&mut self, sent: &str, reply: String, cx: &mut Context<Self>) {
+        if !self.agent_calls.routes.contains_key(sent) {
+            return;
+        }
         let waiting = self
             .agent_calls
             .routes
@@ -367,7 +413,7 @@ impl Monos {
         self.answer_delegation(&route, &reply, cx);
         if let Some(call) = route.call.take() {
             let id = route.wait.clone().unwrap_or_default();
-            self.finish_call(call, Ok(agents::waited(&id, &route.name, Some(&reply))), cx);
+            self.finish_call(call, Ok(route.waited(&id, Some(&reply))), cx);
             return;
         }
         let reply = if reply.trim().is_empty() {
