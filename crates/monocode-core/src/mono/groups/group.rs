@@ -634,7 +634,7 @@ pub fn groups_of<'a>(groups: &'a [GroupMono], mono_id: &str) -> Vec<&'a GroupMon
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mono::groups::brief::{Member, group_brief};
+    use crate::mono::groups::brief::{group_brief, Member};
     use serde_json::json;
 
     fn project() -> Group {
@@ -893,24 +893,18 @@ mod tests {
 
     #[test]
     fn groups_open_any_folder_to_read_but_never_a_disk_or_a_system_folder_to_change() {
-        assert!(
-            folder_problem("C:\\", false)
-                .unwrap()
-                .contains("whole disk")
-        );
+        assert!(folder_problem("C:\\", false)
+            .unwrap()
+            .contains("whole disk"));
         assert!(folder_problem("Docs", false).unwrap().contains("full path"));
         let system = r"C:\Windows\System32";
         assert_eq!(folder_problem(system, false), None);
-        assert!(
-            folder_problem(system, true)
-                .unwrap()
-                .contains("never changed")
-        );
-        assert!(
-            folder_problem("/etc/hosts", true)
-                .unwrap()
-                .contains("never changed")
-        );
+        assert!(folder_problem(system, true)
+            .unwrap()
+            .contains("never changed"));
+        assert!(folder_problem("/etc/hosts", true)
+            .unwrap()
+            .contains("never changed"));
         assert_eq!(folder_problem("/Users/ana/Docs", true), None);
     }
 

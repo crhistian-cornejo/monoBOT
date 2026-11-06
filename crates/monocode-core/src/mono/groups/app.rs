@@ -3,14 +3,14 @@
 //! change, without sending anything. The host finds the sessions, sends the
 //! messages and saves the group.
 use super::{
-    brief::{Member, member_role},
+    brief::{member_role, Member},
     group::{
-        Access, AccessRequest, Group, GroupMono, folder_problem, group_access_for, is_link,
-        is_seat_id, with_access_request,
+        folder_problem, group_access_for, is_link, is_seat_id, with_access_request, Access,
+        AccessRequest, Group, GroupMono,
     },
     js_len, js_prefix,
 };
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 
 /// The group actions and the fields each takes, for the app's validation.
 pub const GROUP_ACTIONS: [(&str, &[&str]); 3] = [
@@ -261,12 +261,10 @@ mod tests {
         .unwrap();
         assert_eq!(asked.reply["access"], "asked");
         assert_eq!(asked.reply["requestId"], "r1");
-        assert!(
-            asked.reply["note"]
-                .as_str()
-                .unwrap()
-                .contains("asked in the group \"Nexa\"")
-        );
+        assert!(asked.reply["note"]
+            .as_str()
+            .unwrap()
+            .contains("asked in the group \"Nexa\""));
         let saved = asked.group.unwrap();
         assert_eq!(
             saved.requests,

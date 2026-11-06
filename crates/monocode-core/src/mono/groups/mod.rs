@@ -15,14 +15,16 @@ pub mod learning;
 pub mod mentions;
 pub mod project;
 pub mod replies;
+pub mod roster;
 pub mod round;
 pub mod seats;
 
 pub use block::{Block, GroupMemberPost, TurnMetrics};
 pub use brief::{Member, MemberKind};
 pub use group::{
-    Access, AccessAnswer, AccessRequest, Folder, Group, GroupMono, parse, parse_entry,
+    parse, parse_entry, Access, AccessAnswer, AccessRequest, Folder, Group, GroupMono,
 };
+pub use roster::{read_roster, Roster};
 
 /// A text's length as JavaScript counts it (UTF-16 units), so every limit
 /// cuts where the desktop app cuts.

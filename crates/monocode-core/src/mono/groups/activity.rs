@@ -3,7 +3,7 @@
 //! and what the members asked each other lately.
 use super::{
     block::Block,
-    brief::{Member, group_members, member_role},
+    brief::{group_members, member_role, Member},
     group::GroupMono,
 };
 use serde::{Deserialize, Serialize};

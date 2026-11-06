@@ -5,7 +5,7 @@
 use super::{
     block::{Block, GroupMemberPost},
     clip, flat, js_prefix,
-    mentions::{Named, starts_with_word},
+    mentions::{starts_with_word, Named},
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

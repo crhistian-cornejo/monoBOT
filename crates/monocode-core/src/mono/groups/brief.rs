@@ -1,5 +1,5 @@
 //! Who is in a group and what its leader is told (`groupBrief.ts`).
-use super::group::{GROUP_ACCESS_RULE, Group, group_places};
+use super::group::{group_places, Group, GROUP_ACCESS_RULE};
 
 /// One of the user's agents, as a group reads it from the roster.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

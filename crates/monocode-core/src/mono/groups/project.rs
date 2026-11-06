@@ -85,11 +85,10 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         seed_group_memory(root.path(), "nexa", "- The client is Nexa", "2026-11-05");
         let file = files::read(root.path(), "nexa", None, "MEMORY.md").unwrap();
-        assert!(
-            file.text
-                .unwrap()
-                .contains("- 2026-11-05 · The client is Nexa")
-        );
+        assert!(file
+            .text
+            .unwrap()
+            .contains("- 2026-11-05 · The client is Nexa"));
     }
 
     #[test]

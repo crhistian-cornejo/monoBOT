@@ -6,8 +6,8 @@
 use super::{
     block::Block,
     clip, js_len,
-    mentions::{Addressed, Named, addressed_member},
-    replies::{DIRECT_PREFIX, QUICK_PREFIX, ROUND_PREFIX, group_request_prefix, turn_after},
+    mentions::{addressed_member, Addressed, Named},
+    replies::{group_request_prefix, turn_after, DIRECT_PREFIX, QUICK_PREFIX, ROUND_PREFIX},
 };
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -94,7 +94,11 @@ fn without_polite(text: &str) -> &str {
         rest = &rest[POLITE_GAP.find(rest).map_or(0, |gap| gap.end())..];
         matched = true;
     }
-    if matched { rest } else { text }
+    if matched {
+        rest
+    } else {
+        text
+    }
 }
 
 /// Whether a message to the group is an errand one member can just do (open
