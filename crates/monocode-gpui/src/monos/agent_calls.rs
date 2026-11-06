@@ -49,7 +49,7 @@ pub(super) struct AgentCalls {
 }
 
 impl Monos {
-    fn delegations(&mut self) -> &mut Vec<Delegation> {
+    pub(super) fn delegations(&mut self) -> &mut Vec<Delegation> {
         let store = self.store.clone();
         self.agent_calls.delegations.get_or_insert_with(|| {
             locked(&store)

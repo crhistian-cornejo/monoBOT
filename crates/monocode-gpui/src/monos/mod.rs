@@ -20,6 +20,7 @@ mod images;
 mod memory_ui;
 mod mobile;
 mod news;
+mod news_view;
 mod notifications;
 mod overview;
 mod panel_stack;

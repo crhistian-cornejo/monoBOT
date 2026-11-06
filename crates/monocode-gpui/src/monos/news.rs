@@ -13,6 +13,17 @@ use monocode_core::time::now_ms;
 pub(super) struct NewsState {
     feed: Option<Feed>,
     pub(super) toasts: Toasts,
+    /// The bot whose news alone shows, from the filters.
+    pub(super) only: Option<String>,
+    /// Reports opened past their clamp.
+    pub(super) expanded: std::collections::HashSet<String>,
+}
+
+impl NewsState {
+    /// The posts loaded so far; none until the feed is first read.
+    pub(super) fn feed_items(&self) -> &[news::Item] {
+        self.feed.as_ref().map_or(&[], |feed| &feed.items)
+    }
 }
 
 impl Monos {

@@ -122,6 +122,29 @@ flowchart TB
 ```
 *Naranja = nuevo o modificado. Líneas punteadas = trabajo de port.*
 
+## Avance (5 de noviembre de 2026)
+
+Primero la lógica de todo y luego la interfaz idéntica a Tauri, como pidió Crhistian.
+
+| Fase | Lógica (core y conexión) | Interfaz |
+| --- | --- | --- |
+| 0–1 Cimientos, nombre y estilo | Hecha | Hecha: Geist, acento naranja, sin radios, «monoBOT» |
+| 2 Gráficos tramados | Hecha (skills de finanzas y datos) | Hecha |
+| 3 Proveedores y sesiones | Droid y autodetección hechos; reintento, enviar más tarde, mantener despierto, citas, chips de cita y volumen portados a core | Reintento, volumen y mantener despierto conectados; faltan enviar más tarde, chips de cita y citas |
+| 4 Skills y bots | Hecha: herramientas, conectores, Principal, mensajes entre agentes, wakes, reglas fijas de Tauri y memoria del equipo | Zona Agents, tarjetas de crear y ajustes de cada bot hechos; faltan las pestañas del resumen (News, Bots, Sub-agents) |
+| 5 Noticias | Hecha | Falta la lista y las tarjetas |
+| 6 Grupos | En un agente | En un agente |
+| 7 Correo | Hecha | Hecha |
+| 8 Teléfono (Poki) | Pendiente | Pendiente |
+| 9 Archivos y documentos | Lectores de xlsx, docx y pptx en core; imágenes (`images.generate`) conectadas | Tarjeta de imágenes hecha; faltan los visores |
+| 10 Dictado | En un agente | En un agente |
+| 11 Workstreams | Core hecho; falta el campo en el Mono y su contexto | Pendiente |
+| 12 Producción | Pendiente | Pendiente |
+
+Exportar, importar y sincronizar bots tienen la lógica hecha y conectada (la
+sincronización corre cada 2 minutos); falta su grupo en Ajustes › Monos y el
+diálogo de comparación.
+
 ## Fases
 
 Las fases 0 y 1 van primero. De la 2 a la 11 se pueden repartir en sesiones

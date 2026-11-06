@@ -15,6 +15,10 @@ pub(super) enum OverviewTab {
     Documents,
     Changes,
     Activity,
+    /// The Principal's News: what the bots posted on their own.
+    News,
+    /// The Principal's bots: who it handed work to.
+    Bots,
 }
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum SettingsSection {
@@ -1028,28 +1032,52 @@ impl Monos {
             .overview_reveal
             .as_ref()
             .and_then(|r| r.progress(self.overview_tab, window, cx));
-        let tabs = [
-            (OverviewTab::Overview, "Overview", "dashboard", 0),
-            (
-                OverviewTab::Sessions,
-                "Sub-agents",
-                "message-multiple",
-                mono.launches.len(),
-            ),
-            (
-                OverviewTab::Documents,
-                "Documents",
-                "file",
-                mono.documents.len(),
-            ),
-            (OverviewTab::Habits, "Habits", "clock", self.habits.len()),
-            (
-                OverviewTab::Changes,
-                "Changes",
-                "file-diff",
-                self.project_changes.count(&mono.id),
-            ),
-        ];
+        let overview = (OverviewTab::Overview, "Overview", "dashboard", 0);
+        let documents = (
+            OverviewTab::Documents,
+            "Documents",
+            "file",
+            mono.documents.len(),
+        );
+        let habits = (OverviewTab::Habits, "Habits", "clock", self.habits.len());
+        // A personal bot does not work in projects: no sessions to list and no
+        // code changes; the Principal also reads every bot's news and leads
+        // the bots (MonoOverview's BOT_TABS and PRINCIPAL_TABS).
+        let tabs: Vec<(OverviewTab, &str, &str, usize)> = if mono.is_principal() {
+            let unseen = self
+                .news
+                .feed_items()
+                .iter()
+                .filter(|item| !item.seen)
+                .count();
+            vec![
+                overview,
+                (OverviewTab::News, "News", "bell", unseen),
+                habits,
+                documents,
+                (OverviewTab::Bots, "Bots", "users", 0),
+            ]
+        } else if mono.is_bot() || mono.is_group() {
+            vec![overview, habits, documents]
+        } else {
+            vec![
+                overview,
+                (
+                    OverviewTab::Sessions,
+                    "Sub-agents",
+                    "message-multiple",
+                    mono.launches.len(),
+                ),
+                documents,
+                habits,
+                (
+                    OverviewTab::Changes,
+                    "Changes",
+                    "file-diff",
+                    self.project_changes.count(&mono.id),
+                ),
+            ]
+        };
         div()
             .id("mono-overview-tabs")
             .debug_selector(|| "mono-overview-tabs".into())
@@ -1076,6 +1104,8 @@ impl Monos {
                     OverviewTab::Documents => "mono-overview-Documents",
                     OverviewTab::Habits => "mono-overview-Habits",
                     OverviewTab::Changes => "mono-overview-Changes",
+                    OverviewTab::News => "mono-overview-News",
+                    OverviewTab::Bots => "mono-overview-Bots",
                     OverviewTab::Activity => unreachable!(),
                 };
                 crate::project_tabs::tab_button(
@@ -1136,6 +1166,8 @@ impl Monos {
             OverviewTab::Habits => self.habits_list(mono, cx),
             OverviewTab::Documents => self.document_list(mono, cx),
             OverviewTab::Changes => self.changes_list(mono, cx),
+            OverviewTab::News => self.news_list(cx),
+            OverviewTab::Bots => self.delegations_list(mono, cx),
             OverviewTab::Activity => self.activity_view(mono, cx),
         };
         div()

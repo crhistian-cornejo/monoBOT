@@ -2076,6 +2076,7 @@ fn a_bots_settings_show_its_specialty_and_save_its_tools(cx: &mut TestAppContext
     assert!(!access.iter().any(|a| a == "web"));
     assert!(access.iter().any(|a| a == "read"));
     assert_eq!(mono.specialty.as_deref(), Some("Runs the team"));
+}
 
 #[gpui::test]
 fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut TestAppContext) {
@@ -2349,4 +2350,58 @@ fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut Test
         [cash.clone(), docs.clone()]
     );
     assert_eq!(saved.seats.get(&cash), Some(&seat));
+}
+
+#[gpui::test]
+fn the_principal_reads_its_bots_news_and_who_it_asked(cx: &mut TestAppContext) {
+    use monocode_core::mono::{
+        delegations::Delegation,
+        news::{Feed, Post},
+    };
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let bot = s.manager.update(cx, |m, cx| {
+        let principal = m.roster.get_mut(&s.id).unwrap();
+        principal.kind = Some("bot".into());
+        principal.bot_role = Some("principal".into());
+        let root = m.root.clone();
+        let bot = m.roster.create_bot(&root, "finance", false).unwrap().id.clone();
+        let mut feed = Feed::default();
+        feed.add(
+            Post {
+                mono_id: bot.clone(),
+                bot_name: "Cash".into(),
+                source: "Weekly budget".into(),
+                text: "Spending is **under** budget.".into(),
+                ..Default::default()
+            },
+            monocode_core::time::now_ms(),
+        );
+        *m.news_feed() = feed;
+        m.delegations().push(Delegation {
+            id: "d1".into(),
+            from: s.id.clone(),
+            to: bot.clone(),
+            message: "Check the invoices".into(),
+            at: monocode_core::time::now_ms(),
+            reply: None,
+        });
+        m.select_overview(OverviewTab::News, cx);
+        bot
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("mono-overview-News").is_some());
+    assert!(visual.debug_bounds("mono-overview-Bots").is_some());
+    assert!(visual.debug_bounds("mono-overview-Sessions").is_none());
+    assert!(visual.debug_bounds("bot-news-item").is_some());
+    assert!(
+        !s.manager.update(visual, |m, _| m.has_unseen_news()),
+        "reading the feed marks it seen"
+    );
+    s.manager
+        .update(visual, |m, cx| m.select_overview(OverviewTab::Bots, cx));
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("bot-delegations").is_some());
+    let _ = bot;
 }
