@@ -262,17 +262,32 @@ impl HarnessHost {
     }
 
     fn kill_session(&self, session_id: &str) -> Option<Arc<LiveChild>> {
-        let mut inner = self.lock_inner();
-        *inner.epochs.entry(session_id.to_string()).or_insert(0) += 1;
-        inner.children.remove(session_id)
+        let (removed, idle) = {
+            let mut inner = self.lock_inner();
+            *inner.epochs.entry(session_id.to_string()).or_insert(0) += 1;
+            let removed = inner.children.remove(session_id);
+            (removed, inner.children.is_empty())
+        };
+        if removed.is_some() && idle {
+            crate::memory::release_soon();
+        }
+        removed
     }
 
     fn remove_if_pid(&self, session_id: &str, pid: u32) -> Option<Arc<LiveChild>> {
-        let mut inner = self.lock_inner();
-        if inner.children.get(session_id).map(|live| live.pid) != Some(pid) {
-            return None;
+        let (removed, idle) = {
+            let mut inner = self.lock_inner();
+            if inner.children.get(session_id).map(|live| live.pid) != Some(pid) {
+                return None;
+            }
+            let removed = inner.children.remove(session_id);
+            (removed, inner.children.is_empty())
+        };
+        // The last agent run ended: let its buffers go back to the system.
+        if idle {
+            crate::memory::release_soon();
         }
-        inner.children.remove(session_id)
+        removed
     }
 
     fn kill_account(&self, provider: &str, account_id: &str) {

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- MonoBOT uses far less memory at rest. The dictation model loads on the first dictation instead of at startup, and is released after three minutes without dictating. Group-call voices are released after two minutes of silence. The first dictation after a pause takes a few seconds longer to start.
+- The quick composer's workspace picker is created when the composer first opens, instead of staying in memory from startup.
+- After the last agent run ends, or a speech model is released, MonoBOT hands the freed memory back to the system.
+
 ## [0.16.0] - 2026-10-19
 
 ### Added

@@ -6,6 +6,7 @@ mod wav;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Mutex};
 
 use sherpa_onnx::{
@@ -43,12 +44,16 @@ const MAX_CHARS: usize = 2_000;
 /// still speaks many times faster than real time.
 const STEPS: i32 = 8;
 
-/// The synthesizer, loaded once and kept while the app runs, like the
-/// dictation recognizer. One sentence is spoken at a time.
+/// The synthesizer, loaded on the first sentence and kept while a call keeps
+/// speaking, like the dictation recognizer; the app releases it once idle.
+/// One sentence is spoken at a time.
 pub struct Voice {
     dir: PathBuf,
     tts: Mutex<Option<Arc<OfflineTts>>>,
     turn: Mutex<()>,
+    /// The model's voice count, kept after release so asking again does not
+    /// load the whole synthesizer. Zero until known.
+    speakers: AtomicI32,
 }
 
 impl Voice {
@@ -57,6 +62,20 @@ impl Voice {
             dir,
             tts: Mutex::new(None),
             turn: Mutex::new(()),
+            speakers: AtomicI32::new(0),
+        }
+    }
+
+    /// Frees the synthesizer's memory unless a sentence is being spoken.
+    /// Returns whether it was released; the next sentence loads it again.
+    pub fn release(&self) -> bool {
+        let mut slot = self.tts.lock().unwrap_or_else(|e| e.into_inner());
+        match slot.as_ref() {
+            Some(tts) if Arc::strong_count(tts) == 1 => {
+                *slot = None;
+                true
+            }
+            _ => false,
         }
     }
 
@@ -84,7 +103,13 @@ impl Voice {
 
     /// How many voices the model has; members are given one each.
     pub fn speakers(&self) -> Result<i32, Error> {
-        Ok(self.prepare()?.num_speakers().max(1))
+        let known = self.speakers.load(Ordering::Relaxed);
+        if known > 0 {
+            return Ok(known);
+        }
+        let count = self.prepare()?.num_speakers().max(1);
+        self.speakers.store(count, Ordering::Relaxed);
+        Ok(count)
     }
 
     /// Speaks one sentence and returns it as a WAV file.

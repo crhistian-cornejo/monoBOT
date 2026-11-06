@@ -4,15 +4,23 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use monobot_voice::Voice;
 use serde::Serialize;
 use tauri::ipc::Response;
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::idle::IdleRelease;
+
+/// How long the synthesizer stays in memory after the last sentence: a call
+/// speaks in bursts, so pauses between turns do not reload it.
+const IDLE: Duration = Duration::from_secs(2 * 60);
+
 struct State {
     engine: Arc<Voice>,
     installing: AtomicBool,
+    idle: IdleRelease,
 }
 
 static STATE: OnceLock<State> = OnceLock::new();
@@ -34,7 +42,18 @@ fn state(app: &AppHandle) -> Result<&'static State, String> {
     Ok(STATE.get_or_init(|| State {
         engine: Arc::new(Voice::new(dir)),
         installing: AtomicBool::new(false),
+        idle: IdleRelease::new(),
     }))
+}
+
+/// Lets the synthesizer go once no sentence has been spoken for `IDLE`.
+fn release_when_idle(state: &'static State) {
+    let engine = state.engine.clone();
+    state.idle.touch(IDLE, move || {
+        if engine.release() {
+            crate::memory::release_soon();
+        }
+    });
 }
 
 #[derive(Serialize)]
@@ -63,7 +82,7 @@ struct Progress {
 }
 
 /// Downloads, verifies and unpacks the model, reporting `voice-install`
-/// progress, then loads it so the first sentence is spoken at once.
+/// progress. The first sentence loads it; it is not kept in memory before.
 #[tauri::command]
 pub async fn voice_install(app: AppHandle) -> Result<(), String> {
     let state = state(&app)?;
@@ -79,8 +98,7 @@ pub async fn voice_install(app: AppHandle) -> Result<(), String> {
                 last = done;
                 let _ = emitter.emit("voice-install", Progress { done, total });
             }
-        })?;
-        engine.prepare().map(|_| ())
+        })
     })
     .await
     .map_err(|e| e.to_string())
@@ -92,11 +110,14 @@ pub async fn voice_install(app: AppHandle) -> Result<(), String> {
 /// How many voices there are to share among a group's members.
 #[tauri::command]
 pub async fn voice_speakers(app: AppHandle) -> Result<i32, String> {
-    let engine = state(&app)?.engine.clone();
-    tauri::async_runtime::spawn_blocking(move || engine.speakers())
+    let state = state(&app)?;
+    let engine = state.engine.clone();
+    let count = tauri::async_runtime::spawn_blocking(move || engine.speakers())
         .await
         .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    release_when_idle(state);
+    count
 }
 
 /// Speaks one sentence in `lang` ("es" or "en") with voice `speaker`, and
@@ -108,10 +129,12 @@ pub async fn voice_speak(
     lang: String,
     speaker: i32,
 ) -> Result<Response, String> {
-    let engine = state(&app)?.engine.clone();
+    let state = state(&app)?;
+    let engine = state.engine.clone();
     let wav = tauri::async_runtime::spawn_blocking(move || engine.speak(&text, &lang, speaker))
         .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
-    Ok(Response::new(wav))
+        .map_err(|e| e.to_string())
+        .and_then(|result| result.map_err(|e| e.to_string()));
+    release_when_idle(state);
+    Ok(Response::new(wav?))
 }

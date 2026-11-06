@@ -30,8 +30,9 @@ pub enum Error {
     Microphone(String),
 }
 
-/// The recognizer, loaded once and kept while the app runs: loading
-/// Parakeet takes seconds, transcribing a phrase a fraction of one.
+/// The recognizer, loaded on the first dictation and kept while the user keeps
+/// dictating: loading Parakeet takes seconds, transcribing a phrase a fraction
+/// of one. It holds over half a gigabyte, so the app releases it once idle.
 pub struct Dictation {
     dir: PathBuf,
     recognizer: Mutex<Option<Arc<sherpa_onnx::OfflineRecognizer>>>,
@@ -65,6 +66,19 @@ impl Dictation {
         let recognizer = Arc::new(load(&self.dir)?);
         *slot = Some(recognizer.clone());
         Ok(recognizer)
+    }
+
+    /// Frees the recognizer's memory unless a session still uses it. Returns
+    /// whether it was released; the next dictation loads it again.
+    pub fn release(&self) -> bool {
+        let mut slot = self.recognizer.lock().unwrap_or_else(|e| e.into_inner());
+        match slot.as_ref() {
+            Some(recognizer) if Arc::strong_count(recognizer) == 1 => {
+                *slot = None;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Opens the microphone and starts transcribing.

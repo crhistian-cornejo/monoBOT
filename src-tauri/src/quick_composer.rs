@@ -149,11 +149,7 @@ pub async fn quick_composer_prepare(app: AppHandle, window: WebviewWindow) -> Re
     let handle = app.clone();
     app.run_on_main_thread(move || {
         let result = (|| {
-            if handle.get_webview_window(QUICK_COMPOSER_LABEL).is_some()
-                && handle
-                    .get_webview_window(crate::window::QUICK_COMPOSER_GIT_LABEL)
-                    .is_some()
-            {
+            if handle.get_webview_window(QUICK_COMPOSER_LABEL).is_some() {
                 return Ok(true);
             }
             let Some(mtm) = MainThreadMarker::new() else {
@@ -177,12 +173,13 @@ pub async fn quick_composer_prepare(app: AppHandle, window: WebviewWindow) -> Re
         .ok_or_else(|| "Composer preparation was interrupted.".to_string())?
 }
 
+/// Builds only the composer ahead of time, so the shortcut opens it at once.
+/// Its workspace picker is a webview of its own; `show` builds it when the
+/// composer first opens, instead of keeping it in memory from startup.
 fn prepare(app: &AppHandle) -> tauri::Result<()> {
-    let panel = match app.get_webview_window(QUICK_COMPOSER_LABEL) {
-        Some(panel) => panel,
-        None => build(app)?,
-    };
-    git_popup::prepare(app, &panel)?;
+    if app.get_webview_window(QUICK_COMPOSER_LABEL).is_none() {
+        build(app)?;
+    }
     Ok(())
 }
 
