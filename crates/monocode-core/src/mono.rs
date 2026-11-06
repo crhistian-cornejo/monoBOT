@@ -9,6 +9,7 @@ pub mod cards;
 pub mod delegations;
 mod desktop;
 pub mod files;
+pub mod groups;
 pub mod habits;
 pub mod heartbeat;
 pub mod memory;

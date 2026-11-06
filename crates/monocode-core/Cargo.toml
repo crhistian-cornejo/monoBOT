@@ -24,6 +24,8 @@ ureq = "2.12"
 webpki-roots = "0.26.11"
 similar = "2"
 unicode-width = "0.2"
+# Group mentions read "@Análisis" as "@Analisis", as the desktop app does.
+unicode-normalization = "0.1"
 monocode-mobile-link = { path = "../mobile-link" }
 # The user's mail, shared with the desktop app: the same accounts, secrets and snapshot.
 monobot-email = { path = "../email" }
@@ -47,7 +49,6 @@ scraper = { version = "0.29", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
-unicode-normalization = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
