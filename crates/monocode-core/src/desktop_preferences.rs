@@ -409,6 +409,12 @@ impl DesktopPreferences {
     }
 }
 
+/// How storageFlags.ts reads a switch: "1" and "true" are on, anything else
+/// saved is off, and nothing saved leaves the default to the caller.
+pub fn read_flag(raw: Option<&str>) -> Option<bool> {
+    raw.map(|raw| raw == "1" || raw == "true")
+}
+
 fn reconcile_preference(
     preferences: &mut Map<String, Value>,
     baseline: &Value,

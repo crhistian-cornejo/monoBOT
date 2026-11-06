@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 use crate::scm::shell::dirs_home;
+
+pub mod bundled;
+
 fn expand_home(path: &str) -> PathBuf {
     crate::scm::expand_home(Path::new(path))
 }
@@ -88,9 +91,26 @@ pub fn list_skills(
     cwd: String,
     disabled_paths: Option<Vec<String>>,
 ) -> Result<Vec<DiscoveredSkill>, String> {
+    list_skills_with_packs(cwd, disabled_paths, &[])
+}
+
+/// [`list_skills`] plus MonoBOT's own skill packs, as installed under its
+/// data folder ([`bundled::bundled_plugin_dirs`]): source `monocode`, after
+/// every root the user controls so a skill they installed keeps its name.
+/// Only absolute folders count; their skills sit in `<pack>/skills`.
+pub fn list_skills_with_packs(
+    cwd: String,
+    disabled_paths: Option<Vec<String>>,
+    pack_dirs: &[PathBuf],
+) -> Result<Vec<DiscoveredSkill>, String> {
     let project = expand_home(&cwd);
     let home = dirs_home().map(PathBuf::from);
-    let mut skills = list_skills_from(&project, home.as_deref(), disabled_paths.as_deref());
+    let mut skills = list_skills_with(
+        &project,
+        home.as_deref(),
+        disabled_paths.as_deref(),
+        &pack_roots(pack_dirs),
+    );
     let disabled = DisabledFilter::new(disabled_paths.as_deref());
     let codex_home = std::env::var_os("CODEX_HOME")
         .map(PathBuf::from)
@@ -116,10 +136,29 @@ pub fn list_skills(
     Ok(skills)
 }
 
+fn pack_roots(pack_dirs: &[PathBuf]) -> Vec<PathBuf> {
+    pack_dirs
+        .iter()
+        .filter(|dir| dir.is_absolute())
+        .map(|dir| dir.join("skills"))
+        .collect()
+}
+
+#[cfg(test)]
 pub(crate) fn list_skills_from(
     project: &Path,
     home: Option<&Path>,
     disabled_paths: Option<&[String]>,
+) -> Vec<DiscoveredSkill> {
+    list_skills_with(project, home, disabled_paths, &[])
+}
+
+/// `packs` come last, so a skill the user installed keeps its name.
+fn list_skills_with(
+    project: &Path,
+    home: Option<&Path>,
+    disabled_paths: Option<&[String]>,
+    packs: &[PathBuf],
 ) -> Vec<DiscoveredSkill> {
     let disabled_filter = DisabledFilter::new(disabled_paths);
     let mut by_name: HashMap<String, DiscoveredSkill> = HashMap::new();
@@ -190,6 +229,9 @@ pub(crate) fn list_skills_from(
             "devin",
         );
         add_root(project.join(".devin/skills"), "project", "devin");
+        for pack in packs {
+            add_root(pack.clone(), "user", "monocode");
+        }
         for (root, scope, namespace) in claude_plugin_skill_roots(home, project) {
             add_namespaced_root(
                 &mut by_name,
@@ -1302,5 +1344,48 @@ mod tests {
             slash_skill.is_some(),
             "distinct backslash path on Unix must not be disabled by colliding slash path"
         );
+    }
+
+    #[test]
+    fn lists_monobot_packs_after_the_users_own_skills() {
+        let project = tmp("pack-proj");
+        let home = tmp("pack-home");
+        let pack = tmp("pack");
+        let skill = |name: &str| format!("---\nname: {name}\ndescription: d\n---\n");
+        write_skill(&pack.0.join("skills"), "impeccable", &skill("impeccable"));
+        write_skill(&pack.0.join("skills"), "brandkit", &skill("brandkit"));
+        write_skill(
+            &home.0.join(".claude/skills"),
+            "brandkit",
+            &skill("brandkit"),
+        );
+        let skills = list_skills_with(&project.0, Some(&home.0), None, &[pack.0.join("skills")]);
+        let find = |name: &str| skills.iter().find(|s| s.name == name).unwrap();
+        assert_eq!(find("impeccable").source, "monocode");
+        assert_eq!(find("impeccable").scope, "user");
+        assert_eq!(find("brandkit").source, "claude");
+    }
+
+    #[test]
+    fn lists_the_installed_bundled_packs_by_their_folders() {
+        let data = tmp("pack-data");
+        let project = tmp("pack-cwd");
+        let home = tmp("pack-user");
+        let dirs = bundled::bundled_plugin_dirs_in(&data.0, &["monobot-imagery".to_owned()]);
+        // A relative folder is not a pack.
+        let mut given = dirs.clone();
+        given.push(PathBuf::from("native-plugins/x"));
+        assert_eq!(pack_roots(&given), [dirs[0].join("skills")]);
+        let skills = list_skills_with(&project.0, Some(&home.0), None, &pack_roots(&given));
+        // Only Devin's %APPDATA% folder is outside the temporary homes.
+        let packs: Vec<&DiscoveredSkill> = skills.iter().filter(|s| s.source != "devin").collect();
+        let mut names: Vec<&str> = packs.iter().map(|s| s.name.as_str()).collect();
+        names.sort_unstable();
+        let mut expected = bundled::SKILL_PACKS[1].skills.to_vec();
+        expected.sort_unstable();
+        assert_eq!(names, expected);
+        assert!(packs
+            .iter()
+            .all(|s| s.source == "monocode" && s.scope == "user"));
     }
 }

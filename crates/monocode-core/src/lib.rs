@@ -6,6 +6,7 @@ pub mod app_update;
 pub mod automations;
 pub mod catalog;
 pub mod checkpoint;
+pub mod connectors;
 pub mod context;
 pub mod desktop_preferences;
 pub mod diff;
@@ -50,3 +51,6 @@ pub mod cli;
 pub mod mcp;
 
 pub mod worktree_management;
+
+#[cfg(test)]
+mod ts_literal;
