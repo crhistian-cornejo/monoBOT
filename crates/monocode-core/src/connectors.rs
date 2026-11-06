@@ -4,7 +4,10 @@
 //! `node`. The enabled ones go to each Claude turn with `--mcp-config` (and
 //! to Codex as `-c` overrides), so neither CLI's own configuration is
 //! touched. What they return is data, never instructions.
-use crate::desktop_preferences::{read_flag, DesktopPreferences};
+use crate::{
+    desktop_preferences::{read_flag, DesktopPreferences},
+    store::Store,
+};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -572,6 +575,58 @@ pub fn set_session_defaults(settings: ConnectorSettings, packs: Vec<String>) {
     if let Ok(mut slot) = SESSION_DEFAULTS.write() {
         *slot = Some((settings, packs));
     }
+}
+
+/// The connector switches and enabled skill packs new sessions launch with.
+pub fn session_state() -> (ConnectorSettings, Vec<String>) {
+    SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default()
+}
+
+/// The enabled skill packs new sessions launch with.
+pub fn session_packs() -> Vec<String> {
+    SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.as_ref().map(|(_, packs)| packs.clone()))
+        .unwrap_or_default()
+}
+
+impl ConnectorSettings {
+    /// What the native app saved (`native_settings`), else what the desktop
+    /// app's webview holds: the native switch wins once the user used it.
+    pub fn from_store(store: &Store) -> Self {
+        Self::read(|key| saved_value(store, key))
+    }
+}
+
+/// A Settings value: the native store's, else the desktop's.
+pub fn saved_value(store: &Store, key: &str) -> Option<String> {
+    store
+        .setting(key)
+        .ok()
+        .flatten()
+        .or_else(|| store.desktop_preferences()?.get(key).map(str::to_owned))
+}
+
+/// Saves a connector's switch where the native app keeps preferences, and
+/// makes new sessions use it at once.
+pub fn save_enabled(store: &Store, id: &str, enabled: bool) -> Result<(), String> {
+    store.save_setting(&enabled_key(id), if enabled { "true" } else { "false" })?;
+    refresh_session_defaults(store);
+    Ok(())
+}
+
+/// Re-reads the connector switches and skill packs from the store for new
+/// sessions (the seed the app also makes at start).
+pub fn refresh_session_defaults(store: &Store) {
+    set_session_defaults(
+        ConnectorSettings::from_store(store),
+        crate::skills::bundled::enabled_skill_packs_with(|key| saved_value(store, key)),
+    );
 }
 
 /// What a Claude session gets from the app's connectors and MonoBOT's skill

@@ -427,3 +427,20 @@ fn takes_self_approving_modes_away_from_a_session_that_has_poki() {
         "auto"
     );
 }
+
+#[test]
+fn a_saved_switch_survives_and_refreshes_the_session_defaults() {
+    let dir = std::env::temp_dir().join(format!("monobot-connectors-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let store = Store::open(&dir.join("native.sqlite")).unwrap();
+    let off = CONNECTORS.iter().find(|c| !c.on_by_default).unwrap();
+    assert!(!ConnectorSettings::from_store(&store).is_enabled(off));
+    save_enabled(&store, off.id, true).unwrap();
+    assert!(ConnectorSettings::from_store(&store).is_enabled(off));
+    crate::skills::bundled::save_skill_pack(&store, "monobot-design", true).unwrap();
+    assert_eq!(session_packs(), vec!["monobot-design".to_owned()]);
+    crate::skills::bundled::save_skill_pack(&store, "monobot-design", false).unwrap();
+    assert!(session_packs().is_empty());
+    save_enabled(&store, off.id, false).unwrap();
+    assert!(!ConnectorSettings::from_store(&store).is_enabled(off));
+}

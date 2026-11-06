@@ -417,12 +417,8 @@ fn main() {
     if let Some(dir) = db.data_dir() {
         monocode_core::skills::bundled::set_data_dir(dir.to_path_buf());
     }
-    if let Some(preferences) = db.desktop_preferences() {
-        monocode_core::connectors::set_session_defaults(
-            monocode_core::connectors::ConnectorSettings::from_preferences(preferences),
-            monocode_core::skills::bundled::enabled_skill_packs(preferences),
-        );
-    }
+    // What this app saved wins over the desktop app's switches.
+    monocode_core::connectors::refresh_session_defaults(&db);
     let db = Arc::new(Mutex::new(db));
     let platform = gpui_platform::current_platform(false);
     let title_raster = particle_text::GlyphRaster(platform.text_system());

@@ -145,6 +145,18 @@ pub fn enabled_skill_packs_with(get: impl Fn(&str) -> Option<String>) -> Vec<Str
         .collect()
 }
 
+/// Turns a pack on or off where the native app keeps preferences, and makes
+/// new sessions use it at once.
+pub fn save_skill_pack(
+    store: &crate::store::Store,
+    id: &str,
+    enabled: bool,
+) -> Result<(), String> {
+    store.save_setting(&skill_pack_key(id), if enabled { "true" } else { "false" })?;
+    crate::connectors::refresh_session_defaults(store);
+    Ok(())
+}
+
 /// The plugins a Claude session loads: MonoBOT's own, then a bot's packs,
 /// or for any other session the ones turned on in Settings.
 pub fn session_plugins(bot_plugins: Option<&[String]>, enabled_packs: &[String]) -> Vec<String> {

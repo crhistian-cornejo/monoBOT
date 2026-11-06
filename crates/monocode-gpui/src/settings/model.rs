@@ -189,6 +189,12 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         "router port upnp nat remote address public hostname vpn wifi",
     ),
     (
+        "connectors",
+        Section::Mcp,
+        "Connectors",
+        "mcp remote http context7 microsoft learn deepwiki x twitter openalex papers docs built-in",
+    ),
+    (
         "mcp-servers",
         Section::Mcp,
         "MCP servers",

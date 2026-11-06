@@ -65,6 +65,9 @@ pub(crate) struct SettingsContext {
     pub mobile: Option<monocode_core::mobile::Status>,
     /// The pairing code on show.
     pub mobile_invite: Option<monocode_core::mobile::Invite>,
+    /// The connector switches and the skill packs turned on.
+    pub connectors: monocode_core::connectors::ConnectorSettings,
+    pub packs: Vec<String>,
 }
 impl PartialEq for SettingsContext {
     fn eq(&self, other: &Self) -> bool {
@@ -87,6 +90,8 @@ impl PartialEq for SettingsContext {
             && self.inbox_connections == other.inbox_connections
             && self.mobile == other.mobile
             && self.mobile_invite == other.mobile_invite
+            && self.connectors == other.connectors
+            && self.packs == other.packs
     }
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -133,6 +138,10 @@ pub(crate) enum SettingsEvent {
     MobilePair,
     MobileCancelInvite,
     MobileRevoke(String),
+    /// A connector's switch in Settings › MCP.
+    Connector(String, bool),
+    /// A skill pack's switch in Settings › Skills.
+    SkillPack(String, bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
