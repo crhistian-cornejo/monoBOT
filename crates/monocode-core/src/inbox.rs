@@ -9,6 +9,7 @@ mod github;
 pub mod gitlab;
 pub mod jira;
 pub mod linear;
+pub mod mail;
 
 use crate::{desktop_preferences::DesktopPreferences, session_groups::WorkItem, store::Store};
 use chrono::{Datelike, Local, TimeZone};
@@ -420,6 +421,11 @@ pub struct ViewState {
     pub hidden_linear_teams: Vec<String>,
     pub hidden_jira_projects: Vec<String>,
     pub list_width: f32,
+    /// The Email tab, beside GitHub and the trackers.
+    pub email_open: bool,
+    /// Whether a message's pictures on the web load as it opens (the default). Off, they
+    /// wait for a press: a sender can tell from them that it was opened.
+    pub mail_auto_images: bool,
 }
 impl Default for ViewState {
     fn default() -> Self {
@@ -430,6 +436,8 @@ impl Default for ViewState {
             hidden_linear_teams: vec![],
             hidden_jira_projects: vec![],
             list_width: 280.,
+            email_open: false,
+            mail_auto_images: true,
         }
     }
 }
@@ -494,6 +502,8 @@ impl ViewState {
             .json("monocode.jiraHiddenProjects")
             .and_then(|v| serde_json::from_value(v).ok())
             .unwrap_or_default();
+        state.email_open = desktop.get("monocode.inboxEmailOpen") == Some("1");
+        state.mail_auto_images = desktop.get("monocode.mail.autoImages") != Some("0");
         state
     }
     pub fn save(&self, store: &Store) -> Result<(), String> {

@@ -1310,7 +1310,16 @@ pub fn run_with_controls(
 
 /// A bounded, separate conversation for titles and other background text work.
 /// Never resume the user's conversation or inherit its app capabilities/tools.
-pub fn run_text(mut request: Request, cancel: Arc<AtomicBool>) -> Result<String, String> {
+pub fn run_text(request: Request, cancel: Arc<AtomicBool>) -> Result<String, String> {
+    run_text_streaming(request, cancel, |_| {})
+}
+
+/// [`run_text`], telling `on_text` the whole answer so far as each piece arrives.
+pub fn run_text_streaming(
+    mut request: Request,
+    cancel: Arc<AtomicBool>,
+    mut on_text: impl FnMut(&str),
+) -> Result<String, String> {
     request.provider_id = None;
     request.settings = Settings {
         account: request.settings.account.clone(),
@@ -1324,7 +1333,8 @@ pub fn run_text(mut request: Request, cancel: Arc<AtomicBool>) -> Result<String,
         for event in events {
             match event {
                 Event::Text(text) if output.len() + text.len() <= 64 * 1024 => {
-                    output.push_str(&text)
+                    output.push_str(&text);
+                    on_text(&output);
                 }
                 Event::Text(_) => return Err("Background text response exceeded its limit".into()),
                 Event::Tool(tool) if tool.is_compaction() => {}

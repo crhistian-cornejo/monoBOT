@@ -25,6 +25,8 @@ webpki-roots = "0.26.11"
 similar = "2"
 unicode-width = "0.2"
 monocode-mobile-link = { path = "../mobile-link" }
+# The user's mail, shared with the desktop app: the same accounts, secrets and snapshot.
+monobot-email = { path = "../email" }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 uuid = { version = "1", features = ["v4"] }
