@@ -1,5 +1,6 @@
 //! UI-independent services shared by the native migration and Tauri.
 pub mod accounts;
+pub mod citations;
 pub mod agent;
 pub mod app_access;
 pub mod app_update;
@@ -16,6 +17,7 @@ pub mod git;
 pub mod github_star;
 pub mod harness_updates;
 pub mod inbox;
+pub mod keep_awake;
 pub mod mobile;
 pub mod mono;
 pub mod notes;
@@ -26,6 +28,7 @@ pub mod provider;
 pub mod remote;
 pub mod resources;
 pub mod response;
+pub mod scheduled_send;
 pub mod scm;
 pub mod session_filters;
 pub mod session_groups;
@@ -40,9 +43,11 @@ pub mod visual;
 pub mod visual_bridge;
 
 pub mod composer;
+pub mod composer_quotes;
 pub mod contributions;
 pub mod orchestration;
 pub mod skills;
+pub mod sounds;
 
 pub mod search;
 
