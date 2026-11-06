@@ -17,6 +17,7 @@ mod context_meter;
 mod conversation;
 #[cfg(debug_assertions)]
 mod dev_reload;
+mod dictation;
 mod diff_view;
 mod editor_analysis;
 mod editor_scrollbar;
@@ -447,6 +448,7 @@ fn main() {
             shell::bind_keys(cx);
             app_menu::bind(cx);
             usage_footer::bind(cx);
+            dictation::init(cx);
             cx.on_window_closed(|cx, _| {
                 if cx.windows().is_empty() {
                     quit(cx)

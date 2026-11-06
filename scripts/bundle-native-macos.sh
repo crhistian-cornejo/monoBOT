@@ -71,6 +71,7 @@ cat > "$native_bundle/Contents/Info.plist" <<PLIST
 <key>CFBundleIconName</key><string>AppIcon</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSHighResolutionCapable</key><true/>
+<key>NSMicrophoneUsageDescription</key><string>MonoBOT turns what you say into text while dictation is listening. The audio never leaves this Mac.</string>
 </dict></plist>
 PLIST
 native_identity="${MONOCODE_NATIVE_SIGNING_IDENTITY:--}"

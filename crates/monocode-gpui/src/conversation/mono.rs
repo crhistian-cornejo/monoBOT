@@ -866,6 +866,7 @@ impl Conversation {
             })
             .flex()
             .flex_col()
+            .capture_key_down(crate::dictation::capture_escape(&self.dictation))
             .on_mouse_down(
                 MouseButton::Left,
                 // Keep a focus-tracking ancestor from taking focus back.
@@ -972,6 +973,7 @@ impl Conversation {
                                     .child(icon("chevron-down", 12.)),
                             ),
                     )
+                    .child(crate::dictation::mic(&self.dictation, cx))
                     .child(
                         div()
                             .debug_selector(|| "mono-send".into())
@@ -979,6 +981,7 @@ impl Conversation {
                             .child(self.action(has_value, window, cx)),
                     ),
             )
+            .child(self.dictation.clone())
             .children(self.attachment_drop_overlay(12.))
             .into_any_element()
     }

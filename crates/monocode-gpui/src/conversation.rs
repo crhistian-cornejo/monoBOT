@@ -7,6 +7,8 @@ mod changes_shelf;
 mod commands;
 pub(crate) mod composer_features;
 mod composer_shelf;
+#[cfg(test)]
+mod dictation_tests;
 mod edit_last_turn;
 mod follow_up;
 pub(crate) mod git_actions;
@@ -210,6 +212,8 @@ pub(crate) struct Conversation {
     context_hovered: bool,
     /// The submit button's morph between square and labelled pill.
     send_morph: std::cell::RefCell<crate::send_morph::Morph>,
+    /// The mic beside send, and the bar it shows under the toolbar.
+    dictation: Entity<crate::dictation::Dictation>,
     /// ⌘ (Ctrl elsewhere) as last seen, which flips Queue and Steer.
     send_alternate: bool,
     menu: Option<OpenMenu>,
@@ -525,6 +529,7 @@ impl Conversation {
             this.open_typed_btw(cx);
         });
         input.update(cx, |input, _| input.set_alternate_submit(true));
+        let dictation = cx.new(|cx| crate::dictation::Dictation::new(&input, cx));
         let submission = cx.subscribe(&input, |this, _, _: &input::Submitted, cx| this.send(cx));
         let alternate_submission = cx
             .subscribe(&input, |this, _, _: &input::AlternateSubmitted, cx| {
@@ -668,6 +673,7 @@ impl Conversation {
             context: None,
             context_hovered: false,
             send_morph: Default::default(),
+            dictation,
             send_alternate: false,
             menu: None,
             add_anchor: AnchorSlot::default(),
@@ -2899,6 +2905,7 @@ impl Conversation {
                             cx.stop_propagation();
                         }
                     }))
+                    .capture_key_down(crate::dictation::capture_escape(&self.dictation))
                     .relative()
                     .rounded(px(radius))
                     .border_1()
@@ -3039,8 +3046,10 @@ impl Conversation {
                                             .child(icon("chevron-down", 12.)),
                                     ),
                             )
+                            .child(crate::dictation::mic(&self.dictation, cx))
                             .child(self.action(has_value, window, cx)),
                     )
+                    .child(self.dictation.clone())
                     .children(self.attachment_drop_overlay(12.)),
             )
             .children(runner.map(|runner| {

@@ -24,6 +24,9 @@ impl AssetSource for Assets {
    "sticky-note"=>include_bytes!("../assets/hugeicons/sticky-note.svg"),
    "pipette"=>include_bytes!("../assets/hugeicons/pipette.svg"),
    "square"=>include_bytes!("../assets/hugeicons/square.svg"),
+   // Dictation's mic, and the filled square it stops with.
+   "mic-01"=>include_bytes!("../assets/hugeicons/mic-01.svg"),
+   "square-fill"=>include_bytes!("../assets/hugeicons/square-fill.svg"),
    "cancel-01"=>include_bytes!("../assets/hugeicons/cancel-01.svg"),
    "window-maximize"=>include_bytes!("../assets/hugeicons/window-maximize.svg"),
    "window-restore"=>include_bytes!("../assets/hugeicons/window-restore.svg"),

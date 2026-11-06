@@ -50,6 +50,8 @@ test("Finder launches use development data for dev bundles and installed data fo
       assert.ok(plist.includes(`<key>MonocodeDataMode</key><string>${mode}</string>`));
       // macOS rejects menu bar items from a process that exec'd after launch.
       assert.ok(plist.includes("<key>CFBundleExecutable</key><string>monocode-gpui</string>"));
+      // Without it macOS ends the app the moment dictation opens the microphone.
+      assert.match(plist, /<key>NSMicrophoneUsageDescription<\/key><string>MonoBOT [^<]+<\/string>/);
       await assert.rejects(access(join(bundle, "MacOS/monocode-launcher")));
       const launched = spawnSync(join(bundle, "MacOS/monocode-gpui"), ["--cwd", "a project with spaces"], {
         encoding: "utf8",
