@@ -3,6 +3,7 @@ mod actions;
 mod app_commands;
 mod app_views;
 mod automation_runs;
+mod bot_transfer;
 mod classic_sidebar;
 #[cfg(test)]
 mod classic_surface_tests;
@@ -745,6 +746,7 @@ pub(crate) struct Shell {
     quit_prompted: bool,
     pub(crate) menu: Option<ShellMenu>,
     background_dialog: Option<project_settings::OpenBackground>,
+    bot_import: Option<bot_transfer::OpenImport>,
     backgrounds: HashMap<i64, Entity<crate::project_background::ProjectBackground>>,
     /// The last active chat and whether it drew a background, so arriving
     /// from one without fades the next one in.
@@ -1124,6 +1126,7 @@ impl Shell {
             quit_prompted: false,
             menu: None,
             background_dialog: None,
+            bot_import: None,
             backgrounds: HashMap::new(),
             backdrop: None,
             background_card: AnchorSlot::default(),
@@ -1231,6 +1234,7 @@ impl Shell {
                 cx.notify();
             }),
         );
+        this.watch_bot_sync(&monos, cx);
         this.observations.push(cx.subscribe(
             &monos,
             |this, _, opened: &crate::monos::TabOpened, cx| {
@@ -9163,6 +9167,7 @@ impl Render for Shell {
             }))
             .children(self.drag_ghost(cx))
             .children(self.background_modal(window, cx))
+            .children(self.bot_import_modal(window, cx))
             .children(self.link_modal(window, cx))
             .children(self.action_modal(window, cx))
             .children(self.resource_modal(window, cx))

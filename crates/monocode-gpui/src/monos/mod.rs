@@ -4,6 +4,8 @@ mod agent_calls;
 pub(crate) mod agents;
 pub(crate) mod avatar;
 mod bot_settings;
+pub(crate) mod bot_import;
+pub(crate) mod bot_transfer;
 pub(crate) mod cards;
 mod changes;
 mod color_picker;
@@ -28,6 +30,7 @@ mod search;
 #[cfg(all(target_os = "macos", not(test)))]
 mod status;
 mod sync;
+pub(crate) use sync::{SyncUpdated, SyncView};
 #[cfg(test)]
 mod tests;
 mod work;
@@ -180,6 +183,7 @@ pub(crate) struct Monos {
 impl EventEmitter<Changed> for Monos {}
 impl EventEmitter<TabOpened> for Monos {}
 impl EventEmitter<ShowDetails> for Monos {}
+impl EventEmitter<SyncUpdated> for Monos {}
 impl Monos {
     pub(crate) fn resource_sessions(
         &self,
@@ -410,6 +414,7 @@ impl Monos {
             app_results: HashMap::new(),
             app_pending: HashSet::new(),
         };
+        this.load_sync_view();
         if let Some(rx) = rx {
             this._bridge_task = Some(cx.spawn(async move |this, cx| {
                 while let Ok(call) = rx.recv().await {

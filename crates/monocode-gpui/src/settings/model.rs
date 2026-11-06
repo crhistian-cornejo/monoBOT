@@ -219,6 +219,18 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         "mono reset soul name projects sessions sidebar visibility hidden show",
     ),
     (
+        "bots-transfer",
+        Section::Monos,
+        "Export and import bots",
+        "bots export import backup move mac windows another computer file sync",
+    ),
+    (
+        "bots-sync",
+        Section::Monos,
+        "Keep bots in sync",
+        "bots sync onedrive icloud dropbox google drive folder mac windows automatic",
+    ),
+    (
         "project-worktrees",
         Section::Worktrees,
         "Project worktrees",

@@ -68,6 +68,8 @@ pub(crate) struct SettingsContext {
     /// The connector switches and the skill packs turned on.
     pub connectors: monocode_core::connectors::ConnectorSettings,
     pub packs: Vec<String>,
+    /// The folder the bots sync through, and how the last sync went.
+    pub bot_sync: crate::monos::SyncView,
 }
 impl PartialEq for SettingsContext {
     fn eq(&self, other: &Self) -> bool {
@@ -92,6 +94,7 @@ impl PartialEq for SettingsContext {
             && self.mobile_invite == other.mobile_invite
             && self.connectors == other.connectors
             && self.packs == other.packs
+            && self.bot_sync == other.bot_sync
     }
 }
 #[derive(Clone, Debug, PartialEq)]
@@ -142,6 +145,14 @@ pub(crate) enum SettingsEvent {
     Connector(String, bool),
     /// A skill pack's switch in Settings › Skills.
     SkillPack(String, bool),
+    /// Save every bot to a file the user names.
+    BotsExport,
+    /// Read a bots file the user picks and import it.
+    BotsImport,
+    /// Pick the folder the bots sync through.
+    BotSyncChoose,
+    BotSyncNow,
+    BotSyncOff,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -267,6 +278,8 @@ pub(crate) struct SettingsView {
     accent_custom_open: bool,
     accent_anchor: AnchorSlot,
     mobile: pages::MobileState,
+    /// The last export or import, for the line under its buttons.
+    bots_status: Option<(String, bool)>,
     _subscriptions: Vec<Subscription>,
 }
 impl EventEmitter<SettingsEvent> for SettingsView {}
@@ -417,6 +430,7 @@ impl SettingsView {
             accent_custom_open: false,
             accent_anchor: AnchorSlot::default(),
             mobile: pages::MobileState::default(),
+            bots_status: None,
             _subscriptions: subscriptions,
         };
         this.watch_mobile(cx);
