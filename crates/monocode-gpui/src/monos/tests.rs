@@ -1535,6 +1535,7 @@ fn habit_detail_preserves_long_content_history_and_actions_without_edit_fields(
         duration_ms: 72_000,
         outcome: "posted".into(),
         report: Some("**Result**\n\nThe project is ready to review.".into()),
+        status: None,
         error: None,
     });
     habits::update(&s.root, &s.id, |all| {
@@ -1955,46 +1956,97 @@ fn the_principal_makes_bots_and_agents_write_to_each_other(cx: &mut TestAppConte
         mono.kind = Some("bot".into());
         mono.bot_role = Some("principal".into());
     });
-    let made = call(&s, "make", "bots.create", json!({"role": "finance", "name": "Cash"}), cx)
-        .try_recv()
-        .unwrap()
-        .unwrap();
+    let made = call(
+        &s,
+        "make",
+        "bots.create",
+        json!({"role": "finance", "name": "Cash"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
     assert_eq!(made["bot"]["name"], "Cash");
     assert_eq!(made["bot"]["role"], "finance");
-    assert!(made["bot"]["specialty"].as_str().unwrap().starts_with("Money"));
-    let refused = call(&s, "phone", "bots.create", json!({"role": "phone", "name": "P"}), cx)
-        .try_recv()
-        .unwrap();
+    assert!(
+        made["bot"]["specialty"]
+            .as_str()
+            .unwrap()
+            .starts_with("Money")
+    );
+    let refused = call(
+        &s,
+        "phone",
+        "bots.create",
+        json!({"role": "phone", "name": "P"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap();
     assert!(refused.unwrap_err().contains("only the user creates one"));
 
-    let list = call(&s, "list", "agents.list", json!({}), cx).try_recv().unwrap().unwrap();
-    let agents = list["agents"].as_array().unwrap();
-    assert!(agents.iter().any(|a| a["name"] == "Cash"));
-    assert!(!agents.iter().any(|a| a["id"] == s.id.as_str()), "not itself");
-
-    let sent = call(&s, "ask", "agents.message", json!({"to": "cash", "message": "Sum October"}), cx)
+    let list = call(&s, "list", "agents.list", json!({}), cx)
         .try_recv()
         .unwrap()
         .unwrap();
+    let agents = list["agents"].as_array().unwrap();
+    assert!(agents.iter().any(|a| a["name"] == "Cash"));
+    assert!(
+        !agents.iter().any(|a| a["id"] == s.id.as_str()),
+        "not itself"
+    );
+
+    let sent = call(
+        &s,
+        "ask",
+        "agents.message",
+        json!({"to": "cash", "message": "Sum October"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
     assert_eq!(sent["to"], "Cash");
     assert_eq!(sent["submitted"], true);
     s.manager.read_with(cx, |m, _| {
         let cash = m.roster.monos.iter().find(|m| m.name == "Cash").unwrap();
-        let queued = &cash.outbox.last().expect("the message waits in Cash's chat").text;
+        let queued = &cash
+            .outbox
+            .last()
+            .expect("the message waits in Cash's chat")
+            .text;
         assert!(queued.contains("<agent_message from=") && queued.contains("Sum October"));
     });
     // Cash is answering: it may not pass the job on to a third agent.
     let cash = s.manager.read_with(cx, |m, _| {
-        m.roster.monos.iter().find(|m| m.name == "Cash").unwrap().id.clone()
+        m.roster
+            .monos
+            .iter()
+            .find(|m| m.name == "Cash")
+            .unwrap()
+            .id
+            .clone()
     });
     s.manager.update(cx, |m, _| {
-        assert!(m.agent_calls.messaging.is_answering(&cash, monocode_core::time::now_ms()));
+        assert!(
+            m.agent_calls
+                .messaging
+                .is_answering(&cash, monocode_core::time::now_ms())
+        );
     });
 
-    let renamed = call(&s, "name", "name.update", json!({"name": "  Boss   Bot "}), cx)
-        .try_recv()
-        .unwrap()
-        .unwrap();
+    let renamed = call(
+        &s,
+        "name",
+        "name.update",
+        json!({"name": "  Boss   Bot "}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
     assert_eq!(renamed["name"], "Boss Bot");
-    s.manager.read_with(cx, |m, _| assert_eq!(m.roster.get(&s.id).unwrap().name, "Boss Bot"));
+    s.manager.read_with(cx, |m, _| {
+        assert_eq!(m.roster.get(&s.id).unwrap().name, "Boss Bot")
+    });
 }

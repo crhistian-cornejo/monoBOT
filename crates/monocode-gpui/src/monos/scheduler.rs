@@ -1436,22 +1436,18 @@ impl Monos {
                                 duration_ms: now.saturating_sub(start),
                                 outcome: "interrupted".into(),
                                 report: None,
+                                status: None,
                                 error: Some("The app closed before this run finished".into()),
                             })?;
                         }
-                        if h.enabled
-                            && h.next_run_at < now
-                            && now - h.next_run_at > habits::GRACE_MS
-                        {
-                            h.next_run_at = h.schedule.next(now)?;
-                        }
+                        // A habit missed while the app was closed moves on;
+                        // a missed wake is switched off.
+                        h.skip_missed(now)?;
                     }
+                    // A wake the app closed on has run: it does not run twice.
+                    monocode_core::mono::wakes::drop_spent_wakes(all);
                     if let Some(h) = all.iter_mut().find(|h| h.due(now)) {
-                        h.running_since = Some(now);
-                        let manual = std::mem::take(&mut h.run_requested);
-                        if !manual || h.next_run_at <= now {
-                            h.next_run_at = h.schedule.next(now)?;
-                        }
+                        h.claim(now)?;
                         return Ok(Some(h.clone()));
                     }
                     Ok(None)
@@ -1485,10 +1481,7 @@ impl Monos {
         .detach();
     }
     fn start_habit(&mut self, id: &str, habit: Habit, cx: &mut Context<Self>) {
-        let text = format!(
-            "[Scheduled habit: {}]\n{}\n\nDo this scheduled work independently. Return a concise report; if nothing requires attention, reply exactly NOTHING_TO_REPORT. Any session you start belongs to this habit. Do not change the habit unless asked.",
-            habit.name, habit.instructions
-        );
+        let text = habit_run_prompt(&habit, now_ms());
         self.start_run(id, habit.id, habit.name, text, false, cx);
     }
     pub(super) fn start_heartbeat(&mut self, id: &str, text: String, cx: &mut Context<Self>) {
@@ -1683,13 +1676,16 @@ impl Monos {
             ok = false;
             text = error;
         }
-        let report = ok
+        // habitReport + reportStatus: the reply's [needs_attention],
+        // [blocked] or [done] tag is the run's status, not its text.
+        let tagged = ok
             .then(|| {
-                habits::report(&monocode_core::response::final_prose(
+                monocode_core::mono::outcomes::tagged_report(&monocode_core::response::final_prose(
                     run.view.read(cx).mono_rows(cx),
                 ))
             })
             .flatten();
+        let report = tagged.as_ref().map(|(_, text)| text.clone());
         let root = self.root.clone();
         let id = run.mono.clone();
         let habit = run.habit.clone();
@@ -1697,17 +1693,11 @@ impl Monos {
         let duration = now_ms().saturating_sub(at);
         let error = (!ok).then_some(text);
         let stored = report.clone();
-        let result = Run {
-            at,
-            duration_ms: duration,
-            outcome: if ok {
-                if report.is_some() { "posted" } else { "quiet" }
-            } else {
-                "failed"
-            }
-            .into(),
-            report: stored,
-            error,
+        let _ = (duration, stored);
+        let result = if ok {
+            monocode_core::mono::outcomes::RunResult::completed(at, tagged.clone())
+        } else {
+            monocode_core::mono::outcomes::RunResult::failed(at, error)
         };
         let beat = habit == heartbeat::RUN_ID;
         if beat {
@@ -1731,18 +1721,7 @@ impl Monos {
                 self.discard_quiet_heartbeat(&run.mono, session, cx);
             }
         } else {
-            self.file_work(
-                id.clone(),
-                move || {
-                    habits::update(&root, &id, |all| {
-                        if let Some(h) = all.iter_mut().find(|h| h.id == habit) {
-                            h.finish(result.clone())?;
-                        }
-                        Ok(())
-                    })
-                },
-                cx,
-            );
+            self.record_habit_run(id.clone(), habit.clone(), result, cx);
         }
         if let Some(report) = report {
             if let Some(m) = self.roster.get_mut(&run.mono) {
@@ -1760,6 +1739,87 @@ impl Monos {
             self.dispatch(&run.mono, cx);
         }
         self.changed(cx);
+    }
+}
+
+/// habitRunPrompt: the first message of a habit's hidden run. The Mono's
+/// soul and memory come with its session, as in every turn.
+pub(super) fn habit_run_prompt(habit: &Habit, now: u64) -> String {
+    let when = |ms: u64| {
+        chrono::DateTime::from_timestamp_millis(ms as i64)
+            .map(|at| {
+                at.with_timezone(&chrono::Local)
+                    .format("%-d/%-m/%Y, %H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_default()
+    };
+    let last_run = match habit.last_run_at {
+        Some(at) => format!(
+            " It last ran {}{}.",
+            when(at),
+            match habit.last_outcome.as_deref() {
+                Some("quiet") => " and found nothing worth telling the user",
+                Some("failed") => " and could not finish",
+                _ => "",
+            }
+        ),
+        None => " This is its first run.".into(),
+    };
+    format!(
+        "<habit_run>\nYou are running one of your habits on your own; the user did not just message you, and they will not see this run. It is {}.{last_run}{}\n\nHabit: {}\n{}\n\nDo the work now with your tools and the app CLI. Then reply with exactly the message you would send the user in your chat: short, in your own voice, only what they would want to know, with no preamble about running a habit. {} If there is nothing worth telling them, reply with exactly NOTHING_TO_REPORT and nothing else; silence is the right answer more often than not. Save anything worth remembering with the memory actions before you reply.\n</habit_run>",
+        when(now),
+        monocode_core::mono::outcomes::previous_report_note(habit),
+        habit.name,
+        habit.instructions.trim(),
+        monocode_core::mono::outcomes::STATUS_INSTRUCTION,
+    )
+}
+
+impl Monos {
+    /// afterRun: records the run on the habit, removes a wake that ran, and
+    /// posts the first failure in a row, or the pause after five, to the chat.
+    fn record_habit_run(
+        &mut self,
+        id: String,
+        habit: String,
+        result: monocode_core::mono::outcomes::RunResult,
+        cx: &mut Context<Self>,
+    ) {
+        let root = self.root.clone();
+        let mono = id.clone();
+        let work = cx.background_executor().spawn(async move {
+            habits::update(&root, &mono, |all| {
+                Ok(monocode_core::mono::outcomes::record_run(
+                    all,
+                    &habit,
+                    result.clone(),
+                    now_ms(),
+                ))
+            })
+        });
+        cx.spawn(async move |this, cx| {
+            let recorded = work.await;
+            let _ = this.update(cx, |this, cx| {
+                match recorded {
+                    Ok(recorded) => {
+                        if let Some(notice) = recorded.and_then(|r| r.notice)
+                            && let Some(m) = this.roster.get_mut(&id)
+                        {
+                            m.pending_reports
+                                .push(format!("**Habit report**\n\n{notice}"));
+                            this.ensure_chat(&id, cx);
+                            this.save(cx);
+                            this.dispatch(&id, cx);
+                        }
+                        this.reload_files(&id, cx);
+                    }
+                    Err(error) => this.error = Some(error),
+                }
+                this.changed(cx);
+            });
+        })
+        .detach();
     }
 }
 
