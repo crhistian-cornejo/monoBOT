@@ -456,6 +456,23 @@ impl Monos {
             seat.queue.push_front(ask);
             return;
         }
+        // A seat keeps following its member's chat: the same provider and
+        // model, whichever the user picked there since.
+        if let Some(own) = self.chats.get(&key.1) {
+            let own = own.read(cx);
+            let (provider, model, values) = (
+                own.summary.provider.clone(),
+                own.mono_model(),
+                own.settings.model_settings.clone(),
+            );
+            let differs = {
+                let current = view.read(cx);
+                current.summary.provider != provider || current.mono_model() != model
+            };
+            if differs && let Some(kind) = Kind::parse(&provider) {
+                let _ = view.update(cx, |view, cx| view.mono_config(kind, model, values, cx));
+            }
+        }
         let text = group_message(
             &led.name,
             led.group.goal.as_deref(),
