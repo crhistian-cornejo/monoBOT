@@ -1,5 +1,6 @@
 pub(crate) mod attachments;
 pub(crate) mod burst;
+mod citations;
 pub(crate) mod dates;
 mod drafts;
 #[cfg(test)]
@@ -758,6 +759,8 @@ pub(crate) struct TranscriptView {
     highlight_bytes: usize,
     copied: Option<u64>,
     copied_response: Option<(usize, Instant)>,
+    /// Turns whose cited sources are open.
+    sources_open: std::collections::HashSet<usize>,
     note_pending: HashSet<usize>,
     note_feedback: HashMap<usize, Result<(), String>>,
     action_anchors: HashMap<(usize, &'static str), AnchorSlot>,
@@ -2210,7 +2213,33 @@ impl TranscriptView {
         }
         cx.notify();
     }
+    /// The reply's actions, under the sources it cites when it cites any.
     fn response_actions(
+        &mut self,
+        turn: usize,
+        complete: bool,
+        before_user: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let sources = if complete {
+            let (rows, _) = self.response_rows(turn);
+            let output = monocode_core::response::prose(&rows);
+            self.citation_sources(turn, &output, cx)
+        } else {
+            None
+        };
+        let actions = self.response_action_row(turn, complete, before_user, cx);
+        match sources {
+            Some(sources) => div()
+                .flex()
+                .flex_col()
+                .child(sources)
+                .child(actions)
+                .into_any_element(),
+            None => actions,
+        }
+    }
+    fn response_action_row(
         &mut self,
         turn: usize,
         complete: bool,
@@ -2563,6 +2592,7 @@ impl TranscriptView {
             highlight_bytes: 0,
             copied: None,
             copied_response: None,
+            sources_open: Default::default(),
             note_pending: HashSet::new(),
             note_feedback: HashMap::new(),
             action_anchors: HashMap::new(),

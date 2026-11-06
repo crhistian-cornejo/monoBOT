@@ -400,7 +400,9 @@ fn inline_selected(
     let mut highlights = Vec::new();
     for run in &prepared.runs {
         let style = &run.style;
-        let color = if style.link.is_some() {
+        let color = if style.citation {
+            content(0.75)
+        } else if style.link.is_some() {
             accent_color()
         } else if style.bold || style.italic || style.code {
             content(tone.strong())
@@ -412,9 +414,16 @@ fn inline_selected(
         opaque_color.a = 1.;
         let highlight = HighlightStyle {
             color: Some(opaque_color),
-            background_color: style.search.map(search::search_background),
+            background_color: style
+                .search
+                .map(search::search_background)
+                .or(style.citation.then(|| content(0.08))),
             fade_out: Some(1. - base_opacity),
-            font_weight: style.bold.then_some(FontWeight::SEMIBOLD),
+            font_weight: if style.citation {
+                Some(FontWeight::MEDIUM)
+            } else {
+                style.bold.then_some(FontWeight::SEMIBOLD)
+            },
             font_style: style.italic.then_some(FontStyle::Italic),
             strikethrough: style.strikethrough.then_some(StrikethroughStyle {
                 thickness: px(1.),

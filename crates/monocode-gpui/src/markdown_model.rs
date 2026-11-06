@@ -9,6 +9,8 @@ pub(crate) struct InlineStyle {
     pub code: bool,
     pub strikethrough: bool,
     pub link: Option<String>,
+    /// A numbered link to a page it cites: shown as a chip with the site.
+    pub citation: bool,
     pub task: Option<TaskMarker>,
     pub math: bool,
     pub search: Option<bool>,
@@ -699,21 +701,62 @@ fn inline_span(
     out: &mut Vec<InlineRun>,
 ) {
     let end = tag.to_end();
+    let mut cited = None;
     match tag {
         Tag::Strong => style.bold = true,
         Tag::Emphasis => style.italic = true,
         Tag::Strikethrough => style.strikethrough = true,
-        Tag::Link { dest_url, .. } if dest_url.as_ref() != "streamdown:incomplete-link" => {
+        Tag::Link {
+            dest_url, title, ..
+        } if dest_url.as_ref() != "streamdown:incomplete-link" => {
+            if monocode_core::citations::is_href(&dest_url) {
+                cited = Some((dest_url.to_string(), title.to_string()));
+            }
             style.link = Some(dest_url.into_string());
         }
         _ => {}
     }
+    let start = out.len();
     while let Some(event) = events.next() {
         match event {
             Event::End(tag) if tag == end => break,
             Event::Start(tag) => inline_span(events, tag, style.clone(), out),
             event => append_run(out, event, style.clone()),
         }
+    }
+    // A link whose text is only a number cites the page: a chip with the
+    // site's name in its place (CitationChip).
+    if let Some((url, title)) = cited {
+        let label: String = out[start.min(out.len())..]
+            .iter()
+            .map(|run| run.text.as_str())
+            .collect();
+        if monocode_core::citations::number(label.trim()).is_some() {
+            out.truncate(start);
+            out.push(InlineRun {
+                text: format!("\u{2009}{}\u{2009}", citation_chip_label(&url, &title)),
+                style: InlineStyle {
+                    citation: true,
+                    ..style
+                },
+            });
+        }
+    }
+}
+/// The chip's words: the site, or the work's first words for a DOI link
+/// (chipLabel).
+fn citation_chip_label(url: &str, title: &str) -> String {
+    const RESOLVERS: [&str; 4] = ["doi.org", "dx.doi.org", "hdl.handle.net", "n2t.net"];
+    let host = monocode_core::citations::host(url);
+    let title = monocode_core::citations::parse_title(Some(title), url).title;
+    if !RESOLVERS.contains(&host.as_str()) || title.is_empty() || title == host {
+        return host;
+    }
+    let words = title.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+    if words.chars().count() > 22 {
+        format!("{}…", words.chars().take(21).collect::<String>().trim_end())
+    } else {
+        words
     }
 }
 fn append_run(out: &mut Vec<InlineRun>, event: Event<'_>, mut style: InlineStyle) {
@@ -757,6 +800,25 @@ mod note_break_tests {
             panic!("expected code")
         };
         assert_eq!(code, "one\ntwo\n");
+    }
+
+    #[test]
+    fn a_numbered_link_to_a_page_is_a_chip_with_its_site() {
+        let tree = parse_full(
+            "It pumps well [1](https://www.example.com/a \"Ram pumps | It reached 62%.\"). See [the guide](https://example.com/g).",
+        );
+        let Block::Paragraph { runs } = &tree.blocks[0].block else {
+            panic!("expected paragraph")
+        };
+        let chip = runs.iter().find(|run| run.style.citation).unwrap();
+        assert_eq!(chip.text.trim_matches('\u{2009}'), "example.com");
+        assert_eq!(chip.style.link.as_deref(), Some("https://www.example.com/a"));
+        let guide = runs.iter().find(|run| run.text == "the guide").unwrap();
+        assert!(!guide.style.citation, "a worded link stays a link");
+        assert_eq!(
+            citation_chip_label("https://doi.org/10.1/x", "Hydraulic ram pumps in remote areas"),
+            "Hydraulic ram pumps"
+        );
     }
 }
 
