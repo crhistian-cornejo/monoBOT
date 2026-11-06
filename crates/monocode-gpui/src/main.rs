@@ -95,6 +95,7 @@ mod visuals;
 #[cfg(test)]
 mod wheel_glide_tests;
 mod window_state;
+mod word_motion;
 mod workspace;
 mod worktree_switcher;
 

@@ -430,6 +430,13 @@ fn inline_selected(
                 if let Some(word) = word {
                     let alpha = fade.map_or(1., |fade| fade.opacity(word_base + *word));
                     highlight.fade_out = Some(1. - (1. - highlight.fade_out.unwrap_or(0.)) * alpha);
+                    // word-trail: a new word wears the accent, then the text's colour.
+                    if style.link.is_none() {
+                        let trail = fade.map_or(0., |fade| fade.trail(word_base + *word));
+                        highlight.color = highlight
+                            .color
+                            .map(|c| crate::reveal::trail_color(c, trail));
+                    }
                 }
                 highlights.push((range.clone(), highlight));
             }
@@ -567,10 +574,11 @@ fn rich_inline(
         for (part_ix, part) in run.text.split_inclusive(char::is_whitespace).enumerate() {
             let text = part.trim_end_matches(char::is_whitespace);
             if !text.is_empty() {
-                let alpha = if style.link.is_some() || style.math {
-                    1.
+                let (alpha, trail) = if style.link.is_some() || style.math {
+                    (1., 0.)
                 } else {
-                    let value = fade.map_or(1., |fade| fade.opacity(word));
+                    let value =
+                        fade.map_or((1., 0.), |fade| (fade.opacity(word), fade.trail(word)));
                     word += 1;
                     value
                 };
@@ -581,6 +589,8 @@ fn rich_inline(
                 } else {
                     content(tone.prose())
                 };
+                // word-trail: a new word wears the accent, then the text's colour.
+                let color = crate::reveal::trail_color(color, trail);
                 let base_opacity = color.a;
                 let mut opaque_color = color;
                 opaque_color.a = 1.;

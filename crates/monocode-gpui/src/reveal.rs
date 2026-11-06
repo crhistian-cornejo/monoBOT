@@ -1,5 +1,6 @@
 //! Native port of wordFade.tsx: 90 cps floor, 220ms catch-up, 150ms
-//! partial-word hold, 30ms commits and a 320ms opacity fade per word.
+//! partial-word hold and 30ms commits; each word comes into focus and wears
+//! the accent as a trail, as crate::word_motion (wordMotion.ts) times it.
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, Element, ElementId, GlobalElementId,
     InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window, size,
@@ -86,34 +87,30 @@ impl Element for Disclosure {
     }
 }
 
-pub(crate) const WORD_FADE: Duration = Duration::from_millis(320);
+pub(crate) const WORD_FADE: Duration = crate::word_motion::WORD_FOCUS;
 struct FadeGroup {
     words: Range<usize>,
     born: Instant,
     duration: Duration,
-    opacity: f32,
 }
 
-/// Only the short, still-fading suffix needs timing data. Words committed
-/// together share a timestamp and one easing calculation per frame.
+/// Only the short, still-moving suffix needs timing data. Words committed
+/// together share a start; each is staggered behind the one before it.
 #[derive(Default)]
 pub(crate) struct WordFades {
     groups: VecDeque<FadeGroup>,
     words: usize,
+    now: Option<Instant>,
 }
 impl WordFades {
     pub fn advance(&mut self, now: Instant) {
+        self.now = Some(now);
         self.groups
-            .retain(|group| now.duration_since(group.born) < group.duration);
-        for group in &mut self.groups {
-            group.opacity = bezier(
-                now.duration_since(group.born).as_secs_f32() / group.duration.as_secs_f32(),
-                0.,
-                0.,
-                0.58,
-                1.,
-            );
-        }
+            .retain(|group| now.duration_since(group.born) < Self::span(group));
+    }
+    /// How long a group moves: its last word's stagger, then its fade or trail.
+    fn span(group: &FadeGroup) -> Duration {
+        crate::word_motion::PACED_STAGGER_CAP + crate::word_motion::linger(group.duration)
     }
     fn append(&mut self, count: usize, now: Instant, duration: Duration, animate: bool) {
         self.advance(now);
@@ -127,16 +124,35 @@ impl WordFades {
                 words: self.words..count,
                 born: now,
                 duration,
-                opacity: 0.,
             });
         }
         self.words = count;
     }
-    pub fn opacity(&self, word: usize) -> f32 {
-        self.groups
+    /// How long ago this word started coming in, if it is still moving.
+    fn elapsed(&self, word: usize) -> Option<(Duration, Duration)> {
+        let group = self
+            .groups
             .get(self.groups.partition_point(|group| group.words.end <= word))
-            .filter(|group| group.words.contains(&word))
-            .map_or(1., |group| group.opacity)
+            .filter(|group| group.words.contains(&word))?;
+        let delay = crate::word_motion::stagger(
+            word - group.words.start,
+            crate::word_motion::PACED_STAGGER_CAP,
+        );
+        let now = self.now.unwrap_or(group.born);
+        Some((
+            now.saturating_duration_since(group.born + delay),
+            group.duration,
+        ))
+    }
+    pub fn opacity(&self, word: usize) -> f32 {
+        self.elapsed(word).map_or(1., |(elapsed, duration)| {
+            crate::word_motion::ease(elapsed.as_secs_f32() / duration.as_secs_f32())
+        })
+    }
+    /// How much of the accent this word still wears (word-trail).
+    pub fn trail(&self, word: usize) -> f32 {
+        self.elapsed(word)
+            .map_or(0., |(elapsed, _)| crate::word_motion::trail(elapsed))
     }
     pub fn intersects(&self, words: Range<usize>) -> bool {
         words.start < words.end
@@ -148,8 +164,24 @@ impl WordFades {
     fn active(&self, now: Instant) -> bool {
         self.groups
             .iter()
-            .any(|group| now.duration_since(group.born) < group.duration)
+            .any(|group| now.duration_since(group.born) < Self::span(group))
     }
+}
+
+/// A word's colour while its trail lasts: `base` mixed toward the accent.
+pub(crate) fn trail_color(base: gpui::Hsla, amount: f32) -> gpui::Hsla {
+    if amount <= 0. {
+        return base;
+    }
+    let (from, to) = (base.to_rgb(), crate::theme::accent_color().to_rgb());
+    let mix = |a: f32, b: f32| a + (b - a) * amount.min(1.);
+    gpui::Rgba {
+        r: mix(from.r, to.r),
+        g: mix(from.g, to.g),
+        b: mix(from.b, to.b),
+        a: from.a,
+    }
+    .into()
 }
 pub(crate) struct PacedText {
     target: String,
@@ -196,8 +228,9 @@ impl PacedText {
             self.position = text.len() as f64;
         }
     }
+    /// What is on screen: never a table before its header has arrived.
     pub fn text(&self) -> &str {
-        &self.target[..self.shown]
+        crate::word_motion::hold_half_table(&self.target[..self.shown])
     }
     pub fn behind(&self) -> bool {
         self.shown < self.target.len()
@@ -215,21 +248,10 @@ impl PacedText {
         while at < self.target.len() && !self.target.is_char_boundary(at) {
             at += 1;
         }
-        let end = self.target[at..]
-            .char_indices()
-            .find(|(_, c)| c.is_ascii_whitespace())
-            .map(|(i, _)| at + i)
-            .unwrap_or_else(|| {
-                if !streaming || now.duration_since(self.burst) >= Duration::from_millis(150) {
-                    self.target.len()
-                } else {
-                    self.target
-                        .char_indices()
-                        .rev()
-                        .find(|(_, c)| c.is_ascii_whitespace())
-                        .map_or(0, |(i, c)| i + c.len_utf8())
-                }
-            });
+        // revealEnd: whole words only, a mark goes out with the word after
+        // it, and a stream quiet for 150ms lets its last word out.
+        let held = streaming && now.duration_since(self.burst) < Duration::from_millis(150);
+        let end = crate::word_motion::reveal_end(&self.target, at, held);
         if end > self.shown {
             self.shown = end;
             return true;
@@ -400,7 +422,9 @@ mod tests {
                 WORD_FADE,
                 true,
             );
-            assert!(fades.groups.len() <= 10);
+            // A group moves for its stagger cap and trail (60 + 1120ms):
+            // at a 33ms cadence about 36 are live, never every commit.
+            assert!(fades.groups.len() <= 40);
         }
         assert_eq!(fades.words, 100_000);
         assert_eq!(fades.opacity(0), 1.);
