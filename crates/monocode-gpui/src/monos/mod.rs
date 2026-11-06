@@ -3,6 +3,7 @@
 mod agent_calls;
 pub(crate) mod agents;
 pub(crate) mod avatar;
+mod bot_settings;
 pub(crate) mod cards;
 mod changes;
 mod color_picker;
@@ -146,6 +147,8 @@ pub(crate) struct Monos {
     agent_calls: agent_calls::AgentCalls,
     /// The bots' News feed and the cards waiting to be shown.
     news: news::NewsState,
+    /// What a bot's settings loaded or last failed at.
+    bot_settings: bot_settings::BotSettingsState,
     /// Bots kept the same on the user's other computers.
     sync: sync::SyncState,
     /// Where the new-bot menu opened, while it is open.
@@ -386,6 +389,7 @@ impl Monos {
             roles_menu: None,
             agent_calls: Default::default(),
             news: Default::default(),
+            bot_settings: Default::default(),
             sync: Default::default(),
             running: HashMap::new(),
             active_run: None,

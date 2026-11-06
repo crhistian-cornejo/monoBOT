@@ -43,7 +43,8 @@ pub fn member_role(mono: &Mono) -> String {
 
 /// The specialty agents.list shows: the bot's own, else its role's.
 pub fn specialty(mono: &Mono) -> Option<String> {
-    mono.specialty.clone().or_else(|| {
+    let own = mono.specialty.as_deref().map(str::trim);
+    own.filter(|s| !s.is_empty()).map(str::to_owned).or_else(|| {
         mono.is_bot()
             .then(|| bots::role(mono.bot_role.as_deref().unwrap_or("assistant")))
             .flatten()
@@ -530,7 +531,7 @@ pub fn tools_view(
 }
 
 /// BOT_SERVICES' name and note.
-fn service_label(service: &str) -> (&'static str, &'static str) {
+pub fn service_label(service: &str) -> (&'static str, &'static str) {
     match service {
         "gmail" => ("Gmail", "Search and read email"),
         "drive" => ("Google Drive", "Search and read files"),
@@ -539,7 +540,7 @@ fn service_label(service: &str) -> (&'static str, &'static str) {
 }
 
 /// BOT_ACCESS' name and note.
-fn access_label(access: &str) -> (&'static str, &'static str) {
+pub fn access_label(access: &str) -> (&'static str, &'static str) {
     match access {
         "web" => ("Web", "Search the web and read pages"),
         "read" => ("Read files", "Read and search files in its folders"),
@@ -555,7 +556,7 @@ fn access_label(access: &str) -> (&'static str, &'static str) {
 }
 
 /// BOT_SKILLS' name and note: Finance, then the optional packs.
-fn pack_label(plugin: &str) -> (&'static str, &'static str) {
+pub fn pack_label(plugin: &str) -> (&'static str, &'static str) {
     crate::skills::bundled::SKILL_PACKS
         .iter()
         .find(|pack| pack.id == plugin)

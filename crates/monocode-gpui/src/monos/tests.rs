@@ -2050,3 +2050,30 @@ fn the_principal_makes_bots_and_agents_write_to_each_other(cx: &mut TestAppConte
         assert_eq!(m.roster.get(&s.id).unwrap().name, "Boss Bot")
     });
 }
+
+#[gpui::test]
+fn a_bots_settings_show_its_specialty_and_save_its_tools(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    s.manager.update(cx, |m, cx| {
+        let mono = m.roster.get_mut(&s.id).unwrap();
+        mono.kind = Some("bot".into());
+        mono.bot_role = Some("principal".into());
+        cx.notify();
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("mono-orchestrator-badge").is_some());
+    assert!(visual.debug_bounds("mono-specialty-field").is_some());
+    s.manager.update(visual, |m, cx| {
+        m.save_bot_tools(&s.id, |t| t.access.retain(|a| a != "web"), cx);
+        m.bot_field_changed("mono-specialty", "  Runs   the team  ", cx);
+    });
+    let mono = s
+        .manager
+        .read_with(visual, |m, _| m.roster.get(&s.id).unwrap().clone());
+    let access = mono.bot_tools.unwrap().access.unwrap();
+    assert!(!access.iter().any(|a| a == "web"));
+    assert!(access.iter().any(|a| a == "read"));
+    assert_eq!(mono.specialty.as_deref(), Some("Runs the team"));
+}

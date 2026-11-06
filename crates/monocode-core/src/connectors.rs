@@ -609,6 +609,41 @@ pub fn claude_launch(
 
 /// The connectors a bot can be given on this computer, as tools.read lists
 /// them: (id, name, description, ready, user-granted).
+/// A connector as a bot's settings list it (BotToolsGroup).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SettingsRow {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// On in Settings › Connectors and set up: the bot may use it.
+    pub ready: bool,
+    /// On in Settings › Connectors, set up or not.
+    pub enabled: bool,
+    /// Only the user turns it on for a bot, by name.
+    pub user_granted: bool,
+}
+
+/// The connectors a bot's settings offer, with the app's current settings.
+pub fn settings_rows() -> Vec<SettingsRow> {
+    let (settings, _) = SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    let platform = Platform::current();
+    available_connectors(platform)
+        .into_iter()
+        .map(|c| SettingsRow {
+            id: c.id.to_owned(),
+            name: c.name.to_owned(),
+            description: c.description.to_owned(),
+            ready: settings.is_ready(c, platform),
+            enabled: settings.is_enabled(c),
+            user_granted: c.user_granted,
+        })
+        .collect()
+}
+
 pub fn tool_rows() -> Vec<(String, String, String, bool, bool)> {
     let (settings, _) = SESSION_DEFAULTS
         .read()

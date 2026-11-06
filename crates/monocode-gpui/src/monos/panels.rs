@@ -69,7 +69,7 @@ pub(super) fn button(
         .hover(|s| s.bg(content(0.08)).text_color(content(1.)))
         .child(label)
 }
-fn setting(label: &str, description: Option<&str>, control: AnyElement) -> Div {
+pub(super) fn setting(label: &str, description: Option<&str>, control: AnyElement) -> Div {
     div()
         .min_h(px(48.))
         .flex()
@@ -111,7 +111,12 @@ fn setting(label: &str, description: Option<&str>, control: AnyElement) -> Div {
                 .child(control),
         )
 }
-fn switch_setting(label: &str, description: &str, disabled: bool, control: AnyElement) -> Div {
+pub(super) fn switch_setting(
+    label: &str,
+    description: &str,
+    disabled: bool,
+    control: AnyElement,
+) -> Div {
     div()
         .flex()
         .items_center()
@@ -141,7 +146,7 @@ fn switch_setting(label: &str, description: &str, disabled: bool, control: AnyEl
         )
         .child(control)
 }
-fn heading(title: &str, description: Option<&str>) -> Div {
+pub(super) fn heading(title: &str, description: Option<&str>) -> Div {
     div()
         .pt_7()
         .pb_2()
@@ -316,7 +321,7 @@ fn sub_agent_card(agent: SubAgent) -> Stateful<Div> {
             ),
     )
 }
-fn card() -> Div {
+pub(super) fn card() -> Div {
     div()
         .rounded_xl()
         .border_1()
@@ -890,6 +895,11 @@ impl Monos {
         let key_owned = key.to_string();
         self.observations.push(
             cx.subscribe(&field, move |this, input, _: &input::Changed, cx| {
+                if key_owned == "mono-specialty" || key_owned == "daily-brief-time" {
+                    let text = input.read(cx).content.to_string();
+                    this.bot_field_changed(&key_owned, &text, cx);
+                    return;
+                }
                 if key_owned == "mono-name" {
                     let name = input.read(cx).content.trim().chars().take(40).collect();
                     if let Some(id) = this.active.clone() {
@@ -1837,7 +1847,9 @@ impl Monos {
                     .child(avatar::avatar(&mono.mascot, mono.color, "idle", 48., false))
                     .on_click(cx.listener(move |this, _, w, cx|this.open_settings_look(&look,w,cx))))
                 .child(div().id("mono-name-field").debug_selector(||"mono-name-field".into()).mt_3().h(px(32.)).w(px(256.)).max_w_full().px_2().py_1p5()
-                    .rounded_md().font_weight(FontWeight::MEDIUM).hover(|s|s.bg(content(0.05))).child(name)))
+                    .rounded_md().font_weight(FontWeight::MEDIUM).hover(|s|s.bg(content(0.05))).child(name))
+                .when(mono.is_principal(),|d|d.child(super::bot_settings::orchestrator_badge())))
+            .children(self.bot_identity_settings(mono, cx))
             .child(heading("Model", None))
             .child(card()
                 .child(setting("Model",Some("What it thinks and replies with."),
@@ -1868,6 +1880,7 @@ impl Monos {
                         .child(mode.label()).child(icon("chevron-down",12.))
                         .on_click(cx.listener(|this,_,w,cx|this.open_access_picker(w,cx))).into_any_element())
                     .border_t_1().border_color(content(0.04))))
+            .children(self.bot_tools_settings(mono, cx))
             .child(heading("Projects",Some("It can see every session, note and folder in these.")))
             .child(card()
                 .children(mono.projects.iter().enumerate().map(|(ix,project)| {

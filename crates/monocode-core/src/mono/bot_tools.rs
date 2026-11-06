@@ -86,6 +86,30 @@ pub fn tools(role: &str, own: Option<&BotTools>) -> Tools {
     }
 }
 
+impl From<Tools> for BotTools {
+    /// The whole list, as the bot's own (saveBotTools).
+    fn from(tools: Tools) -> Self {
+        Self {
+            services: tools.services,
+            plugins: tools.plugins,
+            access: Some(tools.access),
+            folders: Some(tools.folders),
+            connectors: tools.connectors,
+            skills: tools.skills,
+        }
+    }
+}
+
+/// Back to what its role starts with, keeping the folders the user opened
+/// to it (withRoleTools); none when it has no folders to keep.
+pub fn role_reset(role: &str, own: Option<&BotTools>) -> Option<BotTools> {
+    let folders = own.and_then(|o| o.folders.clone()).unwrap_or_default();
+    (!folders.is_empty()).then(|| BotTools {
+        folders: Some(folders),
+        ..BotTools::from(tools(role, None))
+    })
+}
+
 /// A skill name as Claude Code invokes it: `pdf`, `document-skills:xlsx`.
 pub fn is_skill_name(value: &str) -> bool {
     let part = |p: &str| {
