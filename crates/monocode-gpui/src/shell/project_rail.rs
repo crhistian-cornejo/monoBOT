@@ -2205,6 +2205,32 @@ mod tests {
     }
 
     #[gpui::test]
+    fn the_agents_rows_reach_the_sidebar_edge(cx: &mut TestAppContext) {
+        let (window, _, _) = super::super::tests::window(cx);
+        // With the intro card closed nothing wide is left in the zone, so a
+        // rail that sized to its content would stop at the Principal's pill.
+        window
+            .update(cx, |shell, w, cx| {
+                shell.monos.clone().unwrap().update(cx, |m, _| {
+                    m.roster.bot_intro_dismissed = true;
+                });
+                shell.set_agents_zone(true, w, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        let zone = visual.debug_bounds("rail-zone-agents").unwrap();
+        let rail = visual.debug_bounds("agents-rail").unwrap();
+        assert!(
+            rail.right() >= zone.right(),
+            "agents rail ends at {:?}, short of the switch at {:?}",
+            rail.right(),
+            zone.right()
+        );
+    }
+
+    #[gpui::test]
     fn the_agents_zone_lists_bots_and_makes_one_from_the_role_menu(cx: &mut TestAppContext) {
         let (window, _, _) = super::super::tests::window(cx);
         window

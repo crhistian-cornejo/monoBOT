@@ -92,6 +92,8 @@ impl Monos {
             return div()
                 .id("agents-rail")
                 .debug_selector(|| "agents-rail".into())
+                // A list row sizes to its content unless it fills the width.
+                .w_full()
                 .flex()
                 .flex_col()
                 .items_center()
@@ -130,6 +132,9 @@ impl Monos {
         div()
             .id("agents-rail")
             .debug_selector(|| "agents-rail".into())
+            // A list row sizes to its content unless it fills the width, which
+            // left the rows short of the sidebar's edge.
+            .w_full()
             .flex()
             .flex_col()
             .child(principal)
