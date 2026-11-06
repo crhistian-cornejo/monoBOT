@@ -6,6 +6,8 @@
 //! Nothing here sends by itself: `send` runs only when the user presses Send. The pure half
 //! (views, days, the reply's prompt and subject) follows `src/features/mail/model/mail.ts`.
 //! Every function that reaches a server blocks: callers run it off the UI thread.
+mod agent;
+pub use agent::{agent_action, ACTIONS as AGENT_ACTIONS};
 pub use monobot_email::inspect::{Level, Risk};
 pub use monobot_email::{
     Account, AccountView, Action, Attachment, Folder, Message, Opened, Overview, Person,

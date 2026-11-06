@@ -743,6 +743,37 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                 },cx);
                 return;
             }
+            // The user's mail, from the accounts connected in the Inbox's Email tab. An
+            // account a bot connected for itself is read by that bot alone.
+            "mail.list" | "mail.read" | "mail.draft" | "mail.search" | "mail.connect" => {
+                let reader = mono.id.clone();
+                self.call_work(
+                    call,
+                    target.clone(),
+                    move |store| {
+                        use monocode_core::inbox::mail;
+                        let data_dir = locked(&store)?
+                            .data_dir()
+                            .map(Path::to_path_buf)
+                            .unwrap_or_else(mail::desktop_data_dir);
+                        let access =
+                            monocode_core::desktop_preferences::DesktopPreferences::load(&data_dir)
+                                .json(mail::ACCESS_KEY)
+                                .map(|value| mail::parse_access(&value))
+                                .unwrap_or_default();
+                        let value = mail::agent_action(
+                            &mail::Service::new(data_dir),
+                            &action,
+                            &input,
+                            Some(&reader),
+                            &access,
+                        )?;
+                        Ok((value, Effect::None))
+                    },
+                    cx,
+                );
+                return;
+            }
             _ => Err("Unknown action. Run app help to see supported actions".into()),
         };
         self.finish_call(call, result, cx);
