@@ -24,6 +24,8 @@ ureq = "2.12"
 webpki-roots = "0.26.11"
 similar = "2"
 unicode-width = "0.2"
+# Group mentions read "@Análisis" as "@Analisis", as the desktop app does.
+unicode-normalization = "0.1"
 monocode-mobile-link = { path = "../mobile-link" }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "time", "macros"] }
@@ -42,7 +44,6 @@ tar = "0.4"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
-unicode-normalization = "0.1"
 
 [target.'cfg(windows)'.dependencies]
 keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
