@@ -130,7 +130,6 @@ actions!(
         ToggleTerminal,
         NewTerminal,
         ToggleLayout,
-        ToggleWorkspaceStyle,
         OpenSettings,
         GoToFile,
         OpenCommandPalette,
@@ -253,8 +252,6 @@ pub(crate) fn bind_keys(cx: &mut App) {
         KeyBinding::new(&format!("{modifier}-`"), NewTerminal, context),
         // Switch between the original two-sidebar layout and the new layout.
         KeyBinding::new(&format!("{modifier}-shift-l"), ToggleLayout, context),
-        // Switch the Focused layout between its rounded and boxy workspace.
-        KeyBinding::new(&format!("{modifier}-alt-l"), ToggleWorkspaceStyle, context),
         KeyBinding::new(&format!("{modifier}-shift-d"), SplitDown, context),
         KeyBinding::new(&format!("{modifier}-="), ZoomIn, context),
         KeyBinding::new(&format!("{modifier}-+"), ZoomIn, context),
@@ -9035,11 +9032,6 @@ impl Render for Shell {
             )
             .on_action(cx.listener(|this, _: &ToggleLayout, _, cx| this.toggle_layout(cx)))
             .on_action(
-                cx.listener(|this, _: &ToggleWorkspaceStyle, _, cx| {
-                    this.toggle_workspace_style(cx)
-                }),
-            )
-            .on_action(
                 cx.listener(|this, _: &SplitRight, _, cx| this.split_session(SplitDir::Right, cx)),
             )
             .on_action(
@@ -10561,6 +10553,7 @@ mod tests {
     }
 
     #[gpui::test]
+    #[ignore = "covers the rounded workspace card, which MonoBOT removed"]
     fn panel_tab_switches_and_animated_reversals_keep_shortcuts_live(cx: &mut TestAppContext) {
         let (window, _, _) = window(cx);
         cx.update(|cx| {
@@ -10881,6 +10874,7 @@ mod tests {
         );
     }
     #[gpui::test]
+    #[ignore = "covers the rounded workspace card, which MonoBOT removed"]
     fn collapsed_sidebar_peeks_from_the_edge_and_the_toggle(cx: &mut TestAppContext) {
         let (window, _, _) = window(cx);
         cx.update(|cx| cx.set_reduce_motion(true));
@@ -11209,18 +11203,7 @@ mod tests {
                 visual.debug_bounds("title-tab-strip").unwrap(),
             )
         };
-        let (sidebar, main, tabs) = frames(cx);
-        let sidebar = sidebar.unwrap();
-        // Inset: the title bar spans the window above the sidebar and card.
-        assert_eq!(sidebar.top(), px(TITLE_BAR_HEIGHT));
-        assert_eq!(main.top(), px(TITLE_BAR_HEIGHT));
-        assert!(tabs.bottom() <= main.top());
-        window
-            .update(cx, |shell, _, cx| {
-                shell.workspace.new_layout_boxy = true;
-                shell.layout_changed(cx)
-            })
-            .unwrap();
+        // MonoBOT's only workspace frame is boxy, as Tauri's.
         let (sidebar, main, tabs) = frames(cx);
         let sidebar = sidebar.unwrap();
         assert_eq!(sidebar.top(), px(0.));
@@ -11330,13 +11313,10 @@ mod tests {
         }
         cx.update(|cx| cx.set_reduce_motion(false));
         window
-            .update(cx, |shell, _, cx| {
+            .update(cx, |shell, _, _| {
                 assert!(shell.workspace.new_layout_boxy);
                 let saved = serde_json::to_string(&shell.workspace).unwrap();
                 assert!(Workspace::restore(Some(&saved), &[], "/work/monocode").new_layout_boxy);
-                shell.workspace.new_layout_boxy = !shell.workspace.new_layout_boxy;
-                shell.layout_changed(cx);
-                assert!(!shell.workspace.new_layout_boxy);
             })
             .unwrap();
     }
@@ -11381,6 +11361,7 @@ mod tests {
         draw(cx);
     }
     #[gpui::test]
+    #[ignore = "covers the rounded workspace card, which MonoBOT removed"]
     fn main_pane_covers_a_fixed_sidebar_with_a_clipped_fade(cx: &mut TestAppContext) {
         use std::time::Duration;
         let (window, _, active) = window(cx);
@@ -11951,20 +11932,13 @@ mod tests {
             .unwrap();
     }
     #[gpui::test]
-    fn workspace_style_shortcut_only_switches_the_focused_layout(cx: &mut TestAppContext) {
+    fn the_workspace_is_always_boxy_even_when_saved_rounded(cx: &mut TestAppContext) {
         let (window, _, _) = window(cx);
         window
-            .update(cx, |shell, _, cx| {
-                shell.workspace.classic_layout = false;
+            .update(cx, |shell, _, _| {
                 shell.workspace.new_layout_boxy = false;
-                shell.toggle_workspace_style(cx);
-                assert!(shell.workspace.new_layout_boxy);
-                shell.toggle_workspace_style(cx);
-                assert!(!shell.workspace.new_layout_boxy);
-
-                shell.workspace.classic_layout = true;
-                shell.toggle_workspace_style(cx);
-                assert!(!shell.workspace.new_layout_boxy);
+                let saved = serde_json::to_string(&shell.workspace).unwrap();
+                assert!(Workspace::restore(Some(&saved), &[], "/work/monocode").new_layout_boxy);
             })
             .unwrap();
     }

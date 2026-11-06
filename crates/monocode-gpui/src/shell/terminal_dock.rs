@@ -1136,7 +1136,6 @@ pub(super) fn footer_separator() -> gpui::Div {
         .w(px(1.))
         .h(px(12.))
         .mx(px(3.))
-        .rounded_full()
         .bg(content(0.12))
 }
 const NEW_TERMINAL_LABEL: &str = if cfg!(target_os = "macos") {

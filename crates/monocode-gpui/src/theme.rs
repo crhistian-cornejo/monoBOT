@@ -272,6 +272,10 @@ pub(crate) fn picked_accent() -> Hsla {
 pub(crate) fn user_bubble_fill() -> Hsla {
     user_accent().map_or(content(0.1), |a| a.opacity(0.24))
 }
+/// The bubble's hairline (`border-content/10`), 30% of a picked accent.
+pub(crate) fn user_bubble_edge() -> Hsla {
+    user_accent().map_or(content(0.1), |a| a.opacity(0.3))
+}
 /// `.user-message-bubble[data-draft]`: an 8% wash inside a 38% dashed edge.
 pub(crate) fn draft_bubble_fill() -> Hsla {
     user_accent().map_or(content(0.04), |a| a.opacity(0.08))

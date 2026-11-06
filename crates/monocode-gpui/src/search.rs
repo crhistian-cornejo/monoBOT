@@ -708,7 +708,6 @@ impl SearchView {
                         .top(px(10.))
                         .w(px(2.5))
                         .h(px(18.))
-                        .rounded_full()
                         .bg(accent_color()),
                 )
             })
@@ -1140,7 +1139,6 @@ impl SearchView {
                                     .flex()
                                     .items_center()
                                     .gap(px(6.))
-                                    .rounded_full()
                                     .border_1()
                                     .border_color(if selected {
                                         accent_color().opacity(0.45)

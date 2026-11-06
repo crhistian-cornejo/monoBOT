@@ -108,7 +108,6 @@ pub(crate) enum SettingsEvent {
     Changed(Box<Preferences>),
     /// The Appearance page's Layout picker: true for Focused, false for Classic.
     NewLayout(bool),
-    NewLayoutBoxy(bool),
     Section(Section),
     OpenSession(i64),
     Archive(i64, bool),
@@ -974,7 +973,6 @@ pub(crate) fn nav(
                         .gap_2()
                         .h(px(30.))
                         .px_2()
-                        .rounded_full()
                         .text_color(content(0.35))
                         .cursor_pointer()
                         .hover(|s| s.bg(content(0.08)).text_color(content(1.)))

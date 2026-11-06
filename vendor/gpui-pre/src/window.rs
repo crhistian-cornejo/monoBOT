@@ -7928,7 +7928,6 @@ pub fn quad(
     }
 }
 
-/// Creates a filled quad with the given bounds and background color.
 static SQUARE_CORNERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// MonoBOT: draw square corners everywhere, as its web app sets every radius
@@ -7959,6 +7958,7 @@ pub fn squared_corners(radii: Corners<Pixels>, size: Size<Pixels>) -> Corners<Pi
     }
 }
 
+/// Creates a filled quad with the given bounds and background color.
 pub fn fill(bounds: impl Into<Bounds<Pixels>>, background: impl Into<Background>) -> PaintQuad {
     PaintQuad {
         bounds: bounds.into(),

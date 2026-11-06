@@ -3912,9 +3912,12 @@ fn tool_pill(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div>
         .flex()
         .items_center()
         .gap_1()
-        .bg(content(0.1))
+        // Tauri's composer controls are outlined boxes, not filled pills:
+        // a 14% hairline, filled only on hover.
+        .border_1()
+        .border_color(content(0.14))
         .text_color(content(1.))
-        .hover(|s| s.bg(content(0.15)))
+        .hover(|s| s.bg(content(0.06)))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 /// `[data-composer-box]::before`: the frosted (or, in light themes, solid)

@@ -1358,7 +1358,6 @@ impl DiffView {
                         .h(px(6.))
                         .left(px(gutter + left))
                         .w(px(thumb))
-                        .rounded_full()
                         .bg(content(if self.thumb_drag.is_some() { 0.35 } else { 0.2 }))
                         .hover(|s| s.bg(content(0.35)))
                         .on_mouse_down(

@@ -136,7 +136,6 @@ impl Floating {
                                 div()
                                     .w(px(4.))
                                     .h(px(if selected { 20. } else { 8. }))
-                                    .rounded_r_full()
                                     .bg(content(1.))
                                     .when(!selected, |d| {
                                         d.opacity(0.)

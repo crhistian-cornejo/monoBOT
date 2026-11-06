@@ -682,11 +682,7 @@ fn label_chip(label: &monocode_core::inbox::Label) -> gpui::Div {
 
 fn skeleton() -> AnyElement {
     let bar = |width: gpui::DefiniteLength, height: f32, alpha: f32| {
-        div()
-            .h(px(height))
-            .w(width)
-            .rounded(px(4.))
-            .bg(content(alpha))
+        div().h(px(height)).w(width).bg(content(alpha))
     };
     div()
         .id("work-item-loading")

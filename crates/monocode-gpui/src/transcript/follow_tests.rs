@@ -227,8 +227,7 @@ fn mono_pending_messages_show_thinking_and_keep_the_same_height_on_delivery(
                             .into_iter()
                             .filter(|q| {
                                 let height = q.bounds.size.height.0 / scale;
-                                (35. ..=37.).contains(&height)
-                                    && q.corner_radii.top_left.0 * 2. == q.bounds.size.height.0
+                                (35. ..=37.).contains(&height) && is_user_bubble(q, scale)
                             })
                             .map(|q| q.bounds.top().0 / scale)
                             .reduce(f32::max)
@@ -306,7 +305,7 @@ fn mono_steered_bubbles_align_and_stay_together_after_the_answer_and_reload(
                         .into_iter()
                         .filter(|q| {
                             (35. ..=37.).contains(&(q.bounds.size.height.0 / scale))
-                                && q.corner_radii.top_left.0 * 2. == q.bounds.size.height.0
+                                && is_user_bubble(q, scale)
                         })
                         .map(|q| {
                             (
@@ -1849,10 +1848,7 @@ fn bubble_top(window: &mut Window) -> f32 {
     window
         .painted_quads()
         .into_iter()
-        .filter(|q| {
-            q.corner_radii.top_left.0 > 0.
-                && q.corner_radii.top_left.0 * 2. == q.bounds.size.height.0
-        })
+        .filter(|q| is_user_bubble(q, window.scale_factor()))
         .map(|q| q.bounds.top().0 / window.scale_factor())
         .next()
         .expect("the sent bubble is painted")

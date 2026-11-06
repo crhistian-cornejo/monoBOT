@@ -2001,14 +2001,12 @@ impl TranscriptView {
                                 canvas(
                                     |_, _, _| {},
                                     move |bounds, _, window, _| {
-                                        let radius = if bounds.size.height <= px(37.) {
-                                            f32::from(bounds.size.height) * 0.5
-                                        } else {
-                                            12.
-                                        };
+                                        // Tauri's bubble: never a pill, with a hairline edge.
                                         window.paint_quad(
                                             gpui::fill(bounds, user_bubble_fill())
-                                                .corner_radii(px(radius)),
+                                                .corner_radii(px(12.))
+                                                .border_widths(px(1.))
+                                                .border_color(user_bubble_edge()),
                                         );
                                     },
                                 )
@@ -5313,14 +5311,8 @@ impl TranscriptView {
                                 canvas(
                                     |_, _, _| {},
                                     move |bounds, _, window, cx| {
-                                        // Match React's measured single-line bubble, including
-                                        // when a window resize makes the same text wrap.
-                                        let radius =
-                                            if first && last && bounds.size.height <= px(37.) {
-                                                f32::from(bounds.size.height) * 0.5
-                                            } else {
-                                                12.
-                                            };
+                                        // Tauri's bubble is never a pill, even on one line.
+                                        let radius = 12.;
                                         let corners = gpui::Corners {
                                             top_left: px(if first { radius } else { 0. }),
                                             top_right: px(if first { radius } else { 0. }),
@@ -5329,7 +5321,9 @@ impl TranscriptView {
                                         };
                                         window.paint_quad(
                                             gpui::fill(bounds, user_bubble_fill())
-                                                .corner_radii(corners),
+                                                .corner_radii(corners)
+                                                .border_widths(px(1.))
+                                                .border_color(user_bubble_edge()),
                                         );
                                         if let Some(burst) = burst.filter(burst::Burst::behind_text)
                                         {
@@ -5398,11 +5392,7 @@ impl TranscriptView {
                             |_, _, _| {},
                             move |bounds, _, window, cx| {
                                 // The same corners the bubble's fill paints.
-                                let radius = if last && bounds.size.height <= px(37.) {
-                                    f32::from(bounds.size.height) * 0.5
-                                } else {
-                                    12.
-                                };
+                                let radius = 12.;
                                 let bottom = px(if last { radius } else { 0. });
                                 let corners = gpui::Corners {
                                     top_left: px(radius),
@@ -6028,12 +6018,14 @@ impl Render for TranscriptView {
                                         .flex()
                                         .items_center()
                                         .justify_center()
-                                        .size(px(30.))
-                                        .rounded_full()
+                                        // TranscriptJumpToBottom: a 24px square
+                                        // with a 15% edge on a 10% fill.
+                                        .size(px(24.))
                                         .border_1()
-                                        .border_color(content(0.1))
-                                        .text_color(content(0.7))
-                                        .hover(|s| s.text_color(content(1.)).bg(content(0.04)))
+                                        .border_color(content(0.15))
+                                        .bg(content(0.1))
+                                        .text_color(content(1.))
+                                        .hover(|s| s.bg(content(0.05)))
                                         .child(floating_surface())
                                         .child(icon("chevron-down", 16.))
                                         .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
@@ -6050,11 +6042,21 @@ impl Render for TranscriptView {
 }
 
 /// The frosted fill behind the round controls floating over the transcript.
+/// Tests find a single-line user bubble by its painted shape, since its fill
+/// fades while it enters: 12px corners, a hairline edge and one line's height.
+#[cfg(test)]
+pub(crate) fn is_user_bubble(quad: &gpui::Quad, scale: f32) -> bool {
+    let height = quad.bounds.size.height.0 / scale;
+    quad.border_widths.top.0 > 0.
+        && (quad.corner_radii.top_left.0 / scale - 12.).abs() < 0.01
+        && (30. ..=40.).contains(&height)
+}
 pub(crate) fn floating_surface() -> impl IntoElement {
     canvas(
         |_, _, _| {},
         |bounds, _, window, _| {
-            let radius = bounds.size.height / 2.;
+            // Square, like the controls it sits behind.
+            let radius = px(0.);
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             window.paint_quad(
                 gpui::fill(bounds, content(0.04))
@@ -6287,10 +6289,9 @@ mod scroll_tests {
                     bubble.bounds.size.width.0 / window.scale_factor() < 96.,
                     "short messages still shrink to their text"
                 );
-                assert_eq!(
-                    bubble.corner_radii.top_left.0 * 2.,
-                    bubble.bounds.size.height.0
-                );
+                // Tauri's bubble is never a pill and carries a hairline edge.
+                assert!(bubble.corner_radii.top_left.0 * 2. < bubble.bounds.size.height.0);
+                assert!(bubble.border_widths.top.0 > 0.);
                 assert_eq!(
                     bubble.corner_radii.top_left,
                     bubble.corner_radii.bottom_left
@@ -7151,15 +7152,12 @@ mod scroll_tests {
         let bubble_top = |w: &mut Window| {
             w.painted_quads()
                 .into_iter()
-                .filter(|q| {
-                    q.corner_radii.top_left.0 > 0.
-                        && q.corner_radii.top_left.0 * 2. == q.bounds.size.height.0
-                })
+                .filter(|q| is_user_bubble(q, w.scale_factor()))
                 .map(|q| q.bounds.top().0 / w.scale_factor())
                 .fold(None, |low: Option<f32>, top| {
                     Some(low.map_or(top, |l| l.max(top)))
                 })
-                .expect("single-line bubble is fully rounded")
+                .expect("the single-line bubble is painted")
         };
         // Loaded history neither animates nor starts at the top.
         window
@@ -7259,11 +7257,8 @@ mod scroll_tests {
                 let bubble = w
                     .painted_quads()
                     .into_iter()
-                    .find(|q| {
-                        q.corner_radii.top_left.0 > 0.
-                            && q.corner_radii.top_left.0 * 2. == q.bounds.size.height.0
-                    })
-                    .expect("single-line bubble is fully rounded");
+                    .find(|q| is_user_bubble(q, w.scale_factor()))
+                    .expect("the single-line bubble is painted");
                 assert_eq!(
                     bubble.bounds.size.height.0 / w.scale_factor(),
                     36.,
@@ -7284,10 +7279,7 @@ mod scroll_tests {
                 let bubble = w
                     .painted_quads()
                     .into_iter()
-                    .find(|q| {
-                        q.corner_radii.top_left.0 > 0.
-                            && q.corner_radii.top_left.0 * 2. == q.bounds.size.height.0
-                    })
+                    .find(|q| is_user_bubble(q, w.scale_factor()))
                     .unwrap();
                 let settled_y = bubble.bounds.top().0 / w.scale_factor();
                 assert!(

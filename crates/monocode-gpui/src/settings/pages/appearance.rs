@@ -272,7 +272,7 @@ impl SettingsView {
                 )
             })
             .collect();
-        let mut layout = vec![
+        let layout = vec![
             self.row(
                 Some("inset-layout"),
                 true,
@@ -321,33 +321,6 @@ impl SettingsView {
                 )],
             ),
         ];
-        if inset {
-            layout.insert(
-                1,
-                self.row(
-                    Some("new-layout-style"),
-                    false,
-                    "Workspace style",
-                    Some(if cfg!(target_os = "macos") {
-                        "Choose a rounded card or a full-height boxy workspace. ⌘⌥L switches between them.".into()
-                    } else {
-                        "Choose a rounded card or a full-height boxy workspace. Ctrl+Alt+L switches between them.".into()
-                    }),
-                    vec![self.segmented(
-                        "new-layout-style",
-                        "Workspace style",
-                        if self.ctx.new_layout_boxy {
-                            "boxy"
-                        } else {
-                            "rounded"
-                        },
-                        &[("rounded", "Rounded"), ("boxy", "Boxy")],
-                        cx,
-                        |_, value, cx| cx.emit(SettingsEvent::NewLayoutBoxy(value == "boxy")),
-                    )],
-                ),
-            );
-        }
         page.push(self.group(None, false, "Layout", None, None, layout));
         page
     }
@@ -495,7 +468,6 @@ impl SettingsView {
                                 div()
                                     .size(px(14.))
                                     .flex_shrink_0()
-                                    .rounded_full()
                                     .bg(rgb(custom.unwrap_or(0x4da3f5))),
                             )
                             .child(div().flex_1().min_w_0().child(self.accent_custom.clone())),

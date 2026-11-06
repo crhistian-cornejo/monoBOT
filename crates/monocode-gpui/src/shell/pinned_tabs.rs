@@ -295,7 +295,6 @@ impl Shell {
                                 .left(px((TAB_TILE.w - 10.) / 2.))
                                 .w(px(10.))
                                 .h(px(2.))
-                                .rounded_full()
                                 .bg(accent_color()),
                         )
                     })
@@ -307,7 +306,6 @@ impl Shell {
                                 .left(px((TAB_TILE.w - 6.) / 2.))
                                 .w(px(6.))
                                 .h(px(2.))
-                                .rounded_full()
                                 .bg(content(0.35)),
                         )
                     })

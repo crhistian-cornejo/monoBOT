@@ -350,7 +350,6 @@ impl Conversation {
                 .h_full()
                 .flex()
                 .items_center()
-                .rounded_full()
                 .text_color(content(0.7))
                 .cursor_pointer()
                 .hover(|s| s.bg(content(0.06)).text_color(content(1.)))
@@ -385,7 +384,6 @@ impl Conversation {
                 .h(px(30.))
                 .flex()
                 .items_stretch()
-                .rounded_full()
                 .border_1()
                 .border_color(content(0.1))
                 // Hover fills stay clear of the rim.

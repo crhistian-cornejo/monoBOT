@@ -584,6 +584,9 @@ impl Workspace {
             dock.active = dock.active.min(dock.terminals.len() - 1);
             dock.size = dock.side.clamp(dock.size, (4000., 4000.));
         }
+        // MonoBOT has one square workspace frame, as Tauri; a saved rounded
+        // card from an earlier preview opens boxy.
+        state.new_layout_boxy = true;
         state.add_project(cwd);
         let open: HashSet<_> = state.open_sessions().into_iter().collect();
         let focus = std::mem::take(&mut state.project_focus);
@@ -1577,8 +1580,9 @@ mod tests {
         assert_eq!(fresh.active, Some(2));
         assert_eq!(fresh.project, "/a");
         assert!(fresh.new_layout_boxy);
+        // A rounded card saved by an earlier preview opens boxy, as Tauri.
         let rounded = Workspace::restore(Some(r#"{"new_layout_boxy":false}"#), &sessions, "/a");
-        assert!(!rounded.new_layout_boxy);
+        assert!(rounded.new_layout_boxy);
     }
     #[test]
     fn restoring_history_keeps_only_remembered_or_selected_projects() {

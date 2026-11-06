@@ -2129,17 +2129,8 @@ mod tests {
     }
 
     #[gpui::test]
-    fn new_boxy_style_is_independent_of_the_navigation_layout(cx: &mut TestAppContext) {
+    fn the_boxy_workspace_survives_switching_the_navigation_layout(cx: &mut TestAppContext) {
         let (window, _, active) = super::super::tests::window(cx);
-        window
-            .update(cx, |shell, w, cx| {
-                shell.open_settings(crate::settings::Section::Appearance, w, cx);
-                shell.settings.clone().unwrap().update(cx, |_, cx| {
-                    cx.emit(crate::settings::SettingsEvent::NewLayoutBoxy(true))
-                });
-            })
-            .unwrap();
-        cx.run_until_parked();
         window
             .update(cx, |shell, _, cx| {
                 assert!(!shell.workspace.classic_layout);
