@@ -217,6 +217,7 @@ mod tests {
             .unwrap();
         summary.has_messages = true;
         let window = cx.update(|cx| {
+            crate::accounts::install(store.clone(), cx);
             cx.open_window(Default::default(), |_, cx| {
                 cx.new(|cx| {
                     let mut view = Conversation::new(summary, store, cx);
