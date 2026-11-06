@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     io::{BufRead, BufReader, Read, Write},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{mpsc, Mutex, OnceLock},
     thread,
     time::{Duration, Instant},
@@ -619,7 +619,7 @@ fn fx_models(value: &Value) -> Vec<Model> {
 fn cli_json(kind: Kind, args: &[&str]) -> Result<Value, String> {
     let binary =
         provider::resolve(kind).ok_or_else(|| format!("{} CLI not installed", kind.label()))?;
-    let mut command = Command::new(binary);
+    let mut command = crate::process::command(binary);
     crate::scm::shell::apply_gui_env(&mut command);
     command
         .args(args)
@@ -708,7 +708,7 @@ fn query_provider(
 ) -> Result<Value, String> {
     let binary =
         provider::resolve(kind).ok_or_else(|| format!("{} CLI not installed", kind.label()))?;
-    let mut command = Command::new(binary);
+    let mut command = crate::process::command(binary);
     crate::scm::shell::apply_gui_env(&mut command);
     account.apply(kind, &mut command)?;
     if kind == Kind::Codex {

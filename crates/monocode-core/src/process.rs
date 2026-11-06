@@ -1,6 +1,72 @@
 //! Child policy extracted from src-tauri/src/background_work.rs.
 use std::process::Command;
 
+/// A command for an agent CLI. On Windows, npm installs CLIs as `.cmd`
+/// shims, and Rust refuses to pass arguments with quotes, newlines or `%` to
+/// a batch file (the "batch file arguments are invalid" error). Launch what
+/// the shim launches instead: its `.exe`, or `node` with its script, as npm's
+/// cmd-shim writes them. Anything else starts as given.
+pub fn command(binary: impl AsRef<std::path::Path>) -> Command {
+    let binary = binary.as_ref();
+    match shim_target(binary) {
+        Some((program, script)) => {
+            let mut command = Command::new(program);
+            if let Some(script) = script {
+                command.arg(script);
+            }
+            command
+        }
+        None => Command::new(binary),
+    }
+}
+
+/// What an npm `.cmd` shim runs: the program, and for Node CLIs its script.
+pub fn shim_target(
+    binary: &std::path::Path,
+) -> Option<(std::path::PathBuf, Option<std::path::PathBuf>)> {
+    let extension = binary.extension()?.to_string_lossy().to_ascii_lowercase();
+    if extension != "cmd" && extension != "bat" {
+        return None;
+    }
+    let text = std::fs::read_to_string(binary).ok()?;
+    let dir = binary.parent()?;
+    let target = shim_paths(&text)
+        .into_iter()
+        .rfind(|path| !path.eq_ignore_ascii_case("node.exe"))?;
+    let target = dir.join(target.replace('\\', std::path::MAIN_SEPARATOR_STR));
+    if !target.is_file() {
+        return None;
+    }
+    if target
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("exe"))
+    {
+        return Some((target, None));
+    }
+    let local = dir.join("node.exe");
+    let node = if local.is_file() {
+        local
+    } else {
+        std::path::PathBuf::from("node")
+    };
+    Some((node, Some(target)))
+}
+
+/// The quoted `%dp0%\…` (or `%~dp0\…`) paths in a cmd-shim, in order.
+fn shim_paths(text: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for quoted in text.split('"').skip(1).step_by(2) {
+        let rest = quoted
+            .strip_prefix("%dp0%\\")
+            .or_else(|| quoted.strip_prefix("%~dp0\\"))
+            .or_else(|| quoted.strip_prefix("%~dp0"));
+        if let Some(rest) = rest.filter(|rest| !rest.is_empty()) {
+            paths.push(rest.to_owned());
+        }
+    }
+    paths
+}
+
 /// Apply scheduling hints before exec so descendants inherit them.
 /// Best effort: a refused hint must not prevent a provider from launching.
 pub fn configure_child(command: &mut Command) {
@@ -360,5 +426,78 @@ mod windows_tests {
         assert_eq!(output.status.code(), Some(7));
         assert!(String::from_utf8_lossy(&output.stdout).contains("stdout"));
         assert!(String::from_utf8_lossy(&output.stderr).contains("stderr"));
+    }
+}
+
+#[cfg(test)]
+mod shim_tests {
+    use super::*;
+
+    #[test]
+    fn npm_shims_launch_their_exe_or_node_script() {
+        let dir = std::env::temp_dir().join(format!("monobot-shim-{}", std::process::id()));
+        let bin = dir.join("node_modules").join("cli").join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("claude.exe"), b"").unwrap();
+        std::fs::write(bin.join("codex.js"), b"").unwrap();
+        // The two shapes npm's cmd-shim writes: a native exe, and a Node script.
+        let exe = dir.join("claude.cmd");
+        std::fs::write(
+            &exe,
+            "@ECHO off\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\cli\\bin\\claude.exe\"   %*\r\n",
+        )
+        .unwrap();
+        let node = dir.join("codex.cmd");
+        std::fs::write(
+            &node,
+            concat!(
+                "IF EXIST \"%dp0%\\node.exe\" (\r\n",
+                "  SET \"_prog=%dp0%\\node.exe\"\r\n",
+                ")\r\n",
+                "\"%_prog%\"  \"%dp0%\\node_modules\\cli\\bin\\codex.js\" %*\r\n",
+            ),
+        )
+        .unwrap();
+        let (program, script) = shim_target(&exe).unwrap();
+        assert!(program.ends_with("claude.exe") && script.is_none());
+        let (program, script) = shim_target(&node).unwrap();
+        assert_eq!(program, std::path::PathBuf::from("node"));
+        assert!(script.unwrap().ends_with("codex.js"));
+        assert!(shim_target(&dir.join("claude.exe")).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    /// Every provider installed on this machine is found and starts.
+    /// `cargo test -p monocode-core installed_providers_start -- --ignored --nocapture`
+    #[test]
+    #[ignore = "starts the installed agent CLIs"]
+    fn installed_providers_start() {
+        for kind in crate::provider::Kind::ALL {
+            let Some(binary) = crate::provider::resolve_auto(kind) else {
+                println!("{:<12} not installed", kind.id());
+                continue;
+            };
+            let output = super::command(&binary)
+                .arg("--version")
+                .stdin(std::process::Stdio::null())
+                .output();
+            let line = output
+                .as_ref()
+                .map(|o| {
+                    let text = String::from_utf8_lossy(&o.stdout).trim().to_owned();
+                    let text = if text.is_empty() {
+                        String::from_utf8_lossy(&o.stderr).trim().to_owned()
+                    } else {
+                        text
+                    };
+                    text.lines().next().unwrap_or_default().to_owned()
+                })
+                .unwrap_or_else(|error| format!("FAILED: {error}"));
+            println!("{:<12} {} -> {line}", kind.id(), binary.display());
+            assert!(output.is_ok(), "{} did not start", kind.id());
+        }
     }
 }

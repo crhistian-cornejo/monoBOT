@@ -59,7 +59,7 @@ pub fn rewind_last_turn(
     // Remove the previous warm process before reverting its underlying session.
     // It must not later resume with a pre-revert in-memory context.
     parked::discard_session(&request);
-    let mut command = Command::new(&request.binary);
+    let mut command = crate::process::command(&request.binary);
     crate::scm::shell::apply_gui_env(&mut command);
     command.envs(&request.settings.environment);
     request.settings.account.apply(request.kind, &mut command)?;

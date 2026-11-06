@@ -65,6 +65,7 @@ fn launch(value: &Value) -> Option<Value> {
             "hermes",
             "antigravity",
             "devin",
+            "droid",
             "grok",
         ]
         .contains(&harness)

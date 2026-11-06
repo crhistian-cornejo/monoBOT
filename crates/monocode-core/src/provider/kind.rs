@@ -12,9 +12,10 @@ pub enum Kind {
     Fx,
     Hermes,
     Devin,
+    Droid,
 }
 impl Kind {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
@@ -26,6 +27,7 @@ impl Kind {
         Self::Hermes,
         Self::Antigravity,
         Self::Devin,
+        Self::Droid,
     ];
     pub fn id(self) -> &'static str {
         match self {
@@ -40,6 +42,7 @@ impl Kind {
             Self::Fx => "fx",
             Self::Hermes => "hermes",
             Self::Devin => "devin",
+            Self::Droid => "droid",
         }
     }
     pub fn label(self) -> &'static str {
@@ -55,6 +58,7 @@ impl Kind {
             Self::Fx => "fx",
             Self::Hermes => "Hermes Agent",
             Self::Devin => "Devin",
+            Self::Droid => "Droid",
         }
     }
     pub fn parse(id: &str) -> Option<Self> {
@@ -76,6 +80,7 @@ impl Kind {
             Self::OpenCode => &[".opencode/bin"],
             Self::Fx => &[".fx/bin"],
             Self::Antigravity => &[".local/share/agy-acp"],
+            Self::Droid => &[".factory/bin"],
             Self::Hermes => &[
                 ".hermes/hermes-agent/venv/bin",
                 ".hermes/hermes-agent/.venv/bin",
@@ -106,6 +111,7 @@ impl Kind {
             Self::Fx => "fx CLI",
             Self::Hermes => "Hermes Agent CLI",
             Self::Devin => "Devin CLI",
+            Self::Droid => "Droid CLI",
         }
     }
     /// The install command React shows in its hint, when it has one.
@@ -115,6 +121,7 @@ impl Kind {
             Self::Pi => Some("npm i -g @earendil-works/pi-coding-agent"),
             Self::Omp => Some("curl -fsSL https://omp.sh/install | sh"),
             Self::Fx => Some("curl -fsSL https://fx.sh/setup.sh | bash"),
+            Self::Droid => Some("npm i -g droid"),
             Self::Hermes => {
                 Some("Install from hermes-agent.nousresearch.com, then run hermes model")
             }

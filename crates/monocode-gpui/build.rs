@@ -32,7 +32,43 @@ fn embed_windows_icon(manifest_dir: &std::path::Path) {
     // Not canonicalize: its \\?\ verbatim prefix is rejected by rc.exe.
     let icon = icon.to_string_lossy().replace('\\', "/");
     let rc = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("monocode.rc");
-    fs::write(&rc, format!("1 ICON \"{icon}\"\n")).unwrap();
+    // Task Manager and Explorer name the process by its FileDescription.
+    let version = env::var("MONOCODE_NATIVE_VERSION")
+        .unwrap_or_else(|_| env::var("CARGO_PKG_VERSION").unwrap());
+    let numbers: Vec<u16> = version
+        .split(['.', '-'])
+        .take(3)
+        .map(|part| part.parse().unwrap_or(0))
+        .chain([0, 0, 0])
+        .take(3)
+        .collect();
+    let comma = format!("{},{},{},0", numbers[0], numbers[1], numbers[2]);
+    let resource = format!(
+        r#"1 ICON "{icon}"
+1 VERSIONINFO
+FILEVERSION {comma}
+PRODUCTVERSION {comma}
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "FileDescription", "monoBOT"
+      VALUE "ProductName", "monoBOT"
+      VALUE "FileVersion", "{version}"
+      VALUE "ProductVersion", "{version}"
+      VALUE "InternalName", "monocode-gpui"
+      VALUE "OriginalFilename", "monocode-gpui.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+"#
+    );
+    fs::write(&rc, resource).unwrap();
     embed_resource::compile(&rc, embed_resource::NONE)
         .manifest_optional()
         .unwrap();

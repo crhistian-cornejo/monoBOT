@@ -113,7 +113,8 @@ impl Selection {
         start.min(end)..end
     }
 }
-const MENU_DELAY: std::time::Duration = std::time::Duration::from_millis(300);
+/// Just past a double-click; the menu then appears at once, as tooltips do.
+const MENU_DELAY: std::time::Duration = std::time::Duration::from_millis(120);
 /// The top centre of the selection's first line, as React anchors to the
 /// range's first client rect rather than the pointer.
 fn menu_anchor(state: &State) -> Option<Point<Pixels>> {
@@ -640,6 +641,7 @@ impl TranscriptView {
         let weak = cx.weak_entity();
         Some(
             popover("transcript-selection", Anchor::Point(position))
+                .without_animation()
                 .allow_outside_press()
                 .side(Side::Top)
                 .align(crate::popover::Align::Center)

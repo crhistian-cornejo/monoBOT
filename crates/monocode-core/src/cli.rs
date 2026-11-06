@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     io::Read,
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{OnceLock, RwLock},
     time::{Duration, Instant},
 };
@@ -32,7 +32,7 @@ pub fn output(
     cwd: &Path,
     timeout: Duration,
 ) -> Result<String, String> {
-    let mut command = Command::new(binary);
+    let mut command = crate::process::command(binary);
     crate::scm::shell::apply_gui_env(&mut command);
     command
         .args(args)

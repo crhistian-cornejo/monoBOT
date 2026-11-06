@@ -216,6 +216,10 @@ pub fn resolve_auto(kind: Kind) -> Option<PathBuf> {
                 return Some(candidate);
             }
         }
+        // An extensionless file there is a Unix shell script (npm and Git
+        // Bash leave one beside each `.cmd`), which Windows cannot start.
+        #[cfg(windows)]
+        p.extension()?;
         (executable(&p) && discovery::matches(kind, &p)).then_some(p)
     })
 }
@@ -1405,7 +1409,7 @@ fn run_operation(
             );
         }
     }
-    let mut command = Command::new(&request.binary);
+    let mut command = crate::process::command(&request.binary);
     crate::scm::shell::apply_gui_env(&mut command);
     command.envs(&request.settings.environment);
     request.settings.account.apply(request.kind, &mut command)?;

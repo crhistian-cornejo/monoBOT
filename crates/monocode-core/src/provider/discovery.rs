@@ -29,7 +29,7 @@ pub(super) fn matches(kind: Kind, path: &Path) -> bool {
     if cache.lock().unwrap().get(&key) == Some(&modified) {
         return true;
     }
-    let mut command = Command::new(path);
+    let mut command = crate::process::command(path);
     command
         .arg("--help")
         .stdin(Stdio::null())

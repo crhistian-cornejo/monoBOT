@@ -456,7 +456,7 @@ pub(crate) fn provider_tile(provider: &str) -> Option<(Hsla, Hsla)> {
         "omp" => (0xC45BE0, 0x8A5CF2),
         "cursor" | "grok" | "pi" | "fx" => (0x343434, 0x161616),
         "opencode" => (0x3B3636, 0x1F1C1C),
-        "hermes" | "devin" => (0x3A3A3E, 0x1E1E22),
+        "hermes" | "devin" | "droid" => (0x3A3A3E, 0x1E1E22),
         // Codex: the blue of its mark's gradient.
         _ => (0x7A8CFF, 0x4048FF),
     };
@@ -488,6 +488,7 @@ pub(crate) fn provider_glyph(provider: &str, side: f32) -> AnyElement {
         "fx" => ("fx.svg", 1.),
         "hermes" => ("hermes.svg", 0.72),
         "devin" => ("devin.svg", 0.88),
+        "droid" => ("droid.svg", 0.9),
         _ => ("codex-glyph.svg", 1.),
     };
     svg()
@@ -510,6 +511,7 @@ pub(crate) fn provider_icon(provider: &str, side: f32) -> Div {
         "fx" => ("fx.svg", true, 1.),
         "hermes" => ("hermes.svg", true, 0.72),
         "devin" => ("devin.svg", true, 0.88),
+        "droid" => ("droid.svg", true, 0.9),
         _ => ("codex.svg", false, 1.),
     };
     // Like React's currentColor / CSS masks, GPUI's SVG mask follows the theme.

@@ -16,7 +16,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
-    process::Command,
 };
 
 pub const PROVIDERS: [&str; 5] = ["github", "linear", "jira", "gitlab", "azuredevops"];
@@ -1023,7 +1022,7 @@ fn run_command(
             program
         )
     })?;
-    let mut command = Command::new(binary);
+    let mut command = crate::process::command(binary);
     command
         .current_dir(root)
         .args(args)

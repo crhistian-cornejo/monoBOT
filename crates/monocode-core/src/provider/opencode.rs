@@ -155,7 +155,7 @@ fn park(server: Server, request: &Request, session: String) {
     });
 }
 fn command(request: &Request) -> Result<Command, String> {
-    let mut command = Command::new(&request.binary);
+    let mut command = crate::process::command(&request.binary);
     crate::scm::shell::apply_gui_env(&mut command);
     command.envs(&request.settings.environment);
     request.settings.account.apply(request.kind, &mut command)?;

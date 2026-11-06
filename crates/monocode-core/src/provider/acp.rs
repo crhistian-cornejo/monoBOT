@@ -83,6 +83,10 @@ pub(super) fn configure(command: &mut Command, request: &Request) -> Result<(), 
         Kind::Cursor => {
             command.arg("acp");
         }
+        // Factory's Droid serves ACP from its exec command (DROID_ACP_ARGS).
+        Kind::Droid => {
+            command.args(["exec", "-o", "acp"]);
+        }
         Kind::Fx => {
             command.arg("acp");
             if let Some(model) = &request.model {
@@ -369,6 +373,19 @@ impl Protocol {
                     "ask"
                 } else {
                     "code"
+                }
+            }
+            // droidModeId: Droid's autonomy levels; Spec is its read-only plan.
+            Kind::Droid => {
+                if planning {
+                    "spec"
+                } else {
+                    match settings.access {
+                        AccessMode::FullAccess => "auto-high",
+                        AccessMode::Auto => "auto-medium",
+                        AccessMode::AutoAcceptEdits => "auto-low",
+                        _ => "normal",
+                    }
                 }
             }
             Kind::OpenCode => {

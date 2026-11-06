@@ -5,7 +5,7 @@ use crate::{
 };
 use std::{
     io::Read,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
         mpsc, Arc,
@@ -42,7 +42,7 @@ pub fn authenticate(
         .ok_or("This provider does not offer a single browser sign-in flow")?;
     let binary =
         provider::resolve(kind).ok_or_else(|| format!("{} CLI not installed", kind.label()))?;
-    let mut command = Command::new(binary);
+    let mut command = crate::process::command(binary);
     crate::scm::shell::apply_gui_env(&mut command);
     profile.apply(kind, &mut command)?;
     command
@@ -129,7 +129,7 @@ fn safe_detail(value: &str) -> String {
 pub(crate) fn cli_output(kind: Kind, args: &[&str], profile: &Profile) -> Result<String, String> {
     let binary =
         provider::resolve(kind).ok_or_else(|| format!("{} CLI not found", kind.label()))?;
-    let mut command = Command::new(binary);
+    let mut command = crate::process::command(binary);
     crate::scm::shell::apply_gui_env(&mut command);
     profile.apply(kind, &mut command)?;
     command
