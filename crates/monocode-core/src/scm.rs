@@ -1091,7 +1091,7 @@ fn parse_gh_pr_list(json: &str) -> Option<Pr> {
     best
 }
 
-fn gh_run(root: &Path, args: &[&str]) -> Result<String, String> {
+pub(crate) fn gh_run(root: &Path, args: &[&str]) -> Result<String, String> {
     let program = shell::resolve_gui_binary("gh")
         .ok_or_else(|| "GitHub CLI (`gh`) is not installed.".to_string())?;
     let mut cmd = Command::new(&program);
