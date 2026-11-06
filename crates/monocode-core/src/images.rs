@@ -523,6 +523,106 @@ pub fn await_turn_images(
     }
 }
 
+/// The app's Antigravity provider as the image turn's runner: a throwaway
+/// supervised session in the home folder, the picture tool allowed and
+/// everything else refused, then the pictures Gemini left in its brain
+/// folder (`generateImages` on the Antigravity harness).
+pub struct AntigravityRunner {
+    pub binary: PathBuf,
+    pub home: PathBuf,
+    /// Where the collected pictures are copied.
+    pub save_dir: PathBuf,
+    pub cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl AntigravityRunner {
+    /// The installed Antigravity and the user's home, or why it can't run.
+    pub fn installed(save_dir: PathBuf) -> Result<Self, String> {
+        use crate::provider::Kind;
+        let binary = crate::provider::resolve(Kind::Antigravity)
+            .ok_or_else(|| Kind::Antigravity.unavailable_hint())?;
+        let home = dirs::home_dir().ok_or("No home folder for Antigravity")?;
+        Ok(Self {
+            binary,
+            home,
+            save_dir,
+            cancel: Default::default(),
+        })
+    }
+}
+
+impl ImageTurnRunner for AntigravityRunner {
+    fn run(
+        &self,
+        turn: &ImageTurn,
+        on_event: &mut dyn FnMut(TurnEvent) -> bool,
+    ) -> Result<(), String> {
+        use crate::agent::{AccessMode, Control, Decision, Settings};
+        use crate::provider::{Event, Kind, Request};
+        use std::sync::atomic::Ordering;
+        let started = now_ms();
+        let (controls, answers) = std::sync::mpsc::channel();
+        let model = turn
+            .model
+            .split_once(':')
+            .map_or(turn.model.as_str(), |(_, id)| id);
+        let request = Request {
+            kind: Kind::Antigravity,
+            binary: self.binary.clone(),
+            cwd: self.home.clone(),
+            prompt: turn.text.clone(),
+            provider_id: None,
+            model: Some(model.into()),
+            settings: Settings {
+                access: AccessMode::Supervised,
+                attachments: turn.source.iter().cloned().collect(),
+                ..Default::default()
+            },
+        };
+        let result = crate::provider::run_with_controls(
+            request,
+            self.cancel.clone(),
+            Some(answers),
+            |events| {
+                for event in events {
+                    if let Event::Approval(approval) = event {
+                        let allow = on_event(TurnEvent::Approval {
+                            title: approval.title,
+                            kind: approval.detail,
+                        });
+                        let decision = if allow {
+                            Decision::Allow
+                        } else {
+                            Decision::Deny
+                        };
+                        let _ = controls.send(Control {
+                            id: approval.id,
+                            decision,
+                        });
+                    }
+                }
+                Ok(())
+            },
+        );
+        if let Err(error) = &result {
+            on_event(TurnEvent::Error(error.clone()));
+        }
+        // Gemini's image subagent can still be writing when the turn ends.
+        let brain = self.home.join(BRAIN_DIR);
+        let wait = if result.is_ok() { 120 } else { 4 };
+        for image in await_turn_images(
+            Duration::from_secs(wait),
+            Duration::from_secs(2),
+            || self.cancel.load(Ordering::Relaxed),
+            || collect_images_since(&brain, &self.save_dir, started),
+            std::thread::sleep,
+        ) {
+            on_event(TurnEvent::Image(image));
+        }
+        result
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

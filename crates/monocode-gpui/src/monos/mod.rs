@@ -14,6 +14,7 @@ mod host;
 pub(crate) mod html;
 #[cfg(target_os = "windows")]
 mod html_windows;
+mod images;
 mod memory_ui;
 mod mobile;
 mod news;

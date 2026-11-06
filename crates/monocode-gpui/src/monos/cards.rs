@@ -245,6 +245,7 @@ pub(crate) fn render(
     match kind {
         "document" => return artifact(value, cx),
         "choices" => return choices(value, chosen, cx),
+        "images" => return super::images::render(value, cx),
         "session" => {
             let id = value["sessionId"].as_i64().unwrap_or_default();
             let view = value["state"]
