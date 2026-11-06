@@ -14,6 +14,9 @@ const IDENTITY_FIELDS: &[&str] = &[
     "showStartedSessionsInSidebar",
     "useSidebarFolders",
     "background",
+    "kind",
+    "botRole",
+    "specialty",
 ];
 
 impl Roster {
@@ -172,6 +175,27 @@ fn desktop_mono(store: &Store, value: &Value, backgrounds: Option<&Value>) -> Op
             .and_then(Value::as_bool)
             .unwrap_or(false),
         background,
+        // Bots, workstreams and groups (mono.ts readEntry); a bot without a
+        // known role is an Assistant, as on the desktop.
+        kind: value
+            .get("kind")
+            .and_then(Value::as_str)
+            .filter(|kind| ["bot", "workstream", "group"].contains(kind))
+            .map(str::to_owned),
+        bot_role: (value.get("kind").and_then(Value::as_str) == Some("bot")).then(|| {
+            value
+                .get("botRole")
+                .and_then(Value::as_str)
+                .filter(|role| super::bots::role(role).is_some())
+                .unwrap_or("assistant")
+                .to_owned()
+        }),
+        specialty: value
+            .get("specialty")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned),
         ..Default::default()
     };
     mono.normalize();

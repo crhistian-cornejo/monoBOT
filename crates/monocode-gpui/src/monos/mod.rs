@@ -1,5 +1,6 @@
 //! Mono workspaces: one runtime per identity, shared by the rail, title tabs,
 //! overview, settings and floating windows.
+pub(crate) mod agents;
 pub(crate) mod avatar;
 pub(crate) mod cards;
 mod changes;
@@ -137,6 +138,8 @@ pub(crate) struct Monos {
     activity: Option<(String, Entity<crate::transcript::TranscriptView>)>,
     activity_turn: Option<usize>,
     rail_ids: Vec<String>,
+    /// Where the new-bot menu opened, while it is open.
+    roles_menu: Option<gpui::Point<gpui::Pixels>>,
     running: HashMap<i64, RunningHabit>,
     active_run: Option<i64>,
     completion_work: HashSet<(String, u64)>,
@@ -370,6 +373,7 @@ impl Monos {
             activity: None,
             activity_turn: None,
             rail_ids: Vec::new(),
+            roles_menu: None,
             running: HashMap::new(),
             active_run: None,
             completion_work: HashSet::new(),
@@ -1182,7 +1186,8 @@ impl Monos {
         .detach();
     }
     pub(crate) fn rail(&mut self, project: Option<String>, cx: &mut Context<Self>) -> AnyElement {
-        self.rail_impl(project, false, false, cx)
+        self.rail_ids.clear();
+        self.rail_impl(project, false, false, agents::Section::Coding, cx)
     }
     /// Original navigation lists every Mono, before the projects; the inset
     /// layout continues to list only the current project's Monos.
@@ -1191,26 +1196,30 @@ impl Monos {
         compact: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        self.rail_impl(None, true, compact, cx)
+        self.rail_ids.clear();
+        self.rail_impl(None, true, compact, agents::Section::Coding, cx)
     }
     fn rail_impl(
         &mut self,
         project: Option<String>,
         original: bool,
         compact: bool,
+        section: agents::Section,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if !self.prefs.monos {
+        if !self.prefs.monos && section == agents::Section::Coding {
             return div().into_any_element();
         }
         let roster: Vec<_> = self
             .roster
             .monos
             .iter()
+            .filter(|m| section.holds(m))
             .filter(|m| project.as_ref().is_none_or(|p| m.works_on(p)))
             .cloned()
             .collect();
-        self.rail_ids = roster.iter().map(|m| m.id.clone()).collect();
+        // Every section on screen adds its rows, for dragging within it.
+        self.rail_ids.extend(roster.iter().map(|m| m.id.clone()));
         for mono in &roster {
             self.rail_bounds.entry(mono.id.clone()).or_default();
         }
@@ -1240,13 +1249,16 @@ impl Monos {
                             .text_size(px(12.))
                             .line_height(px(20.))
                             .text_color(content(0.5))
-                            .child("Monos"),
+                            .child(section.label()),
                     )
                 })
         } else {
-            section_label("Monos")
+            section_label(section.label())
         }
-        .when(has, |d| {
+        .when(has && section == agents::Section::Bots, |d| {
+            d.child(self.new_bot_button(cx))
+        })
+        .when(has && section == agents::Section::Coding, |d| {
             d.child(
                 icon_button("new-mono", "New mono", "plus")
                     .debug_selector(|| "sidebar-mono-button".into())
@@ -1265,33 +1277,49 @@ impl Monos {
             .when(compact, |d| {
                 d.w_full().flex().flex_col().items_center().gap(px(6.))
             })
-            .when(!compact, |d| d.child(heading))
-            .when(!has, |d| {
-                d.child(
-                    div()
-                        .id("new-mono-row")
-                        .debug_selector(|| "new-mono".into())
-                        .role(Role::Button)
-                        .aria_label("New mono")
-                        .h(px(32.))
-                        .when(original, |d| {
-                            d.ml(px(6.)).mr_2().font_weight(gpui::FontWeight::MEDIUM)
-                        })
-                        .px_2()
-                        .rounded_md()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_size(px(14.))
-                        .text_color(content(0.5))
-                        .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
-                        .child(icon("plus", 16.))
-                        .child("New mono")
-                        .on_click(cx.listener(move |this, _, w, cx| {
-                            this.create(project.clone().into_iter().collect(), w, cx)
-                        })),
-                )
+            .when(
+                !compact
+                    && section != agents::Section::Principal
+                    && !(section == agents::Section::Coding && !has && project.is_none()),
+                |d| d.child(heading),
+            )
+            // MonoIntroCard: with no Mono yet, the card stands in for the section.
+            .when(
+                !has && section == agents::Section::Coding && project.is_none() && !compact,
+                |d| d.child(self.mono_intro_card(cx)),
+            )
+            .when(!has && section == agents::Section::Bots, |d| {
+                d.child(self.new_bot_row(cx))
             })
+            .when(
+                !has && section == agents::Section::Coding && project.is_some(),
+                |d| {
+                    d.child(
+                        div()
+                            .id("new-mono-row")
+                            .debug_selector(|| "new-mono".into())
+                            .role(Role::Button)
+                            .aria_label("New mono")
+                            .h(px(32.))
+                            .when(original, |d| {
+                                d.ml(px(6.)).mr_2().font_weight(gpui::FontWeight::MEDIUM)
+                            })
+                            .px_2()
+                            .rounded_md()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .text_size(px(14.))
+                            .text_color(content(0.5))
+                            .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
+                            .child(icon("plus", 16.))
+                            .child("New mono")
+                            .on_click(cx.listener(move |this, _, w, cx| {
+                                this.create(project.clone().into_iter().collect(), w, cx)
+                            })),
+                    )
+                },
+            )
             .children(roster.into_iter().enumerate().map(|(index, mono)| {
                 let active = self.active.as_deref() == Some(&mono.id);
                 let state = self

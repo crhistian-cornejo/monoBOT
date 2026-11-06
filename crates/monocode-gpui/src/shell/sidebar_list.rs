@@ -8,6 +8,8 @@ use std::cell::{Cell, RefCell};
 enum Row {
     Navigation,
     Monos,
+    /// The Agents zone: the Principal, bots and groups.
+    Agents,
     Pinned,
     Folders,
     Group(Entry),
@@ -275,13 +277,22 @@ impl Shell {
             self.workspace.session_filters,
             self.workspace.preferences.show_archived,
             self.workspace.boxy_layout(),
-            self.workspace.classic_layout
-        )
+            self.workspace.classic_layout,
+        ) + if self.workspace.agents_zone {
+            "\0agents"
+        } else {
+            ""
+        }
     }
 
     pub(super) fn prepare_sidebar_list(&mut self, entries: &[Entry], cx: &App) {
         if self.workspace.classic_layout {
             self.prepare_classic_sidebar_list(entries);
+            return;
+        }
+        if self.workspace.agents_zone {
+            self.sidebar_list
+                .update(self.sidebar_scope(), vec![Row::Agents]);
             return;
         }
         let groups = self.project_groups();
@@ -491,6 +502,13 @@ impl Shell {
                     })
                     .unwrap_or_else(|| div().into_any());
             }
+            Row::Agents => {
+                return self
+                    .monos
+                    .clone()
+                    .map(|monos| monos.update(cx, |monos, cx| monos.agents_rail(false, cx)))
+                    .unwrap_or_else(|| div().into_any());
+            }
             Row::Pinned => section_label("Pinned").into_any(),
             Row::Folders => section_label("Folders").into_any(),
             Row::Group(entry) => {
@@ -615,6 +633,64 @@ impl Shell {
         }
         self.close_preview(cx);
         self.sidebar_list.remeasure();
+        self.persist(cx);
+        cx.notify();
+    }
+
+    /// RailZoneSwitch: Code holds projects, Monos and sessions; Agents holds
+    /// the user's bots and groups. The segmented control Settings uses.
+    pub(super) fn rail_zone_switch(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let agents = self.workspace.agents_zone;
+        let option = |id: &'static str, label: &'static str, path: &'static str, on: bool| {
+            div()
+                .id(id)
+                .debug_selector(move || format!("rail-zone-{id}"))
+                .role(Role::Tab)
+                .aria_label(label)
+                .aria_selected(on)
+                .min_w_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(px(6.))
+                .px(px(10.))
+                .py_1()
+                .when(on, |d| d.bg(content(0.1)).text_color(content(1.)))
+                .when(!on, |d| {
+                    d.text_color(content(0.5))
+                        .hover(|s| s.text_color(content(1.)))
+                })
+                .child(icon(path, 14.))
+                .child(div().truncate().child(label))
+        };
+        div()
+            .id("rail-zone")
+            .role(Role::TabList)
+            .aria_label("Sidebar zone")
+            .grid()
+            .grid_cols(2)
+            .gap(px(2.))
+            .p(px(2.))
+            .border_1()
+            .border_color(content(0.1))
+            .text_size(px(12.))
+            .child(
+                option("code", "Code", "code", !agents)
+                    .on_click(cx.listener(|this, _, _, cx| this.set_agents_zone(false, cx))),
+            )
+            .child(
+                option("agents", "Agents", "bot", agents)
+                    .on_click(cx.listener(|this, _, _, cx| this.set_agents_zone(true, cx))),
+            )
+            .into_any_element()
+    }
+
+    pub(super) fn set_agents_zone(&mut self, agents: bool, cx: &mut Context<Self>) {
+        if self.workspace.agents_zone == agents {
+            return;
+        }
+        self.workspace.agents_zone = agents;
+        self.refresh_sidebar_structure(cx);
         self.persist(cx);
         cx.notify();
     }

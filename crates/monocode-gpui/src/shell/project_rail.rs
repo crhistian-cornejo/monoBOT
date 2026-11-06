@@ -13,9 +13,14 @@ const ICON_RAIL_WIDTH: f32 = 48.;
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum ProjectRailRow {
     Monos,
+    /// The Agents zone in place of the projects: Principal, bots and groups.
+    Agents,
     Heading(&'static str),
     Group(String),
-    Project { path: String, grouped: bool },
+    Project {
+        path: String,
+        grouped: bool,
+    },
     Gap,
     Empty,
 }
@@ -83,7 +88,10 @@ impl ProjectRailList {
         }
         // The global Mono roster is one naturally sized item, not a project
         // card. Its row count can change without the project list changing.
-        if self.rows.first() == Some(&ProjectRailRow::Monos) {
+        if matches!(
+            self.rows.first(),
+            Some(ProjectRailRow::Monos | ProjectRailRow::Agents)
+        ) {
             self.state.remeasure_items(0..1);
         }
     }
@@ -316,7 +324,10 @@ impl Shell {
             .flex_col()
             .overflow_hidden()
             .when(!self.classic_titlebar_spans_window(cx), |d| d.child(header))
-            .when(!compact, |d| d.child(self.original_rail_navigation(cx)))
+            .when(!compact, |d| {
+                d.child(div().px_2().pt_1().pb_2().child(self.rail_zone_switch(cx)))
+                    .child(self.original_rail_navigation(cx))
+            })
             .child(
                 div()
                     .id("project-rail-scroll")
@@ -331,6 +342,11 @@ impl Shell {
             .into_any_element()
     }
     fn prepare_project_rail(&mut self, compact: bool) {
+        if self.workspace.agents_zone && !compact {
+            self.project_rail_list
+                .update(vec![ProjectRailRow::Agents, ProjectRailRow::Gap], compact);
+            return;
+        }
         let mut rows = Vec::new();
         if self.workspace.preferences.monos {
             rows.push(ProjectRailRow::Monos);
@@ -421,6 +437,11 @@ impl Shell {
                 .monos
                 .clone()
                 .map(|m| m.update(cx, |m, cx| m.project_navigation_rail(compact, cx)))
+                .unwrap_or_else(|| div().into_any()),
+            ProjectRailRow::Agents => self
+                .monos
+                .clone()
+                .map(|m| m.update(cx, |m, cx| m.agents_rail(true, cx)))
                 .unwrap_or_else(|| div().into_any()),
             ProjectRailRow::Heading(label) => self.project_rail_heading(label, compact, cx),
             ProjectRailRow::Project { path, grouped } => {
@@ -2140,6 +2161,43 @@ mod tests {
                 shell.toggle_layout(cx);
                 assert!(!shell.workspace.classic_layout && shell.workspace.new_layout_boxy);
                 assert!(shell.sessions.contains_key(&active));
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn the_agents_zone_lists_bots_and_makes_one_from_the_role_menu(cx: &mut TestAppContext) {
+        let (window, _, _) = super::super::tests::window(cx);
+        window
+            .update(cx, |shell, _, cx| shell.set_agents_zone(true, cx))
+            .unwrap();
+        cx.run_until_parked();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("rail-zone-agents").is_some());
+        assert!(visual.debug_bounds("agents-rail").is_some());
+        // As Tauri's insetPersonal: the header says Agents, with no project
+        // picker, and none of Code's navigation or sessions.
+        assert!(visual.debug_bounds("sidebar-agents-title").is_some());
+        assert!(visual.debug_bounds("sidebar-project-button").is_none());
+        assert!(visual.debug_bounds("sidebar-mono-button").is_none());
+        // No bot yet: the "New bot" row opens the role menu.
+        let row = visual.debug_bounds("new-bot").unwrap();
+        visual.simulate_click(row.center(), Default::default());
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("new-bot-custom").is_some(), "Blank bot");
+        let finance = visual.debug_bounds("new-bot-finance").unwrap();
+        visual.simulate_click(finance.center(), Default::default());
+        visual.run_until_parked();
+        window
+            .update(visual, |shell, _, cx| {
+                let monos = shell.monos.clone().unwrap();
+                let roster = &monos.read(cx).roster;
+                let bot = roster.monos.iter().find(|m| m.is_bot()).unwrap();
+                assert_eq!(bot.bot_role.as_deref(), Some("finance"));
+                assert_eq!(bot.name, "Finance");
+                assert!(bot.specialty.as_deref().unwrap().starts_with("Money"));
+                assert!(shell.workspace.agents_zone);
             })
             .unwrap();
     }

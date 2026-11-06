@@ -6705,6 +6705,10 @@ impl Shell {
         }
         self.refresh_sidebar_structure(cx);
         let live_agents = self.live_agents_preview(cx);
+        // Sidebar.tsx's insetPersonal: the header just says Agents, and the
+        // zone switch sits under it, above the Principal, bots and groups.
+        let agents = self.workspace.agents_zone;
+        let zone = self.rail_zone_switch(cx);
         div()
             .id("monocode-sidebar")
             .debug_selector(|| "sidebar-content".into())
@@ -6743,7 +6747,26 @@ impl Shell {
                                 .items_center()
                                 .gap_1()
                                 .child(
-                                    div().flex_1().min_w_0().flex().items_center().child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .flex()
+                                        .items_center()
+                                        .when(agents, |d| {
+                                            d.child(
+                                                div()
+                                                    .debug_selector(|| {
+                                                        "sidebar-agents-title".into()
+                                                    })
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .text_size(px(14.))
+                                                    .font_weight(FontWeight::MEDIUM)
+                                                    .child("Agents"),
+                                            )
+                                        })
+                                        .when(!agents, |d| {
+                                            d.child(
                                         div()
                                             .id("workspace-project")
                                             .debug_selector(|| "sidebar-project-button".into())
@@ -6817,9 +6840,10 @@ impl Shell {
                                                     );
                                                 }
                                             })),
-                                    ),
+                                    )
+                                        }),
                                 )
-                                .when(self.workspace.sidebar_search_visible, |d| {
+                                .when(self.workspace.sidebar_search_visible && !agents, |d| {
                                     d.child(
                                         icon_button("sidebar-search", "Search", "search")
                                             .debug_selector(|| "sidebar-search-button".into())
@@ -6861,6 +6885,7 @@ impl Shell {
                                     )),
                                 ),
                         )
+                        .child(div().mx_2().mb_1().child(zone))
                         .child(self.virtual_sidebar(cx))
                         .children(live_agents)
                         .child(self.app_update_footer(cx))
@@ -6873,7 +6898,7 @@ impl Shell {
                         }),
                 ),
             )
-            .when(!self.workspace.classic_layout, |d| {
+            .when(!self.workspace.classic_layout && !agents, |d| {
                 d.child(self.project_spaces(cx))
             })
             .when_some(self.session_preview.as_ref(), |d, preview| {

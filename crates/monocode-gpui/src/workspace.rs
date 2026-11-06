@@ -131,6 +131,9 @@ pub(crate) struct Workspace {
     pub last_actions: HashMap<String, String>,
     /// Original layout: separate project and session sidebars.
     pub classic_layout: bool,
+    /// The sidebar shows the Agents zone (bots and groups) instead of Code
+    /// (RailZoneSwitch's "personal").
+    pub agents_zone: bool,
     /// The new single-sidebar layout can keep its full-height, square frame.
     pub new_layout_boxy: bool,
     pub project_rail_open: bool,
@@ -346,6 +349,7 @@ impl Default for Workspace {
             actions: HashMap::new(),
             last_actions: HashMap::new(),
             classic_layout: false,
+            agents_zone: false,
             // Fresh installs start on the boxy frame; saved choices are kept.
             new_layout_boxy: true,
             project_rail_open: true,

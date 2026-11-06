@@ -1,6 +1,7 @@
 //! Persistent Mono identities and app-owned context, shared by native views,
 //! scheduled runs and the local app CLI. React's monos/model is the reference.
 pub mod api;
+pub mod bots;
 pub mod bridge;
 pub mod cards;
 mod desktop;
@@ -65,6 +66,16 @@ pub struct Mono {
     /// The model and effort for sessions it starts without naming any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subsessions: Option<Subsessions>,
+    /// "bot", "workstream" or "group" as the desktop roster writes it; none
+    /// for a coding Mono. Each kind has its own sidebar section.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// A bot's role from [`bots::ROLES`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bot_role: Option<String>,
+    /// What it takes on, in place of its role's, for the Principal to read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub specialty: Option<String>,
 }
 
 /// What a Mono's sessions start with when it names no provider, model or
@@ -134,10 +145,26 @@ impl Default for Mono {
             seen_rows: 0,
             heartbeat_minutes: heartbeat::DEFAULT_MINUTES,
             subsessions: None,
+            kind: None,
+            bot_role: None,
+            specialty: None,
         }
     }
 }
 impl Mono {
+    pub fn is_bot(&self) -> bool {
+        self.kind.as_deref() == Some("bot")
+    }
+    pub fn is_group(&self) -> bool {
+        self.kind.as_deref() == Some("group")
+    }
+    /// A coding Mono, listed under Code rather than Agents.
+    pub fn is_coding(&self) -> bool {
+        self.kind.is_none()
+    }
+    pub fn is_principal(&self) -> bool {
+        self.is_bot() && self.bot_role.as_deref() == Some("principal")
+    }
     pub fn label(&self) -> String {
         if !self.name.trim().is_empty() {
             return self.name.clone();
@@ -246,6 +273,8 @@ pub struct Message {
 pub struct Roster {
     pub monos: Vec<Mono>,
     pub hidden_sessions: Vec<i64>,
+    /// The "A bot of your own" card was closed (botIntroDismissed).
+    pub bot_intro_dismissed: bool,
     /// Last observed desktop identities, for reconciling later desktop edits
     /// without discarding deliberate native edits or resurrecting deletions.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -282,23 +311,53 @@ impl Roster {
             &serde_json::to_string(self).map_err(|e| e.to_string())?,
         )
     }
+    /// The mascot and color the next Mono gets (nextMonoLook): the first of
+    /// each not yet taken, else the next round.
+    pub fn next_look(&self) -> (String, u32) {
+        let mascot = MASCOTS
+            .iter()
+            .find(|name| !self.monos.iter().any(|m| &m.mascot == *name))
+            .unwrap_or(&MASCOTS[self.monos.len() % MASCOTS.len()])
+            .to_string();
+        let color = *COLORS_MONO
+            .iter()
+            .find(|color| !self.monos.iter().any(|m| m.color == **color))
+            .unwrap_or(&COLORS_MONO[self.monos.len() % COLORS_MONO.len()]);
+        (mascot, color)
+    }
     pub fn create(&mut self, projects: Vec<String>) -> &Mono {
+        let (mascot, color) = self.next_look();
         let mut mono = Mono {
-            mascot: MASCOTS
-                .iter()
-                .find(|name| !self.monos.iter().any(|m| &m.mascot == *name))
-                .unwrap_or(&MASCOTS[self.monos.len() % MASCOTS.len()])
-                .to_string(),
-            color: *COLORS_MONO
-                .iter()
-                .find(|color| !self.monos.iter().any(|m| m.color == **color))
-                .unwrap_or(&COLORS_MONO[self.monos.len() % COLORS_MONO.len()]),
+            mascot,
+            color,
             projects,
             ..Default::default()
         };
         mono.normalize();
         self.monos.push(mono);
         self.monos.last().unwrap()
+    }
+    /// A bot of this role (createMono with a bot): its role's name and
+    /// specialty, the next free look, and its instructions as the soul.
+    /// `blank` makes the from-scratch bot, named by the user later.
+    pub fn create_bot(&mut self, root: &Path, role: &str, blank: bool) -> Option<&Mono> {
+        let info = bots::role(role)?;
+        self.create(Vec::new());
+        let mono = self.monos.last_mut()?;
+        mono.kind = Some("bot".into());
+        mono.bot_role = Some(info.role.into());
+        if !blank {
+            mono.name = info.name.into();
+            mono.specialty = Some(info.specialty.into());
+        }
+        mono.normalize();
+        let soul = if blank {
+            bots::BLANK_SOUL
+        } else {
+            info.instructions
+        };
+        let _ = files::save(root, &mono.id, None, "SOUL.md", soul, None);
+        self.monos.last()
     }
     pub fn get(&self, id: &str) -> Option<&Mono> {
         self.monos.iter().find(|m| m.id == id)
