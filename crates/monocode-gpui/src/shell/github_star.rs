@@ -162,6 +162,7 @@ impl Shell {
             .debug_selector(|| "github-star-dismiss".into())
             .role(Role::Button)
             .aria_label("Don't show again")
+            .tooltip(chrome_tip("Don't show again", None))
             .absolute()
             .right(px(4.))
             .top(px(4.))

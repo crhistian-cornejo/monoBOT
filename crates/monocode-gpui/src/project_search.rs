@@ -487,6 +487,7 @@ impl Render for ProjectSearch {
                             .id("project-search-back")
                             .role(Role::Button)
                             .aria_label("Back to files")
+                            .tooltip(chrome_tip("Back to files", None))
                             .size(px(28.))
                             .flex_shrink_0()
                             .flex()

@@ -125,6 +125,10 @@ impl Render for LinkedActivity {
                     .id("dismiss-linked-activity")
                     .role(Role::Button)
                     .aria_label(format!("Dismiss updates for {kind} {number}"))
+                    .tooltip(chrome_tip(
+                        format!("Dismiss updates for {kind} {number}"),
+                        None,
+                    ))
                     .cursor_pointer()
                     .size(px(24.))
                     .flex()

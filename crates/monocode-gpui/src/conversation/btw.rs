@@ -1216,6 +1216,14 @@ impl Btw {
                             } else {
                                 "Discard new question".into()
                             })
+                            .tooltip(chrome_tip(
+                                if persisted {
+                                    format!("Delete “{label}”")
+                                } else {
+                                    "Discard new question".to_owned()
+                                },
+                                None,
+                            ))
                             .cursor_pointer()
                             .mr(px(4.))
                             .size(px(20.))

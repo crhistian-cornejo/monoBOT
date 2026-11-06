@@ -685,6 +685,7 @@ impl Monos {
                                 .id(("mono-changes-checkouts", ix))
                                 .role(Role::Button)
                                 .aria_label("Switch project working copy")
+                                .tooltip(chrome_tip("Switch project working copy", None))
                                 .size(px(18.))
                                 .mr_1()
                                 .flex()

@@ -407,6 +407,7 @@ impl Monos {
                                 .id(SharedString::from(format!("news-copy-{}", item.id)))
                                 .role(Role::Button)
                                 .aria_label("Copy report")
+                                .tooltip(chrome_tip("Copy report", None))
                                 .size(px(24.))
                                 .flex()
                                 .items_center()

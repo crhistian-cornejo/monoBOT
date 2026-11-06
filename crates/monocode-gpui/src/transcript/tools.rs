@@ -449,6 +449,14 @@ impl TranscriptView {
                                 if error_open { "Hide" } else { "Show" },
                                 if has_error { "error details" } else { "steps" }
                             ))
+                            .tooltip(chrome_tip(
+                                format!(
+                                    "{} {} for {caption}",
+                                    if error_open { "Hide" } else { "Show" },
+                                    if has_error { "error details" } else { "steps" }
+                                ),
+                                None,
+                            ))
                             .p_1()
                             .child(
                                 icon(

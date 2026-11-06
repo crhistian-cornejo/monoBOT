@@ -6092,6 +6092,7 @@ impl Render for TranscriptView {
                                         .child(self.jump_anchor.probe())
                                         .role(Role::Button)
                                         .aria_label("Scroll to bottom")
+                                        .tooltip(chrome_tip("Scroll to bottom", None))
                                         .relative()
                                         .flex()
                                         .items_center()

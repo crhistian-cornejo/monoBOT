@@ -1135,6 +1135,7 @@ impl Render for UsageFooter {
                         .id("refresh-usage")
                         .role(Role::Button)
                         .aria_label("Refresh usage")
+                        .tooltip(chrome_tip("Refresh usage", None))
                         .track_focus(&self.refresh_focus)
                         .tab_index(0)
                         .key_context("UsageRefresh")

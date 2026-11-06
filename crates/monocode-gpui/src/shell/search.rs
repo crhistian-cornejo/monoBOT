@@ -112,6 +112,7 @@ impl Shell {
                         .debug_selector(|| "close-search-tab".into())
                         .role(Role::Button)
                         .aria_label("Close Search")
+                        .tooltip(chrome_tip("Close Search", None))
                         .absolute()
                         .right_1()
                         .top(px(10.))

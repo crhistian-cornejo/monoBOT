@@ -1147,6 +1147,7 @@ impl QuickComposer {
                         .id(("quick-remove-attachment", ix))
                         .role(Role::Button)
                         .aria_label(format!("Remove {label}"))
+                        .tooltip(chrome_tip(format!("Remove {label}"), None))
                         .cursor_pointer()
                         .flex_shrink_0()
                         .size(px(16.))
@@ -1711,6 +1712,7 @@ impl QuickComposer {
                                     .id("quick-fast")
                                     .role(Role::Button)
                                     .aria_label("Fast mode")
+                                    .tooltip(chrome_tip("Fast mode", None))
                                     .aria_toggled(if fast {
                                         gpui::Toggled::True
                                     } else {
@@ -1750,6 +1752,7 @@ impl QuickComposer {
                                 .id("quick-effort-reset")
                                 .role(Role::Button)
                                 .aria_label("Reset to saved defaults")
+                                .tooltip(chrome_tip("Reset to saved defaults", None))
                                 .group("quick-effort-reset")
                                 .cursor_pointer()
                                 .size(px(28.))
@@ -2004,6 +2007,7 @@ impl Render for QuickComposer {
                             .id("quick-close")
                             .role(Role::Button)
                             .aria_label("Close composer")
+                            .tooltip(chrome_tip("Close composer", None))
                             .group("quick-close")
                             .cursor_pointer()
                             .absolute()

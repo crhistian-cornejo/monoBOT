@@ -6470,18 +6470,20 @@ impl Shell {
         session: &session_loading::Metadata<'_>,
         cx: &Context<Self>,
     ) -> AnyElement {
+        let action = if session.summary.archived {
+            "Unarchive"
+        } else {
+            "Archive"
+        };
+        let tip = format!("{action} {}", session.display_title());
         div()
             .id(("archive-session", id as usize))
             .debug_selector(move || format!("archive-session-{id}"))
             .role(Role::Button)
-            .aria_label(format!(
-                "{} {}",
-                if session.summary.archived {
-                    "Unarchive"
-                } else {
-                    "Archive"
-                },
-                session.display_title()
+            .aria_label(tip.clone())
+            .tooltip(chrome_tip(
+                tip,
+                (!session.summary.archived).then_some("Session: Archive"),
             ))
             .group("session-archive")
             .size(px(20.))

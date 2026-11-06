@@ -1056,6 +1056,7 @@ fn pairing_icon_action(
         .debug_selector(move || id.into())
         .role(Role::Button)
         .aria_label(label)
+        .tooltip(chrome_tip(label, None))
         .group("pairing-icon-action")
         .size(px(28.))
         .flex_shrink_0()

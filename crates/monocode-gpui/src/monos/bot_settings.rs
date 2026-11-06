@@ -666,6 +666,7 @@ impl Monos {
                     .id(("bot-folder-remove", ix))
                     .role(Role::Button)
                     .aria_label(format!("Remove {}", pretty(&path)))
+                    .tooltip(chrome_tip(format!("Remove {}", pretty(&path)), None))
                     .size(px(24.))
                     .flex_shrink_0()
                     .flex()

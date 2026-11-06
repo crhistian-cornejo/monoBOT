@@ -1269,6 +1269,7 @@ impl Conversation {
             .id(id)
             .role(Role::Button)
             .aria_label(label)
+            .tooltip(chrome_tip(label, None))
             .group(id)
             .flex_shrink_0()
             .size(px(26.))

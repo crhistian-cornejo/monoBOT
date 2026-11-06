@@ -1024,6 +1024,7 @@ impl Monos {
                     .debug_selector(|| "original-hide-mono-overview".into())
                     .role(Role::Button)
                     .aria_label("Hide overview")
+                    .tooltip(chrome_tip("Hide overview", None))
                     .aria_toggled(gpui::Toggled::True)
                     .size(px(24.))
                     .flex_shrink_0()

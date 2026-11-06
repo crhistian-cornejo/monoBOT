@@ -79,6 +79,7 @@ impl Shell {
                         .debug_selector(move || format!("close-app-tab-{}", view.label()))
                         .role(Role::Button)
                         .aria_label(format!("Close {}", view.label()))
+                        .tooltip(chrome_tip(format!("Close {}", view.label()), None))
                         .absolute()
                         .right_1()
                         .top(px(10.))

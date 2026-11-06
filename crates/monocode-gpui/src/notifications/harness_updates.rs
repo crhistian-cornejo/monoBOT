@@ -176,6 +176,7 @@ impl Render for HarnessUpdates {
                 .id("dismiss-harness-updates")
                 .role(Role::Button)
                 .aria_label("Dismiss harness updates")
+                .tooltip(chrome_tip("Dismiss harness updates", None))
                 .size(px(24.))
                 .flex()
                 .items_center()

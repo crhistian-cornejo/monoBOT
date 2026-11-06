@@ -778,6 +778,7 @@ impl SettingsView {
                                 .id("clear-settings-search")
                                 .role(Role::Button)
                                 .aria_label("Clear settings search")
+                                .tooltip(chrome_tip("Clear settings search", None))
                                 .size_4()
                                 .flex_shrink_0()
                                 .flex()

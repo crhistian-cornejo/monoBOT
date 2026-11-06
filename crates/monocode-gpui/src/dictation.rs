@@ -399,6 +399,7 @@ pub(crate) fn mic(dictation: &Entity<Dictation>, cx: &App) -> impl IntoElement +
         .debug_selector(|| "dictation-mic".into())
         .role(Role::Button)
         .aria_label(phase.button_label())
+        .tooltip(chrome_tip(phase.button_label(), None))
         .aria_toggled(if listening {
             Toggled::True
         } else {

@@ -1215,6 +1215,13 @@ impl DiffView {
                                             "Comment on line {}",
                                             number.map(|n| n.to_string()).unwrap_or_default()
                                         )))
+                                        .tooltip(chrome_tip(
+                                            format!(
+                                                "Comment on line {}",
+                                                number.map(|n| n.to_string()).unwrap_or_default()
+                                            ),
+                                            None,
+                                        ))
                                         .absolute()
                                         .top_0()
                                         .bottom_0()
@@ -1243,6 +1250,7 @@ impl DiffView {
                                             .id(("diff-stage-hunk", ix))
                                             .role(Role::Button)
                                             .aria_label("Stage hunk")
+                                            .tooltip(chrome_tip("Stage hunk", None))
                                             .absolute()
                                             .top_0()
                                             .bottom_0()

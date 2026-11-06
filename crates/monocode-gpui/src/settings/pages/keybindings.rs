@@ -531,6 +531,10 @@ impl SettingsView {
                                         .debug_selector(move || format!("reset-shortcut-{command}"))
                                         .role(Role::Button)
                                         .aria_label(format!("Reset {command} shortcut"))
+                                        .tooltip(chrome_tip(
+                                            format!("Reset {command} shortcut"),
+                                            None,
+                                        ))
                                         .p_1()
                                         .rounded_md()
                                         .cursor_pointer()

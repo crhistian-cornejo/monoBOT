@@ -776,6 +776,7 @@ impl Shell {
                                             .aria_label(SharedString::from(format!(
                                                 "Close {label}"
                                             )))
+                                            .tooltip(chrome_tip(format!("Close {label}"), None))
                                             .group("terminal-tab-close")
                                             .absolute()
                                             .right_1()

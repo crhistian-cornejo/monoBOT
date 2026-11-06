@@ -123,6 +123,7 @@ impl Render for InstalledUpdateNotice {
                     .id("dismiss-installed-update")
                     .role(Role::Button)
                     .aria_label("Dismiss update notification")
+                    .tooltip(chrome_tip("Dismiss update notification", None))
                     .debug_selector(|| "dismiss-installed-update".into())
                     // The X sits over the clickable card; keep its click from opening What's new.
                     .block_mouse_except_scroll()
@@ -331,6 +332,7 @@ impl Render for WhatsNew {
                             .id("close-whats-new")
                             .role(Role::Button)
                             .aria_label("Close")
+                            .tooltip(chrome_tip("Close", None))
                             .cursor_pointer()
                             .size(px(24.))
                             .flex()
