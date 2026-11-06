@@ -6,6 +6,7 @@
 //! The feed is kept in the settings store under [`NEWS_KEY`] as the same JSON
 //! array the desktop keeps in `monocode.botNews`; the first load takes the
 //! desktop's feed when the native one has none yet.
+use super::outcomes::ReportStatus;
 use crate::store::Store;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -30,35 +31,19 @@ pub const LAST_ALERT_KEY: &str = "botNews.lastAlert";
 /// The desktop's own feed, read once when the native one is empty.
 const DESKTOP_NEWS_KEY: &str = "monocode.botNews";
 
-/// Where a habit's report stands (ReportStatus in monoHabits.ts).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Status {
-    Progress,
-    Done,
-    Blocked,
-    NeedsAttention,
+/// The badge a report shows (STATUS_LABEL); progress shows none.
+pub fn status_label(status: ReportStatus) -> Option<&'static str> {
+    match status {
+        ReportStatus::Progress => None,
+        ReportStatus::Done => Some("Done"),
+        ReportStatus::Blocked => Some("Blocked"),
+        ReportStatus::NeedsAttention => Some("Needs you"),
+    }
 }
 
-impl Status {
-    pub fn parse(value: &str) -> Option<Self> {
-        Some(match value {
-            "progress" => Self::Progress,
-            "done" => Self::Done,
-            "blocked" => Self::Blocked,
-            "needs_attention" => Self::NeedsAttention,
-            _ => return None,
-        })
-    }
-    /// The badge a report shows (STATUS_LABEL); progress shows none.
-    pub fn label(self) -> Option<&'static str> {
-        match self {
-            Self::Progress => None,
-            Self::Done => Some("Done"),
-            Self::Blocked => Some("Blocked"),
-            Self::NeedsAttention => Some("Needs you"),
-        }
-    }
+/// A stored status; an unknown one is none.
+fn parse_status(value: &str) -> Option<ReportStatus> {
+    serde_json::from_value(Value::String(value.into())).ok()
 }
 
 /// One post in the feed (BotNewsItem).
@@ -74,7 +59,7 @@ pub struct Item {
     pub at: u64,
     pub seen: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub status: Option<Status>,
+    pub status: Option<ReportStatus>,
     /// The chat and the message it was posted as, to open it there.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
@@ -99,7 +84,7 @@ impl Item {
     }
     /// A report that needs the user asks for a reply.
     pub fn open_label(&self) -> &'static str {
-        if self.status == Some(Status::NeedsAttention) {
+        if self.status == Some(ReportStatus::NeedsAttention) {
             "Reply in chat"
         } else {
             "Open in chat"
@@ -128,7 +113,7 @@ pub struct Post {
     pub source: String,
     pub text: String,
     pub at: Option<u64>,
-    pub status: Option<Status>,
+    pub status: Option<ReportStatus>,
     pub session_id: Option<String>,
     pub block_id: Option<String>,
 }
@@ -176,7 +161,7 @@ fn stored_item(value: &Value) -> Option<Item> {
         text: text("text")?.into(),
         at: at.max(0.) as u64,
         seen: value.get("seen").and_then(Value::as_bool).unwrap_or(false),
-        status: text("status").and_then(Status::parse),
+        status: text("status").and_then(parse_status),
         session_id: text("sessionId").map(str::to_owned),
         block_id: text("blockId").map(str::to_owned),
     })
@@ -302,8 +287,11 @@ impl Feed {
 /// Whether a post should raise an OS alert now. Attention and blocked always
 /// do; the rest at most once an hour, the feed holding what came between.
 /// `last` is when routine news last alerted, moved on when this one does.
-pub fn should_alert(last: &mut u64, status: Option<Status>, now: u64) -> bool {
-    if matches!(status, Some(Status::NeedsAttention | Status::Blocked)) {
+pub fn should_alert(last: &mut u64, status: Option<ReportStatus>, now: u64) -> bool {
+    if matches!(
+        status,
+        Some(ReportStatus::NeedsAttention | ReportStatus::Blocked)
+    ) {
         return true;
     }
     if now.saturating_sub(*last) < ALERT_INTERVAL_MS {
@@ -315,7 +303,7 @@ pub fn should_alert(last: &mut u64, status: Option<Status>, now: u64) -> bool {
 
 /// [`should_alert`] with the last alert kept in the settings store
 /// (shouldAlertNews). Without storage it alerts.
-pub fn should_alert_stored(store: &Store, status: Option<Status>, now: u64) -> bool {
+pub fn should_alert_stored(store: &Store, status: Option<ReportStatus>, now: u64) -> bool {
     let mut last = store
         .setting(LAST_ALERT_KEY)
         .ok()
@@ -618,7 +606,7 @@ mod tests {
                 {"id":"3","monoId":"a","text":"no time"}]"#,
         );
         assert_eq!(stored.items.len(), 1);
-        assert_eq!(stored.items[0].status, Some(Status::Done));
+        assert_eq!(stored.items[0].status, Some(ReportStatus::Done));
         assert_eq!(Feed::parse(&stored.to_json()), stored);
     }
 
@@ -653,21 +641,25 @@ mod tests {
     fn alerts_at_once_for_attention_otherwise_at_most_once_an_hour() {
         let now = 10 * ALERT_INTERVAL_MS;
         let mut last = 0;
-        assert!(should_alert(&mut last, Some(Status::Progress), now));
+        assert!(should_alert(&mut last, Some(ReportStatus::Progress), now));
         assert!(!should_alert(
             &mut last,
-            Some(Status::Progress),
+            Some(ReportStatus::Progress),
             now + 1_000
         ));
         assert!(should_alert(
             &mut last,
-            Some(Status::NeedsAttention),
+            Some(ReportStatus::NeedsAttention),
             now + 2_000
         ));
-        assert!(should_alert(&mut last, Some(Status::Blocked), now + 3_000));
         assert!(should_alert(
             &mut last,
-            Some(Status::Done),
+            Some(ReportStatus::Blocked),
+            now + 3_000
+        ));
+        assert!(should_alert(
+            &mut last,
+            Some(ReportStatus::Done),
             now + ALERT_INTERVAL_MS
         ));
     }
@@ -807,7 +799,7 @@ mod tests {
         let mut feed = Feed::default();
         feed.add(
             Post {
-                status: Some(Status::NeedsAttention),
+                status: Some(ReportStatus::NeedsAttention),
                 ..post("fin", "Finance", "Daily", "Two Netflix charges", Some(1))
             },
             0,
@@ -827,8 +819,11 @@ mod tests {
         assert_eq!(feed.items[0].open_label(), "Open in chat");
         assert_eq!(finance.note_title(), "Finance · Daily");
         assert_eq!(finance.summary(), "Two Netflix charges");
-        assert_eq!(Status::NeedsAttention.label(), Some("Needs you"));
-        assert_eq!(Status::Progress.label(), None);
+        assert_eq!(
+            status_label(ReportStatus::NeedsAttention),
+            Some("Needs you")
+        );
+        assert_eq!(status_label(ReportStatus::Progress), None);
         assert!(feed.shows_filters());
         let senders = feed.senders();
         assert_eq!(

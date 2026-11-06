@@ -2,11 +2,7 @@
 //! weekday morning, goes through the user's email, what the other agents did
 //! and what is due, and tells the user what needs them today
 //! (src/features/bots/model/dailyBrief.ts).
-use super::{
-    files,
-    habits::{Habit, Schedule},
-};
-use serde_json::Value;
+use super::habits::{self, Habit, Schedule};
 use std::path::Path;
 
 pub const NAME: &str = "Daily brief";
@@ -59,23 +55,17 @@ pub fn draft(time: &str) -> Draft {
     }
 }
 
-/// The brief among a bot's habits.json, never a wake of the same name
-/// (findDailyBrief). It reads the file itself because a wake's `once` is not
-/// one of the native Habit's fields.
-pub fn find(habits_json: Option<&str>) -> Option<Habit> {
-    let list: Vec<Value> = serde_json::from_str(habits_json?).ok()?;
-    list.into_iter()
-        .find(|habit| {
-            habit.get("name").and_then(Value::as_str) == Some(NAME)
-                && habit.get("once") != Some(&Value::Bool(true))
-        })
-        .and_then(|habit| serde_json::from_value(habit).ok())
+/// The brief among a bot's habits, never a wake of the same name
+/// (findDailyBrief).
+pub fn find(habits: &[Habit]) -> Option<&Habit> {
+    habits
+        .iter()
+        .find(|habit| habit.name == NAME && !habit.once)
 }
 
 /// The bot's brief, read from its folder.
 pub fn load(root: &Path, mono: &str) -> Result<Option<Habit>, String> {
-    let file = files::read(root, mono, None, "habits.json")?;
-    Ok(find(file.text.as_deref()))
+    Ok(find(&habits::load(root, mono)?).cloned())
 }
 
 /// "HH:MM" from 00:00 to 23:59 (isBriefTime).
@@ -130,29 +120,26 @@ mod tests {
     #[test]
     fn is_found_among_the_bots_habits_never_a_wake_of_the_same_name() {
         let brief = draft(TIME).habit(0).unwrap();
-        let mut wake = serde_json::to_value(draft(TIME).habit(0).unwrap()).unwrap();
-        wake["once"] = true.into();
+        let wake = Habit {
+            once: true,
+            ..draft(TIME).habit(0).unwrap()
+        };
         let other = Draft {
             name: "Weekly papers".into(),
             ..draft(TIME)
         }
         .habit(0)
         .unwrap();
-        let list = |habits: Vec<Value>| serde_json::to_string(&habits).unwrap();
-        let all = list(vec![
-            serde_json::to_value(&other).unwrap(),
-            wake,
-            serde_json::to_value(&brief).unwrap(),
-        ]);
-        assert_eq!(find(Some(&all)).map(|h| h.id), Some(brief.id.clone()));
-        let only_other = list(vec![serde_json::to_value(&other).unwrap()]);
-        assert!(find(Some(&only_other)).is_none());
-        assert!(find(None).is_none());
+        let all = [other.clone(), wake, brief.clone()];
+        assert_eq!(find(&all).map(|h| &h.id), Some(&brief.id));
+        assert!(find(&[other]).is_none());
         assert_eq!(brief.name, NAME);
 
         let root = tempfile::tempdir().unwrap();
         assert!(load(root.path(), "principal").unwrap().is_none());
-        files::save(root.path(), "principal", None, "habits.json", &all, None).unwrap();
+        let text = serde_json::to_string(&all).unwrap();
+        super::super::files::save(root.path(), "principal", None, "habits.json", &text, None)
+            .unwrap();
         assert_eq!(
             load(root.path(), "principal").unwrap().map(|h| h.id),
             Some(brief.id)
