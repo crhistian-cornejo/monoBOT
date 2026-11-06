@@ -606,3 +606,26 @@ pub fn claude_launch(
         asks: asking_permission_mode("auto", &connectors) != "auto",
     }
 }
+
+/// The connectors a bot can be given on this computer, as tools.read lists
+/// them: (id, name, description, ready, user-granted).
+pub fn tool_rows() -> Vec<(String, String, String, bool, bool)> {
+    let (settings, _) = SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    let platform = Platform::current();
+    available_connectors(platform)
+        .into_iter()
+        .map(|c| {
+            (
+                c.id.to_owned(),
+                c.name.to_owned(),
+                c.description.to_owned(),
+                settings.is_ready(c, platform),
+                c.user_granted,
+            )
+        })
+        .collect()
+}

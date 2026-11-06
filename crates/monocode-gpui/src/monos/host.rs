@@ -786,6 +786,27 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                 );
                 return;
             }
+            // Any agent reads a web page or keeps a file from the web; files go
+            // to Documents/MonoBOT/<agent> (handleWeb).
+            "web.read" | "web.download" => {
+                let agent = mono.label();
+                self.call_work(
+                    call,
+                    target.clone(),
+                    move |_| {
+                        let value = if action == "web.read" {
+                            monocode_core::web::read_input(&input)?
+                        } else {
+                            let documents = monocode_core::web::documents_dir()
+                                .ok_or("The Documents folder is not available")?;
+                            monocode_core::web::download_input(&input, Some(&agent), &documents)?
+                        };
+                        Ok((value, Effect::None))
+                    },
+                    cx,
+                );
+                return;
+            }
             _ => Err("Unknown action. Run app help to see supported actions".into()),
         };
         self.finish_call(call, result, cx);

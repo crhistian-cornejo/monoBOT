@@ -469,6 +469,100 @@ pub fn record(list: &mut Vec<Delegation>, from: &str, to: &str, message: &str, n
     delegations::record(list, from, to, message, now)
 }
 
+/// A connector as tools.read lists it: (id, name, does, ready, user_granted).
+pub type ConnectorRow = (String, String, String, bool, bool);
+
+/// tools.read: what the bot has and what it could have (handleTools).
+/// `installed` are the user's installed skills; `connectors` the app's.
+pub fn tools_view(
+    tools: &bot_tools::Tools,
+    installed: &[String],
+    connectors: &[ConnectorRow],
+    updated: bool,
+) -> Value {
+    let on_list = |id: &str, granted: bool| match &tools.connectors {
+        Some(list) => list.iter().any(|c| c == id),
+        None => !granted,
+    };
+    let mut skills: Vec<Value> = bot_tools::PLUGINS
+        .iter()
+        .map(|plugin| {
+            let (label, does) = pack_label(plugin);
+            json!({"name": plugin, "label": label, "does": does, "on": tools.plugins.iter().any(|p| p == plugin)})
+        })
+        .collect();
+    skills.extend(installed.iter().map(|name| {
+        json!({"name": name, "on": tools.skills.as_ref().is_none_or(|list| list.iter().any(|w| bot_tools::skill_matches(w, name)))})
+    }));
+    let mut view = json!({
+        "services": bot_tools::SERVICES.iter().map(|service| {
+            let (label, does) = service_label(service);
+            json!({"name": service, "label": label, "does": does, "on": tools.services.iter().any(|s| s == service)})
+        }).collect::<Vec<_>>(),
+        "skills": skills,
+        "access": bot_tools::ACCESS.iter().map(|access| {
+            let (label, does) = access_label(access);
+            json!({"name": access, "label": label, "does": does, "on": tools.access.iter().any(|a| a == access)})
+        }).collect::<Vec<_>>(),
+        "connectors": connectors.iter().map(|(id, name, does, ready, granted)| {
+            let mut row = json!({"name": id, "label": name, "does": does, "on": *ready && on_list(id, *granted)});
+            if !ready {
+                row["note"] = "Off in the app's settings; ask the user".into();
+            } else if *granted {
+                row["note"] = "Only the user turns this on or off for you".into();
+            }
+            row
+        }).collect::<Vec<_>>(),
+        "folders": tools.folders.iter().map(|folder| json!({
+            "path": folder.path,
+            "canChange": folder.edit && tools.access.iter().any(|a| a == "edit"),
+        })).collect::<Vec<_>>(),
+        "foldersNote": "Besides your home folder. Only the user adds folders, in your settings; ask them when you need one.",
+        "alwaysBlocked": "Sending, replying to, forwarding or deleting email; sharing or deleting files; deleting Notion pages; deleting files or pushing from the shell.",
+    });
+    if tools.skills.is_none() {
+        view["skillsNote"] = "No list yet: every installed skill is open to you.".into();
+    }
+    if updated {
+        view["appliesFrom"] = "your next turn".into();
+    }
+    view
+}
+
+/// BOT_SERVICES' name and note.
+fn service_label(service: &str) -> (&'static str, &'static str) {
+    match service {
+        "gmail" => ("Gmail", "Search and read email"),
+        "drive" => ("Google Drive", "Search and read files"),
+        _ => ("Notion", "Read and write pages"),
+    }
+}
+
+/// BOT_ACCESS' name and note.
+fn access_label(access: &str) -> (&'static str, &'static str) {
+    match access {
+        "web" => ("Web", "Search the web and read pages"),
+        "read" => ("Read files", "Read and search files in its folders"),
+        "edit" => (
+            "Change files",
+            "Create and edit files in folders you allow; never delete",
+        ),
+        _ => (
+            "Images",
+            "Make and edit pictures with Gemini's Nano Banana, through Antigravity",
+        ),
+    }
+}
+
+/// BOT_SKILLS' name and note: Finance, then the optional packs.
+fn pack_label(plugin: &str) -> (&'static str, &'static str) {
+    crate::skills::bundled::SKILL_PACKS
+        .iter()
+        .find(|pack| pack.id == plugin)
+        .map(|pack| (pack.name, pack.description))
+        .unwrap_or(("Finance", "Expenses, income and budgets"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -635,5 +729,48 @@ mod tests {
             new_name(&json!({"name": "  Ada   Lovelace "})).unwrap(),
             "Ada Lovelace"
         );
+    }
+
+    #[test]
+    fn tool_labels_match_the_web_build() {
+        let source = include_str!("../../../../src/features/bots/model/bots.ts");
+        for service in bot_tools::SERVICES {
+            let (label, does) = service_label(service);
+            assert!(source.contains(&format!("name: \"{label}\"")), "{label}");
+            assert!(source.contains(does), "{does}");
+        }
+        for access in bot_tools::ACCESS {
+            let (label, does) = access_label(access);
+            assert!(source.contains(&format!("name: \"{label}\"")), "{label}");
+            assert!(source.contains(does), "{does}");
+        }
+        let tools = bot_tools::tools("research", None);
+        let rows = vec![
+            (
+                "openalex".to_owned(),
+                "OpenAlex".to_owned(),
+                "Papers".to_owned(),
+                true,
+                false,
+            ),
+            (
+                "poki".to_owned(),
+                "Poki".to_owned(),
+                "iPhone".to_owned(),
+                false,
+                true,
+            ),
+        ];
+        let view = tools_view(&tools, &["pdf".to_owned()], &rows, true);
+        assert_eq!(view["connectors"][0]["on"], true);
+        assert_eq!(
+            view["connectors"][1]["note"],
+            "Off in the app's settings; ask the user"
+        );
+        assert_eq!(
+            view["skills"].as_array().unwrap().last().unwrap()["on"],
+            false
+        );
+        assert_eq!(view["appliesFrom"], "your next turn");
     }
 }

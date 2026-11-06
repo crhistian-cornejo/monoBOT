@@ -81,6 +81,7 @@ impl Monos {
                 let recent = self.delegations().clone();
                 Ok(agents::agents_list(&mono.id, &self.roster.monos, &recent, &[]))
             }
+            "tools.read" | "tools.update" => self.tools_call(mono, action, input, cx),
             "agents.message" => return self.agent_message(call, mono, input, cx),
             "agents.wait" => return self.agent_wait(call, input, cx),
             _ => return Some(call),
@@ -96,6 +97,51 @@ impl Monos {
         cx: &mut Context<Self>,
     ) {
         self.finish_call(call, result, cx);
+    }
+
+    /// A bot reads and changes its own services and skills (handleTools).
+    fn tools_call(
+        &mut self,
+        mono: &Mono,
+        action: &str,
+        input: &Value,
+        cx: &mut Context<Self>,
+    ) -> Result<Value, String> {
+        if !mono.is_bot() {
+            return Err("Only a bot's own conversation can manage its tools".into());
+        }
+        let role = mono.bot_role.clone().unwrap_or_else(|| "assistant".into());
+        let rows = monocode_core::connectors::tool_rows();
+        if action == "tools.update" {
+            let ids: Vec<String> = rows.iter().map(|r| r.0.clone()).collect();
+            let granted: Vec<(String, String)> = rows
+                .iter()
+                .filter(|r| r.4)
+                .map(|r| (r.0.clone(), r.1.clone()))
+                .collect();
+            let current = monocode_core::mono::bot_tools::tools(&role, mono.bot_tools.as_ref());
+            let next = agents::required_tools(input, &current, &ids)?;
+            agents::refuse_user_granted(
+                next.connectors.as_deref(),
+                current.connectors.as_deref(),
+                &granted,
+            )?;
+            if let Some(bot) = self.roster.get_mut(&mono.id) {
+                bot.bot_tools = Some(next);
+            }
+            self.save(cx);
+            self.changed(cx);
+        }
+        let own = self.roster.get(&mono.id).and_then(|m| m.bot_tools.clone());
+        let tools = monocode_core::mono::bot_tools::tools(&role, own.as_ref());
+        let home = monocode_core::accounts::home().unwrap_or_default();
+        let installed = monocode_core::mono::bot_tools::installed_skills(&home);
+        Ok(agents::tools_view(
+            &tools,
+            &installed,
+            &rows,
+            action == "tools.update",
+        ))
     }
 
     /// The Principal creates and lists the user's personal bots (handleBots).

@@ -541,6 +541,12 @@ fn save_unique(
     Err("Too many files with that name".into())
 }
 
+/// The user's Documents folder, where agents keep what they download
+/// (Tauri's `document_dir`).
+pub fn documents_dir() -> Option<std::path::PathBuf> {
+    dirs::document_dir()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
