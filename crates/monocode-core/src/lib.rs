@@ -37,6 +37,7 @@ pub mod usage;
 pub mod user_links;
 pub mod visual;
 pub mod visual_bridge;
+pub mod web;
 
 pub mod composer;
 pub mod contributions;
