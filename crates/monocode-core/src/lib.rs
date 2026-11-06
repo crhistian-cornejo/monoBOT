@@ -10,6 +10,7 @@ pub mod checkpoint;
 pub mod connectors;
 pub mod context;
 pub mod desktop_preferences;
+pub mod dictation;
 pub mod diff;
 pub mod external_editor;
 pub mod files;

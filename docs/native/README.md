@@ -74,6 +74,14 @@ hot reload or automatic rebuild on save.
 On macOS, the command packages and launches `MonoBOT Native.app`. Other
 platforms launch the executable directly.
 
+Dictation links sherpa-onnx, whose build script downloads its prebuilt libraries
+from GitHub into each target folder. A network that inspects TLS refuses that
+download, so the native scripts (`native:dev`, `native:build`, `native:test`,
+`native:check`) point `SHERPA_ONNX_LIB_DIR` at the libraries a Tauri build already
+fetched under `target/sherpa-onnx-prebuilt`, in this checkout or, from a git
+worktree, the main one. Running cargo by hand, use `node scripts/native-cargo.mjs`
+in its place, or set `SHERPA_ONNX_LIB_DIR` yourself.
+
 ## Build
 
 ```sh

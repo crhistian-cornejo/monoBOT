@@ -267,6 +267,14 @@ Traducir `src/features/groups/model/*` (rondas, asientos, menciones, actividad, 
 | --- | --- |
 | `67759dd4` `2da0d411` `ef96600c` `a99fe1bc` `43308a3b` | Dictado local en los compositores (sherpa‑onnx), modelo tomado de Echo, descarga detrás de proxy, permiso de micrófono en macOS |
 
+Dictado hecho: `monocode-gpui/src/dictation.rs` sobre `crates/dictation`, con el modelo en la
+misma carpeta que Tauri (`models/dictation` dentro de su carpeta de datos) y la lógica de
+`dictation.ts` en `monocode-core/src/dictation.rs`. El micrófono va junto a enviar en los
+compositores de sesión, de Mono y de «by the way», como en Tauri (el compositor rápido no lo
+tiene en Tauri). `scripts/native-sherpa.mjs` reutiliza las librerías de sherpa‑onnx que ya
+bajó la compilación de Tauri. Falta la voz de las llamadas de grupo (`crates/voice`), que
+depende de la fase 6.
+
 ### Fase 11: workstreams
 
 | Commit | Qué |

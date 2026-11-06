@@ -15,6 +15,12 @@ use std::{
 
 /// Tauri's application-data location, keyed by its bundle identifier.
 pub fn monocode_database() -> PathBuf {
+    monocode_data_dir().join("monocode.db")
+}
+
+/// Tauri's `app_data_dir()`: the folder its database and downloaded models
+/// live in.
+pub fn monocode_data_dir() -> PathBuf {
     #[cfg(target_os = "macos")]
     let base = crate::accounts::home()
         .unwrap_or_default()
@@ -29,7 +35,7 @@ pub fn monocode_database() -> PathBuf {
                 .unwrap_or_default()
                 .join(".local/share")
         });
-    base.join("com.monocode.desktop/monocode.db")
+    base.join("com.monocode.desktop")
 }
 
 #[derive(Debug, Default)]

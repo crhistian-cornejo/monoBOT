@@ -107,6 +107,8 @@ pub(super) struct Btw {
     store: Database,
     parent_input: Entity<input::Input>,
     input: Entity<input::Input>,
+    /// The side composer's mic, as the session composer has it.
+    dictation: Entity<crate::dictation::Dictation>,
     transcript: Entity<TranscriptView>,
     target: Target,
     threads: Vec<Thread>,
@@ -260,6 +262,7 @@ impl Btw {
             session,
             store,
             parent_input,
+            dictation: cx.new(|cx| crate::dictation::Dictation::new(&input, cx)),
             input,
             transcript,
             target,
@@ -1381,6 +1384,7 @@ impl Btw {
                 .shadow(composer_shadow())
                 .flex()
                 .flex_col()
+                .capture_key_down(crate::dictation::capture_escape(&self.dictation))
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, _, window, cx| {
@@ -1435,6 +1439,7 @@ impl Btw {
                                 ),
                         )
                         .child(div().flex_1())
+                        .child(crate::dictation::mic(&self.dictation, cx))
                         .child(
                             send_button(
                                 "btw-send",
@@ -1454,7 +1459,8 @@ impl Btw {
                                 }
                             })),
                         ),
-                ),
+                )
+                .child(self.dictation.clone()),
         )
     }
 }
