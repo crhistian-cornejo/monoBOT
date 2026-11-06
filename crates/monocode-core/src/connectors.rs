@@ -562,3 +562,47 @@ pub fn mcp_servers(enabled: &ConnectorSettings, platform: Platform) -> Value {
 
 #[cfg(test)]
 mod tests;
+
+/// The connector switches and enabled skill packs new sessions launch with.
+/// The app sets them at start and whenever Settings change them.
+static SESSION_DEFAULTS: std::sync::RwLock<Option<(ConnectorSettings, Vec<String>)>> =
+    std::sync::RwLock::new(None);
+
+pub fn set_session_defaults(settings: ConnectorSettings, packs: Vec<String>) {
+    if let Ok(mut slot) = SESSION_DEFAULTS.write() {
+        *slot = Some((settings, packs));
+    }
+}
+
+/// What a Claude session gets from the app's connectors and MonoBOT's skill
+/// packs (launchOptions + bundledPluginDirs in claude.ts). `bot` narrows the
+/// connectors to its list and brings its own packs.
+#[derive(Clone, Debug, Default)]
+pub struct ClaudeLaunch {
+    pub servers: Map<String, Value>,
+    pub allowed_tools: Vec<String>,
+    pub ask_tools: Vec<String>,
+    pub plugin_dirs: Vec<std::path::PathBuf>,
+    /// Some connector acts: auto and bypass modes fall back to asking.
+    pub asks: bool,
+}
+
+pub fn claude_launch(
+    bot_connectors: Option<&[String]>,
+    bot_plugins: Option<&[String]>,
+) -> ClaudeLaunch {
+    let (settings, packs) = SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    let connectors = settings.session_connectors(bot_connectors, Platform::current());
+    let plugins = crate::skills::bundled::session_plugins(bot_plugins, &packs);
+    ClaudeLaunch {
+        servers: settings.servers(&connectors),
+        allowed_tools: connector_allowed_tools(&connectors),
+        ask_tools: connector_ask_tools(&connectors),
+        plugin_dirs: crate::skills::bundled::bundled_plugin_dirs(&plugins),
+        asks: asking_permission_mode("auto", &connectors) != "auto",
+    }
+}

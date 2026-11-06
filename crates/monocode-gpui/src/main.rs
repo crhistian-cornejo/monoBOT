@@ -412,6 +412,17 @@ fn main() {
         projects.push(workspace.project);
     }
     let sidebar_metadata = db.session_sidebar_metadata(&projects);
+    // MonoBOT's skill packs extract beside the data, and every Claude chat
+    // launches with the connector and pack switches the desktop app saved.
+    if let Some(dir) = db.data_dir() {
+        monocode_core::skills::bundled::set_data_dir(dir.to_path_buf());
+    }
+    if let Some(preferences) = db.desktop_preferences() {
+        monocode_core::connectors::set_session_defaults(
+            monocode_core::connectors::ConnectorSettings::from_preferences(preferences),
+            monocode_core::skills::bundled::enabled_skill_packs(preferences),
+        );
+    }
     let db = Arc::new(Mutex::new(db));
     let platform = gpui_platform::current_platform(false);
     let title_raster = particle_text::GlyphRaster(platform.text_system());

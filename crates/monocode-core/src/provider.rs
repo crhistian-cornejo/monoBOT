@@ -1467,8 +1467,28 @@ fn run_operation(
                 "stdio",
             ]);
             let settings = &request.settings;
+            // botLaunchForSession: a bot's Claude gets only its tools and
+            // folders, and never what sends, shares or deletes.
+            let bot = settings
+                .mono
+                .as_ref()
+                .filter(|_| !settings.text_only)
+                .filter(|mono| mono.mono.is_bot())
+                .map(|mono| crate::mono::bot_tools::launch_for(&mono.mono, &request.cwd));
+            // The app's connectors and MonoBOT's skill packs, for every chat.
+            let extras = (!settings.text_only).then(|| {
+                crate::connectors::claude_launch(
+                    bot.as_ref().and_then(|b| b.connectors.as_deref()),
+                    bot.as_ref().map(|b| b.plugins.as_slice()),
+                )
+            });
             let mode = if settings.plan {
                 "plan"
+            } else if extras.as_ref().is_some_and(|e| e.asks)
+                && matches!(settings.access.claude(), "auto" | "bypassPermissions")
+            {
+                // A connector that acts asks every time (askingPermissionMode).
+                "default"
             } else {
                 settings.access.claude()
             };
@@ -1516,14 +1536,15 @@ fn run_operation(
                     system.push(instructions);
                 }
             }
-            // botLaunchForSession: a bot's Claude gets only its tools and
-            // folders, and never what sends, shares or deletes.
-            let bot = settings
-                .mono
-                .as_ref()
-                .filter(|_| !settings.text_only)
-                .filter(|mono| mono.mono.is_bot())
-                .map(|mono| crate::mono::bot_tools::launch_for(&mono.mono, &request.cwd));
+            if let Some(extras) = &extras {
+                for (id, server) in &extras.servers {
+                    servers.insert(id.clone(), server.clone());
+                }
+                allowed.extend(extras.allowed_tools.iter().map(String::as_str));
+                for dir in &extras.plugin_dirs {
+                    command.args(["--plugin-dir", &dir.to_string_lossy()]);
+                }
+            }
             if let Some(bot) = &bot {
                 allowed.extend(bot.allowed_tools.iter().map(String::as_str));
                 if !bot.disallowed_tools.is_empty() {
@@ -1581,6 +1602,10 @@ fn run_operation(
                     effort
                 };
                 command.args(["--effort", effort]);
+            }
+            // Its acting tools ask every time, even where the user once said "always".
+            if let Some(extras) = extras.as_ref().filter(|e| !e.ask_tools.is_empty()) {
+                config["permissions"] = json!({"ask": extras.ask_tools});
             }
             command.args(["--settings", &config.to_string()]);
             if !settings.text_only {

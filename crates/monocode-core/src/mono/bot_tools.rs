@@ -424,7 +424,7 @@ pub fn launch_for(mono: &super::Mono, cwd: &std::path::Path) -> Launch {
         mono.bot_role.as_deref().unwrap_or("assistant"),
         mono.bot_tools.as_ref(),
         &installed_skills(cwd),
-        &[],
+        &crate::connectors::connector_denied_tools(),
     )
 }
 
