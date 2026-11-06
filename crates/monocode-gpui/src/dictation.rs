@@ -29,9 +29,9 @@ fn engine(cx: &App) -> Arc<dyn Engine> {
         .map_or_else(engine::local, |engines| engines.0.clone())
 }
 
-/// The app sets the speech model up on its own the first time it runs, in
+/// The app downloads the speech model on its own the first time it runs, in
 /// the background, so dictation works when the user first reaches for the
-/// mic; once it is there, it loads ahead of the first dictation.
+/// mic. Once it is there it stays on disk until the first dictation loads it.
 pub(crate) fn init(cx: &mut App) {
     let engine = engine(cx);
     cx.background_executor()

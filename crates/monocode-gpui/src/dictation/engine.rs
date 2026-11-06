@@ -7,6 +7,13 @@ use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::time::Duration;
+
+/// How long Parakeet stays in memory after the last dictation. It holds over
+/// half a gigabyte, so it is loaded on the first dictation and let go once
+/// the user has not dictated for a while; dictating a few messages in a row
+/// still loads it once.
+const IDLE: Duration = Duration::from_secs(3 * 60);
 
 /// `dictation_status`, with the download's progress for a composer that
 /// follows a setup it did not start.
@@ -23,10 +30,10 @@ pub(crate) struct Status {
 /// What the composers dictate with; tests stand in for the microphone.
 pub(crate) trait Engine: Send + Sync {
     fn status(&self) -> Status;
-    /// `init`: sets the model up the first time the app runs, or loads it
-    /// ahead of the first dictation.
+    /// `init`: downloads the model the first time the app runs. An installed
+    /// model stays on disk until the first dictation.
     fn prepare(&self);
-    /// `dictation_install`: downloads and verifies the model, then loads it.
+    /// `dictation_install`: downloads and verifies the model.
     fn install(&self, progress: &mut dyn FnMut(u64, u64)) -> Result<(), String>;
     /// `dictation_start`: opens the microphone, ending any other dictation.
     /// The ticket names this one for stop and cancel.
@@ -47,24 +54,46 @@ pub(crate) fn local() -> Arc<dyn Engine> {
 }
 
 struct Local {
-    engine: Dictation,
+    engine: Arc<Dictation>,
     session: Mutex<Option<(u64, Session)>>,
     tickets: AtomicU64,
     installing: AtomicBool,
     done: AtomicU64,
     total: AtomicU64,
+    /// Counts dictations, so a release scheduled after one is skipped when
+    /// another started before it ran.
+    uses: Arc<AtomicU64>,
+    idle: Duration,
 }
 
 impl Local {
     fn new(dir: std::path::PathBuf) -> Self {
         Self {
-            engine: Dictation::new(dir),
+            engine: Arc::new(Dictation::new(dir)),
             session: Mutex::new(None),
             tickets: AtomicU64::new(0),
             installing: AtomicBool::new(false),
             done: AtomicU64::new(0),
             total: AtomicU64::new(0),
+            uses: Arc::new(AtomicU64::new(0)),
+            idle: IDLE,
         }
+    }
+
+    /// Lets Parakeet go once no dictation has started for `self.idle`.
+    fn release_when_idle(&self) {
+        let this_use = self.uses.fetch_add(1, Ordering::AcqRel) + 1;
+        let uses = self.uses.clone();
+        let engine = self.engine.clone();
+        let idle = self.idle;
+        let _ = std::thread::Builder::new()
+            .name("dictation-idle".into())
+            .spawn(move || {
+                std::thread::sleep(idle);
+                if uses.load(Ordering::Acquire) == this_use {
+                    engine.release();
+                }
+            });
     }
 
     fn take(&self, ticket: u64) -> Option<Session> {
@@ -89,9 +118,7 @@ impl Engine for Local {
     }
 
     fn prepare(&self) {
-        if self.engine.installed() {
-            let _ = self.engine.prepare();
-        } else {
+        if !self.engine.installed() {
             // When it cannot (no network, say) the composer offers it again.
             let _ = self.install(&mut |_, _| {});
         }
@@ -110,8 +137,6 @@ impl Engine for Local {
                 self.total.store(total, Ordering::Relaxed);
                 progress(done, total);
             })
-            // Loaded now, so the first dictation starts at once.
-            .and_then(|()| self.engine.prepare().map(|_| ()))
             .map_err(|e| e.to_string());
         self.installing.store(false, Ordering::Release);
         result
@@ -126,10 +151,23 @@ impl Engine for Local {
         if let Some((_, previous)) = previous {
             previous.cancel();
         }
-        // A missing model fails here, before anything asks for the microphone.
-        self.engine.prepare().map_err(|e| e.to_string())?;
-        super::permission::microphone()?;
-        let session = self.engine.start(on_event).map_err(|e| e.to_string())?;
+        // Keep Parakeet loaded while the microphone is open: this cancels a
+        // release already waiting.
+        self.uses.fetch_add(1, Ordering::AcqRel);
+        let opened = (|| {
+            // A missing model fails here, before anything asks for the microphone.
+            self.engine.prepare().map_err(|e| e.to_string())?;
+            super::permission::microphone()?;
+            self.engine.start(on_event).map_err(|e| e.to_string())
+        })();
+        let session = match opened {
+            Ok(session) => session,
+            Err(err) => {
+                // A failed start (no microphone, say) must not pin the model.
+                self.release_when_idle();
+                return Err(err);
+            }
+        };
         let ticket = self.tickets.fetch_add(1, Ordering::Relaxed) + 1;
         let replaced = self
             .session
@@ -143,12 +181,18 @@ impl Engine for Local {
     }
 
     fn stop(&self, ticket: u64) -> String {
-        self.take(ticket).map(Session::stop).unwrap_or_default()
+        let Some(session) = self.take(ticket) else {
+            return String::new();
+        };
+        let text = session.stop();
+        self.release_when_idle();
+        text
     }
 
     fn cancel(&self, ticket: u64) {
         if let Some(session) = self.take(ticket) {
             session.cancel();
+            self.release_when_idle();
         }
     }
 }
