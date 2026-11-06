@@ -16,6 +16,7 @@ pub(crate) mod html;
 mod html_windows;
 mod memory_ui;
 mod mobile;
+mod news;
 mod notifications;
 mod overview;
 mod panel_stack;
@@ -141,6 +142,8 @@ pub(crate) struct Monos {
     rail_ids: Vec<String>,
     /// Messages between agents, waits and delegations.
     agent_calls: agent_calls::AgentCalls,
+    /// The bots' News feed and the cards waiting to be shown.
+    news: news::NewsState,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
     running: HashMap<i64, RunningHabit>,
@@ -378,6 +381,7 @@ impl Monos {
             rail_ids: Vec::new(),
             roles_menu: None,
             agent_calls: Default::default(),
+            news: Default::default(),
             running: HashMap::new(),
             active_run: None,
             completion_work: HashSet::new(),
@@ -1061,6 +1065,7 @@ impl Monos {
         if finished {
             if let Some(sent) = self.inflight.get(id).map(|m| m.id.clone()) {
                 self.agent_answered(id, &sent, cx);
+                self.bot_turn_news(id, cx);
             }
             if let Some(mut sent) = self.inflight.remove(id) {
                 let (ok, status) = self.chats[id].read(cx).external_outcome(cx);
@@ -1085,8 +1090,16 @@ impl Monos {
         self.changed(cx);
     }
     pub(crate) fn open(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if !self.prefs.monos || self.roster.get(id).is_none() {
+        // The Monos switch hides the coding Monos; bots and groups stay open.
+        let Some(agent) = self.roster.get(id).map(|m| !m.is_coding()) else {
             return;
+        };
+        if !self.prefs.monos && !agent {
+            return;
+        }
+        // The bots' News lives with the Principal: opening it reads them.
+        if self.roster.get(id).is_some_and(Mono::is_principal) {
+            self.mark_news_seen(cx);
         }
         if self.active.as_deref() != Some(id) {
             self.save_open_file(cx);
@@ -1230,6 +1243,8 @@ impl Monos {
             .collect();
         // Every section on screen adds its rows, for dragging within it.
         self.rail_ids.extend(roster.iter().map(|m| m.id.clone()));
+        // PersonalRail: the Principal's row says there is unread News.
+        let news_dot = section == agents::Section::Principal && self.has_unseen_news();
         for mono in &roster {
             self.rail_bounds.entry(mono.id.clone()).or_default();
         }
@@ -1447,6 +1462,19 @@ impl Monos {
                                             .child("Orchestrator"),
                                     )
                                 }),
+                        )
+                    })
+                    .when(unread == 0 && news_dot && !compact, |d| {
+                        d.child(
+                            div()
+                                .debug_selector(|| "mono-rail-news-dot".into())
+                                .absolute()
+                                .right(px(13.))
+                                .top(px(13.))
+                                .size(px(6.))
+                                .rounded_full()
+                                .bg(accent_color())
+                                .group_hover("mono-rail-row", |s| s.invisible()),
                         )
                     })
                     .when(unread > 0 && !compact, |d| {

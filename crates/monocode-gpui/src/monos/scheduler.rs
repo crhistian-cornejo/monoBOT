@@ -1723,6 +1723,13 @@ impl Monos {
         } else {
             self.record_habit_run(id.clone(), habit.clone(), result, cx);
         }
+        // A bot's habit is news in the Principal's feed (not a heartbeat).
+        if !beat && let Some((status, text)) = &tagged {
+            let source = run.view.read(cx).summary.title.clone();
+            let status = (*status != monocode_core::mono::outcomes::ReportStatus::Progress)
+                .then_some(*status);
+            self.bot_habit_news(&run.mono, &source, text, status, cx);
+        }
         if let Some(report) = report {
             if let Some(m) = self.roster.get_mut(&run.mono) {
                 m.pending_reports.push(if beat {
