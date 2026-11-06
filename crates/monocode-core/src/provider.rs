@@ -1314,11 +1314,21 @@ pub fn run_text(request: Request, cancel: Arc<AtomicBool>) -> Result<String, Str
     run_text_streaming(request, cancel, |_| {})
 }
 
-/// [`run_text`], telling `on_text` the whole answer so far as each piece arrives.
+/// What a streamed background answer has done so far.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextProgress<'a> {
+    /// The whole answer so far, every message of it.
+    Text(&'a str),
+    /// The model finished its message; the harness may take a moment more to exit.
+    Done,
+}
+
+/// [`run_text`], telling `on_progress` the whole answer so far as each piece arrives, and
+/// when the model's message is complete.
 pub fn run_text_streaming(
     mut request: Request,
     cancel: Arc<AtomicBool>,
-    mut on_text: impl FnMut(&str),
+    mut on_progress: impl FnMut(TextProgress<'_>),
 ) -> Result<String, String> {
     request.provider_id = None;
     request.settings = Settings {
@@ -1334,8 +1344,9 @@ pub fn run_text_streaming(
             match event {
                 Event::Text(text) if output.len() + text.len() <= 64 * 1024 => {
                     output.push_str(&text);
-                    on_text(&output);
+                    on_progress(TextProgress::Text(&output));
                 }
+                Event::Done => on_progress(TextProgress::Done),
                 Event::Text(_) => return Err("Background text response exceeded its limit".into()),
                 Event::Tool(tool) if tool.is_compaction() => {}
                 Event::Tool(_) | Event::Approval(_) | Event::Question(_) => {

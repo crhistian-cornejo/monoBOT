@@ -859,14 +859,64 @@ pub fn text_harness() -> Option<crate::provider::Kind> {
 
 /// Asks a connected model for a reply; the user reviews it before anything is sent.
 /// `on_text` gets the reply so far while the model writes it. Blocks until it is done.
+/// What the page hears while a model writes a reply.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReplyProgress {
+    /// The reply so far, cleaned.
+    Text(String),
+    /// The model finished its message (true), or started another (false).
+    Arrived(bool),
+}
+
+/// A reply as it streams. Only the model's last message counts: one that says something
+/// before the reply starts over with it.
+#[derive(Default)]
+pub struct ReplyStream {
+    start: usize,
+    seen: usize,
+    closed: bool,
+}
+
+impl ReplyStream {
+    pub fn feed(
+        &mut self,
+        progress: crate::provider::TextProgress<'_>,
+        on: &mut impl FnMut(ReplyProgress),
+    ) {
+        match progress {
+            crate::provider::TextProgress::Done => {
+                self.closed = true;
+                on(ReplyProgress::Arrived(true));
+            }
+            crate::provider::TextProgress::Text(so_far) => {
+                if self.closed {
+                    self.start = self.seen.min(so_far.len());
+                    self.closed = false;
+                    on(ReplyProgress::Arrived(false));
+                }
+                self.seen = so_far.len();
+                if let Some(text) = clean_reply(&so_far[self.start..]) {
+                    on(ReplyProgress::Text(text));
+                }
+            }
+        }
+    }
+
+    /// The last message of the whole answer.
+    pub fn last<'a>(&self, output: &'a str) -> &'a str {
+        output.get(self.start..).unwrap_or(output)
+    }
+}
+
 pub fn write_reply(
     text: crate::session_title::TextModel,
     prompt: String,
     cancel: Arc<std::sync::atomic::AtomicBool>,
-    mut on_text: impl FnMut(String),
+    mut on_progress: impl FnMut(ReplyProgress),
 ) -> Result<String, String> {
     let binary = crate::provider::resolve(text.kind)
         .ok_or("Connect an agent (Claude, Codex…) to write with AI.")?;
+    let mut stream = ReplyStream::default();
     let output = crate::provider::run_text_streaming(
         crate::provider::Request {
             kind: text.kind,
@@ -881,13 +931,9 @@ pub fn write_reply(
             },
         },
         cancel,
-        |so_far| {
-            if let Some(text) = clean_reply(so_far) {
-                on_text(text);
-            }
-        },
+        |progress| stream.feed(progress, &mut on_progress),
     )?;
-    clean_reply(&output)
+    clean_reply(stream.last(&output))
         .filter(|text| !split_subject(text).body.trim().is_empty())
         .ok_or_else(|| "The model wrote nothing. Try again.".into())
 }
@@ -1461,6 +1507,29 @@ mod tests {
         assert!(body[1].len() <= SNAPSHOT_BODY - "Hola Ana".len());
         assert!(body[1].chars().all(|c| c == 'ñ'));
         assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn only_the_models_last_message_is_the_reply() {
+        use crate::provider::TextProgress::{Done, Text};
+        let mut heard = Vec::new();
+        let mut on = |progress| heard.push(progress);
+        let mut stream = ReplyStream::default();
+        stream.feed(Text("Let me read it."), &mut on);
+        stream.feed(Done, &mut on);
+        stream.feed(Text("Let me read it.Subject: Sí"), &mut on);
+        stream.feed(Done, &mut on);
+        assert_eq!(
+            heard,
+            [
+                ReplyProgress::Text("Let me read it.".into()),
+                ReplyProgress::Arrived(true),
+                ReplyProgress::Arrived(false),
+                ReplyProgress::Text("Subject: Sí".into()),
+                ReplyProgress::Arrived(true),
+            ]
+        );
+        assert_eq!(stream.last("Let me read it.Subject: Sí"), "Subject: Sí");
     }
 
     #[test]

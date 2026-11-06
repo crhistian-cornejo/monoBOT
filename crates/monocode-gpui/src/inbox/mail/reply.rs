@@ -3,6 +3,8 @@
 //! a few seconds to undo. Who it goes to is the core's to decide; nothing leaves without
 //! the user's press.
 use super::*;
+use crate::reveal::{PacedText, WordFades};
+use gpui::{Animation, AnimationExt, HighlightStyle, StyledText};
 use monocode_core::{
     inbox::mail::{Person, Recipients, ReplyInput},
     session_title::TextModel,
@@ -34,6 +36,13 @@ pub(crate) struct MailReply {
     /// What AI has written so far this run, shown as it streams.
     streamed: Option<String>,
     started: Instant,
+    /// The model finished its message, though its harness may not have exited yet.
+    arrived: bool,
+    /// The streamed subject and text, word by word, as a chat reply streams.
+    reveal: Option<(PacedText, PacedText)>,
+    /// What AI wrote and what the fields held before, waiting for the last streamed word
+    /// to settle before the text becomes the editable box in its place.
+    settling: Option<(String, (String, String))>,
     /// What the box and the subject held before AI last wrote in them, to undo to.
     before: Option<(String, String)>,
     /// The request AI last wrote for, to try again with.
@@ -224,6 +233,80 @@ fn people_row(label: &'static str, people: Vec<AnyElement>, end: Option<AnyEleme
         })
 }
 
+/// The byte ranges of a text's words, split on whitespace.
+fn word_ranges(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut words = Vec::new();
+    let mut start = None;
+    for (at, c) in text.char_indices() {
+        match (c.is_whitespace(), start) {
+            (true, Some(from)) => {
+                words.push(from..at);
+                start = None;
+            }
+            (false, None) => start = Some(at),
+            _ => {}
+        }
+    }
+    if let Some(from) = start {
+        words.push(from..text.len());
+    }
+    words
+}
+
+/// Streamed text whose newest words are still coming into focus and wear the accent.
+fn faded(text: &str, fades: &WordFades, base: gpui::Hsla) -> StyledText {
+    let highlights: Vec<_> = word_ranges(text)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(word, range)| {
+            let (opacity, trail) = (fades.opacity(word), fades.trail(word));
+            (opacity < 1. || trail > 0.).then(|| {
+                let mut color = crate::reveal::trail_color(base, trail);
+                color.a *= opacity;
+                (
+                    range,
+                    HighlightStyle {
+                        color: Some(color),
+                        ..Default::default()
+                    },
+                )
+            })
+        })
+        .collect();
+    StyledText::new(text.to_string()).with_highlights(highlights)
+}
+
+/// How bright the light inside the field is, `t` through its 2.4s breath: dimmest halfway,
+/// on the web's ease-in-out (`ai-glow-breathe`).
+fn breathe(t: f32) -> f32 {
+    let ease = |t: f32| crate::reveal::bezier(t, 0.42, 0., 0.58, 1.);
+    if t < 0.5 {
+        1. - 0.55 * ease(t * 2.)
+    } else {
+        0.45 + 0.55 * ease((t - 0.5) * 2.)
+    }
+}
+
+/// The soft light inside the reply's field while AI writes (`.ai-glow::after`).
+fn glow(reduce_motion: bool) -> AnyElement {
+    let light = div().absolute().inset_0().shadow(vec![
+        gpui::BoxShadow::new(px(0.), px(0.), accent_color().opacity(0.22))
+            .blur_radius(px(12.))
+            .spread_radius(px(1.))
+            .inset(),
+    ]);
+    if reduce_motion {
+        return light.into_any_element();
+    }
+    light
+        .with_animation(
+            "mail-reply-glow",
+            Animation::new(Duration::from_millis(2400)).repeat(),
+            |light, t| light.opacity(breathe(t)),
+        )
+        .into_any_element()
+}
+
 /// The reply's small text buttons (`h-7 px-2 text-[12px] text-content/70`).
 fn tool_button(id: &'static str, label: impl Into<SharedString>, enabled: bool) -> Stateful<Div> {
     let label: SharedString = label.into();
@@ -334,6 +417,9 @@ impl MailReply {
             writing: false,
             streamed: None,
             started: Instant::now(),
+            arrived: false,
+            reveal: None,
+            settling: None,
             before: None,
             last_ask: None,
             people: None,
@@ -426,6 +512,9 @@ impl MailReply {
         self.writing = true;
         self.streamed = Some(String::new());
         self.started = Instant::now();
+        self.arrived = false;
+        self.reveal = None;
+        self.settling = None;
         self.status = None;
         self.last_ask = request.clone();
         let prompt = model::reply_prompt(&ReplyInput {
@@ -452,7 +541,7 @@ impl MailReply {
                     .unwrap_or_default(),
             }
         });
-        let (tx, rx) = async_channel::unbounded::<String>();
+        let (tx, rx) = async_channel::unbounded::<model::ReplyProgress>();
         let task = cx.background_executor().spawn(async move {
             let text = match chosen {
                 Some(text) => text,
@@ -462,15 +551,18 @@ impl MailReply {
                     Default::default(),
                 ),
             };
-            model::write_reply(text, prompt, cancel, |so_far| {
-                let _ = tx.try_send(so_far);
+            model::write_reply(text, prompt, cancel, |progress| {
+                let _ = tx.try_send(progress);
             })
         });
         cx.spawn(async move |this, cx| {
-            while let Ok(so_far) = rx.recv().await {
+            while let Ok(progress) = rx.recv().await {
                 let alive = this.update(cx, |this, cx| {
                     if this.run == run && this.writing {
-                        this.streamed = Some(so_far);
+                        match progress {
+                            model::ReplyProgress::Text(so_far) => this.streamed = Some(so_far),
+                            model::ReplyProgress::Arrived(arrived) => this.arrived = arrived,
+                        }
                         cx.notify();
                     }
                 });
@@ -488,20 +580,75 @@ impl MailReply {
                 }
                 this.writing = false;
                 this.cancel = None;
-                this.streamed = None;
                 match result {
                     Ok(written) => {
-                        let reply = model::split_subject(&written);
-                        this.set_fields(reply.body, reply.subject, cx);
-                        this.before = Some(original);
-                        window.focus(&this.text.focus_handle(cx), cx);
+                        // The streamed text stays up until its last word has settled.
+                        this.streamed = Some(written.clone());
+                        this.settling = Some((written, original));
+                        this.settle_when_revealed(run, window, cx);
                     }
-                    Err(error) => this.status = Some((error, true)),
+                    Err(error) => {
+                        this.streamed = None;
+                        this.reveal = None;
+                        this.status = Some((error, true));
+                    }
                 }
                 cx.notify();
             });
         })
         .detach();
+        cx.notify();
+    }
+
+    /// The field lights while AI writes, and goes out once the model's message has arrived
+    /// and its last word has come onto the screen, not when the harness exits.
+    fn glowing(&self, now: Instant) -> bool {
+        self.writing && !(self.arrived && !self.revealing(now))
+    }
+
+    fn revealing(&self, now: Instant) -> bool {
+        self.reveal
+            .as_ref()
+            .is_some_and(|(subject, body)| subject.active(now) || body.active(now))
+    }
+
+    fn settle_when_revealed(&mut self, run: u64, window: &mut Window, cx: &mut Context<Self>) {
+        cx.spawn_in(window, async move |this, cx| {
+            loop {
+                let done = this
+                    .update_in(cx, |this, window, cx| {
+                        if this.run != run || this.settling.is_none() {
+                            return true;
+                        }
+                        if this.revealing(Instant::now()) {
+                            return false;
+                        }
+                        this.settle(window, cx);
+                        true
+                    })
+                    .unwrap_or(true);
+                if done {
+                    break;
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(50))
+                    .await;
+            }
+        })
+        .detach();
+    }
+
+    /// The last word has settled: the text becomes the editable box in its place.
+    fn settle(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some((written, original)) = self.settling.take() else {
+            return;
+        };
+        let reply = model::split_subject(&written);
+        self.set_fields(reply.body, reply.subject, cx);
+        self.before = Some(original);
+        self.streamed = None;
+        self.reveal = None;
+        window.focus(&self.text.focus_handle(cx), cx);
         cx.notify();
     }
 
@@ -522,6 +669,8 @@ impl MailReply {
             self.set_fields(streamed.body, streamed.subject, cx);
         }
         self.writing = false;
+        self.reveal = None;
+        self.settling = None;
         window.focus(&self.text.focus_handle(cx), cx);
         cx.notify();
     }
@@ -738,6 +887,36 @@ impl MailReply {
             .into_any_element()
     }
 
+    /// Paces what AI has written so far: words come out and into focus, wearing the accent
+    /// as a trail, as a chat reply streams (`crate::reveal`).
+    fn step_reveal(&mut self, window: &mut Window, cx: &App) {
+        let Some(streamed) = self.streamed.as_deref() else {
+            self.reveal = None;
+            return;
+        };
+        let now = Instant::now();
+        let animate = !cx.reduce_motion();
+        let split = model::split_subject(streamed);
+        let (subject, body) = self.reveal.get_or_insert_with(|| {
+            (
+                PacedText::new("", animate, now),
+                PacedText::new("", animate, now),
+            )
+        });
+        for (paced, text) in [
+            (&mut *subject, split.subject.as_deref().unwrap_or_default()),
+            (&mut *body, split.body.as_str()),
+        ] {
+            paced.update(text, now);
+            paced.step(now, self.writing);
+            let words = word_ranges(paced.text()).len();
+            paced.words(words, now);
+        }
+        if self.revealing(now) {
+            window.request_animation_frame();
+        }
+    }
+
     fn editor(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let streaming = self.streamed.as_deref().map(model::split_subject);
         let gaps = if streaming.is_some() {
@@ -762,14 +941,25 @@ impl MailReply {
                 .text_color(content(1.))
                 .child(text)
         };
+        let shown = |pick: fn(&(PacedText, PacedText)) -> &PacedText, base: gpui::Hsla| {
+            self.reveal.as_ref().map(|reveal| {
+                let paced = pick(reveal);
+                faded(paced.text(), &paced.fades, base)
+            })
+        };
         let fields: AnyElement = match streaming {
             Some(streamed) => div()
                 .flex()
                 .flex_col()
                 .child(match streamed.subject.as_deref() {
-                    Some(subject) if !subject.is_empty() => {
-                        subject_text(div().child(subject.to_string()).into_any_element())
-                    }
+                    Some(subject) if !subject.is_empty() => subject_text(
+                        div()
+                            .child(
+                                shown(|r| &r.0, content(1.))
+                                    .unwrap_or_else(|| StyledText::new(subject.to_string())),
+                            )
+                            .into_any_element(),
+                    ),
                     _ if streamed.body.is_empty() => subject_text(
                         div()
                             .flex()
@@ -801,7 +991,10 @@ impl MailReply {
                         .text_size(px(13.))
                         .line_height(px(21.))
                         .text_color(content(0.9))
-                        .child(streamed.body),
+                        .child(
+                            shown(|r| &r.1, content(0.9))
+                                .unwrap_or_else(|| StyledText::new(streamed.body)),
+                        ),
                 )
                 .into_any_element(),
             None => div()
@@ -817,15 +1010,25 @@ impl MailReply {
                 )
                 .into_any_element(),
         };
+        // The border lights while words are still coming, and goes out with the last of them.
+        let glowing = self.glowing(Instant::now());
         div()
             .relative()
             .border_1()
-            .border_color(if self.writing {
-                accent_color()
+            .border_color(if glowing {
+                accent_color().opacity(0.)
             } else if focused {
                 content(0.25)
             } else {
                 content(0.1)
+            })
+            .when(glowing, |d| {
+                d.shadow(vec![
+                    gpui::BoxShadow::new(px(0.), px(0.), accent_color().opacity(0.6))
+                        .spread_radius(px(1.))
+                        .inset(),
+                ])
+                .child(glow(cx.reduce_motion()))
             })
             .child(fields)
             .when(ai_wrote || gaps > 0, |d| {
@@ -1019,6 +1222,7 @@ impl MailReply {
 
 impl gpui::Render for MailReply {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.step_reveal(window, cx);
         let status: Option<(String, gpui::Hsla)> = match (&self.countdown, &self.status) {
             (Some(left), _) => Some((format!("Sending in {left}s…"), content(0.55))),
             (None, Some((text, true))) => Some((text.clone(), rgb(0xf87171).into())),
@@ -1065,5 +1269,61 @@ impl gpui::Render for MailReply {
                         .child(text),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::TestAppContext;
+
+    #[test]
+    fn words_and_the_breath_of_the_light() {
+        assert_eq!(word_ranges("  Hola  Ana,\nsí "), [2..6, 8..12, 13..16]);
+        assert_eq!(breathe(0.), 1.);
+        assert!((breathe(0.5) - 0.45).abs() < 1e-3);
+        assert!((breathe(1.) - 1.).abs() < 1e-3);
+        assert!(breathe(0.25) < 1. && breathe(0.25) > 0.45);
+    }
+
+    #[gpui::test]
+    fn the_field_lights_until_the_message_arrives_and_its_last_word_settles(
+        cx: &mut TestAppContext,
+    ) {
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": "a.inbox.1", "accountId": "a", "folder": "inbox", "from": "Ana",
+            "address": "ana@mina.pe", "subject": "Pozas", "preview": "", "body": [],
+            "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
+        }))
+        .unwrap();
+        let service = model::Service::new(std::env::temp_dir().join("monobot-native-reply"));
+        let (reply, cx) = cx.add_window_view(|window, cx| {
+            MailReply::new(service, message, None, None, None, window, cx)
+        });
+        reply.update(cx, |reply, cx| {
+            let now = Instant::now();
+            assert!(!reply.glowing(now));
+            reply.writing = true;
+            reply.streamed = Some("Subject: Sí\n\nHola Ana".into());
+            assert!(reply.glowing(now), "lit while words come");
+            reply.arrived = true;
+            assert!(
+                !reply.glowing(now),
+                "out once arrived with nothing left to reveal"
+            );
+            reply.reveal = Some((
+                PacedText::new("", true, now),
+                PacedText::new("Hola Ana", true, now),
+            ));
+            assert!(
+                reply.glowing(now),
+                "still lit while the last words come out"
+            );
+            assert_eq!(
+                reply.subject.read(cx).content.as_ref(),
+                "Re: Pozas",
+                "the subject starts as «Re: » and theirs"
+            );
+        });
     }
 }
