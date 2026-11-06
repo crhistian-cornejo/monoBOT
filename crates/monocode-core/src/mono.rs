@@ -16,6 +16,8 @@ pub mod heartbeat;
 pub mod memory;
 pub mod news;
 pub mod outcomes;
+pub mod sync;
+pub mod transfer;
 pub mod wakes;
 pub mod work;
 pub(crate) use desktop::codex_home;

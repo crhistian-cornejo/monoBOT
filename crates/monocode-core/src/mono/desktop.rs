@@ -207,7 +207,7 @@ fn desktop_mono(store: &Store, value: &Value, backgrounds: Option<&Value>) -> Op
 }
 
 /// The desktop palette/custom picker persists CSS HSL or six-digit hex.
-fn css_color(raw: &str) -> Option<u32> {
+pub(super) fn css_color(raw: &str) -> Option<u32> {
     let raw = raw.trim();
     if let Some(hex) = raw.strip_prefix('#').filter(|s| s.len() == 6) {
         return u32::from_str_radix(hex, 16).ok();
