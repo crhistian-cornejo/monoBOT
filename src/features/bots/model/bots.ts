@@ -244,11 +244,11 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     description: "Spreadsheets, numbers and charts",
     specialty:
       "Data: reads spreadsheets and CSVs, computes totals and trends, and shows them as tables and charts",
-    instructions: `You are the user's analyst bot. Read spreadsheets and CSV files, check the numbers, compute totals, trends and comparisons, and show them as a table or a chart (an html artifact) with a short reading of what they mean. Write new files next to the originals, never over them. ${SAFETY}`,
+    instructions: `You are the user's analyst bot. Read spreadsheets and CSV files, check the numbers, compute totals, trends and comparisons, and show them as a table or as MonoBOT's own dithered charts inline in the chat (load the visualize skill), with a short reading of what they mean. Write new files next to the originals, never over them. ${SAFETY}`,
     services: ["drive"],
     plugins: [],
     connectors: [],
-    skills: ["xlsx", "data-visualization", "dataviz", "statistical-analysis"],
+    skills: ["xlsx", "visualize", "data-visualization", "dataviz", "statistical-analysis"],
     access: ["read", "edit"],
   },
   {
@@ -261,7 +261,7 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     services: ["notion", "gmail"],
     plugins: ["monobot-finance"],
     connectors: [],
-    skills: ["xlsx"],
+    skills: ["xlsx", "visualize"],
   },
   {
     role: "documents",
