@@ -98,8 +98,15 @@ struct Markup {
     accent: gpui::Hsla,
     html: Arc<str>,
 }
-pub(super) struct Html {
+pub(crate) struct Html {
     body: String,
+    /// An email's sanitized HTML, shown as its own page under a policy that runs no
+    /// script and loads nothing but inline pictures (`mail::mail_document`).
+    #[cfg_attr(
+        not(any(target_os = "macos", target_os = "windows")),
+        expect(dead_code, reason = "Only the native web views read it.")
+    )]
+    mail: bool,
     interactive: bool,
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     markup: Option<Markup>,
@@ -139,10 +146,40 @@ fn sandbox(body: &str) -> String {
         escape(&source)
     )
 }
+/// An email's page in the app's colors, resolved for a page that cannot read its tokens.
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn mail_page(body: &str) -> String {
+    let color = |value: gpui::Hsla| {
+        let value: gpui::Rgba = value.opacity(1.).into();
+        format!(
+            "#{:02x}{:02x}{:02x}",
+            (value.r * 255.) as u8,
+            (value.g * 255.) as u8,
+            (value.b * 255.) as u8
+        )
+    };
+    monocode_core::inbox::mail::mail_document(
+        body,
+        &monocode_core::inbox::mail::Colors {
+            text: color(crate::theme::content(1.)),
+            background: color(crate::theme::background_base()),
+            link: color(crate::theme::accent_color()),
+        },
+        &Default::default(),
+    )
+}
 impl Html {
     pub(super) fn new(body: String) -> Self {
+        Self::with(body, false)
+    }
+    /// An email's sanitized HTML (with any pictures the user allowed already in place).
+    pub(crate) fn mail(body: String) -> Self {
+        Self::with(body, true)
+    }
+    fn with(body: String, mail: bool) -> Self {
         Self {
             body,
+            mail,
             interactive: true,
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             markup: None,
@@ -162,17 +199,33 @@ impl Html {
             self.markup = Some(Markup {
                 ink,
                 accent,
-                html: sandbox(&self.body).into(),
+                html: if self.mail {
+                    mail_page(&self.body)
+                } else {
+                    sandbox(&self.body)
+                }
+                .into(),
             });
         }
         self.markup.as_ref().unwrap().html.clone()
+    }
+    /// Shows another body, such as the same email once its pictures landed.
+    pub(crate) fn set_body(&mut self, body: String, cx: &mut Context<Self>) {
+        if self.body != body {
+            self.body = body;
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
+            {
+                self.markup = None;
+            }
+            cx.notify();
+        }
     }
     pub(super) fn set_interactive(&mut self, interactive: bool) {
         if self.interactive != interactive {
             self.interactive = interactive;
         }
     }
-    pub(super) fn hide(&self) {
+    pub(crate) fn hide(&self) {
         #[cfg(target_os = "macos")]
         if let Some(view) = self.view.borrow().as_ref() {
             view.clip.setHidden(true);
