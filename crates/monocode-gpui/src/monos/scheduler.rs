@@ -1360,6 +1360,8 @@ impl Monos {
     pub(super) fn tick(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         self.sync_tick(cx);
         self.check_habits(cx);
+        // A round still waiting checks again when a slow member runs out of time.
+        self.check_groups(cx);
         cx.notify();
     }
     fn check_habits(&mut self, cx: &mut Context<Self>) {
@@ -1572,9 +1574,12 @@ impl Monos {
                         settings.internal_message = true;
                         settings.mono = None;
                         settings.environment.clear();
+                        // A member's habit keeps its groups' folders.
+                        let groups = this.group_context(&mono, None);
                         view.update(cx, |v, cx| {
                             v.install_transfer(settings, None, cx);
                             v.configure_mono(mono, root, env, cx);
+                            v.set_mono_groups(groups, cx);
                         });
                         this.observations.push(
                             cx.subscribe(&view, move |this, _, _: &SessionChanged, cx| {

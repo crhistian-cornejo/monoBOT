@@ -442,11 +442,16 @@ pub fn installed_skills(cwd: &std::path::Path) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// What a bot's session in `cwd` launches with (botLaunchForSession).
-pub fn launch_for(mono: &super::Mono, cwd: &std::path::Path) -> Launch {
-    launch(
-        mono.bot_role.as_deref().unwrap_or("assistant"),
-        mono.bot_tools.as_ref(),
+/// What a bot's session in `cwd` launches with, its groups' folders and
+/// files included (botLaunchForSession with groupPlacesFor).
+pub fn launch_in_groups(
+    mono: &super::Mono,
+    cwd: &std::path::Path,
+    groups: &[super::groups::Group],
+) -> Launch {
+    super::groups::native::bot_launch(
+        mono,
+        groups,
         &installed_skills(cwd),
         &crate::connectors::connector_denied_tools(),
     )

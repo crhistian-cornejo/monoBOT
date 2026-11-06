@@ -455,7 +455,7 @@ fn run_turn_using(
                 .as_deref()
                 .and_then(|r| serde_json::from_str::<serde_json::Value>(r).ok())
                 .and_then(|r| r["rules"].as_str().map(str::to_owned));
-            let added = monocode_core::mono::context(
+            let mut added = monocode_core::mono::context(
                 &mono.mono,
                 &files,
                 &mono.executable,
@@ -466,6 +466,11 @@ fn run_turn_using(
                     &rules,
                 ),
             );
+            // A group's lead reads how to run its room, a member in its
+            // seat where its words go; handed again when either changes.
+            if let Some(group) = mono.groups.brief(&mono.mono) {
+                added = format!("{added}\n\n{group}");
+            }
             let fingerprint = monocode_core::mono::files::content_hash(&added);
             mono_fingerprint = Some((fingerprint.clone(), rules.clone()));
             let expected =
@@ -486,9 +491,23 @@ fn run_turn_using(
             } else {
                 prompt
             };
+            // Members' answers to an @Name or an errand went around the
+            // lead; it reads them once, with the next message.
+            let posts = if mono.groups.group.is_some() {
+                let context = monocode_core::mono::groups::native::posts_context(
+                    &transcript.rows[..turn_start],
+                );
+                if context.is_empty() {
+                    context
+                } else {
+                    format!("{context}\n\n")
+                }
+            } else {
+                String::new()
+            };
             // Outside the hashed context, so the clock never resends it.
             let now = chrono::Local::now().format("%A %-d %B %Y, %H:%M");
-            format!("{intro}\n\n{brief}\n\n<local_time>{now}</local_time>\n{prompt}")
+            format!("{intro}\n\n{brief}\n\n{posts}<local_time>{now}</local_time>\n{prompt}")
         } else if let Some(handoff) = &settings.handoff {
             monocode_core::response::wrap_handoff_prompt(&handoff.from, &handoff.brief, &prompt)
         } else if provider_id.is_none() && turn_start > 0 {

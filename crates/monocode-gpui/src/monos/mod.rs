@@ -11,6 +11,7 @@ mod dashboard;
 mod files;
 mod filters;
 mod floating;
+mod groups;
 mod host;
 pub(crate) mod html;
 #[cfg(target_os = "windows")]
@@ -151,6 +152,8 @@ pub(crate) struct Monos {
     bot_settings: bot_settings::BotSettingsState,
     /// Bots kept the same on the user's other computers.
     sync: sync::SyncState,
+    /// Groups' seats, rounds and members' posts.
+    groups: groups::Groups,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
     running: HashMap<i64, RunningHabit>,
@@ -412,6 +415,7 @@ impl Monos {
             news: Default::default(),
             bot_settings: Default::default(),
             sync: Default::default(),
+            groups: Default::default(),
             running: HashMap::new(),
             active_run: None,
             completion_work: HashSet::new(),
@@ -789,6 +793,7 @@ impl Monos {
                     .as_ref()
                     .map(|b| b.environment(view.read(cx).summary.id))
                     .unwrap_or_default();
+                let groups = this.group_context(&mono, None);
                 view.update(cx, |view, cx| {
                     view.configure_mono(mono, root, env, cx);
                     if let Some(settings) = settings {
@@ -798,12 +803,24 @@ impl Monos {
                         view.settings.mono = config;
                         view.settings.environment = env;
                     }
+                    view.set_mono_groups(groups, cx);
                     view.load(cx);
                 });
                 let source = id.clone();
                 this.observations.push(cx.subscribe(
                     &view,
+                    move |this, _, event: &crate::conversation::GroupAccessAnswer, cx| {
+                        this.answer_access(&source, &event.request, event.access, cx)
+                    },
+                ));
+                let source = id.clone();
+                this.observations.push(cx.subscribe(
+                    &view,
                     move |this, _, event: &MonoSubmitted, cx| {
+                        // In a group's chat, @Name and rounds go to the members.
+                        if this.group_submitted(&source, &event.text, &event.attachments, cx) {
+                            return;
+                        }
                         let _ = this.enqueue(
                             &source,
                             event.text.clone(),
@@ -952,7 +969,11 @@ impl Monos {
                 .map(|b| b.environment(view.read(cx).summary.id))
                 .unwrap_or_default();
             let root = self.root.clone();
-            view.update(cx, |view, cx| view.configure_mono(mono, root, env, cx));
+            let groups = self.group_context(&mono, None);
+            view.update(cx, |view, cx| {
+                view.configure_mono(mono, root, env, cx);
+                view.set_mono_groups(groups, cx);
+            });
         }
     }
     fn enqueue(
@@ -1116,6 +1137,11 @@ impl Monos {
             }
             self.check_completions(cx);
             self.reload_files(id, cx);
+            // A group's chat that is free again takes its members' posts
+            // and the last word on a finished round.
+            if self.roster.get(id).is_some_and(Mono::is_group) {
+                self.check_groups(cx);
+            }
         }
         self.dispatch(id, cx);
         self.changed(cx);

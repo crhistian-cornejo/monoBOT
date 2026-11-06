@@ -18,6 +18,7 @@ const IDENTITY_FIELDS: &[&str] = &[
     "botRole",
     "specialty",
     "botTools",
+    "group",
 ];
 
 impl Roster {
@@ -194,6 +195,8 @@ fn desktop_mono(store: &Store, value: &Value, backgrounds: Option<&Value>) -> Op
         bot_tools: (value.get("kind").and_then(Value::as_str) == Some("bot"))
             .then(|| value.get("botTools").and_then(super::bot_tools::parse))
             .flatten(),
+        // parseMono: a group always has one, empty when it cannot be read.
+        group: super::groups::parse_entry(value),
         specialty: value
             .get("specialty")
             .and_then(Value::as_str)
@@ -287,6 +290,38 @@ mod tests {
             original
         );
         assert_eq!(store.sessions().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn desktop_groups_keep_their_members_folders_and_seats() {
+        let store = Store::open_monocode(Path::new(":memory:")).unwrap();
+        let group = desktop_mono(
+            &store,
+            &json!({
+                "id":"nexa", "name":"Nexa", "kind":"group",
+                "group":{"members":["docs","fin"],"goal":"Informe","seats":{"docs":"seat-1"},
+                         "folders":[{"path":"D:\\Projects\\1064","edit":true}]}
+            }),
+            None,
+        )
+        .unwrap();
+        let read = group.group.as_ref().unwrap();
+        assert_eq!(read.members, ["docs", "fin"]);
+        assert_eq!(read.seats.get("docs").map(String::as_str), Some("seat-1"));
+        assert!(read.folders[0].edit);
+        // What the native roster saves reads back the same.
+        let saved = serde_json::to_value(&group).unwrap();
+        assert_eq!(saved["group"]["goal"], "Informe");
+        let back: Mono = serde_json::from_value(saved).unwrap();
+        assert_eq!(back.group, group.group);
+        // A bot has none, whatever its entry holds.
+        let bot = desktop_mono(
+            &store,
+            &json!({"id":"docs","kind":"bot","group":{"members":["x"]}}),
+            None,
+        )
+        .unwrap();
+        assert!(bot.group.is_none());
     }
 
     #[test]

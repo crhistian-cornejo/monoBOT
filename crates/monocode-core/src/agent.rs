@@ -156,11 +156,13 @@ pub struct ProviderSwitch {
     pub account: crate::accounts::Profile,
     pub provider_id: Option<String>,
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MonoContext {
     pub mono: crate::mono::Mono,
     pub root: std::path::PathBuf,
     pub executable: std::path::PathBuf,
+    /// What its groups add: the lead's room, a member's seat, the folders.
+    pub groups: crate::mono::groups::native::Context,
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]

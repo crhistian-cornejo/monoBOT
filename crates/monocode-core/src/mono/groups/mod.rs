@@ -13,6 +13,7 @@ pub mod brief;
 pub mod group;
 pub mod learning;
 pub mod mentions;
+pub mod native;
 pub mod project;
 pub mod replies;
 pub mod roster;

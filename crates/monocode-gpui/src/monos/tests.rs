@@ -2076,4 +2076,277 @@ fn a_bots_settings_show_its_specialty_and_save_its_tools(cx: &mut TestAppContext
     assert!(!access.iter().any(|a| a == "web"));
     assert!(access.iter().any(|a| a == "read"));
     assert_eq!(mono.specialty.as_deref(), Some("Runs the team"));
+
+#[gpui::test]
+fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::{Access, Block, Group, native};
+    let s = setup(cx);
+    // Members whose chats never reach a provider: their seats follow them
+    // into a folder that does not exist, so each turn stops on an error
+    // before anything launches, and that error is the answer they post.
+    let fixture = || {
+        locked(&s.store)
+            .unwrap()
+            .create("codex", "/missing/monobot-group-member")
+            .unwrap()
+            .id
+    };
+    let (cash_chat, docs_chat) = (fixture(), fixture());
+    let handle: gpui::AnyWindowHandle = s.window.into();
+    let (cash, docs) = handle
+        .update(cx, |_, window, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.dismiss_settings(window, cx);
+                let root = m.root.clone();
+                let mut bot = |role: &str, name: &str, session: i64| {
+                    let id = m.roster.create_bot(&root, role, false).unwrap().id.clone();
+                    let bot = m.roster.get_mut(&id).unwrap();
+                    bot.name = name.into();
+                    bot.session_id = Some(session);
+                    id
+                };
+                let cash = bot("finance", "Cash", cash_chat);
+                let docs = bot("documents", "Docs", docs_chat);
+                let group = m.roster.get_mut(&s.id).unwrap();
+                group.kind = Some("group".into());
+                group.name = "Team".into();
+                group.group = Some(Group {
+                    members: vec![cash.clone(), docs.clone()],
+                    goal: Some("Close October".into()),
+                    ..Group::default()
+                });
+                // The lead's own turns stay queued: no provider starts.
+                m.chats[&s.id].update(cx, |chat, _| {
+                    chat.settings.usage_limit = Some(Default::default())
+                });
+                m.configure_chat(&s.id, cx);
+                (cash, docs)
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let members = call(&s, "members", "group.members", json!({}), cx)
+        .try_recv()
+        .unwrap()
+        .unwrap();
+    let names: Vec<_> = members["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| m["name"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(names, ["Cash", "Docs"]);
+
+    let chat = cx.update(|cx| s.manager.read(cx).chats[&s.id].clone());
+    let say = |text: &str, cx: &mut TestAppContext| {
+        chat.update(cx, |_, cx| {
+            cx.emit(crate::conversation::MonoSubmitted {
+                text: text.into(),
+                attachments: Vec::new(),
+            })
+        });
+        cx.run_until_parked();
+    };
+    let group_blocks =
+        |cx: &mut TestAppContext| cx.update(|cx| native::blocks(chat.read(cx).mono_rows(cx)));
+    let seat_of = |member: &str, cx: &mut TestAppContext| {
+        cx.update(|cx| {
+            s.manager
+                .read(cx)
+                .roster
+                .get(&s.id)
+                .unwrap()
+                .seats
+                .get(member)
+                .copied()
+        })
+    };
+    let lead_outbox = |cx: &mut TestAppContext| {
+        cx.update(|cx| s.manager.read(cx).roster.get(&s.id).unwrap().outbox.clone())
+    };
+    let posts = |blocks: &[Block], member: &str, kind: &str| {
+        blocks
+            .iter()
+            .filter(|b| {
+                b.group_member
+                    .as_ref()
+                    .is_some_and(|p| p.mono_id == member && p.request.contains(kind))
+            })
+            .count()
+    };
+
+    // @Name, anywhere in the message, goes to that member alone.
+    say("oye @Cash, ¿cuánto gasté?", cx);
+    let blocks = group_blocks(cx);
+    let asked = blocks
+        .iter()
+        .find(|b| b.is_user() && b.text == "oye @Cash, ¿cuánto gasté?")
+        .expect("the user's message shows as written");
+    assert!(
+        asked
+            .app_request_id
+            .as_deref()
+            .is_some_and(|r| r.starts_with("group-direct-"))
+    );
+    let seat = seat_of(&cash, cx).expect("Cash answers from its own seat");
+    assert_ne!(seat, cash_chat, "not from its own chat");
+    assert!(seat_of(&docs, cx).is_none(), "Docs was not asked");
+    let seat_rows = locked(&s.store).unwrap().load(seat).unwrap().rows;
+    let prompt = native::blocks(&seat_rows)
+        .into_iter()
+        .find(|b| b.is_user())
+        .unwrap();
+    assert!(prompt.app_request_id.unwrap().contains("-direct-"));
+    assert!(prompt.text.contains("<group_message group=\"Team\">"));
+    assert!(prompt.text.contains("The group is for: Close October"));
+    assert!(prompt.text.contains("oye Cash, ¿cuánto gasté?"));
+    assert!(!prompt.text.contains("@Cash"));
+    // Its finished answer posts in the group's chat under its name: here,
+    // the error its turn stopped on.
+    let posted = group_blocks(cx);
+    assert_eq!(posts(&posted, &cash, "-direct-"), 1);
+    let (post, text) = posted
+        .iter()
+        .find_map(|b| b.group_member.as_ref().map(|p| (p.clone(), b.text.clone())))
+        .unwrap();
+    assert_eq!(post.name, "Cash");
+    assert!(text.starts_with("Couldn't answer:"), "{text}");
+    assert!(lead_outbox(cx).is_empty(), "the lead was not asked");
+
+    // A question for the team: every member answers in its seat, then the
+    // lead reads them all and has the last word.
+    say("¿Qué opinan del plan de cierre?", cx);
+    assert_eq!(seat_of(&cash, cx), Some(seat), "a member keeps its seat");
+    assert!(seat_of(&docs, cx).is_some());
+    let posted = group_blocks(cx);
+    assert_eq!(posts(&posted, &cash, "-round-"), 1);
+    assert_eq!(posts(&posted, &docs, "-round-"), 1);
+    let outbox = lead_outbox(cx);
+    let last_word = outbox
+        .iter()
+        .find(|m| m.text.contains("<group_round>"))
+        .expect("the lead has the last word");
+    assert!(last_word.internal);
+    assert!(
+        last_word
+            .text
+            .contains("The user wrote to the group: \"¿Qué opinan del plan de cierre?\"")
+    );
+    assert!(
+        last_word
+            .text
+            .contains("### Cash\n(no answer: it stopped on an error")
+    );
+    assert!(last_word.text.contains("### Docs"));
+
+    // The lead brings a member in; its answer posts and comes back to it.
+    let asked = call(
+        &s,
+        "ask-docs",
+        "group.ask",
+        json!({"member": "docs", "message": "Find the October invoices"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    assert_eq!(asked["member"], "Docs");
+    assert_eq!(asked["notifyOnComplete"], true);
+    cx.run_until_parked();
+    let posted = group_blocks(cx);
+    assert!(posted.iter().any(|b| {
+        b.group_member
+            .as_ref()
+            .is_some_and(|p| p.request.ends_with("-ask-docs"))
+    }));
+    assert!(lead_outbox(cx).iter().any(|m| {
+        m.internal
+            && m.text.starts_with("MonoBOT completion notification")
+            && m.text.contains("Find the October invoices")
+    }));
+    let refused = call(
+        &s,
+        "ask-nobody",
+        "group.ask",
+        json!({"member": "ivy", "message": "x"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap();
+    assert_eq!(
+        refused.unwrap_err(),
+        "No member by that name or id; run group.members"
+    );
+
+    // A path outside the group's folders: the user is asked in the chat.
+    let access = call(
+        &s,
+        "access",
+        "group.access",
+        json!({"target": "D:\\Survey", "reason": "the survey data"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    assert_eq!(access["access"], "asked");
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("group-access-prompt").is_some());
+    assert!(visual.debug_bounds("mono-signature-name-Cash").is_some());
+    let request = visual.update(|_, cx| {
+        s.manager
+            .read(cx)
+            .roster
+            .get(&s.id)
+            .unwrap()
+            .group
+            .as_ref()
+            .unwrap()
+            .requests[0]
+            .id
+            .clone()
+    });
+    chat.update(visual, |_, cx| {
+        cx.emit(crate::conversation::GroupAccessAnswer {
+            request,
+            access: Access::Read,
+        })
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("group-access-prompt").is_none());
+    let group = visual.update(|_, cx| {
+        s.manager
+            .read(cx)
+            .roster
+            .get(&s.id)
+            .unwrap()
+            .group
+            .clone()
+            .unwrap()
+    });
+    assert!(group.requests.is_empty());
+    assert!(
+        group
+            .folders
+            .iter()
+            .any(|f| f.path == "D:\\Survey" && !f.edit)
+    );
+    // The answer goes to the chat, so the group carries on.
+    let blocks = visual.update(|_, cx| native::blocks(chat.read(cx).mono_rows(cx)));
+    assert!(blocks.iter().any(|b| {
+        b.is_user()
+            && b.text
+                .starts_with("Yes, read only: the members may read D:\\Survey")
+    }));
+    // What the group holds reads back from the saved roster.
+    let saved = mono::Roster::load(&locked(&s.store).unwrap()).unwrap();
+    let saved = saved.get(&s.id).unwrap();
+    assert_eq!(
+        saved.group.as_ref().unwrap().members,
+        [cash.clone(), docs.clone()]
+    );
+    assert_eq!(saved.seats.get(&cash), Some(&seat));
 }

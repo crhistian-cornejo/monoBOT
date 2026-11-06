@@ -23,8 +23,14 @@ pub(crate) struct QueueChanged {
     pub id: String,
     pub remove: bool,
 }
+/// The user's answer to a group member's request for a path or link.
+pub(crate) struct GroupAccessAnswer {
+    pub request: String,
+    pub access: monocode_core::mono::groups::Access,
+}
 impl EventEmitter<QueueChanged> for Conversation {}
 impl EventEmitter<Submitted> for Conversation {}
+impl EventEmitter<GroupAccessAnswer> for Conversation {}
 impl Conversation {
     /// App launches are saved before installing a view. Reuse the normal durable
     /// draft/queue path instead of submitting an unrecorded seed prompt.
@@ -138,12 +144,61 @@ impl Conversation {
             .delivered
             .retain(|id| mono.outbox.iter().any(|m| &m.id == id));
         self.sync_mono_pending(cx);
+        // Its groups are set apart and kept until they change.
+        let groups = self
+            .settings
+            .mono
+            .take()
+            .map(|context| context.groups)
+            .unwrap_or_default();
         self.settings.mono = Some(monocode_core::agent::MonoContext {
             mono,
             root,
             executable: std::env::current_exe().unwrap_or_default(),
+            groups,
         });
         cx.notify();
+    }
+    /// What the Mono's groups add to its turns and launch: the lead's room,
+    /// a member's seat and the groups' folders.
+    pub(crate) fn set_mono_groups(
+        &mut self,
+        groups: monocode_core::mono::groups::native::Context,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(context) = self.settings.mono.as_mut()
+            && context.groups != groups
+        {
+            context.groups = groups;
+            cx.notify();
+        }
+    }
+    /// Appends rows outside any turn, such as a group member's post or the
+    /// user's message to its members; false while a turn runs or history
+    /// loads, to try again once it settles.
+    pub(crate) fn mono_append(
+        &mut self,
+        rows: Vec<monocode_core::transcript::Row>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.history_ready() {
+            self.load(cx);
+            return false;
+        }
+        if self.busy || self.stopping || rows.is_empty() {
+            return false;
+        }
+        let at = self.transcript.read(cx).source_rows().len();
+        let saved =
+            locked(&self.store).and_then(|mut db| db.write_rows(self.summary.id, at, &rows));
+        if saved.is_err() {
+            return false;
+        }
+        self.transcript.update(cx, |t, cx| t.patch(at, rows, cx));
+        self.summary.has_messages = true;
+        cx.emit(SessionChanged);
+        cx.notify();
+        true
     }
     /// The user's queued messages show in the transcript as bubbles; the one
     /// just delivered is already a transcript row.
@@ -682,6 +737,7 @@ impl Conversation {
                     )
                     .children(self.usage_notice(true, cx))
                     .children(self.auth_notice(cx))
+                    .children(self.group_access_prompt(cx))
                     .child(self.approval_shelf(window, cx))
                     .child({
                         let composer = div()
@@ -695,6 +751,171 @@ impl Conversation {
                     }),
             )
             .into_any_element()
+    }
+
+    /// GroupAccessPrompt: above a group chat's composer, its Principal
+    /// asking whether the members may open a path or link outside the
+    /// group's folders. Only the user's tap grants it.
+    fn group_access_prompt(&self, cx: &Context<Self>) -> Option<AnyElement> {
+        use monocode_core::mono::groups::{Access, group::is_link};
+        let context = self.settings.mono.as_ref()?;
+        let group = context
+            .mono
+            .group
+            .as_ref()
+            .filter(|_| context.mono.is_group())?;
+        let request = group.requests.first()?;
+        let waiting = group.requests.len();
+        let name = context.mono.label();
+        let asker = context.groups.lead.clone().unwrap_or_else(|| name.clone());
+        let link = is_link(&request.target);
+        let who = match request.by.as_deref() {
+            Some(by) if by != name => format!("{by} needs"),
+            _ => "The group needs".to_owned(),
+        };
+        let shown = if link {
+            request.target.clone()
+        } else {
+            std::env::var("HOME")
+                .or_else(|_| std::env::var("USERPROFILE"))
+                .ok()
+                .filter(|home| !home.is_empty())
+                .and_then(|home| {
+                    request
+                        .target
+                        .strip_prefix(&home)
+                        .map(|rest| format!("~{rest}"))
+                })
+                .unwrap_or_else(|| request.target.clone())
+        };
+        let button = |id: &'static str, label: &'static str, access: Access, primary: bool| {
+            let answer = request.id.clone();
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .role(Role::Button)
+                .aria_label(label)
+                .h(px(24.))
+                .px(px(if primary { 10. } else { 8. }))
+                .flex()
+                .items_center()
+                .flex_shrink_0()
+                .text_size(px(11.))
+                .when(primary, |d| {
+                    d.font_weight(gpui::FontWeight::MEDIUM)
+                        .bg(content(1.))
+                        .text_color(background_base())
+                        .hover(|s| s.bg(content(0.8)))
+                })
+                .when(!primary, |d| {
+                    d.text_color(content(0.65))
+                        .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
+                })
+                .child(label)
+                .on_click(cx.listener(move |_, _, _, cx| {
+                    cx.emit(GroupAccessAnswer {
+                        request: answer.clone(),
+                        access,
+                    })
+                }))
+        };
+        Some(
+            div()
+                .debug_selector(|| "group-access-prompt".into())
+                .px(px(6.))
+                .pb(px(6.))
+                .child(
+                    div()
+                        .border_1()
+                        .border_color(content(0.1))
+                        .bg(content(0.03))
+                        .px_3()
+                        .py(px(10.))
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .child(icon("square-lock", 14.).text_color(content(0.45)))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .text_size(px(11.))
+                                        .text_color(content(0.5))
+                                        .child(format!("{asker} asks for access")),
+                                )
+                                .when(waiting > 1, |d| {
+                                    d.child(
+                                        div()
+                                            .flex_shrink_0()
+                                            .text_size(px(11.))
+                                            .text_color(content(0.4))
+                                            .child(format!("1 of {waiting}")),
+                                    )
+                                }),
+                        )
+                        .child(
+                            div()
+                                .mt(px(6.))
+                                .text_size(px(13.))
+                                .line_height(px(21.))
+                                .text_color(content(0.85))
+                                .child(format!(
+                                    "{who} {}, outside the group’s folders:",
+                                    if link {
+                                        "this link"
+                                    } else {
+                                        "this folder or file"
+                                    }
+                                )),
+                        )
+                        .child(
+                            div()
+                                .mt_1()
+                                .truncate()
+                                .font_family(crate::fonts::mono())
+                                .text_size(px(12.))
+                                .text_color(content(0.7))
+                                .child(shown),
+                        )
+                        .when_some(request.reason.clone(), |d, reason| {
+                            d.child(
+                                div()
+                                    .mt_1()
+                                    .text_size(px(12.))
+                                    .text_color(content(0.55))
+                                    .child(reason),
+                            )
+                        })
+                        .child(
+                            div()
+                                .mt(px(10.))
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .justify_end()
+                                .gap_2()
+                                .child(button("group-access-no", "No", Access::No, false))
+                                .when(!link, |d| {
+                                    d.child(button(
+                                        "group-access-edit",
+                                        "Read and edit",
+                                        Access::Edit,
+                                        false,
+                                    ))
+                                })
+                                .child(button(
+                                    "group-access-read",
+                                    if link { "Allow reading" } else { "Read only" },
+                                    Access::Read,
+                                    true,
+                                )),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     /// Whether the model list and a composer menu are open.
