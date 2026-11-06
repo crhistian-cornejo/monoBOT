@@ -13,13 +13,12 @@ pub(super) fn toggle(id: impl Into<gpui::ElementId>, on: bool) -> gpui::Stateful
         .w(px(28.))
         .h(px(16.))
         .flex_shrink_0()
-        .rounded_full()
         .px(px(2.))
         .flex()
         .items_center()
         .when(on, |d| d.bg(accent_color()).justify_end())
         .when(!on, |d| d.bg(content(0.2)))
-        .child(div().size(px(12.)).rounded_full().bg(rgb(0xffffff)))
+        .child(div().size(px(12.)).bg(rgb(0xffffff)))
 }
 fn options(values: &[(&str, &str)]) -> Vec<(String, String)> {
     values

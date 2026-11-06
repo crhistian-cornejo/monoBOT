@@ -1646,12 +1646,12 @@ function ToggleSwitch({
       aria-label={label}
       aria-checked={on}
       onClick={() => onChange(!on)}
-      className={`relative shrink-0 rounded-full transition-colors duration-150 ease-out active:scale-[0.96] ${
+      className={`relative shrink-0 transition-colors duration-150 ease-out active:scale-[0.96] ${
         compact ? "h-4 w-7" : "h-5 w-9"
       } ${on ? "bg-accent" : "bg-content/20"}`}
     >
       <span
-        className={`absolute top-0.5 left-0.5 rounded-full bg-white transition-transform duration-150 ease-out ${
+        className={`absolute top-0.5 left-0.5 bg-white transition-transform duration-150 ease-out ${
           compact
             ? `size-3 ${on ? "translate-x-3" : "translate-x-0"}`
             : `size-4 ${on ? "translate-x-4" : "translate-x-0"}`

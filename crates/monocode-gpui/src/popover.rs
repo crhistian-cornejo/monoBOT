@@ -1390,7 +1390,6 @@ impl Menu {
                             .w(px(36.))
                             .h(px(20.))
                             .flex_shrink_0()
-                            .rounded_full()
                             .bg(content(if action.checked { 0.35 } else { 0.15 }))
                             .child(
                                 div()
@@ -1398,7 +1397,6 @@ impl Menu {
                                     .top(px(2.))
                                     .left(px(if action.checked { 18. } else { 2. }))
                                     .size(px(16.))
-                                    .rounded_full()
                                     .bg(content(1.)),
                             ),
                     )

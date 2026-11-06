@@ -381,7 +381,6 @@ impl SettingsView {
             .h(px(20.))
             .w(px(36.))
             .flex_shrink_0()
-            .rounded_full()
             .bg(if on { accent_color() } else { content(0.2) })
             .when(disabled, |d| d.opacity(0.4))
             .child(
@@ -390,7 +389,6 @@ impl SettingsView {
                     .top(px(2.))
                     .left(px(if on { 18. } else { 2. }))
                     .size(px(16.))
-                    .rounded_full()
                     .bg(rgb(0xffffff)),
             )
             .when(!disabled, |d| {

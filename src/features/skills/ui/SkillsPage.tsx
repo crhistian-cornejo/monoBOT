@@ -350,10 +350,10 @@ export function SkillsPage({
                             aria-label={`Include ${skill.name} in MonoBOT catalog`}
                             aria-checked={!disabled}
                             onClick={() => onToggle(skill.path, disabled)}
-                            className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${disabled ? "bg-content/20" : "bg-accent"}`}
+                            className={`relative h-5 w-9 shrink-0 transition-colors ${disabled ? "bg-content/20" : "bg-accent"}`}
                           >
                             <span
-                              className={`absolute top-0.5 size-4 rounded-full bg-white transition-[left] ${disabled ? "left-0.5" : "left-4.5"}`}
+                              className={`absolute top-0.5 size-4 bg-white transition-[left] ${disabled ? "left-0.5" : "left-4.5"}`}
                             />
                           </button>
                         </div>

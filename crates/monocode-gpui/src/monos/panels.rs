@@ -1982,14 +1982,12 @@ impl Monos {
             .w(px(36.))
             .h(px(20.))
             .flex_shrink_0()
-            .rounded_full()
             .bg(if on { accent_color() } else { content(0.2) })
             .child(
                 div()
                     .size(px(16.))
                     .mt(px(2.))
                     .ml(px(if on { 18. } else { 2. }))
-                    .rounded_full()
                     .bg(gpui::white()),
             )
             .on_click(cx.listener(move |this, _, _, cx| {

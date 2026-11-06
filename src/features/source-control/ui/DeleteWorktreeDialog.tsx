@@ -161,10 +161,10 @@ export function DeleteWorktreeDialog({
               aria-checked={deleteSessions}
               disabled={busy}
               onClick={() => setDeleteSessions(!deleteSessions)}
-              className={`relative h-5 w-9 shrink-0 rounded-full transition-colors disabled:opacity-40 ${deleteSessions ? "bg-red-500" : "bg-content/20"}`}
+              className={`relative h-5 w-9 shrink-0 transition-colors disabled:opacity-40 ${deleteSessions ? "bg-red-500" : "bg-content/20"}`}
             >
               <span
-                className={`absolute top-0.5 size-4 rounded-full bg-white transition-[left] ${deleteSessions ? "left-4.5" : "left-0.5"}`}
+                className={`absolute top-0.5 size-4 bg-white transition-[left] ${deleteSessions ? "left-4.5" : "left-0.5"}`}
               />
             </button>
           </div>

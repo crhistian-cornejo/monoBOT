@@ -733,7 +733,6 @@ impl SettingsView {
                                 .w(px(36.))
                                 .h(px(20.))
                                 .relative()
-                                .rounded_full()
                                 .bg(if enabled {
                                     accent_color()
                                 } else {
@@ -745,7 +744,6 @@ impl SettingsView {
                                         .top(px(2.))
                                         .left(px(if enabled { 18. } else { 2. }))
                                         .size(px(16.))
-                                        .rounded_full()
                                         .bg(gpui::rgb(0xffffff)),
                                 )
                                 .on_click(cx.listener(move |this, _, _, cx| {

@@ -501,7 +501,6 @@ impl VisualView {
                         div()
                             .w(px(30.))
                             .h(px(18.))
-                            .rounded_full()
                             .bg(if *value {
                                 accent_color()
                             } else {
@@ -514,7 +513,6 @@ impl VisualView {
                                     .top(px(3.))
                                     .left(px(if *value { 15. } else { 3. }))
                                     .size(px(12.))
-                                    .rounded_full()
                                     .bg(content(1.)),
                             ),
                     )

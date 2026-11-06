@@ -922,12 +922,12 @@ export function ModelPicker({
                   {isToggle ? (
                     <span
                       aria-hidden="true"
-                      className={`relative h-5 w-9 shrink-0 rounded-full transition-colors ${
+                      className={`relative h-5 w-9 shrink-0 transition-colors ${
                         value === "true" ? "bg-content/35" : "bg-content/15"
                       }`}
                     >
                       <span
-                        className={`absolute top-0.5 size-4 rounded-full bg-content shadow-sm transition-transform ${
+                        className={`absolute top-0.5 size-4 bg-content shadow-sm transition-transform ${
                           value === "true"
                             ? "translate-x-4.5"
                             : "translate-x-0.5"
@@ -1265,12 +1265,12 @@ function TogglePill({
         data-model-control
         onMouseDown={(event) => event.preventDefault()}
         onClick={toggle}
-        className={`relative h-4 w-7 shrink-0 rounded-full transition-colors ${
+        className={`relative h-4 w-7 shrink-0 transition-colors ${
           on ? "bg-accent" : "bg-content/20"
         }`}
       >
         <span
-          className={`absolute top-0.5 size-3 rounded-full bg-white transition-[left] ${
+          className={`absolute top-0.5 size-3 bg-white transition-[left] ${
             on ? "left-3.5" : "left-0.5"
           }`}
         />

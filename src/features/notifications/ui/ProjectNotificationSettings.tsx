@@ -355,11 +355,11 @@ export function ProjectNotificationSettings({
                                 className="peer sr-only"
                               />
                               <span
-                                className="relative h-5 w-9 rounded-full bg-content/20 transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent motion-reduce:transition-none"
+                                className="relative h-5 w-9 bg-content/20 transition-colors peer-checked:bg-accent peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-accent motion-reduce:transition-none"
                                 aria-hidden="true"
                               />
                               <span
-                                className="pointer-events-none absolute left-0.5 top-0.5 size-4 rounded-full bg-white transition-transform peer-checked:translate-x-4 motion-reduce:transition-none"
+                                className="pointer-events-none absolute left-0.5 top-0.5 size-4 bg-white transition-transform peer-checked:translate-x-4 motion-reduce:transition-none"
                                 aria-hidden="true"
                               />
                             </span>

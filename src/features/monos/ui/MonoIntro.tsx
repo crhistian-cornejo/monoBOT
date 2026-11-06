@@ -81,9 +81,9 @@ export function MonoIntroCard({
               onHide();
               playCue("switch");
             }}
-            className="relative h-4 w-7 shrink-0 rounded-full bg-accent transition-colors"
+            className="relative h-4 w-7 shrink-0 bg-accent transition-colors"
           >
-            <span className="absolute left-3.5 top-0.5 size-3 rounded-full bg-white" />
+            <span className="absolute left-3.5 top-0.5 size-3 bg-white" />
           </button>
         )}
       </div>
