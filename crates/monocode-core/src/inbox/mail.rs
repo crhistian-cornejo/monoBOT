@@ -1034,6 +1034,62 @@ pub fn data_url_bytes(data_url: &str) -> Option<Vec<u8>> {
         .ok()
 }
 
+// ---- Echo's picture, drawn in glyphs beside the mail ----
+
+/// The glyphs of the art, from the emptiest to the densest.
+pub const GLYPHS: &[u8] = b" .:-=+*#%@";
+
+/// The part of a picture that covers a panel: its centre, as `object-cover` keeps it, as
+/// (x, y, width, height).
+pub fn cover_crop(
+    width: u32,
+    height: u32,
+    panel_width: f32,
+    panel_height: f32,
+) -> (u32, u32, u32, u32) {
+    let scale = (panel_width / width as f32).max(panel_height / height as f32);
+    let crop_width = (panel_width / scale).round().min(width as f32);
+    let crop_height = (panel_height / scale).round().min(height as f32);
+    (
+        ((width as f32 - crop_width) / 2.).round() as u32,
+        ((height as f32 - crop_height) / 2.).round() as u32,
+        crop_width as u32,
+        crop_height as u32,
+    )
+}
+
+/// A picture as glyphs: `pixels` are its RGBA bytes at one pixel per cell, and each cell is
+/// (index into `GLYPHS`, lightness). Its tones are stretched between its darkest and lightest
+/// few, so a picture of middling tones still goes from empty to dense, and a stray bright
+/// point does not flatten it. The curve keeps the middle tones sparse: the eye goes to what
+/// is really bright, not to a wall of glyphs.
+pub fn ascii_cells(pixels: &[u8], cols: usize, rows: usize) -> Vec<(usize, f32)> {
+    let count = cols * rows;
+    let tones: Vec<f32> = (0..count)
+        .map(|at| {
+            let from = at * 4;
+            let channel = |offset: usize| f32::from(*pixels.get(from + offset).unwrap_or(&0));
+            (0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2)) / 255.
+        })
+        .collect();
+    let mut sorted = tones.clone();
+    sorted.sort_by(f32::total_cmp);
+    let low = sorted.get(count * 2 / 100).copied().unwrap_or(0.);
+    let high = sorted
+        .get((count * 98 / 100).min(count.saturating_sub(1)))
+        .copied()
+        .unwrap_or(1.);
+    let range = if high - low > 0. { high - low } else { 1. };
+    tones
+        .into_iter()
+        .map(|tone| {
+            let light = ((tone - low) / range).clamp(0., 1.).powf(1.5);
+            let glyph = ((light * GLYPHS.len() as f32) as usize).min(GLYPHS.len() - 1);
+            (glyph, light)
+        })
+        .collect()
+}
+
 // ---- Which agents may read each account ----
 
 /// Address (lowercase) → the ids of the Monos that may read it. An account the user
@@ -1405,6 +1461,27 @@ mod tests {
         assert!(body[1].len() <= SNAPSHOT_BODY - "Hola Ana".len());
         assert!(body[1].chars().all(|c| c == 'ñ'));
         assert_eq!(body.len(), 2);
+    }
+
+    #[test]
+    fn the_art_keeps_the_pictures_centre_and_spans_empty_to_dense() {
+        assert_eq!(cover_crop(1000, 500, 100., 100.), (250, 0, 500, 500));
+        assert_eq!(cover_crop(400, 800, 200., 100.), (0, 300, 400, 200));
+        // A ramp of grey from black to white, one pixel per cell.
+        let pixels: Vec<u8> = (0..100u8)
+            .flat_map(|v| {
+                let grey = (u32::from(v) * 255 / 99) as u8;
+                [grey, grey, grey, 255]
+            })
+            .collect();
+        let cells = ascii_cells(&pixels, 10, 10);
+        assert_eq!(cells.len(), 100);
+        assert_eq!(cells[0].0, 0);
+        assert_eq!(cells[99].0, GLYPHS.len() - 1);
+        assert!(cells.windows(2).all(|pair| pair[0].1 <= pair[1].1));
+        // A flat picture is all one glyph rather than a division by zero.
+        let flat = ascii_cells(&[128; 16], 2, 2);
+        assert!(flat.iter().all(|cell| cell == &flat[0]));
     }
 
     #[test]

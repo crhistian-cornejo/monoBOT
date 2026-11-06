@@ -3,6 +3,7 @@
 //! user to review. Accounts, secrets and the last reading are the desktop app's own
 //! (`monocode_core::inbox::mail`), so a mailbox connected there shows here.
 mod accounts;
+mod art;
 mod reader;
 mod reply;
 
@@ -267,6 +268,7 @@ impl Mailbox {
     pub(crate) fn activate(&mut self, cx: &mut Context<Self>) {
         if !self.started {
             self.started = true;
+            art::warm(cx);
             self.load_accounts(cx);
         }
     }
@@ -1376,45 +1378,6 @@ impl gpui::Render for Mailbox {
             .when(self.account_menu, |d| d.child(self.account_menu_view(cx)))
             .when_some(dialog, |d, dialog| {
                 d.child(crate::modal::window_overlay(window, dialog))
-            })
-            .into_any_element()
-    }
-}
-
-mod art {
-    //! A picture drawn in glyphs, in the user's accent color, as in Echo. Decoration only.
-    use super::*;
-
-    pub(super) fn art(children: Option<AnyElement>) -> AnyElement {
-        div()
-            .relative()
-            .size_full()
-            .min_h_0()
-            .overflow_hidden()
-            .bg(accent_color().opacity(0.05))
-            .child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(gpui::relative(1. / 3.))
-                    .bg(gpui::linear_gradient(
-                        0.,
-                        gpui::linear_color_stop(background_base(), 0.),
-                        gpui::linear_color_stop(background_base().opacity(0.), 1.),
-                    )),
-            )
-            .when_some(children, |d, children| {
-                d.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .p(px(24.))
-                        .child(children),
-                )
             })
             .into_any_element()
     }
