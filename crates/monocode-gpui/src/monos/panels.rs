@@ -38,8 +38,8 @@ pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
         &[Overview, Sessions, Documents, Habits, Changes]
     }
 }
-#[derive(Clone, Copy, PartialEq)]
-pub(super) enum SettingsSection {
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SettingsSection {
     General,
     Soul,
     Memory,
@@ -2087,7 +2087,7 @@ impl Monos {
         let Some(mono) = self.roster.get(id).cloned() else {
             return;
         };
-        let editor = cx.new(|cx| LookEditor::new(mono, cx));
+        let editor = cx.new(|cx| LookEditor::new(mono.clone(), cx));
         let focus = editor.read(cx).name.focus_handle(cx);
         let changed = cx.subscribe(&editor, |this, _, event: &LookChanged, cx| {
             if let Some(mono) = this.roster.get_mut(&event.mono.id) {

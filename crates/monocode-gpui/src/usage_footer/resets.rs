@@ -13,8 +13,8 @@ enum Command {
 
 impl UsageFooter {
     pub(super) fn has_banked_resets(&self) -> bool {
-        self.kind == Kind::Codex
-            && self.cache[index(self.kind)]
+        self.details_kind == Kind::Codex
+            && self.cache[index(self.details_kind)]
                 .snapshot
                 .as_ref()
                 .and_then(|s| s.reset_credits.as_ref())
@@ -22,15 +22,16 @@ impl UsageFooter {
     }
 
     pub(super) fn banked_resets(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        if self.kind != Kind::Codex {
+        if self.details_kind != Kind::Codex {
             return None;
         }
-        let snapshot = self.cache[index(self.kind)].snapshot.as_ref();
+        let snapshot = self.cache[index(self.details_kind)].snapshot.as_ref();
         let rows = rows(snapshot);
         let center = crate::accounts::get(cx);
+        let key = self.key_for(Kind::Codex, cx);
         let action = center
             .as_ref()
-            .and_then(|c| c.read(cx).reset_actions.get(&self.key))
+            .and_then(|c| c.read(cx).reset_actions.get(&key))
             .cloned();
         let action = action.as_ref();
         if rows.is_empty() && action.is_none() {
@@ -267,11 +268,12 @@ impl UsageFooter {
         let Some(center) = crate::accounts::get(cx) else {
             return;
         };
-        if self.kind != Kind::Codex
+        let key = self.key_for(Kind::Codex, cx);
+        if self.details_kind != Kind::Codex
             || center
                 .read(cx)
                 .reset_actions
-                .get(&self.key)
+                .get(&key)
                 .is_some_and(|a| a.applying())
         {
             return;
@@ -284,9 +286,7 @@ impl UsageFooter {
                     return;
                 }
                 self.confirm_reset = None;
-                center.update(cx, |center, cx| {
-                    center.consume_reset(self.key.clone(), &row, cx)
-                });
+                center.update(cx, |center, cx| center.consume_reset(key, &row, cx));
             }
         }
         window.focus(&self.details, cx);

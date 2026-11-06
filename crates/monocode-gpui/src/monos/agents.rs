@@ -119,10 +119,7 @@ impl Monos {
                 .into_any_element()
         };
         let bots = self.rail_impl(None, original, false, Section::Bots, cx);
-        // Groups are listed once there is one; making one is the group
-        // dialog's, which comes with the groups themselves.
-        let groups = has(Section::Groups, self)
-            .then(|| self.rail_impl(None, original, false, Section::Groups, cx));
+        let groups = self.rail_impl(None, original, false, Section::Groups, cx);
         let custom = self
             .roster
             .monos
@@ -141,7 +138,8 @@ impl Monos {
             .child(divider())
             .child(bots)
             .children(intro.map(|card| div().px_2().pb_3().child(card)))
-            .when_some(groups, |d, groups| d.child(divider()).child(groups))
+            .child(divider())
+            .child(groups)
             .children(self.roles_surface(cx))
             .into_any_element()
     }

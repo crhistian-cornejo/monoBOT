@@ -731,7 +731,7 @@ impl Monos {
                             if let Some(last) = input.get("final").and_then(Value::as_bool) {
                                 card["final"] = json!(last);
                             }
-                            self.hold_card(call.session,&mono.id,card);
+                            self.hold_card(call.session, &mono.id, card);
                             self.save(cx);
                             Ok(json!(document))
                         }

@@ -232,7 +232,13 @@ fn detail(label: &'static str, value: impl IntoElement) -> gpui::Div {
                 .text_color(content(0.45))
                 .child(label),
         )
-        .child(div().flex_1().min_w_0().text_color(content(0.8)).child(value))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .text_color(content(0.8))
+                .child(value),
+        )
 }
 
 impl Monos {
@@ -277,25 +283,28 @@ impl Monos {
             .map(|chat| chat.read(cx).mono_status().to_owned())
             .unwrap_or_else(|| "idle".into());
         Some(
-            popover("mono-preview", Anchor::Slot(self.mono_preview.anchor.clone()))
-                .side(Side::Right)
-                .gap(8.)
-                .width(260.)
-                .max_height(440.)
-                .track(self.mono_preview.surface.clone())
-                .child(
-                    div()
-                        .id("mono-preview-content")
-                        .debug_selector(|| "mono-preview".into())
-                        .role(Role::Tooltip)
-                        .max_h(px(438.))
-                        .overflow_y_scroll()
-                        .on_hover(cx.listener(|this, hovered, window, cx| {
-                            Hover::card_hover(this, mono_preview, *hovered, window, cx)
-                        }))
-                        .child(self.mono_preview_body(mono, &state)),
-                )
-                .into_any_element(),
+            popover(
+                "mono-preview",
+                Anchor::Slot(self.mono_preview.anchor.clone()),
+            )
+            .side(Side::Right)
+            .gap(8.)
+            .width(260.)
+            .max_height(440.)
+            .track(self.mono_preview.surface.clone())
+            .child(
+                div()
+                    .id("mono-preview-content")
+                    .debug_selector(|| "mono-preview".into())
+                    .role(Role::Tooltip)
+                    .max_h(px(438.))
+                    .overflow_y_scroll()
+                    .on_hover(cx.listener(|this, hovered, window, cx| {
+                        Hover::card_hover(this, mono_preview, *hovered, window, cx)
+                    }))
+                    .child(self.mono_preview_body(mono, &state)),
+            )
+            .into_any_element(),
         )
     }
 
@@ -446,12 +455,13 @@ impl Monos {
                             .gap_1p5()
                             .text_size(px(11.))
                             .text_color(content(0.55))
-                            .child(
-                                div()
-                                    .size(px(14.))
-                                    .flex_shrink_0()
-                                    .child(avatar::avatar(&mono.mascot, mono.color, state, 14., true)),
-                            )
+                            .child(div().size(px(14.)).flex_shrink_0().child(avatar::avatar(
+                                &mono.mascot,
+                                mono.color,
+                                state,
+                                14.,
+                                true,
+                            )))
                             .child(div().min_w_0().truncate().child(kind)),
                     )
                     .child(
@@ -494,7 +504,14 @@ impl Monos {
         cx: &mut Context<Self>,
     ) {
         if hovered {
-            Hover::enter(self, news_summary, id.to_owned(), anchor, SUMMARY_OPEN_MS, cx);
+            Hover::enter(
+                self,
+                news_summary,
+                id.to_owned(),
+                anchor,
+                SUMMARY_OPEN_MS,
+                cx,
+            );
         } else {
             Hover::leave(self, news_summary, id, window, cx);
         }
@@ -512,57 +529,60 @@ impl Monos {
         let item = items.iter().find(|item| item.id == id)?;
         let text = news::preview(&item.text, SUMMARY_MAX);
         Some(
-            popover("news-summary", Anchor::Slot(self.news.summary.anchor.clone()))
-                .side(Side::Left)
-                .gap(8.)
-                .width(280.)
-                .track(self.news.summary.surface.clone())
-                .child(
-                    div()
-                        .id("news-summary-content")
-                        .debug_selector(|| "news-summary".into())
-                        .role(Role::Tooltip)
-                        .px_3()
-                        .py_2p5()
-                        .on_hover(cx.listener(|this, hovered, window, cx| {
-                            Hover::card_hover(this, news_summary, *hovered, window, cx)
-                        }))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap_1p5()
-                                .text_size(px(11.))
-                                .text_color(content(0.55))
-                                .child(self.face(&item.mono_id, 14., cx))
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .truncate()
-                                        .child(format!("{} · {}", item.bot_name, item.source)),
-                                )
-                                .child(
-                                    div()
-                                        .ml_auto()
-                                        .flex_shrink_0()
-                                        .text_color(content(0.4))
-                                        .child(when(item.at)),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .mt_1p5()
-                                .text_size(px(12.))
-                                .line_height(px(18.))
-                                .text_color(content(0.8))
-                                .child(if text.is_empty() {
-                                    "No text".to_owned()
-                                } else {
-                                    text
-                                }),
-                        ),
-                )
-                .into_any_element(),
+            popover(
+                "news-summary",
+                Anchor::Slot(self.news.summary.anchor.clone()),
+            )
+            .side(Side::Left)
+            .gap(8.)
+            .width(280.)
+            .track(self.news.summary.surface.clone())
+            .child(
+                div()
+                    .id("news-summary-content")
+                    .debug_selector(|| "news-summary".into())
+                    .role(Role::Tooltip)
+                    .px_3()
+                    .py_2p5()
+                    .on_hover(cx.listener(|this, hovered, window, cx| {
+                        Hover::card_hover(this, news_summary, *hovered, window, cx)
+                    }))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .text_size(px(11.))
+                            .text_color(content(0.55))
+                            .child(self.face(&item.mono_id, 14., cx))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(format!("{} · {}", item.bot_name, item.source)),
+                            )
+                            .child(
+                                div()
+                                    .ml_auto()
+                                    .flex_shrink_0()
+                                    .text_color(content(0.4))
+                                    .child(when(item.at)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .mt_1p5()
+                            .text_size(px(12.))
+                            .line_height(px(18.))
+                            .text_color(content(0.8))
+                            .child(if text.is_empty() {
+                                "No text".to_owned()
+                            } else {
+                                text
+                            }),
+                    ),
+            )
+            .into_any_element(),
         )
     }
 }

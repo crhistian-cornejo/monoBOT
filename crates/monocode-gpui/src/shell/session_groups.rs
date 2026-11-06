@@ -1972,7 +1972,7 @@ mod tests {
         assert_eq!(started.left() - first.left(), px(30.));
         window
             .update(visual, |shell, _, cx| {
-                shell.change_sidebar_option("compact-session-cards", cx);
+                shell.change_sidebar_option("compact-session-cards", None, cx);
             })
             .unwrap();
         visual.run_until_parked();

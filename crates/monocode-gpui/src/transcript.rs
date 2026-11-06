@@ -4149,8 +4149,11 @@ impl TranscriptView {
     ) {
         let live_stream = self.streaming && end == self.source.len() && at >= self.live_start;
         let mono_arrival = self.mono && self.entrances.contains_key(&at);
-        let can_animate =
-            self.visible && self.smooth_reveal && !reduced && assistant && (live_stream || mono_arrival);
+        let can_animate = self.visible
+            && self.smooth_reveal
+            && !reduced
+            && assistant
+            && (live_stream || mono_arrival);
         if !self.reveals.contains_key(&at) && !can_animate {
             return;
         }

@@ -112,6 +112,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "in",
             "count",
             "personal",
+            "final",
         ]
         .contains(&key.as_str())
             && !value.is_string()

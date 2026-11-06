@@ -304,7 +304,8 @@ function usedPercentFrom(rec: Record<string, unknown>): number | null {
   const value =
     numberField(rec, "used_percentage") ??
     numberField(rec, "usedPercent") ??
-    numberField(rec, "utilization");
+    numberField(rec, "utilization") ??
+    numberField(rec, "percent");
   if (value == null) return null;
   return value;
 }
@@ -320,10 +321,34 @@ export function parseClaudeOAuthUsage(body: string): ProviderRateLimits {
   if (!rec) {
     return errorRateLimits("claude", "Claude usage response was empty");
   }
+  let session = mapUsageWindow(rec.five_hour, SESSION_WINDOW_MINUTES);
+  let weekly = mapUsageWindow(rec.seven_day, WEEKLY_WINDOW_MINUTES);
+  if ((!session || !weekly) && Array.isArray(rec.limits)) {
+    for (const entry of rec.limits) {
+      const item = asRecord(entry);
+      if (!item || item.is_active === false) continue;
+      if (
+        !session &&
+        (item.kind === "five_hour" ||
+          item.kind === "session_all" ||
+          item.group === "session")
+      ) {
+        session = mapUsageWindow(item, SESSION_WINDOW_MINUTES);
+      } else if (
+        !weekly &&
+        item.scope == null &&
+        (item.kind === "weekly_all" ||
+          item.kind === "seven_day" ||
+          item.group === "weekly")
+      ) {
+        weekly = mapUsageWindow(item, WEEKLY_WINDOW_MINUTES);
+      }
+    }
+  }
   return {
     provider: "claude",
-    session: mapUsageWindow(rec.five_hour, SESSION_WINDOW_MINUTES),
-    weekly: mapUsageWindow(rec.seven_day, WEEKLY_WINDOW_MINUTES),
+    session,
+    weekly,
     monthly: null,
     resetCredits: null,
     updatedAt: Date.now(),

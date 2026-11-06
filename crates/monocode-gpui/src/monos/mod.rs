@@ -3,8 +3,8 @@
 mod agent_calls;
 pub(crate) mod agents;
 pub(crate) mod avatar;
-mod bot_settings;
 pub(crate) mod bot_import;
+mod bot_settings;
 pub(crate) mod bot_transfer;
 pub(crate) mod cards;
 mod changes;
@@ -60,7 +60,8 @@ use monocode_core::{
     provider::Kind,
     store::Session,
 };
-use panels::{OpenPicker, OverviewTab, Route, SettingsSection};
+pub(crate) use panels::SettingsSection;
+use panels::{OpenPicker, OverviewTab, Route};
 use std::{
     collections::{HashMap, HashSet},
     path::PathBuf,
@@ -609,13 +610,27 @@ impl Monos {
             .into_any_element()
     }
     pub(crate) fn open_current_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.open_current_settings_section(SettingsSection::General, window, cx);
+    }
+    pub(crate) fn open_current_settings_section(
+        &mut self,
+        section: SettingsSection,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(id) = self.active.clone() else {
             return;
         };
-        self.settings = Some(SettingsSection::General);
+        self.settings = Some(section);
         window.focus(&self.settings_focus, cx);
         self.reload_files(&id, cx);
         cx.notify();
+    }
+    pub(crate) fn toggle_bot_intro(&mut self, cx: &mut Context<Self>) -> bool {
+        self.roster.bot_intro_dismissed = !self.roster.bot_intro_dismissed;
+        self.save(cx);
+        cx.notify();
+        !self.roster.bot_intro_dismissed
     }
     pub(crate) fn current(&self) -> Option<&Mono> {
         self.active.as_deref().and_then(|id| self.roster.get(id))

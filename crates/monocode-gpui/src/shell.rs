@@ -13,10 +13,10 @@ mod github_star;
 mod idle_agents;
 #[cfg(test)]
 mod image_lightbox_tests;
+mod keep_awake;
 mod layout;
 mod live_agents;
 mod mobile_host;
-mod keep_awake;
 mod mono_panes;
 pub(crate) mod monos;
 mod new_chat_choice;
@@ -4087,6 +4087,10 @@ impl Shell {
             self.usage_footer.update(cx, |footer, cx| {
                 footer.context(kind, profile, model.as_deref(), project, session, cx)
             });
+        } else {
+            let project = self.workspace.project.clone();
+            self.usage_footer
+                .update(cx, |footer, cx| footer.set_project(project, cx));
         }
     }
     pub(crate) fn focus_active(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -5309,9 +5313,15 @@ impl Shell {
                         .filter(|m| m.target == MenuTarget::SidebarOptions)
                 {
                     let menu = open.menu.clone();
-                    this.change_sidebar_option(id, cx);
-                    let items = this.sidebar_options_menu_items();
-                    menu.update(cx, |menu, cx| menu.replace_items(items, cx));
+                    if this.change_sidebar_option(id, Some(window), cx) {
+                        let items = this.sidebar_options_menu_items(cx);
+                        menu.update(cx, |menu, cx| menu.replace_items(items, cx));
+                        return;
+                    }
+                    this.menu = None;
+                    this.clear_context_selection();
+                    this.invalidate_chrome(cx);
+                    cx.notify();
                     return;
                 }
                 if let MenuEvent::Picked(id, _) = event
@@ -5517,10 +5527,22 @@ impl Shell {
                 MenuStyle::Filter,
             ),
             MenuTarget::SidebarOptions => (
-                "Sidebar options".into(),
-                self.sidebar_options_menu_items(),
-                184.,
-                MenuStyle::Filter,
+                if self.workspace.agents_zone {
+                    "Agents options".into()
+                } else {
+                    "Sidebar options".into()
+                },
+                self.sidebar_options_menu_items(cx),
+                if self.workspace.agents_zone {
+                    200.
+                } else {
+                    184.
+                },
+                if self.workspace.agents_zone {
+                    MenuStyle::Explorer
+                } else {
+                    MenuStyle::Filter
+                },
             ),
             MenuTarget::ProjectRailAdd => (
                 "Open project".into(),
@@ -5820,7 +5842,9 @@ impl Shell {
                 self.set_dock_side(side, cx);
             }
             MenuTarget::SessionFilter => self.change_session_filter(action, cx),
-            MenuTarget::SidebarOptions => self.change_sidebar_option(action, cx),
+            MenuTarget::SidebarOptions => {
+                self.change_sidebar_option(action, Some(window), cx);
+            }
             MenuTarget::Tab(id) => {
                 self.run_title_tab_menu(TitleTab::Session(id), action, window, cx)
             }

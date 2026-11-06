@@ -434,16 +434,44 @@ fn parse_claude(value: &Value) -> Result<Snapshot, FetchError> {
     if !value.is_object() {
         return Err(FetchError::failed("Claude usage response was unexpected."));
     }
-    let windows = [("five_hour", 300), ("seven_day", 10_080)]
+    let mut windows = [("five_hour", 300), ("seven_day", 10_080)]
         .into_iter()
         .filter_map(|(key, minutes)| {
             window(
                 &value[key],
                 minutes,
-                &["utilization", "used_percentage", "usedPercent"],
+                &["utilization", "used_percentage", "usedPercent", "percent"],
             )
         })
         .collect::<Vec<_>>();
+    if let Some(limits) = value["limits"].as_array() {
+        for item in limits {
+            if item["is_active"].as_bool() == Some(false) {
+                continue;
+            }
+            let minutes = match (item["kind"].as_str(), item["group"].as_str()) {
+                (Some("five_hour" | "session_all"), _) | (_, Some("session")) => Some(300),
+                (Some("weekly_all" | "seven_day"), _) | (_, Some("weekly"))
+                    if item.get("scope").is_none_or(Value::is_null) =>
+                {
+                    Some(10_080)
+                }
+                _ => None,
+            };
+            if let Some(minutes) = minutes {
+                if !windows.iter().any(|w| w.minutes == minutes) {
+                    if let Some(w) = window(
+                        item,
+                        minutes,
+                        &["percent", "utilization", "used_percentage", "usedPercent"],
+                    ) {
+                        windows.push(w);
+                    }
+                }
+            }
+        }
+        windows.sort_by_key(|w| w.minutes);
+    }
     if windows.is_empty() {
         return Err(FetchError::unavailable(
             "No Claude subscription usage available for this account.",

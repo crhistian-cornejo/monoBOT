@@ -402,9 +402,10 @@ impl FileEditor {
         self.loading = true;
         // A CSV past the editor's limit can only be read as a sheet.
         let too_big_to_edit = office::is_delimited(&self.path)
-            && std::fs::metadata(&self.path).is_ok_and(|m| m.len() > document::MAX_TEXT_BYTES as u64);
-        if let Some(kind) = office::kind_of(&self.path)
-            .or_else(|| too_big_to_edit.then_some(office::Kind::Sheet))
+            && std::fs::metadata(&self.path)
+                .is_ok_and(|m| m.len() > document::MAX_TEXT_BYTES as u64);
+        if let Some(kind) =
+            office::kind_of(&self.path).or_else(|| too_big_to_edit.then_some(office::Kind::Sheet))
         {
             self.load_office(kind, force, cx);
             return;
@@ -903,9 +904,9 @@ impl FileEditor {
                 let _ = this.update(cx, |this, cx| {
                     this.sheet_preview = result.ok().map(|workbook| {
                         let path = this.path.clone();
-                        gpui::AnyView::from(cx.new(|cx| {
-                            spreadsheet::SpreadsheetView::new(&path, workbook, cx)
-                        }))
+                        gpui::AnyView::from(
+                            cx.new(|cx| spreadsheet::SpreadsheetView::new(&path, workbook, cx)),
+                        )
                     });
                     cx.notify();
                 });

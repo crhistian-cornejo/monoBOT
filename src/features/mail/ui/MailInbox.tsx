@@ -139,21 +139,21 @@ export function MailInbox() {
   if (!accounts.length)
     return (
       <div className="flex min-h-0 min-w-0 flex-1">
-      <div className="min-h-0 min-w-0 flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-md px-5 py-8">
-          <h2 className="flex items-center gap-2 text-[15px] font-medium">
-            <Mail className="size-4 text-accent" /> Your email in the Inbox
-          </h2>
-          <p className="mb-5 mt-1 text-[13px] text-content/60">
-            Read your mail beside GitHub, sort it, and answer with a reply AI
-            drafts for you to review. Connect an account with an app password.
-          </p>
-          <MailAccounts accounts={accounts} onChanged={() => void loadAccounts()} />
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center overflow-y-auto p-5">
+          <div className="my-auto w-full max-w-md py-8">
+            <h2 className="flex items-center gap-2 text-[15px] font-medium">
+              <Mail className="size-4 text-accent" /> Your email in the Inbox
+            </h2>
+            <p className="mb-5 mt-1 text-[13px] text-content/60">
+              Read your mail beside GitHub, sort it, and answer with a reply AI
+              drafts for you to review. Connect an account with an app password.
+            </p>
+            <MailAccounts accounts={accounts} onChanged={() => void loadAccounts()} />
+          </div>
         </div>
-      </div>
-      <div className="hidden min-h-0 w-[42%] shrink-0 border-l border-stroke md:block">
-        <MailArt />
-      </div>
+        <div className="hidden min-h-0 w-[42%] shrink-0 border-l border-stroke md:block">
+          <MailArt />
+        </div>
       </div>
     );
 

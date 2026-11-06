@@ -579,7 +579,10 @@ impl Shell {
 const TRAILING_SLOT: f32 = 14.;
 
 impl Shell {
-    pub(super) fn sidebar_options_menu_items(&self) -> Vec<MenuItem> {
+    pub(super) fn sidebar_options_menu_items(&self, cx: &App) -> Vec<MenuItem> {
+        if self.workspace.agents_zone {
+            return self.agents_options_menu_items(cx);
+        }
         vec![
             MenuAction::new("sidebar-search", "Search")
                 .icon("search")
@@ -615,7 +618,167 @@ impl Shell {
         ]
     }
 
-    pub(super) fn change_sidebar_option(&mut self, action: &str, cx: &mut Context<Self>) {
+    pub(super) fn agents_options_menu_items(&self, cx: &App) -> Vec<MenuItem> {
+        let mut items = Vec::new();
+
+        let mut bot_subitems = vec![
+            MenuAction::new("new-bot-custom", "Blank bot")
+                .description("Start from scratch: name, soul, model")
+                .icon("pencil-edit"),
+        ];
+        for role in monocode_core::mono::bots::offered() {
+            bot_subitems.push(
+                MenuAction::new(format!("new-bot-{}", role.role), role.name)
+                    .description(role.description)
+                    .icon("bot"),
+            );
+        }
+        items.push(
+            MenuAction::new("new-bot", "New bot")
+                .icon("plus")
+                .submenu(bot_subitems)
+                .into(),
+        );
+
+        if let Some(mono) = self.monos.as_ref().and_then(|m| {
+            let monos = m.read(cx);
+            let active_id = monos.active.as_deref()?;
+            monos.roster.get(active_id).cloned()
+        }) {
+            items.push(MenuItem::Separator);
+            items.push(
+                MenuAction::new("bot-settings", format!("{} settings…", mono.label()))
+                    .icon("settings")
+                    .into(),
+            );
+            if mono.is_bot() || mono.is_principal() {
+                items.push(
+                    MenuAction::new("bot-soul", "Soul & rules…")
+                        .icon("sparkles")
+                        .into(),
+                );
+                items.push(
+                    MenuAction::new("bot-memory", "Memory…")
+                        .icon("sticky-note")
+                        .into(),
+                );
+            }
+        }
+
+        let intro_shown = self
+            .monos
+            .as_ref()
+            .map_or(false, |m| !m.read(cx).roster.bot_intro_dismissed);
+        items.push(MenuItem::Separator);
+        items.push(
+            MenuAction::new("toggle-bot-intro", "Show intro card")
+                .icon("ai-idea")
+                .toggle(intro_shown)
+                .into(),
+        );
+
+        items.push(
+            MenuAction::new("agent-preferences", "Agent preferences…")
+                .icon("sliders")
+                .into(),
+        );
+
+        items.push(MenuItem::Separator);
+        items.push(
+            MenuAction::new("switch-to-code", "Switch to Code")
+                .icon("code")
+                .into(),
+        );
+
+        items
+    }
+
+    pub(super) fn change_sidebar_option(
+        &mut self,
+        action: &str,
+        mut window: Option<&mut Window>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if action == "toggle-bot-intro" {
+            if let Some(monos) = self.monos.clone() {
+                monos.update(cx, |m, cx| {
+                    m.toggle_bot_intro(cx);
+                });
+            }
+            cx.notify();
+            return true;
+        }
+
+        if let Some(role) = action.strip_prefix("new-bot-") {
+            let blank = role == "custom";
+            if let Some(monos) = self.monos.clone()
+                && let Some(window) = window.as_deref_mut()
+            {
+                monos.update(cx, |m, cx| m.create_bot(role, blank, window, cx));
+            }
+            return false;
+        }
+
+        if action == "bot-settings" {
+            if let Some(monos) = self.monos.clone()
+                && let Some(window) = window.as_deref_mut()
+            {
+                monos.update(cx, |m, cx| {
+                    m.open_current_settings(window, cx);
+                });
+            }
+            return false;
+        }
+
+        if action == "bot-soul" {
+            if let Some(monos) = self.monos.clone()
+                && let Some(window) = window.as_deref_mut()
+            {
+                monos.update(cx, |m, cx| {
+                    m.open_current_settings_section(
+                        crate::monos::SettingsSection::Soul,
+                        window,
+                        cx,
+                    );
+                });
+            }
+            return false;
+        }
+
+        if action == "bot-memory" {
+            if let Some(monos) = self.monos.clone()
+                && let Some(window) = window.as_deref_mut()
+            {
+                monos.update(cx, |m, cx| {
+                    m.open_current_settings_section(
+                        crate::monos::SettingsSection::Memory,
+                        window,
+                        cx,
+                    );
+                });
+            }
+            return false;
+        }
+
+        if action == "agent-preferences" {
+            if let Some(window) = window.as_deref_mut() {
+                self.open_settings(crate::settings::Section::Monos, window, cx);
+            }
+            return false;
+        }
+
+        if action == "switch-to-code" {
+            if let Some(window) = window.as_deref_mut() {
+                self.set_agents_zone(false, window, cx);
+            } else {
+                self.workspace.agents_zone = false;
+                self.refresh_sidebar_structure(cx);
+                self.persist(cx);
+                cx.notify();
+            }
+            return false;
+        }
+
         let value = match action {
             "sidebar-search" => &mut self.workspace.sidebar_search_visible,
             "sidebar-notes" => &mut self.workspace.sidebar_notes_visible,
@@ -624,7 +787,7 @@ impl Shell {
             "sidebar-monos" => &mut self.workspace.preferences.monos,
             "sidebar-activity" => &mut self.workspace.sidebar_activity_visible,
             "compact-session-cards" => &mut self.workspace.compact_session_cards,
-            _ => return,
+            _ => return false,
         };
         *value = !*value;
         if action == "sidebar-monos" {
@@ -635,6 +798,7 @@ impl Shell {
         self.sidebar_list.remeasure();
         self.persist(cx);
         cx.notify();
+        true
     }
 
     /// RailZoneSwitch: Code holds projects, Monos and sessions; Agents holds
@@ -1419,6 +1583,96 @@ mod tests {
             .unwrap();
         visual.run_until_parked();
         assert!(visual.debug_bounds("sidebar-activity-card").is_none());
+    }
+
+    #[gpui::test]
+    fn agents_sidebar_options_menu_shows_agents_actions_and_not_code_options(
+        cx: &mut TestAppContext,
+    ) {
+        let (window, _, _) = super::super::tests::window(cx);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+
+        // 1. In Code mode, clicking sidebar-options shows code options
+        let options = visual.debug_bounds("sidebar-options").unwrap();
+        visual.simulate_click(options.center(), Default::default());
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("menu-action-sidebar-search").is_some());
+        assert!(visual.debug_bounds("menu-action-sidebar-notes").is_some());
+        assert!(
+            visual
+                .debug_bounds("menu-action-compact-session-cards")
+                .is_some()
+        );
+        assert!(visual.debug_bounds("menu-action-new-bot").is_none());
+        assert!(
+            visual
+                .debug_bounds("menu-action-toggle-bot-intro")
+                .is_none()
+        );
+        assert!(visual.debug_bounds("menu-action-switch-to-code").is_none());
+
+        // Close menu
+        visual.simulate_click(options.center(), Default::default());
+        visual.run_until_parked();
+
+        // 2. Switch to Agents mode
+        window
+            .update(visual, |shell, window, cx| {
+                shell.set_agents_zone(true, window, cx);
+            })
+            .unwrap();
+        visual.run_until_parked();
+
+        // 3. In Agents mode, clicking sidebar-options shows agents options and NOT code options
+        let options = visual.debug_bounds("sidebar-options").unwrap();
+        visual.simulate_click(options.center(), Default::default());
+        visual.run_until_parked();
+
+        assert!(visual.debug_bounds("menu-action-new-bot").is_some());
+        assert!(
+            visual
+                .debug_bounds("menu-action-toggle-bot-intro")
+                .is_some()
+        );
+        assert!(
+            visual
+                .debug_bounds("menu-action-agent-preferences")
+                .is_some()
+        );
+        assert!(visual.debug_bounds("menu-action-switch-to-code").is_some());
+
+        // Code options must NOT be present
+        assert!(visual.debug_bounds("menu-action-sidebar-search").is_none());
+        assert!(visual.debug_bounds("menu-action-sidebar-notes").is_none());
+        assert!(
+            visual
+                .debug_bounds("menu-action-sidebar-automations")
+                .is_none()
+        );
+        assert!(visual.debug_bounds("menu-action-sidebar-inbox").is_none());
+        assert!(visual.debug_bounds("menu-action-sidebar-monos").is_none());
+        assert!(
+            visual
+                .debug_bounds("menu-action-sidebar-activity")
+                .is_none()
+        );
+        assert!(
+            visual
+                .debug_bounds("menu-action-compact-session-cards")
+                .is_none()
+        );
+
+        // 4. Clicking "Switch to Code" switches back to Code mode
+        let switch_to_code = visual.debug_bounds("menu-action-switch-to-code").unwrap();
+        visual.simulate_click(switch_to_code.center(), Default::default());
+        visual.run_until_parked();
+
+        window
+            .update(visual, |shell, _, _| {
+                assert!(!shell.workspace.agents_zone);
+            })
+            .unwrap();
     }
 
     #[gpui::test]

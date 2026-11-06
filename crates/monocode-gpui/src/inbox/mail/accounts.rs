@@ -342,12 +342,12 @@ impl Mailbox {
                     .child(
                         div()
                             .flex()
-                            .flex_wrap()
-                            .gap_x(px(4.))
+                            .flex_col()
+                            .gap(px(4.))
                             .text_size(px(12.))
                             .line_height(px(19.))
                             .text_color(content(0.6))
-                            .child(text)
+                            .child(div().child(text))
                             .when_some(link, |d, (label, url)| {
                                 d.child(
                                     div()

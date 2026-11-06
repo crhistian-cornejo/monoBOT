@@ -106,4 +106,50 @@ mod tests {
         assert_eq!(draft.members, vec!["ivy"]);
         assert_eq!(group_draft("Empty", &Group::default()).goal, "");
     }
+
+    #[test]
+    fn roster_creates_and_saves_groups() {
+        let root = tempfile::tempdir().unwrap();
+        let mut roster = crate::mono::Roster::default();
+        roster.create_bot(root.path(), "principal", false);
+        let group = roster.create_group(
+            root.path(),
+            "Design sync",
+            Group {
+                goal: Some("Review brand guidelines".into()),
+                members: vec![],
+                ..Group::default()
+            },
+            Some("Tone: friendly"),
+        );
+        let group_id = group.id.clone();
+        assert!(group.is_group());
+        assert_eq!(group.name, "Design sync");
+        // Principal is included automatically
+        assert_eq!(group.group.as_ref().unwrap().members.len(), 1);
+
+        let saved = roster
+            .save_group(
+                &group_id,
+                "Design sync 2.0",
+                Group {
+                    goal: Some("New goal".into()),
+                    members: vec!["other".into()],
+                    ..Group::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(saved.name, "Design sync 2.0");
+        assert_eq!(
+            saved.group.as_ref().unwrap().goal.as_deref(),
+            Some("New goal")
+        );
+        // Principal is still kept in members
+        assert!(saved
+            .group
+            .as_ref()
+            .unwrap()
+            .members
+            .contains(&"other".to_string()));
+    }
 }

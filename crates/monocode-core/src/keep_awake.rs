@@ -123,7 +123,7 @@ mod platform {
     use std::sync::mpsc;
     use std::thread;
     use windows_sys::Win32::System::Power::{
-        ES_CONTINUOUS, ES_SYSTEM_REQUIRED, SetThreadExecutionState,
+        SetThreadExecutionState, ES_CONTINUOUS, ES_SYSTEM_REQUIRED,
     };
 
     /// Windows ties the request to the thread that made it, and callers' threads
@@ -177,7 +177,7 @@ mod platform {
 
 #[cfg(target_os = "macos")]
 mod platform {
-    use std::ffi::{CString, c_char, c_void};
+    use std::ffi::{c_char, c_void, CString};
 
     type CFStringRef = *const c_void;
 

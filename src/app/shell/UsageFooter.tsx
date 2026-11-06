@@ -480,44 +480,56 @@ export function UsageChips({
   if (!showUsage) return <>{fallback}</>;
   return (
     <>
-      {wantClaude ? (
-        <UsageProviderChip
-          limits={claude}
-          now={now}
-          variant={variant}
-          {...claudeAccountProps}
-          onReconnect={reconnectClaude}
-        />
-      ) : null}
-      {wantCodex ? (
-        <UsageProviderChip
-          limits={codex}
-          now={now}
-          project={project}
-          variant={variant}
-          {...codexAccountProps}
-          onConsumeReset={consumeCodexReset}
-          onReconnect={reconnectCodex}
-        />
-      ) : null}
-      {showOpencodeChip ? (
-        <UsageProviderChip
-          limits={opencode}
-          now={now}
-          project={project}
-          variant={variant}
-        />
-      ) : null}
-      {wantDevin ? (
+      {providers.map((provider) => {
+        if (provider === "claude") {
+          return (
+            <UsageProviderChip
+              key="claude"
+              limits={claude}
+              now={now}
+              variant={variant}
+              {...claudeAccountProps}
+              onReconnect={reconnectClaude}
+            />
+          );
+        }
+        if (provider === "codex") {
+          return (
+            <UsageProviderChip
+              key="codex"
+              limits={codex}
+              now={now}
+              project={project}
+              variant={variant}
+              {...codexAccountProps}
+              onConsumeReset={consumeCodexReset}
+              onReconnect={reconnectCodex}
+            />
+          );
+        }
+        if (provider === "opencode") {
+          return showOpencodeChip ? (
+            <UsageProviderChip
+              key="opencode"
+              limits={opencode}
+              now={now}
+              project={project}
+              variant={variant}
+            />
+          ) : null;
+        }
         // Devin has one login per machine, so there is no account picker.
-        <UsageProviderChip
-          limits={devin}
-          now={now}
-          project={project}
-          variant={variant}
-          onReconnect={reconnectDevin}
-        />
-      ) : null}
+        return (
+          <UsageProviderChip
+            key="devin"
+            limits={devin}
+            now={now}
+            project={project}
+            variant={variant}
+            onReconnect={reconnectDevin}
+          />
+        );
+      })}
       <button
         type="button"
         className={USAGE_REFRESH_CLASSES[variant]}

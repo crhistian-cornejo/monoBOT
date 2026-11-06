@@ -23,7 +23,7 @@ pub(super) fn fetch_for(profile: &crate::accounts::Profile) -> Result<Snapshot, 
     if expiry.is_some_and(|at| at <= now_ms()) {
         return Err(expired());
     }
-    let response = ureq::AgentBuilder::new()
+    let response = monobot_http::agent()
         .timeout(Duration::from_secs(10))
         .build()
         .get("https://api.anthropic.com/api/oauth/usage")
@@ -144,6 +144,36 @@ fn keychain_service(config: Option<&std::path::Path>) -> String {
 
 #[cfg(target_os = "macos")]
 fn keychain(config: Option<&std::path::Path>) -> Option<Value> {
+    let service = keychain_service(config);
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "claude-code-user".into());
+    for args in [
+        vec!["find-generic-password", "-s", &service, "-w"],
+        vec!["find-generic-password", "-s", &service, "-a", &user, "-w"],
+        vec![
+            "find-generic-password",
+            "-s",
+            &service,
+            "-a",
+            "claude-code-user",
+            "-w",
+        ],
+    ] {
+        if let Some(raw) = keychain_query(&args) {
+            if let Some(value) = credential_blob(&raw) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn keychain_query(args: &[&str]) -> Option<String> {
     use crate::process;
     use std::{
         process::{Command, Stdio},
@@ -152,10 +182,9 @@ fn keychain(config: Option<&std::path::Path>) -> Option<Value> {
         time::Instant,
     };
 
-    let service = keychain_service(config);
     let mut command = Command::new("/usr/bin/security");
     command
-        .args(["find-generic-password", "-s", &service, "-w"])
+        .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
@@ -187,7 +216,7 @@ fn keychain(config: Option<&std::path::Path>) -> Option<Value> {
     process::terminate(&mut child);
     drop(rx);
     let _ = reader.join();
-    credential_blob(&result?)
+    result
 }
 
 #[cfg(test)]

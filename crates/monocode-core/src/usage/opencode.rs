@@ -37,7 +37,7 @@ pub(super) fn fetch() -> Result<OpencodeGoUsageFetch, String> {
             Some("OpenCode Go not connected".into()),
         ));
     };
-    let agent = ureq::AgentBuilder::new().timeout(HTTP_TIMEOUT).build();
+    let agent = monobot_http::agent().timeout(HTTP_TIMEOUT).build();
     let result = agent
         .get(OPENCODE_GO_USAGE_URL)
         .set("Authorization", &format!("Bearer {api_key}"))

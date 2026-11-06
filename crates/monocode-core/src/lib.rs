@@ -1,12 +1,12 @@
 //! UI-independent services shared by the native migration and Tauri.
 pub mod accounts;
-pub mod citations;
 pub mod agent;
 pub mod app_access;
 pub mod app_update;
 pub mod automations;
 pub mod catalog;
 pub mod checkpoint;
+pub mod citations;
 pub mod connectors;
 pub mod context;
 pub mod desktop_preferences;
@@ -27,8 +27,8 @@ pub mod notes;
 pub mod office;
 pub mod process;
 pub mod project_appearance;
-pub mod provider_retry;
 pub mod provider;
+pub mod provider_retry;
 pub mod remote;
 pub mod resources;
 pub mod response;

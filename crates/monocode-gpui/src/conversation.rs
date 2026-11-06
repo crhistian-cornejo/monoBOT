@@ -17,10 +17,10 @@ mod mobile;
 mod mono;
 mod notifications;
 mod provider_retry;
-mod send_later;
 mod remote;
 pub(crate) mod remote_plans;
 mod response_menu;
+mod send_later;
 #[cfg(test)]
 mod submission_tests;
 mod title;
@@ -2445,8 +2445,10 @@ impl Conversation {
                 None => menu,
             }
         });
-        events.push(
-            cx.subscribe_in(&menu, window, |this, menu, event: &MenuEvent, window, cx| {
+        events.push(cx.subscribe_in(
+            &menu,
+            window,
+            |this, menu, event: &MenuEvent, window, cx| {
                 if let MenuEvent::Picked(id, _) = event {
                     let toggle = menu.read(cx).toggle_state(id);
                     if id.as_ref() == "upload" {
@@ -2464,8 +2466,8 @@ impl Conversation {
                 }
                 this.menu = None;
                 cx.notify();
-            }),
-        );
+            },
+        ));
         self.menu = Some(OpenMenu {
             kind,
             menu,

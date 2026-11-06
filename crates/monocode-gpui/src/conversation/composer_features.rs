@@ -365,7 +365,8 @@ impl Conversation {
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 cx.stop_propagation();
-                                this.quotes = monocode_core::composer_quotes::remove(&this.quotes, &id);
+                                this.quotes =
+                                    monocode_core::composer_quotes::remove(&this.quotes, &id);
                                 cx.notify();
                             })),
                     )

@@ -752,7 +752,11 @@ fn citation_chip_label(url: &str, title: &str) -> String {
     if !RESOLVERS.contains(&host.as_str()) || title.is_empty() || title == host {
         return host;
     }
-    let words = title.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+    let words = title
+        .split_whitespace()
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" ");
     if words.chars().count() > 22 {
         format!("{}…", words.chars().take(21).collect::<String>().trim_end())
     } else {
@@ -812,11 +816,17 @@ mod note_break_tests {
         };
         let chip = runs.iter().find(|run| run.style.citation).unwrap();
         assert_eq!(chip.text.trim_matches('\u{2009}'), "example.com");
-        assert_eq!(chip.style.link.as_deref(), Some("https://www.example.com/a"));
+        assert_eq!(
+            chip.style.link.as_deref(),
+            Some("https://www.example.com/a")
+        );
         let guide = runs.iter().find(|run| run.text == "the guide").unwrap();
         assert!(!guide.style.citation, "a worded link stays a link");
         assert_eq!(
-            citation_chip_label("https://doi.org/10.1/x", "Hydraulic ram pumps in remote areas"),
+            citation_chip_label(
+                "https://doi.org/10.1/x",
+                "Hydraulic ram pumps in remote areas"
+            ),
             "Hydraulic ram pumps"
         );
     }

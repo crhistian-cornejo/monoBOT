@@ -2369,7 +2369,12 @@ fn the_principal_reads_its_bots_news_and_who_it_asked(cx: &mut TestAppContext) {
         principal.kind = Some("bot".into());
         principal.bot_role = Some("principal".into());
         let root = m.root.clone();
-        let bot = m.roster.create_bot(&root, "finance", false).unwrap().id.clone();
+        let bot = m
+            .roster
+            .create_bot(&root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
         let mut feed = Feed::default();
         feed.add(
             Post {
@@ -2433,7 +2438,9 @@ fn bots_open_on_their_own_overview_tabs(cx: &mut TestAppContext) {
     let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
     let open = |visual: &mut gpui::VisualTestContext, id: &str| {
         s.window
-            .update(visual, |_, w, cx| s.manager.update(cx, |m, cx| m.open(id, w, cx)))
+            .update(visual, |_, w, cx| {
+                s.manager.update(cx, |m, cx| m.open(id, w, cx))
+            })
             .unwrap();
         visual.run_until_parked();
     };
@@ -2458,8 +2465,9 @@ fn bots_open_on_their_own_overview_tabs(cx: &mut TestAppContext) {
         );
     });
     // A coding Mono keeps whatever overview tab was open.
-    s.manager
-        .update(visual, |m, cx| m.select_overview(OverviewTab::Documents, cx));
+    s.manager.update(visual, |m, cx| {
+        m.select_overview(OverviewTab::Documents, cx)
+    });
     open(visual, &s.id);
     s.manager.update(visual, |m, _| {
         let mono = m.roster.get(&s.id).unwrap();

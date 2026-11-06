@@ -390,6 +390,61 @@ impl Roster {
         let _ = files::save(root, &mono.id, None, "SOUL.md", soul, None);
         self.monos.last()
     }
+    /// A group of agents (createGroupMono in Tauri): its goal, members and
+    /// optional folders/context, with its instructions as the soul.
+    pub fn create_group(
+        &mut self,
+        root: &Path,
+        name: &str,
+        group: groups::Group,
+        instructions: Option<&str>,
+    ) -> &Mono {
+        let (mascot, color) = self.next_look();
+        let mut members = group.members.clone();
+        if let Some(principal) = self.monos.iter().find(|m| m.is_principal()) {
+            if !members.contains(&principal.id) {
+                members.insert(0, principal.id.clone());
+            }
+        }
+        let mut mono = Mono {
+            id: new_id(),
+            name: name.trim().to_string(),
+            mascot,
+            color,
+            projects: Vec::new(),
+            kind: Some("group".into()),
+            group: Some(groups::Group { members, ..group }),
+            ..Default::default()
+        };
+        mono.normalize();
+        if let Some(instructions) = instructions.filter(|s| !s.trim().is_empty()) {
+            let _ = files::save(root, &mono.id, None, "SOUL.md", instructions, None);
+        }
+        self.monos.push(mono);
+        self.monos.last().unwrap()
+    }
+    /// Updates a group's settings (saveGroup in Tauri); the Principal stays in it.
+    pub fn save_group(&mut self, id: &str, name: &str, group: groups::Group) -> Option<&Mono> {
+        let principal_id = self
+            .monos
+            .iter()
+            .find(|m| m.is_principal())
+            .map(|m| m.id.clone());
+        let mono = self.get_mut(id)?;
+        if !mono.is_group() {
+            return None;
+        }
+        mono.name = name.trim().to_string();
+        mono.normalize();
+        let mut members = group.members;
+        if let Some(principal) = principal_id {
+            if !members.contains(&principal) {
+                members.insert(0, principal);
+            }
+        }
+        mono.group = Some(groups::Group { members, ..group });
+        self.monos.iter().find(|m| m.id == id)
+    }
     pub fn get(&self, id: &str) -> Option<&Mono> {
         self.monos.iter().find(|m| m.id == id)
     }

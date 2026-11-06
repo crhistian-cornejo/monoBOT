@@ -66,6 +66,7 @@ impl Shell {
         if !center.read(cx).book.exists(kind, id) {
             return;
         }
+        self.update_usage_provider(cx);
         let profile = center.read(cx).profile(id);
         let view = session
             .and_then(|id| self.sessions.get(&id).cloned())
