@@ -12,6 +12,7 @@ use crate::{
     diff_view::{DiffEvent, DiffView},
     input::{self, Input},
     popover::AnchorSlot,
+    resize_limit::LimitGlow,
     runtime::{Database, locked},
     theme::*,
 };
@@ -107,6 +108,8 @@ pub(crate) struct Inbox {
     action_notice: Option<String>,
     confirm_action: Option<String>,
     resize_start: Option<(f32, f32)>,
+    /// The resize handle straining at its limit, for the accent glow.
+    limit_glow: Option<LimitGlow>,
     active: bool,
     refresh_queued: bool,
     notifications: model::NotificationTracker,
@@ -323,6 +326,7 @@ impl Inbox {
             action_notice: None,
             confirm_action: None,
             resize_start: None,
+            limit_glow: None,
             active: false,
             refresh_queued: false,
             notifications: model::NotificationTracker::default(),

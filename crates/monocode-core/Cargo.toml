@@ -51,6 +51,8 @@ scraper = { version = "0.29", default-features = false }
 # Office documents are zip packages of XML parts, read for the file viewer.
 zip = { version = "4.6", default-features = false, features = ["deflate-flate2"] }
 quick-xml = "0.42"
+# Bounded PDF text extraction for the native paper reader.
+lopdf = { version = "0.45", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3.6", default-features = false, features = ["apple-native"] }

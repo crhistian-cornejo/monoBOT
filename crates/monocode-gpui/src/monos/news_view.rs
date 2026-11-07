@@ -457,9 +457,10 @@ impl Monos {
                                 .rounded_md()
                                 .text_color(content(0.55))
                                 .opacity(0.)
-                                .group_hover(SharedString::from(format!("news-item-{}", item.id)), |s| {
-                                    s.opacity(1.)
-                                })
+                                .group_hover(
+                                    SharedString::from(format!("news-item-{}", item.id)),
+                                    |s| s.opacity(1.),
+                                )
                                 .hover(|s| s.bg(content(0.08)))
                                 .when(note_pending, |d| d.opacity(0.4))
                                 .child(icon(

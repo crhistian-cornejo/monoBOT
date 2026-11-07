@@ -11,6 +11,7 @@ pub(crate) struct InlineStyle {
     pub link: Option<String>,
     /// A numbered link to a page it cites: shown as a chip with the site.
     pub citation: bool,
+    pub citation_passage: Option<String>,
     pub task: Option<TaskMarker>,
     pub math: bool,
     pub search: Option<bool>,
@@ -737,6 +738,8 @@ fn inline_span(
                 text: format!("\u{2009}{}\u{2009}", citation_chip_label(&url, &title)),
                 style: InlineStyle {
                     citation: true,
+                    citation_passage: monocode_core::citations::parse_title(Some(&title), &url)
+                        .snippet,
                     ..style
                 },
             });
@@ -820,8 +823,13 @@ mod note_break_tests {
             chip.style.link.as_deref(),
             Some("https://www.example.com/a")
         );
+        assert_eq!(
+            chip.style.citation_passage.as_deref(),
+            Some("It reached 62%.")
+        );
         let guide = runs.iter().find(|run| run.text == "the guide").unwrap();
         assert!(!guide.style.citation, "a worded link stays a link");
+        assert!(guide.style.citation_passage.is_none());
         assert_eq!(
             citation_chip_label(
                 "https://doi.org/10.1/x",

@@ -19,6 +19,7 @@ use std::path::{Path, PathBuf};
 use serde_json::{json, Map, Value};
 use url::Url;
 
+pub(crate) use fetch::{download_pdf, fetch_within};
 pub use fetch::{is_text, parse_public_url, Fetched};
 pub use page::{read_web_page, WebLink, WebPageRead, DEFAULT_MAX_CHARS};
 
@@ -514,13 +515,17 @@ fn percent_decode(segment: &str) -> String {
 
 /// Saves under `stem.ext`; the same bytes reuse the file, other bytes with
 /// that name get a number.
-fn save_unique(
+pub(crate) fn save_unique(
     folder: &Path,
     stem: &str,
     extension: &str,
     bytes: &[u8],
 ) -> Result<PathBuf, String> {
+    use std::io::Write;
+
     fs::create_dir_all(folder).map_err(|e| e.to_string())?;
+    let mut temp = tempfile::NamedTempFile::new_in(folder).map_err(|e| e.to_string())?;
+    temp.write_all(bytes).map_err(|e| e.to_string())?;
     let dot = if extension.is_empty() { "" } else { "." };
     for attempt in 1..=50 {
         let file = if attempt == 1 {
@@ -529,13 +534,17 @@ fn save_unique(
             format!("{stem} ({attempt}){dot}{extension}")
         };
         let target = folder.join(file);
-        match fs::read(&target) {
-            Ok(existing) if existing == bytes => return Ok(target),
-            Ok(_) => continue,
-            Err(_) => {
-                fs::write(&target, bytes).map_err(|e| e.to_string())?;
-                return Ok(target);
+        match temp.persist_noclobber(&target) {
+            Ok(_) => return Ok(target),
+            Err(error) if error.error.kind() == std::io::ErrorKind::AlreadyExists => {
+                temp = error.file;
+                match fs::read(&target) {
+                    Ok(existing) if existing == bytes => return Ok(target),
+                    Ok(_) => continue,
+                    Err(error) => return Err(error.to_string()),
+                }
             }
+            Err(error) => return Err(error.error.to_string()),
         }
     }
     Err("Too many files with that name".into())
@@ -596,6 +605,28 @@ mod tests {
         );
         let second = save_unique(dir.path(), "guide", "pdf", b"two").unwrap();
         assert!(second.ends_with("guide (2).pdf"));
+    }
+
+    #[test]
+    fn simultaneous_downloads_never_overwrite_one_another() {
+        let dir = tempfile::tempdir().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let folder = dir.path().to_path_buf();
+        let first_barrier = barrier.clone();
+        let first_folder = folder.clone();
+        let first = std::thread::spawn(move || {
+            first_barrier.wait();
+            save_unique(&first_folder, "paper", "pdf", b"first").unwrap()
+        });
+        let second = std::thread::spawn(move || {
+            barrier.wait();
+            save_unique(&folder, "paper", "pdf", b"second").unwrap()
+        });
+        let first = first.join().unwrap();
+        let second = second.join().unwrap();
+        assert_ne!(first, second);
+        assert_eq!(fs::read(first).unwrap(), b"first");
+        assert_eq!(fs::read(second).unwrap(), b"second");
     }
 
     #[test]

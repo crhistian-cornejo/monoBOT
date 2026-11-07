@@ -194,9 +194,7 @@ impl Monos {
         let item_id = item_id.to_owned();
         cx.spawn(async move |this, cx| {
             let result = work.await;
-            let _ = this.update(cx, |this, cx| {
-                this.news_note_result(&item_id, result, cx)
-            });
+            let _ = this.update(cx, |this, cx| this.news_note_result(&item_id, result, cx));
         })
         .detach();
         cx.notify();
@@ -215,9 +213,7 @@ impl Monos {
         if success {
             let item_id = item_id.to_owned();
             cx.spawn(async move |this, cx| {
-                cx.background_executor()
-                    .timer(Duration::from_secs(2))
-                    .await;
+                cx.background_executor().timer(Duration::from_secs(2)).await;
                 let _ = this.update(cx, |this, cx| {
                     this.news.note_feedback.remove(&item_id);
                     cx.notify();

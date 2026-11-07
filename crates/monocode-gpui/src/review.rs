@@ -736,6 +736,21 @@ impl ReviewPane {
             editor.update(cx, |editor, cx| editor.navigate(line, column, cx));
         }
     }
+
+    pub(crate) fn focus_paper(
+        &mut self,
+        page: usize,
+        passage: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(editor) = self
+            .sources
+            .get(self.state.active)
+            .and_then(|source| source.editor.clone())
+        {
+            editor.update(cx, |editor, cx| editor.focus_paper(page, passage, cx));
+        }
+    }
     pub(crate) fn focus_active(&self, window: &mut Window, cx: &mut gpui::App) {
         // Keep workspace shortcuts reachable while the active body is loading,
         // deferred or showing an error. Rendering hands focus to a ready body.

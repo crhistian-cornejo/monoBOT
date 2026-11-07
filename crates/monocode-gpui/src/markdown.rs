@@ -466,6 +466,7 @@ fn inline_selected(
     let clicked_links = links.clone();
     let menu_links = links.clone();
     let clicked_urls = urls.clone();
+    let clicked_citations = prepared.citations.clone();
     let text_id: SharedString = format!("{id}-text").into();
     let child = div()
         .id(id)
@@ -487,7 +488,11 @@ fn inline_selected(
                         return;
                     }
                 }
-                open_link(&clicked_urls[ix], window, cx);
+                if let Some(passage) = &clicked_citations[ix] {
+                    open_citation(&clicked_urls[ix], passage.as_deref(), window, cx);
+                } else {
+                    open_link(&clicked_urls[ix], window, cx);
+                }
             }
         })
         .on_mouse_down(MouseButton::Right, move |event, window, cx| {
@@ -616,6 +621,7 @@ fn rich_inline(
                     ..Default::default()
                 };
                 let link = style.link.clone();
+                let citation = style.citation.then(|| style.citation_passage.clone());
                 let menu_link = link.clone();
                 let styled =
                     StyledText::new(text.to_owned()).with_highlights([(0..text.len(), highlight)]);
@@ -649,7 +655,11 @@ fn rich_inline(
                             if let Some(url) = &link
                                 && activate_link(event, clicked_selection.as_ref())
                             {
-                                open_link(url, window, cx);
+                                if let Some(passage) = &citation {
+                                    open_citation(url, passage.as_deref(), window, cx);
+                                } else {
+                                    open_link(url, window, cx);
+                                }
                             }
                         })
                         .on_mouse_down(MouseButton::Right, move |event, window, cx| {
@@ -725,6 +735,39 @@ fn open_link(url: &str, window: &mut Window, cx: &mut App) {
     } else if !url.starts_with('#') && (!url.contains("://") || url.starts_with("file://")) {
         window.dispatch_action(Box::new(crate::file_editor::OpenPath(url.into())), cx);
     }
+}
+
+/// Only numbered citations look up a cached PDF; ordinary links keep their
+/// existing behavior. Cache reads and passage matching stay off the UI thread.
+pub(crate) fn open_citation(url: &str, passage: Option<&str>, window: &mut Window, cx: &mut App) {
+    let url = url.to_owned();
+    let passage = passage.map(str::to_owned);
+    let search_url = url.clone();
+    let search_passage = passage.clone();
+    let work = cx.background_executor().spawn(async move {
+        let store =
+            monocode_core::papers::PaperStore::new(monocode_core::papers::cache_dir().ok()?);
+        monocode_core::papers::cached_citation(&store, &search_url, search_passage.as_deref())
+    });
+    window
+        .spawn(cx, async move |cx| {
+            let target = work.await;
+            let _ = cx.update(|window, cx| {
+                if let Some((path, page)) = target {
+                    window.dispatch_action(
+                        Box::new(crate::file_editor::OpenPaper {
+                            path: path.to_string_lossy().into_owned(),
+                            page,
+                            passage,
+                        }),
+                        cx,
+                    );
+                } else {
+                    cx.open_url(&url);
+                }
+            });
+        })
+        .detach();
 }
 
 pub(crate) fn body(

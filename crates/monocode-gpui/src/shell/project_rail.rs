@@ -179,6 +179,7 @@ impl Shell {
         if self.workspace.classic_layout && self.settings.is_none() {
             self.workspace.project_rail_open = !self.workspace.project_rail_open;
             self.project_resize = None;
+            self.release_limit_glow();
             self.fit_sidebar(cx);
             self.persist(cx);
             self.invalidate_chrome(cx);
@@ -220,6 +221,9 @@ impl Shell {
                             .w(px(6.))
                             .cursor(CursorStyle::ResizeLeftRight)
                             .child(resize_border(true, self.project_resize.is_some()))
+                            .when_some(self.limit_glow(&GlowTarget::Projects), |d, glow| {
+                                d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                            })
                             .on_mouse_down(
                                 MouseButton::Left,
                                 cx.listener(|this, e: &MouseDownEvent, _, cx| {

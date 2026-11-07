@@ -5,6 +5,7 @@ use std::io::Read;
 pub const MAX_TEXT_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_LINE_BYTES: usize = 16 * 1024;
 const MAX_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PDF_PREVIEW_BYTES: u64 = 40 * 1024 * 1024;
 
 #[derive(Clone, Debug)]
 pub struct TextDocument {
@@ -24,6 +25,9 @@ pub enum Document {
         width: u32,
         height: u32,
         original_size: usize,
+    },
+    Pdf {
+        bytes: Vec<u8>,
     },
     Video {
         size: u64,
@@ -145,19 +149,26 @@ pub fn read_document(path: &Path) -> Result<Document, String> {
             source: None,
         });
     }
-    if meta.len() > MAX_PREVIEW_BYTES {
-        return Ok(Document::Unsupported(
-            "File is too large to preview (maximum 32 MB).".into(),
-        ));
+    let max_preview = if is_pdf_path(&path) {
+        MAX_PDF_PREVIEW_BYTES
+    } else {
+        MAX_PREVIEW_BYTES
+    };
+    let too_large = || {
+        Document::Unsupported(format!(
+            "File is too large to preview (maximum {} MB).",
+            max_preview / 1024 / 1024
+        ))
+    };
+    if meta.len() > max_preview {
+        return Ok(too_large());
     }
     let mut bytes = Vec::new();
-    file.take(MAX_PREVIEW_BYTES + 1)
+    file.take(max_preview + 1)
         .read_to_end(&mut bytes)
         .map_err(|e| e.to_string())?;
-    if bytes.len() as u64 > MAX_PREVIEW_BYTES {
-        return Ok(Document::Unsupported(
-            "File is too large to preview (maximum 32 MB).".into(),
-        ));
+    if bytes.len() as u64 > max_preview {
+        return Ok(too_large());
     }
     document_from_bytes(&path, bytes, MAX_TEXT_BYTES)
 }
@@ -175,11 +186,29 @@ fn read_remote_bytes(path: &Path) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
+fn is_pdf_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"))
+}
+
 fn document_from_bytes(
     path: &Path,
     bytes: Vec<u8>,
     max_text_bytes: usize,
 ) -> Result<Document, String> {
+    let pdf_path = is_pdf_path(path);
+    let pdf_header = bytes.starts_with(b"%PDF-")
+        || (pdf_path
+            && bytes[..bytes.len().min(1024)]
+                .windows(5)
+                .any(|window| window == b"%PDF-"));
+    if pdf_header {
+        return Ok(Document::Pdf { bytes });
+    }
+    if pdf_path {
+        return Ok(Document::Unsupported("Not a readable PDF.".into()));
+    }
     let format = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         Some("png")
     } else if bytes.starts_with(b"\xff\xd8\xff") {
@@ -377,6 +406,43 @@ fn matches_disk(path: &Path, expected: &[u8]) -> Result<bool, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn pdf_detection_accepts_pdfs_without_misclassifying_text() {
+        for path in ["paper.PDF", "remote://host/paper.pdf", "unnamed"] {
+            let bytes = b"%PDF-1.7\n".to_vec();
+            assert!(matches!(
+                document_from_bytes(Path::new(path), bytes.clone(), MAX_TEXT_BYTES).unwrap(),
+                Document::Pdf { bytes: got } if got == bytes
+            ));
+        }
+        assert!(matches!(
+            document_from_bytes(
+                Path::new("paper.pdf"),
+                b"junk %PDF-1.7".to_vec(),
+                MAX_TEXT_BYTES
+            )
+            .unwrap(),
+            Document::Pdf { .. }
+        ));
+        assert!(matches!(
+            document_from_bytes(
+                Path::new("paper.pdf"),
+                b"not a pdf".to_vec(),
+                MAX_TEXT_BYTES
+            )
+            .unwrap(),
+            Document::Unsupported(_)
+        ));
+        assert!(matches!(
+            document_from_bytes(
+                Path::new("notes.txt"),
+                b"Example: %PDF-1.7".to_vec(),
+                MAX_TEXT_BYTES
+            )
+            .unwrap(),
+            Document::Text(_)
+        ));
+    }
     #[test]
     fn remote_links_resolve_inside_the_host_and_text_keeps_host_limits() {
         let cwd = Path::new("remote://linux/home/code");

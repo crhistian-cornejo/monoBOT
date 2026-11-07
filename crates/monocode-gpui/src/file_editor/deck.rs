@@ -232,7 +232,10 @@ impl DeckView {
                     return frame(&image.frame)
                         .child(
                             gpui::svg()
-                                .data(image_svg(&image.image.bytes, &image.image.mime, w, h).as_bytes())
+                                .data(
+                                    image_svg(&image.image.bytes, &image.image.mime, w, h)
+                                        .as_bytes(),
+                                )
                                 .absolute()
                                 .inset_0()
                                 .size_full()
@@ -301,10 +304,9 @@ impl DeckView {
             }
             SlideItem::Shape(shape) => {
                 let mut surface = frame(&shape.frame).flex().flex_col();
-                let svg = transform_of(&shape.frame)
-                    .and_then(|transform| {
-                        shape_svg(shape, scale).map(|markup| (markup, transform))
-                    });
+                let svg = transform_of(&shape.frame).and_then(|transform| {
+                    shape_svg(shape, scale).map(|markup| (markup, transform))
+                });
                 if let Some((markup, transform)) = svg {
                     surface = surface.child(
                         gpui::svg()

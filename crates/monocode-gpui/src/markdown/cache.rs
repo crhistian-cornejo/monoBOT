@@ -17,6 +17,7 @@ pub(super) struct PreparedInline {
     pub fonts: Vec<(Range<usize>, SharedString)>,
     pub links: Vec<Range<usize>>,
     pub urls: Vec<String>,
+    pub citations: Vec<Option<Option<String>>>,
 }
 impl PreparedInline {
     pub fn new(runs: &[InlineRun], heading: bool) -> Self {
@@ -25,6 +26,7 @@ impl PreparedInline {
         let mut fonts = Vec::new();
         let mut links = Vec::new();
         let mut urls = Vec::new();
+        let mut citations = Vec::new();
         let mut word = 0;
         for run in runs {
             let start = text.len();
@@ -55,6 +57,7 @@ impl PreparedInline {
             if let Some(url) = &style.link {
                 links.push(range.clone());
                 urls.push(url.clone());
+                citations.push(style.citation.then(|| style.citation_passage.clone()));
             }
             prepared.push(PreparedRun {
                 range,
@@ -70,6 +73,7 @@ impl PreparedInline {
             fonts,
             links,
             urls,
+            citations,
         }
     }
 }
@@ -98,7 +102,15 @@ fn runs_bytes(runs: &[InlineRun]) -> usize {
     std::mem::size_of_val(runs)
         + runs
             .iter()
-            .map(|run| run.text.capacity() + run.style.link.as_ref().map_or(0, String::capacity))
+            .map(|run| {
+                run.text.capacity()
+                    + run.style.link.as_ref().map_or(0, String::capacity)
+                    + run
+                        .style
+                        .citation_passage
+                        .as_ref()
+                        .map_or(0, String::capacity)
+            })
             .sum::<usize>()
 }
 fn row_bytes(row: &MarkdownRow) -> usize {

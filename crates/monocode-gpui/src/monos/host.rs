@@ -808,6 +808,114 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                 return;
             }
             "images.generate" => self.images_generate(&call, &mono, &input, cx),
+            "papers.find" => {
+                self.call_work(
+                    call,
+                    target.clone(),
+                    move |_| {
+                        let store = monocode_core::papers::PaperStore::new(
+                            monocode_core::papers::cache_dir()?,
+                        );
+                        Ok((
+                            monocode_core::papers::find_input(&store, &input)?,
+                            Effect::None,
+                        ))
+                    },
+                    cx,
+                );
+                return;
+            }
+            "papers.add" | "papers.read" => {
+                let agent = mono.label();
+                self.call_work(
+                    call,
+                    target.clone(),
+                    move |_| {
+                        use monocode_core::{papers, web};
+                        let store = papers::PaperStore::new(papers::cache_dir()?);
+                        let mut meta = if action == "papers.add" {
+                            let path = web::required_string(&input["path"], "path", 1000)?;
+                            let reference = web::optional_string(input.get("ref"), "ref", 500)?;
+                            let title = web::optional_string(input.get("title"), "title", 300)?;
+                            if let Some(reference) = reference.as_deref() {
+                                papers::resolve(&store, reference)?;
+                            }
+                            store.import(
+                                Path::new(&path),
+                                reference.as_deref(),
+                                title.as_deref(),
+                            )?
+                        } else {
+                            let reference = web::required_string(&input["ref"], "ref", 500)?;
+                            let meta = papers::resolve(&store, &reference)?;
+                            store.load_open_copy(meta)?
+                        };
+                        if meta.availability == "full-text" {
+                            if let Some(documents) = web::documents_dir() {
+                                if let Ok(path) = store.export(
+                                    &meta.paper.key,
+                                    &meta.paper.title,
+                                    Some(&agent),
+                                    &documents,
+                                ) {
+                                    meta.file = Some(path.to_string_lossy().into_owned());
+                                    meta.agent = Some(agent);
+                                    let _ = store.put_meta(&meta);
+                                }
+                            }
+                        }
+                        Ok((store.answer(&meta, &input)?, Effect::None))
+                    },
+                    cx,
+                );
+                return;
+            }
+            "papers.figure" => {
+                self.call_work(
+                    call,
+                    target.clone(),
+                    move |_| {
+                        use monocode_core::{papers, web};
+                        let reference = web::required_string(&input["ref"], "ref", 500)?;
+                        let page = input["page"]
+                            .as_u64()
+                            .filter(|page| (1..=2000).contains(page))
+                            .ok_or("page must be a page number from 1 to 2000")? as usize;
+                        let store = papers::PaperStore::new(papers::cache_dir()?);
+                        let meta = store.load_open_copy(papers::resolve(&store, &reference)?)?;
+                        if meta.availability != "full-text" || store.text(&meta.paper.key)?.is_none() {
+                            return Err(format!(
+                                "There is no readable PDF of this paper to draw: {}",
+                                meta.reason.as_deref().unwrap_or("only its abstract is available")
+                            ));
+                        }
+                        let key = meta.paper.key.clone();
+                        let figures = store.text(&key)?.map(|text| papers::figures(&text))
+                            .unwrap_or_default()
+                            .into_iter()
+                            .filter(|figure| figure.page == page)
+                            .collect::<Vec<_>>();
+                        let label = figures.first().map(|figure| figure.label.clone())
+                            .unwrap_or_else(|| format!("Page {page}"));
+                        let on_page = figures.into_iter()
+                            .map(|figure| format!("{}: {}", figure.label, figure.caption.chars().take(140).collect::<String>()))
+                            .collect::<Vec<_>>();
+                        let bytes = store.pdf_bytes(&key)?;
+                        let (pages, png) = crate::file_editor::pdf::render(&bytes, page - 1)?;
+                        let path = store.save_page(&key, page, &png)?.to_string_lossy().into_owned();
+                        Ok((json!({
+                            "path": path,
+                            "page": page,
+                            "pages": pages,
+                            "onThisPage": on_page,
+                            "markdown": format!("![{} of {}](<{path}>)", label.replace(']', ""), meta.paper.title.replace(']', "")),
+                            "note": "The image shows the whole page, not a crop."
+                        }), Effect::None))
+                    },
+                    cx,
+                );
+                return;
+            }
             // Any agent reads a web page or keeps a file from the web; files go
             // to Documents/MonoBOT/<agent> (handleWeb).
             "web.read" | "web.download" => {
@@ -816,13 +924,47 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                     call,
                     target.clone(),
                     move |_| {
-                        let value = if action == "web.read" {
+                        let mut value = if action == "web.read" {
                             monocode_core::web::read_input(&input)?
                         } else {
                             let documents = monocode_core::web::documents_dir()
                                 .ok_or("The Documents folder is not available")?;
                             monocode_core::web::download_input(&input, Some(&agent), &documents)?
                         };
+                        if action == "web.download" {
+                            let path = value.get("path").and_then(Value::as_str).map(str::to_owned);
+                            let is_pdf = path.as_deref().is_some_and(|path| {
+                                Path::new(path).extension().and_then(|ext| ext.to_str())
+                                    .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+                            });
+                            if is_pdf {
+                                let path = path.unwrap();
+                                let url = value["url"].as_str().unwrap_or("").to_owned();
+                                let original = input["url"].as_str().unwrap_or("").to_owned();
+                                let store = monocode_core::papers::PaperStore::new(
+                                    monocode_core::papers::cache_dir()?,
+                                );
+                                match store.import(Path::new(&path), None, None) {
+                                    Ok(mut meta) => {
+                                        if meta.paper.landing.is_none() {
+                                            meta.paper.landing = Some(url.clone());
+                                        }
+                                        meta.agent = Some(agent);
+                                        let _ = store.put_meta(&meta);
+                                        let _ = store.remember_sources(&[&original, &url], &meta.paper.key);
+                                        let mut answer = store.answer(&meta, &json!({"maxChars": 8_000}))?;
+                                        answer["path"] = json!(path);
+                                        answer["url"] = json!(url);
+                                        value = answer;
+                                    }
+                                    Err(error) => {
+                                        value["note"] = json!(format!(
+                                            "The file was saved, but could not be registered as a paper: {error}"
+                                        ));
+                                    }
+                                }
+                            }
+                        }
                         Ok((value, Effect::None))
                     },
                     cx,

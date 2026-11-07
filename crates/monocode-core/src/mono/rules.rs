@@ -29,7 +29,20 @@ const PAPER_RULES: &str = "<paper_rules>\nWhen the user asks about a scientific 
 pub fn fixed(mono: &Mono) -> String {
     let bot = mono.is_bot();
     let principal = mono.is_principal();
-    let mut parts: Vec<String> = vec![CITATION_RULES.into(), PAPER_RULES.into()];
+    let paper_rules = PAPER_RULES
+        .replace(
+            "drawn, cited and underlined like any other paper",
+            "drawn, cited and located in its text view",
+        )
+        .replace(
+            "full-text means you may summarise the paper and quote it",
+            "full-text means readable PDF text exists; summarise and quote only the passages actually returned, and respect textLimits",
+        )
+        .replace(
+            "MonoBOT finds it again and underlines it in the paper when the user clicks the citation",
+            "MonoBOT opens a cached copy and highlights a matching passage in its text view when available",
+        );
+    let mut parts: Vec<String> = vec![CITATION_RULES.into(), paper_rules];
     if bot {
         parts.push(if principal { LEAD_RULES } else { BOT_RULES }.into());
     }

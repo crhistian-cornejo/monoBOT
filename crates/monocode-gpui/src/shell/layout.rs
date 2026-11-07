@@ -1,10 +1,11 @@
 // Navigation and frame style are independent. The original layout adds a
 // project rail beside the sessions sidebar. The new layout keeps one sidebar
 // and offers either an inset rounded card or the existing full-height boxy frame.
-use super::{CORNER_BUTTONS_WIDTH, CORNER_CONTROL_GAP, Shell, titlebar_drag_area};
+use super::{CORNER_BUTTONS_WIDTH, CORNER_CONTROL_GAP, GlowTarget, Shell, titlebar_drag_area};
 use crate::{
     popover::{Anchor, popover},
     project_tabs::{TabReveal, tab_button},
+    resize_limit::{Axis, limit_glow},
     resource_pressure::SessionInfo,
     right_panel::{RightPanel, RightTab},
     theme::*,
@@ -172,6 +173,7 @@ impl Shell {
         }
         self.workspace.classic_layout = !self.workspace.classic_layout;
         self.project_resize = None;
+        self.release_limit_glow();
         self.layout_changed(cx);
         self.sync_settings(cx);
     }
@@ -710,6 +712,9 @@ impl Shell {
                 .w(px(4.))
                 .h_full()
                 .cursor(CursorStyle::ResizeLeftRight)
+                .when_some(self.limit_glow(&GlowTarget::Sidebar), |d, glow| {
+                    d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                })
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, event: &MouseDownEvent, _, cx| {

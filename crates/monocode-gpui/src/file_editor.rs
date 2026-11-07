@@ -26,6 +26,7 @@ mod office_tests;
 #[cfg(test)]
 #[path = "file_editor/tests.rs"]
 mod parity_tests;
+pub(crate) mod pdf;
 mod search;
 mod selection;
 mod spreadsheet;
@@ -80,6 +81,14 @@ pub(crate) fn bind(cx: &mut App) {
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = file_editor, no_json)]
 pub(crate) struct OpenPath(pub String);
+
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(namespace = file_editor, no_json)]
+pub(crate) struct OpenPaper {
+    pub path: String,
+    pub page: usize,
+    pub passage: Option<String>,
+}
 
 /// File links may include a one-based line and column (`:12:4` or `#L12`).
 pub(crate) fn file_location(raw: &str, cwd: &str) -> (String, Option<(usize, usize)>) {
@@ -167,6 +176,9 @@ pub(crate) struct FileEditor {
     image: Option<Arc<Image>>,
     media: Option<Entity<media::MediaPreview>>,
     media_events: Option<Subscription>,
+    pdf: Option<Entity<pdf::PdfView>>,
+    pdf_events: Option<Subscription>,
+    paper_focus: Option<(usize, Option<String>)>,
     /// A spreadsheet, Word document or deck, read by the core.
     office: Option<gpui::AnyView>,
     office_stamp: Option<office::Stamp>,
@@ -317,6 +329,9 @@ impl FileEditor {
             image: None,
             media: None,
             media_events: None,
+            pdf: None,
+            pdf_events: None,
+            paper_focus: None,
             office: None,
             office_stamp: None,
             sheet_preview: None,
@@ -342,6 +357,25 @@ impl FileEditor {
     pub(crate) fn navigate(&mut self, line: usize, column: usize, cx: &mut Context<Self>) {
         self.navigation = Some((line, column));
         self.apply_navigation(cx);
+    }
+
+    pub(crate) fn focus_paper(
+        &mut self,
+        page: usize,
+        passage: Option<String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.paper_focus = Some((page, passage));
+        self.apply_paper_focus(cx);
+    }
+
+    fn apply_paper_focus(&mut self, cx: &mut Context<Self>) {
+        if let Some(pdf) = &self.pdf {
+            let Some((page, passage)) = self.paper_focus.take() else {
+                return;
+            };
+            pdf.update(cx, |pdf, cx| pdf.focus_passage(page, passage, cx));
+        }
     }
     fn apply_navigation(&mut self, cx: &mut Context<Self>) {
         if self.document.is_none() {
@@ -441,6 +475,8 @@ impl FileEditor {
                         this.disk_changed = false;
                         this.image = None;
                         this.media = None;
+                        this.pdf = None;
+                        this.pdf_events = None;
                         this.unsupported = None;
                         let first = this.document.is_none();
                         let text = doc.text.clone();
@@ -507,6 +543,8 @@ impl FileEditor {
                             )
                         }));
                         this.image = Some(image);
+                        this.pdf = None;
+                        this.pdf_events = None;
                         this.dirty = false;
                         this.disk_changed = false;
                         cx.emit(FileEvent::Dirty);
@@ -548,6 +586,38 @@ impl FileEditor {
                         }
                         this.document = None;
                         this.image = None;
+                        this.pdf = None;
+                        this.pdf_events = None;
+                        this.unsupported = None;
+                        this.error = None;
+                        this.dirty = false;
+                        this.disk_changed = false;
+                        cx.emit(FileEvent::Dirty);
+                    }
+                    Ok(Document::Pdf { bytes }) => {
+                        if this.dirty && !force {
+                            this.disk_changed = true;
+                            cx.notify();
+                            return;
+                        }
+                        if !force
+                            && this
+                                .pdf
+                                .as_ref()
+                                .is_some_and(|pdf| pdf.read(cx).has_bytes(&bytes))
+                        {
+                            return;
+                        }
+                        let pdf = cx.new(|cx| pdf::PdfView::new(this.path.clone(), bytes, cx));
+                        this.pdf_events =
+                            Some(cx.subscribe(&pdf, |_, _, event: &pdf::PdfEvent, cx| {
+                                cx.emit(FileEvent::AddToChat(event.0.clone()));
+                            }));
+                        this.pdf = Some(pdf);
+                        this.apply_paper_focus(cx);
+                        this.document = None;
+                        this.image = None;
+                        this.media = None;
                         this.unsupported = None;
                         this.error = None;
                         this.dirty = false;
@@ -561,6 +631,8 @@ impl FileEditor {
                             return;
                         }
                         this.media = None;
+                        this.pdf = None;
+                        this.pdf_events = None;
                         this.unsupported = Some(reason);
                         this.disk_changed = false;
                         this.document = None;
@@ -604,6 +676,8 @@ impl FileEditor {
                         this.document = None;
                         this.image = None;
                         this.media = None;
+                        this.pdf = None;
+                        this.pdf_events = None;
                         this.dirty = false;
                         this.disk_changed = false;
                         cx.emit(FileEvent::Dirty);
@@ -1127,6 +1201,8 @@ impl gpui::Render for FileEditor {
         };
         let body: AnyElement = if let Some(office) = &self.office {
             office.clone().into_any_element()
+        } else if let Some(pdf) = &self.pdf {
+            pdf.clone().into_any_element()
         } else if let Some(media) = &self.media {
             media.clone().into_any_element()
         } else if let Some(image) = preview_image {

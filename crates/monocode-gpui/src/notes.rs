@@ -5,6 +5,7 @@ use crate::{
     explorer::DraggedFile,
     input::{self, Input},
     popover::{Anchor, AnchorSlot, popover},
+    resize_limit::{Axis, LimitGlow, limit_glow},
     runtime::{Database, locked},
     theme::*,
 };
@@ -48,6 +49,8 @@ pub(crate) struct Notes {
     image_drag: bool,
     list_width: f32,
     resize: Option<(f32, f32)>,
+    /// The resize handle straining at its limit, for the accent glow.
+    limit_glow: Option<LimitGlow>,
     blurs_bound: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -130,6 +133,7 @@ impl Notes {
             image_drag: false,
             list_width: 280.,
             resize: None,
+            limit_glow: None,
             blurs_bound: false,
             _subscriptions: subscriptions,
         };
@@ -1046,6 +1050,7 @@ impl gpui::Render for Notes {
                         .on_click(cx.listener(move |this, _, _, cx| this.select(id.clone(), cx)))
                 })))
             .child(div().id("resize-notes-list").role(Role::Splitter).aria_label("Resize notes list").absolute().top_0().bottom_0().right(px(-3.)).w(px(6.)).cursor(CursorStyle::ResizeLeftRight).hover(|style| style.bg(content(0.1)))
+                .when_some(self.limit_glow.clone(), |d, glow| d.child(limit_glow(Axis::X, glow, cx.reduce_motion())))
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| { if event.click_count == 2 { this.list_width = 280.; } else { this.resize = Some((event.position.x.as_f32(), this.list_width)); } cx.notify(); })));
         let detail = if let Some(note) = self.draft(cx) {
             self.detail(note, cx)
@@ -1112,23 +1117,41 @@ impl gpui::Render for Notes {
             .on_mouse_move(
                 cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
                     if let Some((start, width)) = this.resize {
-                        this.list_width = (width + event.position.x.as_f32() - start).clamp(
+                        let wanted = width + event.position.x.as_f32() - start;
+                        let applied = wanted.clamp(
                             240.,
                             420_f32
                                 .min(window.viewport_size().width.as_f32() * 0.5)
                                 .max(240.),
                         );
+                        this.list_width = applied;
+                        // Past the limit the handle glows near the pointer.
+                        let along = event.position.y.as_f32();
+                        match &mut this.limit_glow {
+                            Some(glow) => glow.paint(wanted - applied, along),
+                            None => this.limit_glow = Some(LimitGlow::new(wanted - applied, along)),
+                        }
                         cx.notify();
                     }
                 }),
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.resize = None),
+                cx.listener(|this, _, _, _| {
+                    this.resize = None;
+                    if let Some(glow) = &mut this.limit_glow {
+                        glow.release();
+                    }
+                }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| this.resize = None),
+                cx.listener(|this, _, _, _| {
+                    this.resize = None;
+                    if let Some(glow) = &mut this.limit_glow {
+                        glow.release();
+                    }
+                }),
             )
             .child(div().flex_1().min_h_0().flex().child(list).child(detail))
             .when_some(self.error.clone(), |d, error| {

@@ -87,6 +87,7 @@ impl TranscriptView {
                     d.child(div().w_full().pt_2().flex().flex_col().gap_1().children(
                         sources.into_iter().map(|source| {
                             let url = source.url.clone();
+                            let passage = source.snippet.clone();
                             div()
                                 .id(SharedString::from(format!(
                                     "source-{turn}-{}",
@@ -122,7 +123,14 @@ impl TranscriptView {
                                         .child(source.host),
                                 )
                                 .child(icon("external-link", 14.).text_color(content(0.25)))
-                                .on_click(move |_, _, cx| cx.open_url(&url))
+                                .on_click(move |_, window, cx| {
+                                    crate::markdown::open_citation(
+                                        &url,
+                                        passage.as_deref(),
+                                        window,
+                                        cx,
+                                    );
+                                })
                         }),
                     ))
                 })

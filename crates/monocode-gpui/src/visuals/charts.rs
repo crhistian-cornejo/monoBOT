@@ -210,66 +210,65 @@ pub(super) fn chart(
                 .border_1()
                 .border_color(gpui::transparent_black())
                 .focus(|s| s.border_color(accent_color()))
-                .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _window, cx| {
-                    let Some(entry) = this.charts.get_mut(&keys) else {
-                        return;
-                    };
-                    let last = count.saturating_sub(1);
-                    let key = event.keystroke.key.as_str();
-                    if key == "escape" {
-                        entry.active = None;
-                        entry.spot = None;
+                .on_key_down(
+                    cx.listener(move |this, event: &gpui::KeyDownEvent, _window, cx| {
+                        let Some(entry) = this.charts.get_mut(&keys) else {
+                            return;
+                        };
+                        let last = count.saturating_sub(1);
+                        let key = event.keystroke.key.as_str();
+                        if key == "escape" {
+                            entry.active = None;
+                            entry.spot = None;
+                            cx.stop_propagation();
+                            cx.notify();
+                            return;
+                        }
+                        let page = (count / 10).max(1) as i64;
+                        let step = match key {
+                            "left" => -1i64,
+                            "right" => 1,
+                            "pageup" => -page,
+                            "pagedown" => page,
+                            _ => 0,
+                        };
+                        let next = match key {
+                            "home" => Some(0),
+                            "end" => Some(last),
+                            _ if step != 0 && count > 0 => {
+                                let base = entry
+                                    .active
+                                    .map(|i| i as i64)
+                                    .unwrap_or(if key == "left" { last as i64 + 1 } else { -1 });
+                                Some((base + step).clamp(0, last as i64) as usize)
+                            }
+                            _ => None,
+                        };
+                        let Some(next) = next else {
+                            return;
+                        };
+                        entry.active = Some(next);
                         cx.stop_propagation();
                         cx.notify();
-                        return;
-                    }
-                    let page = (count / 10).max(1) as i64;
-                    let step = match key {
-                        "left" => -1i64,
-                        "right" => 1,
-                        "pageup" => -page,
-                        "pagedown" => page,
-                        _ => 0,
-                    };
-                    let next = match key {
-                        "home" => Some(0),
-                        "end" => Some(last),
-                        _ if step != 0 && count > 0 => {
-                            let base = entry
-                                .active
-                                .map(|i| i as i64)
-                                .unwrap_or(if key == "left" { last as i64 + 1 } else { -1 });
-                            Some((base + step).clamp(0, last as i64) as usize)
-                        }
-                        _ => None,
-                    };
-                    let Some(next) = next else {
-                        return;
-                    };
-                    entry.active = Some(next);
-                    cx.stop_propagation();
-                    cx.notify();
-                }))
+                    }),
+                )
                 .child(
                     canvas(
                         |_, _, _| {},
                         move |bounds, _, window, cx| {
-                            window.with_content_mask(
-                                Some(gpui::ContentMask { bounds }),
-                                |window| {
-                                    cartesian(
-                                        kind,
-                                        &series,
-                                        &labels,
-                                        bounds,
-                                        motion,
-                                        active.filter(|_| focus.is_focused(window)),
-                                        spot_index,
-                                        window,
-                                        cx,
-                                    )
-                                },
-                            )
+                            window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
+                                cartesian(
+                                    kind,
+                                    &series,
+                                    &labels,
+                                    bounds,
+                                    motion,
+                                    active.filter(|_| focus.is_focused(window)),
+                                    spot_index,
+                                    window,
+                                    cx,
+                                )
+                            })
                         },
                     )
                     .size_full(),
@@ -339,11 +338,7 @@ fn data_table(
                     div()
                         .id(SharedString::from(format!("{id}-r{i}-{j}")))
                         .role(Role::Cell)
-                        .child(
-                            s.values
-                                .get(i)
-                                .map_or_else(|| "–".into(), |v| reading(*v)),
-                        )
+                        .child(s.values.get(i).map_or_else(|| "–".into(), |v| reading(*v)))
                 }))
         }))
         .into_any_element()
@@ -580,11 +575,7 @@ fn cartesian(
     if let Some(i) = hovered {
         crosshair(origin, x_of(i), plot_h, window);
     }
-    for (j, (curve, (s, points))) in curves
-        .iter()
-        .zip(series.iter().zip(&points))
-        .enumerate()
-    {
+    for (j, (curve, (s, points))) in curves.iter().zip(series.iter().zip(&points)).enumerate() {
         let c = tint(j, color(&s.color));
         let samples = drawn_to(&curve.samples(2.), curve, reach);
         glowing_line(&samples, origin, 2., c, window);

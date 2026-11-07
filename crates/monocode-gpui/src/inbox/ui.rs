@@ -1,5 +1,8 @@
 use super::*;
-use crate::popover::{Align, Anchor, popover};
+use crate::{
+    popover::{Align, Anchor, popover},
+    resize_limit::{Axis, LimitGlow, limit_glow},
+};
 use gpui::{
     Animation, AnimationExt, AnyElement, ClipboardItem, CursorStyle, Div, FontWeight, Hsla,
     MouseButton, Pixels, Role, SharedString, Stateful, Window, canvas, div, list, prelude::*, px,
@@ -683,6 +686,9 @@ impl Inbox {
                     .bottom_0()
                     .w(px(6.))
                     .cursor(CursorStyle::ResizeLeftRight)
+                    .when_some(self.limit_glow.clone(), |d, glow| {
+                        d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                    })
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
@@ -2907,8 +2913,15 @@ impl gpui::Render for Inbox {
                 cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
                     if let Some((start, width)) = this.resize_start {
                         let max = (f32::from(window.viewport_size().width) * 0.5).clamp(240., 420.);
-                        this.state.list_width =
-                            (width + f32::from(event.position.x) - start).clamp(240., max);
+                        let wanted = width + f32::from(event.position.x) - start;
+                        let applied = wanted.clamp(240., max);
+                        this.state.list_width = applied;
+                        // Past the limit the handle glows near the pointer.
+                        let along = f32::from(event.position.y);
+                        match &mut this.limit_glow {
+                            Some(glow) => glow.paint(wanted - applied, along),
+                            None => this.limit_glow = Some(LimitGlow::new(wanted - applied, along)),
+                        }
                         cx.notify();
                     }
                 }),
@@ -2917,6 +2930,9 @@ impl gpui::Render for Inbox {
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     if this.resize_start.take().is_some() {
+                        if let Some(glow) = &mut this.limit_glow {
+                            glow.release();
+                        }
                         this.save();
                         cx.notify();
                     }
@@ -2926,6 +2942,9 @@ impl gpui::Render for Inbox {
                 MouseButton::Left,
                 cx.listener(|this, _, _, cx| {
                     if this.resize_start.take().is_some() {
+                        if let Some(glow) = &mut this.limit_glow {
+                            glow.release();
+                        }
                         this.save();
                         cx.notify();
                     }

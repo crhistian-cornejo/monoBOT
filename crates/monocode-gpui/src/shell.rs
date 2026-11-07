@@ -65,6 +65,7 @@ use crate::{
         Align, Anchor, AnchorSlot, Flyout, Menu, MenuAction, MenuEvent, MenuItem, MenuStyle, Side,
         menu_popover, popover,
     },
+    resize_limit::{Axis, LimitGlow, limit_glow},
     resource_pressure::{ResourceMonitor, StopSession},
     response_actions::Transfer,
     right_panel::{PanelEvent, RightPanel},
@@ -501,6 +502,22 @@ enum ResizeTarget {
         span: f32,
     },
 }
+/// The handle a resize-limit glow paints on, so only the strained one lights.
+#[derive(Clone, PartialEq)]
+enum GlowTarget {
+    Sidebar,
+    Projects,
+    RightPanel,
+    /// The panel's second handle, in the title bar.
+    RightPanelTitle,
+    Dock,
+    Sash {
+        tab: i64,
+        path: Vec<usize>,
+        index: usize,
+    },
+    Review(i64),
+}
 /// A pane split into the tree pushes in from its edge while its neighbours
 /// follow; a closed pane's neighbours grow back over its room.
 struct PaneMotion {
@@ -767,9 +784,12 @@ pub(crate) struct Shell {
     tab_scroll: ScrollHandle,
     tab_scroll_task: Option<gpui::Task<()>>,
     resize: Option<(Pixels, f32)>,
+    /// The resize handle straining at its limit, for the accent glow.
+    limit_glow: Option<(GlowTarget, LimitGlow)>,
     pub(crate) git: Entity<crate::git_status::ProjectGit>,
     pub(crate) right_panel: Option<Entity<RightPanel>>,
-    right_resize: Option<(Pixels, f32)>,
+    /// Start x, start width, and whether its handle is the title bar's.
+    right_resize: Option<(Pixels, f32, bool)>,
     /// Either right-panel handle is hovered; both of its hairlines light up.
     right_resize_hovered: bool,
     right_slide: Option<PaneSlide>,
@@ -1142,6 +1162,7 @@ impl Shell {
             tab_scroll: ScrollHandle::new(),
             tab_scroll_task: None,
             resize: None,
+            limit_glow: None,
             git,
             right_panel: None,
             right_resize: None,
@@ -2602,6 +2623,20 @@ impl Shell {
                             .as_ref()
                             .is_some_and(|drag| drag.path == sash.path && drag.index == sash.index),
                     ))
+                    .when_some(
+                        self.limit_glow(&GlowTarget::Sash {
+                            tab,
+                            path: sash.path.clone(),
+                            index: sash.index,
+                        }),
+                        |d, glow| {
+                            d.child(limit_glow(
+                                if row { Axis::X } else { Axis::Y },
+                                glow,
+                                cx.reduce_motion(),
+                            ))
+                        },
+                    )
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
@@ -2850,6 +2885,9 @@ impl Shell {
                         .w(px(12.))
                         .cursor(CursorStyle::ResizeLeftRight)
                         .child(resize_border(true, dragging))
+                        .when_some(self.limit_glow(&GlowTarget::Review(id)), |d, glow| {
+                            d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                        })
                         .on_mouse_down(
                             MouseButton::Left,
                             cx.listener(move |this, _, window, cx| {
@@ -2869,6 +2907,7 @@ impl Shell {
         }
         if event.pressed_button != Some(MouseButton::Left) {
             self.review_drag = false;
+            self.release_limit_glow();
             self.persist(cx);
             return;
         }
@@ -2881,11 +2920,20 @@ impl Shell {
             return;
         };
         let width = bounds.size.width.as_f32().max(1.);
-        let ratio = (1. - (event.position.x - bounds.left()).as_f32() / width).clamp(0.15, 0.85);
+        let wanted = 1. - (event.position.x - bounds.left()).as_f32() / width;
+        let ratio = wanted.clamp(0.15, 0.85);
         review.update(cx, |r, cx| {
             r.state.ratio = ratio;
             cx.notify();
         });
+        if let Some(id) = self.workspace.active {
+            // The sash rides the review's left edge: -x pushes the ratio up.
+            self.strain_resize(
+                GlowTarget::Review(id),
+                (wanted - ratio) * width * -1.,
+                event.position.y.as_f32(),
+            );
+        }
         cx.notify();
     }
     /// The narrowest chat column the active tab would have, with or without
@@ -3267,22 +3315,36 @@ impl Shell {
             self.release_resizes(cx);
             return;
         }
-        let Some(dock) = self.workspace.docks.get(&self.workspace.project) else {
+        let Some(side) = self
+            .workspace
+            .docks
+            .get(&self.workspace.project)
+            .map(|dock| dock.side)
+        else {
             return;
         };
-        let at = if dock.side.vertical() {
+        let at = if side.vertical() {
             event.position.y.as_f32()
         } else {
             event.position.x.as_f32()
         };
         let delta = at - start;
-        let signed = if matches!(dock.side, DockSide::Bottom | DockSide::Right) {
-            -delta
+        let flip = if matches!(side, DockSide::Bottom | DockSide::Right) {
+            -1.
         } else {
-            delta
+            1.
         };
+        let signed = delta * flip;
         let target = ResizeTarget::Dock(self.workspace.project.clone());
-        self.drag_resize(target, size + signed, cx);
+        let wanted = size + signed;
+        if let Some(applied) = self.drag_resize(target, wanted, cx) {
+            let along = if side.vertical() {
+                event.position.x.as_f32()
+            } else {
+                event.position.y.as_f32()
+            };
+            self.strain_resize(GlowTarget::Dock, (wanted - applied) * flip, along);
+        }
     }
     /// App.tsx's dock grid: the project's terminal dock on its side of the
     /// workspace. Opening or closing slides the track while the terminal
@@ -3367,6 +3429,13 @@ impl Shell {
             .aria_label("Resize terminal")
             .absolute()
             .child(resize_border(!vertical, self.dock_resize.is_some()))
+            .when_some(self.limit_glow(&GlowTarget::Dock), |d, glow| {
+                d.child(limit_glow(
+                    if vertical { Axis::Y } else { Axis::X },
+                    glow,
+                    cx.reduce_motion(),
+                ))
+            })
             .map(|d| match dock.side {
                 DockSide::Bottom => d.bottom(px(track - 3.5)).left_0().right_0().h(px(6.)),
                 DockSide::Top => d.top(px(track - 3.5)).left_0().right_0().h(px(6.)),
@@ -3885,7 +3954,8 @@ impl Shell {
             return;
         };
         let g = sash.group;
-        let (at, origin) = if sash.dir == SplitDir::Right {
+        let (dir, tab, index, path) = (sash.dir, sash.tab, sash.index, sash.path.clone());
+        let (at, origin) = if dir == SplitDir::Right {
             let origin = bounds.left().as_f32() + g.x * bounds.size.width.as_f32();
             (event.position.x.as_f32(), origin)
         } else {
@@ -3895,7 +3965,19 @@ impl Shell {
         let ResizeTarget::Sash { span, .. } = target else {
             return;
         };
-        self.drag_resize(target, (at - origin) / span.max(1.), cx);
+        let wanted = (at - origin) / span.max(1.);
+        if let Some(applied) = self.drag_resize(target, wanted, cx) {
+            let along = if dir == SplitDir::Right {
+                event.position.y.as_f32()
+            } else {
+                event.position.x.as_f32()
+            };
+            self.strain_resize(
+                GlowTarget::Sash { tab, path, index },
+                (wanted - applied) * span.max(1.),
+                along,
+            );
+        }
     }
     fn sash_target(&self) -> Option<ResizeTarget> {
         let sash = self.pane_sash.as_ref()?;
@@ -3956,11 +4038,15 @@ impl Shell {
             } => self.workspace.place_sash(*tab, path, *index, value),
         }
     }
-    /// Follows the pointer to `value`, stopping at the target's limits.
-    fn drag_resize(&mut self, target: ResizeTarget, value: f32, cx: &mut Context<Self>) {
-        let Some((_, min, max, _)) = self.resize_extent(&target) else {
-            return;
-        };
+    /// Follows the pointer to `value`, stopping at the target's limits, which
+    /// it returns so the caller can measure the strain past them.
+    fn drag_resize(
+        &mut self,
+        target: ResizeTarget,
+        value: f32,
+        cx: &mut Context<Self>,
+    ) -> Option<f32> {
+        let (_, min, max, _) = self.resize_extent(&target)?;
         let clamped = value.clamp(min, max);
         let to = if matches!(target, ResizeTarget::Sash { .. }) {
             clamped
@@ -3969,6 +4055,27 @@ impl Shell {
         };
         self.set_resize(&target, to);
         cx.notify();
+        Some(to)
+    }
+    /// paintResizeLimit: the dragged handle glows near the pointer, stronger
+    /// the further past its limit it pushes. `overshoot` is in px, signed the
+    /// way the pointer goes; `along` is its place along the handle.
+    fn strain_resize(&mut self, target: GlowTarget, overshoot: f32, along: f32) {
+        match &mut self.limit_glow {
+            Some((held, glow)) if *held == target => glow.paint(overshoot, along),
+            _ => self.limit_glow = Some((target, LimitGlow::new(overshoot, along))),
+        }
+    }
+    /// clearResizeLimit: the strained handle's glow fades out.
+    fn release_limit_glow(&mut self) {
+        if let Some((_, glow)) = &mut self.limit_glow {
+            glow.release();
+        }
+    }
+    /// The glow `target`'s handle paints while it strains or its fade runs.
+    fn limit_glow(&self, target: &GlowTarget) -> Option<LimitGlow> {
+        let (held, glow) = self.limit_glow.as_ref()?;
+        (held == target).then(|| glow.clone())
     }
     /// Ends every resize in progress.
     fn release_resizes(&mut self, cx: &mut Context<Self>) -> bool {
@@ -3980,6 +4087,7 @@ impl Shell {
             self.dock_resize.take().is_some(),
         ]
         .contains(&true);
+        self.release_limit_glow();
         if any {
             self.persist(cx);
             cx.notify();
@@ -4325,6 +4433,7 @@ impl Shell {
             })
         };
         self.resize = None;
+        self.release_limit_glow();
         self.drop_peek();
     }
     fn focus_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -4784,7 +4893,7 @@ impl Shell {
                 ),
             )
             .child(
-                self.right_panel_resize_handle("right-panel-resize", cx)
+                self.right_panel_resize_handle("right-panel-resize", false, cx)
                     .absolute()
                     .top_0()
                     .bottom_0()
@@ -4792,7 +4901,10 @@ impl Shell {
                     .child(resize_border(
                         true,
                         self.right_resize.is_some() || self.right_resize_hovered,
-                    )),
+                    ))
+                    .when_some(self.limit_glow(&GlowTarget::RightPanel), |d, glow| {
+                        d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                    }),
             )
             .into_any_element()
     }
@@ -4800,6 +4912,7 @@ impl Shell {
     fn right_panel_resize_handle(
         &self,
         id: &'static str,
+        title: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Stateful<gpui::Div> {
         div()
@@ -4818,8 +4931,8 @@ impl Shell {
             }))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    this.right_resize = Some((event.position.x, this.right_panel_width()));
+                cx.listener(move |this, event: &MouseDownEvent, _, cx| {
+                    this.right_resize = Some((event.position.x, this.right_panel_width(), title));
                     cx.stop_propagation();
                     cx.notify();
                 }),
@@ -4827,6 +4940,7 @@ impl Shell {
             .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
                 if event.click_count() == 2 {
                     this.right_resize = None;
+                    this.release_limit_glow();
                     this.workspace.right_panel_width = crate::right_panel::WIDTH_DEFAULT;
                     this.persist(cx);
                     cx.notify();
@@ -4868,12 +4982,20 @@ impl Shell {
     }
 
     fn drag_right_panel(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) -> bool {
-        let Some((start, width)) = self.right_resize else {
+        let Some((start, width, title)) = self.right_resize else {
             return false;
         };
         if event.pressed_button == Some(MouseButton::Left) {
-            let width = width - (event.position.x - start).as_f32();
-            self.drag_resize(ResizeTarget::RightPanel, width, cx);
+            let wanted = width - (event.position.x - start).as_f32();
+            if let Some(applied) = self.drag_resize(ResizeTarget::RightPanel, wanted, cx) {
+                let target = if title {
+                    GlowTarget::RightPanelTitle
+                } else {
+                    GlowTarget::RightPanel
+                };
+                // The handle rides the panel's left edge: -x pushes wider.
+                self.strain_resize(target, applied - wanted, event.position.y.as_f32());
+            }
         } else {
             self.release_resizes(cx);
         }
@@ -5126,11 +5248,14 @@ impl Shell {
                 // Keep the rule on its divider even during the opening slide.
                 let offset = self.toggle_room(cx) - (self.right_drawn + 7.);
                 d.child(
-                    self.right_panel_resize_handle("titlebar-right-panel-resize", cx)
+                    self.right_panel_resize_handle("titlebar-right-panel-resize", true, cx)
                         .absolute()
                         .top_0()
                         .bottom_0()
                         .left(px(offset - 2.5))
+                        .when_some(self.limit_glow(&GlowTarget::RightPanelTitle), |d, glow| {
+                            d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                        })
                         .child(
                             div()
                                 .id("project-tabs-separator")
@@ -8858,6 +8983,30 @@ impl Render for Shell {
                 }),
             )
             .on_action(
+                cx.listener(|this, event: &crate::file_editor::OpenPaper, window, cx| {
+                    let cwd = this.git.read(cx).project().to_owned();
+                    this.open_review(
+                        crate::review::ReviewTab::File {
+                            cwd,
+                            path: event.path.clone(),
+                        },
+                        window,
+                        cx,
+                    );
+                    if this.mono_active(cx)
+                        && let Some(owner) = this.workspace.active
+                        && let Some(pane) = this.independent_file_pane(owner, cx)
+                    {
+                        this.open_file_pane(pane, window, cx);
+                    }
+                    if let Some(pane) = this.active_review(cx) {
+                        pane.update(cx, |pane, cx| {
+                            pane.focus_paper(event.page, event.passage.clone(), cx);
+                        });
+                    }
+                }),
+            )
+            .on_action(
                 cx.listener(|this, _: &crate::Quit, window, cx| this.request_quit(window, cx)),
             )
             .on_action(
@@ -9097,6 +9246,7 @@ impl Render for Shell {
                 this.folder_drag = None;
                 this.cancel_pane_drag(cx);
                 this.pane_sash = None;
+                this.release_limit_glow();
                 this.invalidate_chrome(cx);
                 cx.notify();
             }))
@@ -9186,19 +9336,29 @@ impl Render for Shell {
                 this.drag_review(event, cx);
                 if let Some((start, width)) = this.project_resize {
                     if event.pressed_button == Some(MouseButton::Left) {
-                        this.drag_resize(
-                            ResizeTarget::Projects,
-                            width + (event.position.x - start).as_f32(),
-                            cx,
-                        );
+                        let wanted = width + (event.position.x - start).as_f32();
+                        if let Some(applied) = this.drag_resize(ResizeTarget::Projects, wanted, cx)
+                        {
+                            this.strain_resize(
+                                GlowTarget::Projects,
+                                wanted - applied,
+                                event.position.y.as_f32(),
+                            );
+                        }
                     } else {
                         this.release_resizes(cx);
                     }
                 }
                 if let Some((start, width)) = this.resize {
                     if event.pressed_button == Some(MouseButton::Left) {
-                        let width = width + (event.position.x - start).as_f32();
-                        this.drag_resize(ResizeTarget::Sidebar, width, cx);
+                        let wanted = width + (event.position.x - start).as_f32();
+                        if let Some(applied) = this.drag_resize(ResizeTarget::Sidebar, wanted, cx) {
+                            this.strain_resize(
+                                GlowTarget::Sidebar,
+                                wanted - applied,
+                                event.position.y.as_f32(),
+                            );
+                        }
                     } else {
                         this.release_resizes(cx);
                     }
