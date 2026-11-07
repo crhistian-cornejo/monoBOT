@@ -1,0 +1,76 @@
+---
+name: threejs-graphics
+description: Expert three.js graphics — procedural modelling (vehicles, robots, buildings, plants), materials, camera, light, water, clouds, effects. Load it before writing or improving any 3D scene or graphic in code; it says which expert guide to read.
+---
+# 3D graphics with three.js
+
+Expert pack [Threejs-Awesome-Graphics-Agent-Skills](https://github.com/scottstts/Threejs-Awesome-Graphics-Agent-Skills) (MIT, © 2026 Scott Sun; see `NOTICE.md`). Every guide below is a file in this skill's `references/` folder: read only the ones the task needs. What a guide names under `examples/` or `assets/` lives in that upstream repository.
+
+# Three.js Visual Skill Router
+
+Treat the model's Three.js knowledge and official documentation as prerequisites. Load only the expertise that changes the visual result.
+
+This pack goes beyond procedural guidance: its working examples and supporting
+assets contain much of its practical implementation value. When they are
+relevant, give them particular attention.
+
+## Route by the visual system being authored
+
+| Required result | Load |
+| --- | --- |
+| composition of a shot, chase/side/orbit rigs, camera handoffs, projection ownership, pointer look, floating origins | `references/threejs-camera-direction.md` |
+| launch and docking timelines, procedural transform phases, springs, staging, rotating-frame alignment, debris motion | `references/threejs-procedural-animation.md` |
+| reusable scalar/vector fields, domain warping, causal masks, procedural normals | `references/threejs-procedural-fields.md` |
+| simulated paper burning with coupled sheet combustion and pyro fluids, luminescent jellyfish with simulated appendages and layered tissue optics, luminescent butterflies with articulated scale glints and finite wing emitters, atlas-filtered blocks, planetary surfaces, hybrid texture-backed PBR soil/moss with procedural displacement and masks, ground and model moss accumulation, terrain wetness, deformable granular sand with mass-coupled grain shading, simulated tearable denim with implicit yarn mechanics and frayed fibres, woven cloth with GPU XPBD and yarn microstructure, simulated fur with interactive grooming and strand shading, lava/emissive surfaces, reflective wave-optical diffraction gratings, thin-film soap bubbles with Airy interference, raytraced diamond/gem refraction, dispersive glass transmission with internal reflection and volume absorption, deforming softbody jelly materials with XPBD mechanics and refractive caustics, authored frame PBR, specular AA | `references/threejs-procedural-materials.md` |
+| height-field ray marching, silhouette-aware POM, curved relief shells, relief self-shadowing | `references/threejs-parallax-occlusion-mapping.md` |
+| well-crafted and complete hard-surface object assemblies, procedural vehicles and humanoid robots, parameter-curve section tracks, tilted shell and spine lofts, pillow panels, exact polygon cuts, UV-owned apertures, spanwise airfoil lofts, sculpted rails/frames, branch rings, fin lofts, profile extrusion, inset, revolve, sweep, solidify, bevels and fillets, shell thickness, direct-topology apertures, semantic mesh writers, material slots and groups, primitive-built forms, coplanar flicker, loose/non-manifold geometry, detached parts, interpenetration, support, clearance and swept-envelope defects | `references/threejs-procedural-geometry.md` |
+| trees, surface-following ivy, painted vines, stylized grass, GPU-computed grass, GPU-culled virtual flower fields, distance-tiered plant geometry, roots, foliage, rooted wind deformation | `references/threejs-procedural-vegetation.md` |
+| buildings, façade grammars, profiles, ornaments, modular mesh writers | `references/threejs-procedural-architecture.md` |
+| planets, terrain, craters, biome fields, coastlines, spherical detail | `references/threejs-procedural-planets.md` |
+| sky scattering, planetary shells, depth-based aerial perspective | `references/threejs-atmosphere-aerial-perspective.md` |
+| weather-driven raymarched clouds and cloud shadows | `references/threejs-volumetric-clouds.md` |
+| FFT oceans, coastal breaker transitions, finite-volume shallow-water beach waves, signed-distance coastlines, shallow-water swash chains, wet sand, rock-impact spray, stylized above/below ocean optics, submerged Snell windows, total internal reflection, forward-refracted structures, pixel-footprint spectral LOD, aquatic perspective, caustic god rays, spectral cascades, choppy derivatives, Jacobian whitecaps | `references/threejs-spectral-ocean.md` |
+| luminescent shallow-water rivers with coupled flow, bioluminescent excitation, advected foam and RGB caustics, photoreal shallow water with gravity-capillary FFT waves, dispersive caustics and diffraction glare, authored analytic waves, bounded heightfield pools, object ripples, differential-area caustics, ray-traced pool volume optics, shared normals, heuristic refraction, fallback absorption, crest foam | `references/threejs-water-optics.md` |
+| falling snow, snow accumulation, model snow caps, wet asphalt puddles, procedural ripple normals, splash flipbooks, rain streaks, shared weather envelopes, surface wetness | `references/threejs-precipitation-surfaces.md` |
+| curved-ray black holes, accretion disks, wormholes and throat transits, null-geodesic integration, lensed celestial spheres and star fields | `references/threejs-raymarched-space-effects.md` |
+| filmic HDR lens-flare compositors, highlight-derived radial ghosts, field-angle pupil deformation, spectral pupil rings, localized glare and bloom, raymarched aurora curtains, finite-footprint emissive slabs, uniform volume integration, equirectangular radiance probes, WebGPU voxel fire and smoke, volumetric fluid fields, mesh-surface emitters, SDF fire collisions, particles, trails, plasma, shockwaves, holographic projections, Fresnel rim shells, scanline banding, layered event effects | `references/threejs-procedural-vfx.md` |
+| accumulated screen frost, touch clearing, wet-window rain, view-aligned droplet refraction and blur | `references/threejs-temporal-surfaces.md` |
+| stable large-world shadows, cascades, clipmaps, cached updates | `references/threejs-shadow-systems.md` |
+| GTAO, bent normals, bilateral reconstruction | `references/threejs-screen-space-ambient-occlusion.md` |
+| HDR bloom and selective emission contribution | `references/threejs-bloom.md` |
+| eye adaptation, tone mapping, LUT grading, output color | `references/threejs-exposure-color-grading.md` |
+| depth/normal/velocity shared ownership and multi-pass ordering | `references/threejs-image-pipeline.md` |
+| fixed-view diagnostics, seed sweeps, temporal and budget evidence | `references/threejs-visual-validation.md` |
+
+## Execution order
+
+For a new procedural scene:
+
+1. Define a visual contract: subject, scale, camera distance, motion, and target frame budget.
+2. Load `references/threejs-camera-direction.md` when framing, lens, camera frame, or mode transitions affect the target.
+3. Load the subject-generation skill.
+4. Add `references/threejs-procedural-animation.md` when object motion requires authored phases, moving frames, or spring convergence.
+5. Add `references/threejs-procedural-fields.md` when multiple visual channels must share coherent structure.
+6. Add lighting/shadows and atmosphere only after silhouette and material masks read without effects.
+7. Add `references/threejs-image-pipeline.md` last.
+8. Load only the atomic image effects actually needed.
+9. Use `references/threejs-visual-validation.md` for a deterministic evidence set.
+
+## Routing constraints
+
+- Do not load a skill for API setup alone. Inspect the installed Three.js version and use official docs.
+- Do not route “make it beautiful” directly to post-processing. Find the missing authored system.
+- Prefer one strong, inspectable visual rule over several independent noise layers.
+- When adapting a supplied reference, preserve the mechanism that creates its character. Do not reduce it to a generic effect category.
+- Keep object-space, world-space, and screen-space systems separate unless the composition explicitly requires coupling.
+- If no retained skill matches, state that the pack lacks expert coverage for that system. Do not stretch the nearest skill to cover it.
+
+## Acceptance gate
+
+A routed task is incomplete until the implementation exposes:
+
+- deterministic seed or reproducible inputs;
+- visual debug modes for its controlling fields;
+- parameters grouped by perceptual role;
+- an intentional mechanism-backed quality or resolution tier when the system defines one;
+- a no-post baseline that still reads.

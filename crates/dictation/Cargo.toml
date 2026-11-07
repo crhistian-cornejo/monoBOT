@@ -1,0 +1,22 @@
+[package]
+name = "monobot-dictation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Local speech-to-text for MonoBOT's composer: the microphone, voice activity (Silero) and Parakeet v3 through sherpa-onnx."
+
+[dependencies]
+# Pinned with the model files below; the same release Echo ships.
+sherpa-onnx = "=1.13.8"
+cpal = "=0.17.3"
+sha2 = "0.10"
+# The same client src-tauri already uses for downloads.
+ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
+# Parakeet's second source, a .tar.bz2 on GitHub, as Echo unpacks it.
+tar = { version = "0.4", default-features = false }
+bzip2 = "0.4"
+# The app's HTTPS settings: Windows' own certificate store, as Echo does.
+monobot-http = { path = "../http" }
+thiserror.workspace = true
+serde.workspace = true
+

@@ -1,0 +1,15 @@
+[package]
+name = "monobot-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "MonoBOT's HTTPS client settings: one place that decides which certificate authorities the app trusts."
+
+[dependencies]
+ureq = { version = "2.12.1", default-features = false, features = ["tls"] }
+
+[target.'cfg(windows)'.dependencies]
+# Windows checks certificates against its own store, as Echo does: a company
+# network that inspects traffic signs with an authority only that store has.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-platform-verifier = "0.7"

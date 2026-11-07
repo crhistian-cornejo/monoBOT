@@ -1,0 +1,18 @@
+{
+  "name": "monobot",
+  "private": true,
+  "version": "0.16.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run scripts/dev-native.mjs",
+    "build": "bun run scripts/build-native.mjs",
+    "test": "node scripts/native-cargo.mjs test --locked -p monocode-core --profile native-dev && node scripts/native-cargo.mjs test --locked -p monocode-gpui --profile native-dev -- --test-threads=1",
+    "test:scripts": "node --test scripts/dev-native.test.mjs scripts/bundle-native-macos.test.mjs scripts/native-dependencies.test.mjs scripts/native-release.test.mjs scripts/package-native.test.mjs scripts/native-sherpa.test.mjs",
+    "check": "bun run test:scripts && cargo fmt --all --check && node scripts/native-cargo.mjs clippy --locked -p monocode-core -p monocode-gpui --all-targets --profile native-dev -- -D warnings",
+    "set-version": "node scripts/bump-version.mjs",
+    "mobile:install": "cd mobile && bun install",
+    "mobile:dev": "cd mobile && bun run start",
+    "mobile:ios": "cd mobile && bun run ios",
+    "mobile:android": "cd mobile && bun run android"
+  }
+}
