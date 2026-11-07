@@ -37,6 +37,7 @@ approval for every edit. Native Supervised mode does not add that guarantee.
 | Chat | Live attachment/steering/rewind checks, complete keyboard selection and screen-reader navigation, richer nested task artifacts and provider-specific task controls |
 | History and workspace | Transcript/database paging, cache runtime checks, remaining desktop layout consumers, explicit import/export |
 | Files and Git | Platform visual/IME checks, Linux/Windows media hosting, non-Git checkpoints, per-file checkpoint Undo/Keep and orchestration checkpoint integration |
+| Papers and PDF | The PDF page rasterizer is Windows-only (`file_editor/pdf.rs` renders with `Windows.Data.Pdf`). Detection by `%PDF-` signature, per-page text extraction, the shared paper cache, the `papers.*` app actions and citation passage matching are platform-neutral. On macOS and Linux the viewer shows the extracted-text view and offers "Open externally"; there is no page image and `papers.figure` fails with a platform error. Citation focus selects the quoted text in the text view — the rendered page has no x/y highlight yet. A macOS renderer (PDFKit/Quartz) and a Linux one (pdfium/poppler) are still needed, plus real-PDF visual checks on Windows |
 | Accounts and settings | Live OAuth/MCP authentication checks and remaining platform-specific settings behavior |
 | Inbox | Runtime/visual checks, inline video, linked-update notices and richer CI evidence/repair progress |
 | Notes | Runtime/visual checks and composer note-card presentation |
