@@ -13,7 +13,7 @@ fn accent(alpha: f32) -> gpui::Hsla {
     crate::theme::accent_color().opacity(alpha)
 }
 
-pub(super) struct PdfEvent(pub String);
+pub(crate) struct PdfEvent(pub String);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct SearchMatch {
@@ -22,7 +22,7 @@ struct SearchMatch {
     span_range: Option<RangeInclusive<usize>>,
 }
 
-pub(super) struct PdfView {
+pub(crate) struct PdfView {
     path: String,
     bytes: Arc<[u8]>,
     page: usize,
@@ -38,6 +38,7 @@ pub(super) struct PdfView {
     viewport_size: Rc<Cell<(f32, f32)>>,
     /// 1.0 fits the whole page in the view; larger scrolls.
     zoom: f32,
+    pinch: f32,
     /// The width the shown bitmap was drawn at.
     drawn_width: f64,
     page_bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -60,7 +61,7 @@ pub(super) struct PdfView {
 impl EventEmitter<PdfEvent> for PdfView {}
 
 impl PdfView {
-    pub(super) fn new(path: String, bytes: Vec<u8>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(path: String, bytes: Vec<u8>, cx: &mut Context<Self>) -> Self {
         cx.on_release(|this, cx| {
             if let Some(image) = this.image.take() {
                 cx.drop_image(image, None);
@@ -99,6 +100,7 @@ impl PdfView {
             drag_anchor: None,
             viewport_size: Rc::new(Cell::new((0.0, 0.0))),
             zoom: 1.0,
+            pinch: 0.0,
             drawn_width: PAGE_WIDTH,
             page_bounds: Rc::new(Cell::new(None)),
             error: None,
@@ -217,7 +219,7 @@ impl PdfView {
         ))
     }
 
-    pub(super) fn focus_passage(
+    pub(crate) fn focus_passage(
         &mut self,
         page: usize,
         passage: Option<String>,
@@ -622,6 +624,17 @@ impl PdfView {
         self.set_zoom(ZOOM_STEPS[next], cx);
     }
 
+    /// A trackpad pinch arrives as many small deltas; a step fires once they
+    /// add up, so one pinch is one zoom step and not a render per event.
+    fn pinch_zoom(&mut self, delta: f32, cx: &mut Context<Self>) {
+        self.pinch += delta;
+        if self.pinch.abs() >= 0.12 {
+            let up = self.pinch > 0.0;
+            self.pinch = 0.0;
+            self.step_zoom(up, cx);
+        }
+    }
+
     fn set_zoom(&mut self, zoom: f32, cx: &mut Context<Self>) {
         if (zoom - self.zoom).abs() < 0.001 {
             return;
@@ -685,6 +698,8 @@ impl Render for PdfView {
         .size_full();
 
         let (avail_w, avail_h) = self.viewport_size.get();
+        // A Mono's side panel is narrow: the toolbar keeps to short labels.
+        let compact = avail_w > 0.0 && avail_w < 520.0;
         let avail_w = (avail_w - 24.0).max(240.0);
         let avail_h = (avail_h - 24.0).max(320.0);
         let ratio = self.aspect_ratio.clamp(0.2, 5.0);
@@ -695,6 +710,9 @@ impl Render for PdfView {
         };
         let (surface_w, surface_h) = (fit_w * self.zoom, fit_h * self.zoom);
         let zoom_label = format!("{}%", (self.zoom * 100.0).round() as u32);
+        let (viewport_w, viewport_h) = self.viewport_size.get();
+        let wrap_w = viewport_w.max(surface_w + 24.0);
+        let wrap_h = viewport_h.max(surface_h + 24.0);
 
         div()
             .size_full()
@@ -705,6 +723,8 @@ impl Render for PdfView {
                 div()
                     .h(px(32.))
                     .flex_shrink_0()
+                    .min_w_0()
+                    .overflow_hidden()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -721,7 +741,7 @@ impl Render for PdfView {
                             .px_2()
                             .rounded_md()
                             .hover(|s| s.bg(content(0.1)))
-                            .child("Previous")
+                            .child(if compact { "‹" } else { "Previous" })
                             .on_click(cx.listener(|this, _, _, cx| this.navigate(false, cx))),
                     )
                     .child(if self.pages == 0 {
@@ -737,7 +757,7 @@ impl Render for PdfView {
                             .px_2()
                             .rounded_md()
                             .hover(|s| s.bg(content(0.1)))
-                            .child("Next")
+                            .child(if compact { "›" } else { "Next" })
                             .on_click(cx.listener(|this, _, _, cx| this.navigate(true, cx))),
                     )
                     .child(
@@ -752,19 +772,68 @@ impl Render for PdfView {
                             .px_2()
                             .rounded_md()
                             .hover(|s| s.bg(content(0.1)))
-                            .child(if self.text_mode {
-                                "Show page"
-                            } else {
-                                "Show text"
+                            .child(match (self.text_mode, compact) {
+                                (true, true) => "Page",
+                                (true, false) => "Show page",
+                                (false, true) => "Text",
+                                (false, false) => "Show text",
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.text_mode = !this.text_mode;
                                 cx.notify();
                             })),
                     )
+                    .when(!self.text_mode, |d| {
+                        d.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .child(
+                                    div()
+                                        .id("pdf-zoom-out")
+                                        .role(Role::Button)
+                                        .aria_label("Zoom out")
+                                        .px_1p5()
+                                        .rounded_md()
+                                        .hover(|s| s.bg(content(0.1)))
+                                        .child("−")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.step_zoom(false, cx)),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("pdf-zoom-fit")
+                                        .role(Role::Button)
+                                        .aria_label("Fit page")
+                                        .min_w(px(40.))
+                                        .flex()
+                                        .justify_center()
+                                        .rounded_md()
+                                        .hover(|s| s.bg(content(0.1)))
+                                        .child(zoom_label)
+                                        .on_click(cx.listener(|this, _, _, cx| this.set_zoom(1.0, cx))),
+                                )
+                                .child(
+                                    div()
+                                        .id("pdf-zoom-in")
+                                        .role(Role::Button)
+                                        .aria_label("Zoom in")
+                                        .px_1p5()
+                                        .rounded_md()
+                                        .hover(|s| s.bg(content(0.1)))
+                                        .child("+")
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.step_zoom(true, cx)),
+                                        ),
+                                ),
+                        )
+                    })
                     .child(
                         div()
-                            .w(px(160.))
+                            .flex_1()
+                            .min_w(px(56.))
+                            .max_w(px(160.))
                             .h(px(22.))
                             .px_2()
                             .rounded_md()
@@ -883,8 +952,39 @@ impl Render for PdfView {
                                 .copied();
                             d.child(
                                 div()
+                                    .id("pdf-scroll")
+                                    .absolute()
+                                    .size_full()
+                                    .overflow_scroll()
+                                    .on_scroll_wheel(cx.listener(
+                                        |this, event: &gpui::ScrollWheelEvent, window, cx| {
+                                            if event.modifiers.secondary() {
+                                                let dy = event.delta.pixel_delta(px(16.)).y.as_f32();
+                                                if dy != 0.0 {
+                                                    this.step_zoom(dy > 0.0, cx);
+                                                }
+                                                window.prevent_default();
+                                                cx.stop_propagation();
+                                            }
+                                        },
+                                    ))
+                                    .on_pinch(cx.listener(
+                                        |this, event: &gpui::PinchEvent, _, cx| {
+                                            this.pinch_zoom(event.delta, cx);
+                                        },
+                                    ))
+                                    .child(
+                                        div()
+                                            .w(px(wrap_w))
+                                            .h(px(wrap_h))
+                                            .flex()
+                                            .items_center()
+                                            .justify_center()
+                                            .child(
+                                div()
                                     .id("pdf-page-surface")
                                     .debug_selector(|| "pdf-page-surface".into())
+                                    .flex_shrink_0()
                                     .relative()
                                     .w(px(surface_w))
                                     .h(px(surface_h))
@@ -1006,6 +1106,8 @@ impl Render for PdfView {
                                                     })),
                                             )
                                         },
+                                    ),
+                            ),
                                     ),
                             )
                         },
@@ -1830,7 +1932,13 @@ mod tests {
             let (_, png) = render(&pdf, 0).unwrap();
             let image = image::load_from_memory(&png).unwrap().to_rgba8();
             let (w, h) = image.dimensions();
-            for (x, y) in [(2, 2), (w - 3, 2), (2, h - 3), (w - 3, h - 3), (w / 2, h / 2)] {
+            for (x, y) in [
+                (2, 2),
+                (w - 3, 2),
+                (2, h - 3),
+                (w - 3, h - 3),
+                (w / 2, h / 2),
+            ] {
                 let pixel = image.get_pixel(x, y).0;
                 assert!(pixel[0] < 40, "({x}, {y}) is {pixel:?}, not page ink");
             }
@@ -1927,6 +2035,38 @@ mod tests {
                 assert_eq!(view.search_matches.len(), 1);
                 assert_eq!(view.page, 1);
                 assert!(!view.search_rects.is_empty());
+            })
+            .unwrap();
+    }
+    #[gpui::test]
+    fn zoom_steps_redraw_wider_only_past_fit_and_fit_resets(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|cx| PdfView::new("study.pdf".into(), two_page_text_pdf(), cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |view, _, cx| {
+                assert_eq!(view.zoom, 1.0);
+                view.step_zoom(false, cx);
+                assert_eq!(view.zoom, 0.75);
+                assert_eq!(view.drawn_width, PAGE_WIDTH, "smaller never redraws");
+                view.step_zoom(true, cx);
+                view.step_zoom(true, cx);
+                view.step_zoom(true, cx);
+                assert_eq!(view.zoom, 1.5);
+                assert_eq!(view.drawn_width, PAGE_WIDTH * 1.5);
+                view.pinch_zoom(0.05, cx);
+                assert_eq!(view.zoom, 1.5, "a small pinch waits for more");
+                view.pinch_zoom(0.1, cx);
+                assert_eq!(view.zoom, 2.0);
+                view.set_zoom(1.0, cx);
+                assert_eq!(view.drawn_width, PAGE_WIDTH);
+                for _ in 0..20 {
+                    view.step_zoom(true, cx);
+                }
+                assert_eq!(view.zoom, 4.0);
             })
             .unwrap();
     }

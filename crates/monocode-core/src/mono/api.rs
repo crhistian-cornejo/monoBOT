@@ -21,6 +21,8 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "chat.card"=>"type repo number note sessionId options name instructions schedule",
         "mail.list"=>"view query unread limit","mail.read"=>"id maxChars","mail.draft"=>"id text",
         "mail.search"=>"query account limit oldestFirst","mail.connect"=>"address provider name shared",
+        "calendar.list"=>"start end",
+        "calendar.create"=>"title start end timezone description",
         // The agents' own actions (agentApp.ts): bots, tools, other agents, wakes and names.
         "bots.list"|"tools.read"|"agents.list"|"group.members"=>"",
         "bots.create"=>"name role specialty instructions services skills access connectors",
@@ -174,6 +176,8 @@ mod tests {
     use serde_json::json;
     #[test]
     fn validates_before_mutation() {
+        assert!(validate("calendar.list", &json!({"start":"2026-11-07T00:00:00Z","end":"2026-11-08T00:00:00Z"})).is_ok());
+        assert!(validate("calendar.create", &json!({"title":"Review","start":"now","end":"later","attendees":["a@example.com"]})).is_err());
         assert!(validate("sessions.start", &json!({"prompt":"x","draft":"false"})).is_err());
         assert!(validate("sessions.delete", &json!({"sessionId":1,"force":true})).is_err());
         assert!(validate("sessions.start", &json!({"runtimeMode":"unsafe"})).is_err());

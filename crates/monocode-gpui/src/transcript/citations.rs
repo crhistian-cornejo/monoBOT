@@ -4,24 +4,6 @@
 use super::*;
 use monocode_core::citations::{self, Source};
 
-/// The letter a site shows in place of its icon (CitationMonogram).
-fn monogram(host: &str, size: f32) -> gpui::Div {
-    div()
-        .size(px(size))
-        .flex_shrink_0()
-        .rounded_full()
-        .bg(content(0.12))
-        .border_1()
-        .border_color(background_base())
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(size * 0.5))
-        .font_weight(gpui::FontWeight::MEDIUM)
-        .text_color(content(0.7))
-        .child(citations::monogram(host))
-}
-
 impl TranscriptView {
     /// The toggle and, once opened, the list; none when the reply cites nothing.
     pub(super) fn citation_sources(
@@ -35,6 +17,24 @@ impl TranscriptView {
             return None;
         }
         let open = self.sources_open.contains(&turn);
+        let stack: Vec<_> = sources
+            .iter()
+            .take(citations::STACK_MONOGRAMS)
+            .enumerate()
+            .map(|(ix, source)| {
+                div()
+                    .when(ix > 0, |d| d.ml(px(-4.)))
+                    .child(crate::site_icons::badge(&source.host, &source.url, 20., cx))
+            })
+            .collect();
+        let rows: Vec<_> = if open {
+            sources
+                .iter()
+                .map(|source| crate::site_icons::badge(&source.host, &source.url, 16., cx))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let toggle = div()
             .id(("citation-sources", turn))
             .debug_selector(|| "citation-sources".into())
@@ -51,17 +51,7 @@ impl TranscriptView {
             .text_size(px(12.))
             .text_color(content(0.7))
             .hover(|s| s.bg(content(0.08)))
-            .child(
-                div().flex().children(
-                    sources
-                        .iter()
-                        .take(citations::STACK_MONOGRAMS)
-                        .enumerate()
-                        .map(|(ix, source)| {
-                            monogram(&source.host, 20.).when(ix > 0, |d| d.ml(px(-4.)))
-                        }),
-                ),
-            )
+            .child(div().flex().children(stack))
             .child(citations::sources_label(sources.len()))
             .child(
                 icon("chevron-down", 14.)
@@ -85,7 +75,7 @@ impl TranscriptView {
                 .child(toggle)
                 .when(open, |d| {
                     d.child(div().w_full().pt_2().flex().flex_col().gap_1().children(
-                        sources.into_iter().map(|source| {
+                        sources.into_iter().zip(rows).map(|(source, site)| {
                             let url = source.url.clone();
                             let passage = source.snippet.clone();
                             div()
@@ -113,7 +103,7 @@ impl TranscriptView {
                                         .text_color(content(0.4))
                                         .child(source.number.to_string()),
                                 )
-                                .child(monogram(&source.host, 16.))
+                                .child(site)
                                 .child(div().flex_1().min_w_0().truncate().child(source.title))
                                 .child(
                                     div()

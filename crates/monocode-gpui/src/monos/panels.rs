@@ -53,6 +53,8 @@ pub(super) enum Route {
     Review,
     Session(i64),
     Document(String),
+    /// A cached paper's PDF, by file path.
+    Paper(String),
     Habit(String),
     NewHabit,
 }
@@ -62,6 +64,7 @@ impl Route {
             Self::Review => "review".into(),
             Self::Session(id) => format!("session:{id}"),
             Self::Document(id) => format!("document:{id}"),
+            Self::Paper(path) => format!("paper:{path}"),
             Self::Habit(id) => format!("habit:{id}"),
             Self::NewHabit => "new-habit".into(),
         }
@@ -400,7 +403,7 @@ pub(super) fn empty_state(glyph: &'static str, message: &str) -> AnyElement {
         )
         .into_any_element()
 }
-fn empty(message: &str) -> AnyElement {
+pub(super) fn empty(message: &str) -> AnyElement {
     div()
         .px_5()
         .py_8()
@@ -1587,6 +1590,7 @@ impl Monos {
                     .child(div().flex_1().min_h_0().child(view))
                     .into_any_element()
             }
+            Route::Paper(path) => self.paper_page(&path, cx),
             Route::Habit(id) => self.habit_page(mono, Some(&id), window, cx),
             Route::NewHabit => self.habit_page(mono, None, window, cx),
         }
@@ -1597,7 +1601,9 @@ impl Monos {
         };
         // Response actions number turns across every loaded page.
         let source = chat.read(cx).transcript.read(cx).history_rows();
-        let Some(start) = self.activity_turn.filter(|i| *i < source.len()) else {
+        // Until a message's activity is picked, follow the latest turn.
+        let latest = source.iter().rposition(|r| r.is_prompt() && r.first);
+        let Some(start) = self.activity_turn.filter(|i| *i < source.len()).or(latest) else {
             return empty_state(
                 "list-bullet",
                 &format!(
@@ -1613,24 +1619,70 @@ impl Monos {
             .find(|(_, r)| r.is_prompt() && r.first)
             .map(|(i, _)| i)
             .unwrap_or(source.len());
-        let rows = source[start..end]
+        let live = end == source.len() && chat.read(cx).mono_status() == "working";
+        let turn = &source[start..end];
+        let rows = turn
             .iter()
             .filter(|r| matches!(r.role.as_str(), "tool" | "reasoning"))
             .cloned()
             .collect::<Vec<_>>();
         if rows.is_empty() {
-            return empty_state("list-bullet", "No activity in this turn yet.");
+            return empty_state(
+                "list-bullet",
+                if live {
+                    "Working…"
+                } else {
+                    "No activity in this turn yet."
+                },
+            );
         }
-        let key = mono::files::content_hash(&format!("{rows:?}"));
-        if self.activity.as_ref().is_none_or(|(old, _)| old != &key) {
+        let key = mono::files::content_hash(&format!("{turn:?}"));
+        if self.activity.as_ref().is_none_or(|(old, _, _)| old != &key) {
+            let research = monocode_core::research::turn_research(turn);
             self.activity = Some((
                 key,
                 cx.new(|cx| crate::transcript::TranscriptView::activity(rows, cx)),
+                research,
             ));
         }
+        let (_, trail, research) = self.activity.clone().unwrap();
+        let section = self.research_section(&research, cx);
         div()
             .size_full()
-            .child(self.activity.as_ref().unwrap().1.clone())
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .px_3()
+                    .pt_2()
+                    .pb_2()
+                    .text_size(px(11.))
+                    .text_color(content(0.45))
+                    .child(
+                        div()
+                            .size(px(6.))
+                            .flex_shrink_0()
+                            .rounded_full()
+                            .bg(if live {
+                                rgb(mono.color).into()
+                            } else {
+                                content(0.3)
+                            }),
+                    )
+                    .child(div().text_color(content(0.7)).child(if live {
+                        "Working"
+                    } else {
+                        "Finished"
+                    })),
+            )
+            .when_some(section, |d, section| {
+                d.child(div().flex_shrink_0().child(section))
+            })
+            .child(div().flex_1().min_h_0().child(trail))
             .into_any_element()
     }
     pub(super) fn settings_modal(

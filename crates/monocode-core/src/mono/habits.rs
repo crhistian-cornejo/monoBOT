@@ -10,6 +10,8 @@ pub const RUNS_KEPT: usize = 20;
 /// Longest report kept with a run.
 pub const REPORT_KEPT_CHARS: usize = 4000;
 pub const GRACE_MS: u64 = 2 * 60 * 60 * 1000;
+/// Hourly habits skip missed runs after 15 minutes instead of catching up later.
+pub const HOURLY_GRACE_MS: u64 = 15 * 60 * 1000;
 pub const TIMEOUT_MS: u64 = 60 * 60 * 1000;
 pub const APPROVAL_WAIT_MS: u64 = 12 * 60 * 60 * 1000;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -267,11 +269,19 @@ impl Habit {
         }
         Ok(())
     }
+    pub fn grace_ms(&self) -> u64 {
+        if self.schedule.schedule_kind == "hourly" {
+            HOURLY_GRACE_MS
+        } else {
+            GRACE_MS
+        }
+    }
     /// Moves a habit that came due longer ago than the grace period (the app
     /// was closed) on to its next time instead of catching up. A missed wake
     /// has no next time, so it is switched off.
     pub fn skip_missed(&mut self, now: u64) -> Result<(), String> {
-        if self.enabled && self.next_run_at < now && now - self.next_run_at > GRACE_MS {
+        let grace = self.grace_ms();
+        if self.enabled && self.next_run_at < now && now - self.next_run_at > grace {
             if self.once {
                 if !self.run_requested {
                     self.enabled = false;
@@ -283,9 +293,10 @@ impl Habit {
         Ok(())
     }
     pub fn due(&self, now: u64) -> bool {
+        let grace = self.grace_ms();
         self.running_since.is_none()
             && (self.run_requested
-                || self.enabled && self.next_run_at <= now && now - self.next_run_at <= GRACE_MS)
+                || self.enabled && self.next_run_at <= now && now - self.next_run_at <= grace)
     }
     pub fn finish(&mut self, run: Run) -> Result<(), String> {
         self.last_run_at = Some(run.at);
@@ -401,5 +412,24 @@ mod tests {
         let habits = parse(Some(text)).unwrap();
         assert_eq!(habits.len(), 1);
         assert!(habits[0].runs.is_empty());
+    }
+
+    #[test]
+    fn hourly_habits_use_shorter_grace_period_to_skip_missed_runs_after_sleep() {
+        let text = r#"[{"id":"desktop","name":"Hourly Audit","instructions":"Check inbox",
+            "schedule":{"scheduleKind":"hourly","minute":0},"runs":[]}]"#;
+        let mut habit = parse(Some(text)).unwrap().remove(0);
+        assert_eq!(habit.grace_ms(), HOURLY_GRACE_MS);
+
+        let scheduled_time = 1_000_000_000;
+        habit.next_run_at = scheduled_time;
+
+        // Within 15 minutes (HOURLY_GRACE_MS), it is due
+        assert!(habit.due(scheduled_time + 10 * 60 * 1000));
+
+        // After 20 minutes (e.g. computer was asleep), it is not due and skips missed
+        assert!(!habit.due(scheduled_time + 20 * 60 * 1000));
+        habit.skip_missed(scheduled_time + 20 * 60 * 1000).unwrap();
+        assert!(habit.next_run_at > scheduled_time);
     }
 }

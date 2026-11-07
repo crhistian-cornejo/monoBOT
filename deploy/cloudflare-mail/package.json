@@ -1,0 +1,18 @@
+{
+  "name": "monobot-cloudflare-mail",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Optional Cloudflare Email Routing inbound Worker for MonoBOT (D1 index + R2 raw MIME, pull API).",
+  "scripts": {
+    "test": "node --test \"test/*.test.ts\"",
+    "typecheck": "tsc -p tsconfig.json",
+    "check": "npm run typecheck && npm test",
+    "deploy": "wrangler deploy --config wrangler.toml"
+  },
+  "devDependencies": {
+    "@types/node": "^26.0.0",
+    "typescript": "^5.8.3",
+    "wrangler": "^4.0.0"
+  }
+}

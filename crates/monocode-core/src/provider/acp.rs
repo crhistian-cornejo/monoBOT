@@ -458,7 +458,10 @@ impl Protocol {
                 self.acp.spent_effort = spent;
                 model
             } else {
-                model.clone()
+                model
+                    .strip_prefix(&format!("{}:", kind.id()))
+                    .unwrap_or(model)
+                    .to_string()
             }
         });
         if let Some(model) = selected_model

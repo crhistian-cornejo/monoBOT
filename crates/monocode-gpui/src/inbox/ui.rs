@@ -357,6 +357,8 @@ impl Inbox {
     /// width instead of sharing the row's.
     fn source_tabs(&self, cx: &mut Context<Self>) -> AnyElement {
         let email = self.state.email_open;
+        let agenda = self.agenda_open;
+        let spread = email || agenda;
         let connected = model::PROVIDERS
             .into_iter()
             .filter(|provider| {
@@ -379,7 +381,7 @@ impl Inbox {
                 .rounded(px(6.))
                 .text_size(px(12.))
                 .map(|d| {
-                    if email {
+                    if spread {
                         d.flex_none().px(px(12.))
                     } else {
                         d.flex_1().min_w_0().px(px(8.))
@@ -398,7 +400,7 @@ impl Inbox {
             .border_color(content(0.07))
             .children(connected.iter().map(|provider| {
                 let source = provider.to_string();
-                let selected = !email && self.state.source == *provider;
+                let selected = !spread && self.state.source == *provider;
                 tab(
                     SharedString::from(format!("inbox-source-{provider}")),
                     model::provider_label(provider),
@@ -427,6 +429,26 @@ impl Inbox {
                     .on_click(cx.listener(|this, _, _, cx| this.set_email_open(true, cx))),
             )
             .child(
+                // Icon-only beside the providers, so the rail keeps its room; the label comes
+                // back once it is the open tab or there is nothing else on the rail.
+                tab("inbox-source-agenda".into(), "Agenda")
+                    .text_color(content(if agenda { 1. } else { 0.5 }))
+                    .when(agenda, |d| d.bg(content(0.1)))
+                    .when(!agenda, |d| {
+                        d.hover(|s| s.bg(content(0.05)).text_color(content(1.)))
+                    })
+                    .when(!agenda && !connected.is_empty(), |d| {
+                        d.flex_none().w(px(32.)).px(px(0.))
+                    })
+                    .child(
+                        icon("clock", 14.).text_color(content(if agenda { 1. } else { 0.5 })),
+                    )
+                    .when(agenda || connected.is_empty(), |d| {
+                        d.child(div().truncate().child("Agenda"))
+                    })
+                    .on_click(cx.listener(|this, _, _, cx| this.set_agenda_open(true, cx))),
+            )
+            .child(
                 tab("inbox-add-connection".into(), "Add connection")
                     .role(Role::Button)
                     .relative()
@@ -434,7 +456,7 @@ impl Inbox {
                     .hover(|s| s.bg(content(0.05)))
                     .child(self.connection_anchor.probe())
                     .child(icon("plus", 14.))
-                    .when(connected.len() < 2 && !email, |d| {
+                    .when(connected.len() < 2 && !spread, |d| {
                         d.child(div().truncate().child("Add connection"))
                     })
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -2874,6 +2896,22 @@ impl gpui::Render for Inbox {
                         .min_w_0()
                         .child(self.mailbox.clone()),
                 )
+        } else if self.agenda_open {
+            div()
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(self.source_tabs(cx))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .min_w_0()
+                        .child(self.agenda.clone()),
+                )
         } else {
             let list = self.list_view(cx);
             let detail = self.detail_view(window, cx);
@@ -2903,6 +2941,9 @@ impl gpui::Render for Inbox {
                         this.confirm_action = None;
                     } else if this.state.email_open
                         && this.mailbox.update(cx, |mailbox, cx| mailbox.escape(cx))
+                    {
+                    } else if this.agenda_open
+                        && this.agenda.update(cx, |agenda, cx| agenda.escape(cx))
                     {
                     } else if this.filters_open
                         || this.connections_open

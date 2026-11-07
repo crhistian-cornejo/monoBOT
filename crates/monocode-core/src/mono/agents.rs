@@ -822,7 +822,7 @@ mod tests {
 
     #[test]
     fn tool_labels_match_the_web_build() {
-        let source = include_str!("../../../tests/fixtures/parity/bots.ts");
+        let source = include_str!("../../tests/fixtures/parity/bots.ts");
         for service in bot_tools::SERVICES {
             let (label, does) = service_label(service);
             assert!(source.contains(&format!("name: \"{label}\"")), "{label}");

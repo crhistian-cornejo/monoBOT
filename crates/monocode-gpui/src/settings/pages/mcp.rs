@@ -10,7 +10,7 @@ use gpui::{AnyElement, Context, FontWeight, Role, SharedString, div, prelude::*,
 use monocode_core::connectors::{self, Platform, Server};
 impl SettingsView {
     /// BuiltInConnectors: MonoBOT's own remote MCP servers, one switch each.
-    /// Poki's setup panel waits for the Poki port.
+    /// Poki's folder, status and tutorial sit under its switch.
     fn connectors_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let settings = self.ctx.connectors.clone();
         let rows = connectors::available_connectors(Platform::current())
@@ -20,6 +20,7 @@ impl SettingsView {
                 let on = settings.is_enabled(connector);
                 let id = connector.id;
                 let site = connector.site;
+                let setup = id == "poki" && on;
                 let wraps = matches!(
                     connector.server,
                     Server::Stdio {
@@ -27,7 +28,7 @@ impl SettingsView {
                         ..
                     }
                 );
-                div()
+                let row = div()
                     .id(SharedString::from(format!("connector-{id}")))
                     .debug_selector(move || format!("settings-connector-{id}"))
                     .flex()
@@ -36,7 +37,6 @@ impl SettingsView {
                     .gap_4()
                     .px_3()
                     .py(px(10.))
-                    .when(ix > 0, |d| d.border_t_1().border_color(content(0.1)))
                     .child(
                         div()
                             .min_w_0()
@@ -91,8 +91,28 @@ impl SettingsView {
                         on,
                         false,
                         cx,
-                        move |_, on, cx| cx.emit(SettingsEvent::Connector(id.into(), on)),
+                        move |this, on, cx| {
+                            cx.emit(SettingsEvent::Connector(id.into(), on));
+                            if id == "poki" {
+                                if on {
+                                    this.poki_bring_up(cx);
+                                } else {
+                                    this.poki_turn_off(cx);
+                                }
+                            }
+                        },
                     ))
+                    .into_any_element();
+                (ix, setup, row)
+            })
+            .collect::<Vec<_>>();
+        let rows = rows
+            .into_iter()
+            .map(|(ix, setup, row)| {
+                div()
+                    .when(ix > 0, |d| d.border_t_1().border_color(content(0.1)))
+                    .child(row)
+                    .when(setup, |d| d.child(self.poki_panel(cx)))
                     .into_any_element()
             })
             .collect::<Vec<_>>();

@@ -24,6 +24,7 @@ pub(crate) mod html;
 mod html_windows;
 mod images;
 mod memory_ui;
+mod mail_workspace;
 mod mobile;
 mod news;
 mod news_view;
@@ -31,6 +32,8 @@ mod notifications;
 mod overview;
 mod panel_stack;
 mod panels;
+mod papers;
+mod research;
 mod scheduler;
 mod search;
 #[cfg(all(target_os = "macos", not(test)))]
@@ -74,6 +77,7 @@ fn can_dispatch(message: &Message, busy: bool) -> bool {
     message.error.is_none()
         && (!busy
             || (!message.internal
+                && !monocode_core::inbox::workspace::is_cloud(&message.id)
                 && monocode_core::mono::agents::message_sender(&message.text).is_none()))
 }
 
@@ -158,10 +162,17 @@ pub(crate) struct Monos {
     html_documents: HashMap<String, Entity<html::Html>>,
     /// Native visuals the Mono published in its chat, opened as documents.
     visual_documents: HashMap<String, Entity<crate::visuals::VisualView>>,
+    papers: HashMap<String, papers::PaperPage>,
+    loading_papers: HashSet<String>,
     project_changes: changes::ProjectChanges,
     review: Option<Entity<crate::review::ReviewPane>>,
-    activity: Option<(String, Entity<crate::transcript::TranscriptView>)>,
+    activity: Option<(
+        String,
+        Entity<crate::transcript::TranscriptView>,
+        monocode_core::research::TurnResearch,
+    )>,
     activity_turn: Option<usize>,
+    activity_sources_all: bool,
     rail_ids: Vec<String>,
     /// Messages between agents, waits and delegations.
     agent_calls: agent_calls::AgentCalls,
@@ -210,6 +221,9 @@ pub(crate) struct Monos {
     session_filter_anchor: AnchorSlot,
     app_results: HashMap<(i64, String), (String, Result<serde_json::Value, String>)>,
     app_pending: HashSet<(i64, String)>,
+    mail_polling: bool,
+    mail_last_poll: u64,
+    last_tick: Option<u64>,
 }
 impl EventEmitter<Changed> for Monos {}
 impl EventEmitter<TabOpened> for Monos {}
@@ -285,6 +299,7 @@ impl Monos {
             let run = std::rc::Rc::new(move |id: &str| {
                 let _ = entity.update(&mut *app.borrow_mut(), |this, cx| {
                     if id == "quit" {
+                        monocode_core::poki::shutdown();
                         cx.quit();
                     } else if id == "composer" {
                         // The composer is its own panel: the workspace window
@@ -438,10 +453,13 @@ impl Monos {
             documents: HashMap::new(),
             html_documents: HashMap::new(),
             visual_documents: HashMap::new(),
+            papers: HashMap::new(),
+            loading_papers: HashSet::new(),
             project_changes: Default::default(),
             review: None,
             activity: None,
             activity_turn: None,
+            activity_sources_all: false,
             rail_ids: Vec::new(),
             roles_menu: None,
             subagent_runs: None,
@@ -471,6 +489,9 @@ impl Monos {
             session_filter_anchor: AnchorSlot::default(),
             app_results: HashMap::new(),
             app_pending: HashSet::new(),
+            mail_polling: false,
+            mail_last_poll: 0,
+            last_tick: None,
         };
         this.load_sync_view();
         if let Some(rx) = rx {
@@ -729,6 +750,9 @@ impl Monos {
     fn save(&mut self, cx: &mut Context<Self>) {
         self.sync_soon();
         let roster = self.roster.clone();
+        let cloud_ids: Vec<String> = roster.monos.iter().flat_map(|m| m.outbox.iter())
+            .filter(|q| monocode_core::inbox::workspace::is_cloud(&q.id))
+            .map(|q| q.id.clone()).collect();
         let store = self.store.clone();
         let queued = roster
             .monos
@@ -747,7 +771,13 @@ impl Monos {
             }
             let work = cx.background_executor().spawn(async move {
                 let db = locked(&store)?;
-                roster.save(&db)
+                roster.save(&db)?;
+                let cloud_error = if !cloud_ids.is_empty() {
+                    let dir = db.data_dir().map(PathBuf::from)
+                        .unwrap_or_else(monocode_core::inbox::mail::desktop_data_dir);
+                    monocode_core::inbox::workspace::Service::new(dir).ack_deliveries(&cloud_ids).err()
+                } else { None };
+                Ok::<_, String>(cloud_error)
             });
             let result = work.await;
             let _ = this.update(cx, |this, cx| match result {
@@ -755,9 +785,14 @@ impl Monos {
                     this.error = Some(error);
                     cx.notify();
                 }
-                Ok(()) => {
+                Ok(cloud_error) => {
+                    if let Some(error) = &cloud_error {
+                        this.error = Some(error.clone());
+                        cx.notify();
+                    }
                     for (id, messages) in queued {
-                        this.persisted_messages.extend(messages);
+                        this.persisted_messages.extend(messages.into_iter().filter(|message|
+                            cloud_error.is_none() || !monocode_core::inbox::workspace::is_cloud(message)));
                         this.dispatch(&id, cx);
                     }
                 }
@@ -1754,7 +1789,7 @@ impl Monos {
                                         .size(px(6.))
                                         .rounded_full()
                                         .border_1()
-                                        .border_color(rgb(crate::right_panel::BACKGROUND_BASE))
+                                        .border_color(crate::theme::background_base())
                                         .bg(if state == "working" {
                                             rgb(mono.color).into()
                                         } else if state == "needs-you" {

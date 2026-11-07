@@ -13,6 +13,7 @@ mod cache;
 mod clean;
 pub mod imap;
 pub mod inspect;
+pub mod http_send;
 pub mod mime;
 pub mod model;
 mod remote;

@@ -471,11 +471,11 @@ mod tests {
 
     #[test]
     fn plugins_match_the_web_build() {
-        let packs = include_str!("../../../tests/fixtures/parity/skillPacks.ts");
+        let packs = include_str!("../../tests/fixtures/parity/skillPacks.ts");
         for plugin in &PLUGINS[1..] {
             assert!(packs.contains(&format!("id: \"{plugin}\"")), "{plugin}");
         }
-        let bots_ts = include_str!("../../../tests/fixtures/parity/bots.ts");
+        let bots_ts = include_str!("../../tests/fixtures/parity/bots.ts");
         for command in DESTRUCTIVE_COMMANDS {
             assert!(bots_ts.contains(&format!("\"{command}\"")), "{command}");
         }

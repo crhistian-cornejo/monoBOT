@@ -84,7 +84,8 @@ pub fn agent_action(
     reader: Option<&str>,
     access: &Access,
 ) -> Result<Value, String> {
-    let readable = |address: &str| may_read(access, address, reader);
+    let workspace = super::super::workspace::Service::new(&service.data_dir);
+    let readable = |address: &str| may_read(access, address, reader) && workspace.cloud_may_read(address, reader);
     match action {
         "mail.connect" => connect(service, input, reader, access),
         "mail.search" => {

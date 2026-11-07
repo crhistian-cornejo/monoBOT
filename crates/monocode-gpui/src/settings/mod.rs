@@ -67,6 +67,8 @@ pub(crate) struct SettingsContext {
     pub mobile_invite: Option<monocode_core::mobile::Invite>,
     /// The connector switches and the skill packs turned on.
     pub connectors: monocode_core::connectors::ConnectorSettings,
+    /// MonoBOT's data folder, where Poki is installed.
+    pub data_dir: Option<std::path::PathBuf>,
     pub packs: Vec<String>,
     /// The folder the bots sync through, and how the last sync went.
     pub bot_sync: crate::monos::SyncView,
@@ -93,6 +95,7 @@ impl PartialEq for SettingsContext {
             && self.mobile == other.mobile
             && self.mobile_invite == other.mobile_invite
             && self.connectors == other.connectors
+            && self.data_dir == other.data_dir
             && self.packs == other.packs
             && self.bot_sync == other.bot_sync
     }
@@ -143,6 +146,8 @@ pub(crate) enum SettingsEvent {
     MobileRevoke(String),
     /// A connector's switch in Settings › MCP.
     Connector(String, bool),
+    /// A connector's checkout folder, such as Poki's.
+    ConnectorCheckout(String, String),
     /// A skill pack's switch in Settings › Skills.
     SkillPack(String, bool),
     /// Save every bot to a file the user names.
@@ -286,6 +291,7 @@ pub(crate) struct SettingsView {
     accent_custom_open: bool,
     accent_anchor: AnchorSlot,
     mobile: pages::MobileState,
+    poki: pages::PokiState,
     /// The last export or import, for the line under its buttons.
     bots_status: Option<(String, bool)>,
     _subscriptions: Vec<Subscription>,
@@ -439,6 +445,7 @@ impl SettingsView {
             accent_custom_open: false,
             accent_anchor: AnchorSlot::default(),
             mobile: pages::MobileState::default(),
+            poki: pages::PokiState::default(),
             bots_status: None,
             _subscriptions: subscriptions,
         };
@@ -487,7 +494,9 @@ impl SettingsView {
                 (None, None) => false,
                 _ => true,
             };
+            let poki_before = self.ctx.connectors.checkout("poki").to_owned();
             self.ctx = ctx;
+            self.poki_context_changed(&poki_before, cx);
             self.mobile_context_changed(cx);
             if remote_changed {
                 self.leave_connections(cx);

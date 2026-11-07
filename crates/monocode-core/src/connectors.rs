@@ -1,7 +1,8 @@
 //! MonoBOT's built-in MCP connectors, ported from
-//! src/features/settings/model/connectors.ts. They need no account: remote
-//! servers over Streamable HTTP and a few that run locally through `npx` or
-//! `node`. The enabled ones go to each Claude turn with `--mcp-config` (and
+//! src/features/settings/model/connectors.ts. Public servers need no account;
+//! the private Mailflare connector uses the system credential store and a
+//! local allowlisting proxy. Others use Streamable HTTP, `npx` or `node`.
+//! The enabled ones go to each Claude turn with `--mcp-config` (and
 //! to Codex as `-c` overrides), so neither CLI's own configuration is
 //! touched. What they return is data, never instructions.
 use crate::{
@@ -62,7 +63,7 @@ pub struct Connector {
     pub description: &'static str,
     pub site: &'static str,
     pub on_by_default: bool,
-    /// Reviewed read-only tools. Never allow a whole server: it may also write.
+    /// Reviewed tools, including non-sending drafts. Never allow a whole server.
     pub tools: &'static [&'static str],
     /// Where it can run at all; `None`, everywhere. Elsewhere it is not shown.
     pub platforms: Option<&'static [Platform]>,
@@ -93,7 +94,24 @@ const BASE: Connector = Connector {
     server: Server::Http { url: "" },
 };
 
-pub const CONNECTORS: [Connector; 10] = [
+pub const CONNECTORS: [Connector; 11] = [
+    Connector {
+        id: "mailflare",
+        name: "Mailflare",
+        description: "Your self-hosted mail and calendar. Configure its URL and token in Inbox › Agenda. Bots need your explicit grant; sending always stays in Mailflare's human review.",
+        site: "https://github.com/hieunc229/mailflare",
+        user_granted: true,
+        // The local proxy keeps credentials out of CLI arguments and enforces
+        // this allowlist even for ACP clients with automatic permissions.
+        server: Server::Stdio { command: "monocode-gpui", args: &[], checkout: None },
+        tools: &[
+            "list_mailboxes", "list_emails", "get_email", "get_thread", "search_emails",
+            "draft_email", "draft_reply", "update_draft", "request_send", "get_send_request",
+            "get_scheduled_send", "get_calendars", "get_schedule", "search_events",
+            "get_event", "find_free_time",
+        ],
+        ..BASE
+    },
     Connector {
         id: "context7",
         name: "Context7",
@@ -407,6 +425,7 @@ pub fn asking_permission_mode<'a>(mode: &'a str, connectors: &[&Connector]) -> &
 pub struct ConnectorSettings {
     enabled: BTreeMap<String, bool>,
     checkouts: BTreeMap<String, String>,
+    mail_workspace: Option<std::path::PathBuf>,
 }
 
 impl ConnectorSettings {
@@ -467,6 +486,7 @@ impl ConnectorSettings {
         self.is_enabled(connector)
             && connector_available(connector, platform)
             && (!needs_checkout || !self.checkout(connector.id).is_empty())
+            && (connector.id != "mailflare" || self.mail_workspace.is_some())
     }
 
     pub fn enabled_connectors(&self, platform: Platform) -> Vec<&'static Connector> {
@@ -489,8 +509,22 @@ impl ConnectorSettings {
             .collect()
     }
 
+    /// Poki's phone tools need its daemon, which a turn that has the
+    /// connector brings up first (claude.ts does the same before it launches).
+    /// A daemon already running, or a failure to start one, changes nothing.
+    pub fn start_poki_for(&self, connectors: &[&Connector]) {
+        if connectors.iter().any(|connector| connector.id == "poki") {
+            crate::poki::ensure_started(self.checkout("poki"));
+        }
+    }
+
     /// The command's arguments, with the checkout's file when it has one.
     pub fn args(&self, connector: &Connector) -> Vec<String> {
+        if connector.id == "mailflare" {
+            return self.mail_workspace.as_ref().map(|dir| vec![
+                "--mailflare-mcp".into(), dir.to_string_lossy().into_owned()
+            ]).unwrap_or_default();
+        }
         let Server::Stdio { args, checkout, .. } = connector.server else {
             return Vec::new();
         };
@@ -501,6 +535,12 @@ impl ConnectorSettings {
         out
     }
 
+    fn command(&self, connector: &Connector, command: &str) -> String {
+        if connector.id == "mailflare" {
+            std::env::current_exe().unwrap_or_else(|_| command.into()).to_string_lossy().into_owned()
+        } else { command.into() }
+    }
+
     /// Each connector's `mcpServers` entry, keyed by its id.
     pub fn servers(&self, connectors: &[&Connector]) -> Map<String, Value> {
         connectors
@@ -509,7 +549,7 @@ impl ConnectorSettings {
                 let server = match connector.server {
                     Server::Http { url } => json!({"type": "http", "url": url}),
                     Server::Stdio { command, .. } => {
-                        json!({"type": "stdio", "command": command, "args": self.args(connector)})
+                        json!({"type": "stdio", "command": self.command(connector, command), "args": self.args(connector)})
                     }
                 };
                 (connector.id.to_owned(), server)
@@ -540,7 +580,7 @@ impl ConnectorSettings {
                 }
                 Server::Stdio { command, .. } => out.extend([
                     "-c".to_owned(),
-                    format!("{key}.command={}", toml(command)),
+                    format!("{key}.command={}", toml(&self.command(connector, command))),
                     "-c".to_owned(),
                     format!("{key}.args={}", list(&self.args(connector))),
                 ]),
@@ -566,7 +606,7 @@ impl ConnectorSettings {
                 }),
                 Server::Stdio { command, .. } => json!({
                     "name": connector.id,
-                    "command": command,
+                    "command": self.command(connector, command),
                     "args": self.args(connector),
                 }),
             })
@@ -590,6 +630,7 @@ pub fn session_acp_servers(bot_connectors: Option<&[String]>) -> Vec<Value> {
         .and_then(|slot| slot.clone())
         .unwrap_or_default();
     let connectors = settings.session_connectors(bot_connectors, Platform::current());
+    settings.start_poki_for(&connectors);
     settings.acp_servers(&connectors)
 }
 
@@ -601,6 +642,7 @@ pub fn session_codex_args(bot_connectors: Option<&[String]>) -> Vec<String> {
         .and_then(|slot| slot.clone())
         .unwrap_or_default();
     let connectors = settings.session_connectors(bot_connectors, Platform::current());
+    settings.start_poki_for(&connectors);
     settings.codex_args(&connectors)
 }
 
@@ -640,7 +682,16 @@ impl ConnectorSettings {
     /// What the native app saved (`native_settings`), else what the desktop
     /// app's webview holds: the native switch wins once the user used it.
     pub fn from_store(store: &Store) -> Self {
-        Self::read(|key| saved_value(store, key))
+        let mut settings = Self::read(|key| saved_value(store, key));
+        if let Some(dir) = store.data_dir() {
+            let service = crate::inbox::workspace::Service::new(dir);
+            if service.config().is_ok_and(|c| !c.mailflare_url.is_empty())
+                && service.secret("mailflare").is_ok()
+            {
+                settings.mail_workspace = Some(dir.into());
+            }
+        }
+        settings
     }
 }
 
@@ -657,6 +708,13 @@ pub fn saved_value(store: &Store, key: &str) -> Option<String> {
 /// makes new sessions use it at once.
 pub fn save_enabled(store: &Store, id: &str, enabled: bool) -> Result<(), String> {
     store.save_setting(&enabled_key(id), if enabled { "true" } else { "false" })?;
+    refresh_session_defaults(store);
+    Ok(())
+}
+
+/// Saves a connector's checkout folder, which an empty path clears.
+pub fn save_checkout(store: &Store, id: &str, path: &str) -> Result<(), String> {
+    store.save_setting(&checkout_key(id), path.trim())?;
     refresh_session_defaults(store);
     Ok(())
 }
@@ -693,6 +751,7 @@ pub fn claude_launch(
         .and_then(|slot| slot.clone())
         .unwrap_or_default();
     let connectors = settings.session_connectors(bot_connectors, Platform::current());
+    settings.start_poki_for(&connectors);
     let plugins = crate::skills::bundled::session_plugins(bot_plugins, &packs);
     ClaudeLaunch {
         servers: settings.servers(&connectors),

@@ -5,6 +5,7 @@ mod diff;
 mod document;
 mod mail;
 mod ui;
+mod workspace;
 pub(crate) use avatar::image as avatar_image;
 pub(crate) use ui::relative_time;
 
@@ -116,6 +117,10 @@ pub(crate) struct Inbox {
     last_refresh: Instant,
     /// The Email tab: the user's mail, beside GitHub and the trackers.
     mailbox: Entity<mail::Mailbox>,
+    /// The Agenda tab: the local agenda and the mail workspace's setup. Opening it leaves
+    /// the Email tab and the provider rail, as they leave each other.
+    agenda: Entity<workspace::Workspace>,
+    agenda_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -197,6 +202,7 @@ impl Inbox {
             mailbox.set_list_width(state.mail_list_width);
             mailbox
         });
+        let agenda = cx.new(|cx| workspace::Workspace::new(data_dir.clone(), store.clone(), cx));
         let subscriptions = vec![
             cx.subscribe(
                 &mailbox,
@@ -340,6 +346,8 @@ impl Inbox {
             notifications: model::NotificationTracker::default(),
             last_refresh: Instant::now(),
             mailbox,
+            agenda,
+            agenda_open: false,
             _subscriptions: subscriptions,
         }
     }
@@ -402,6 +410,9 @@ impl Inbox {
         self.active = active;
         if active && self.state.email_open {
             self.mailbox.update(cx, |mailbox, cx| mailbox.activate(cx));
+        }
+        if active && self.agenda_open {
+            self.agenda.update(cx, |agenda, cx| agenda.activate(cx));
         }
         if active {
             if let Some(item) = self.item() {
@@ -637,6 +648,7 @@ impl Inbox {
     /// Opens the Email tab, or leaves it for the source tabs.
     fn set_email_open(&mut self, open: bool, cx: &mut Context<Self>) {
         if open {
+            self.agenda_open = false;
             self.mailbox.update(cx, |mailbox, cx| mailbox.activate(cx));
         }
         if self.state.email_open != open {
@@ -645,12 +657,25 @@ impl Inbox {
         }
         cx.notify();
     }
+    /// Opens the Agenda tab, or leaves it for the source tabs.
+    fn set_agenda_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if open {
+            if self.state.email_open {
+                self.state.email_open = false;
+                self.save();
+            }
+            self.agenda.update(cx, |agenda, cx| agenda.activate(cx));
+        }
+        self.agenda_open = open;
+        cx.notify();
+    }
     /// The message's page is a native web view drawn over the window: hidden until the
     /// Email tab paints it again.
     pub(crate) fn hide_html(&self, cx: &App) {
         self.mailbox.read(cx).hide_html(cx);
     }
     fn change_source(&mut self, source: String, cx: &mut Context<Self>) {
+        self.agenda_open = false;
         self.set_email_open(false, cx);
         self.state.source = source;
         self.selected = None;

@@ -110,7 +110,7 @@ impl Kind {
         matches!(self, Self::Pi | Self::Omp)
     }
     pub fn subscription_usage(self) -> bool {
-        matches!(self, Self::Codex | Self::Claude)
+        matches!(self, Self::Codex | Self::Claude | Self::Kimi)
     }
     /// The name shown when the binary is missing, matching the React harness map.
     fn install_name(self) -> &'static str {
@@ -173,7 +173,7 @@ mod tests {
     use super::*;
     #[test]
     fn registry_matches_the_react_harnesses() {
-        let source = include_str!("../../../tests/fixtures/parity/register.ts");
+        let source = include_str!("../../tests/fixtures/parity/register.ts");
         for kind in Kind::ALL {
             assert_eq!(Kind::parse(kind.id()), Some(kind));
             if kind != Kind::Kimi {
@@ -200,7 +200,7 @@ mod tests {
     }
     #[test]
     fn hints_match_the_react_source() {
-        let source = include_str!("../../../tests/fixtures/parity/availability.ts");
+        let source = include_str!("../../tests/fixtures/parity/availability.ts");
         for kind in Kind::ALL.into_iter().filter(|kind| *kind != Kind::Kimi) {
             assert!(
                 source.contains(&format!("\"{}\"", kind.install_name())),

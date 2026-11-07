@@ -4,10 +4,10 @@ use super::*;
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap};
 
-const PACKS: &str = include_str!("../../../../tests/fixtures/parity/skillPacks.ts");
-const PLUGINS: &str = include_str!("../../../../tests/fixtures/parity/bundledPlugins.ts");
+const PACKS: &str = include_str!("../../../tests/fixtures/parity/skillPacks.ts");
+const PLUGINS: &str = include_str!("../../../tests/fixtures/parity/bundledPlugins.ts");
 const CLAUDE: &str =
-    include_str!("../../../../tests/fixtures/parity/claude.ts");
+    include_str!("../../../tests/fixtures/parity/claude.ts");
 
 fn ids(uses: PluginUse) -> Vec<&'static str> {
     BUNDLED_PLUGINS

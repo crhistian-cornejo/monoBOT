@@ -1784,7 +1784,7 @@ mod tests {
         .unwrap();
         assert_eq!(read.bots[0].model, Some(model));
         // Every provider the desktop knows.
-        let source = include_str!("../../../tests/fixtures/parity/session.ts");
+        let source = include_str!("../../tests/fixtures/parity/session.ts");
         for harness in HARNESSES.iter().chain(&RUNTIME_MODES) {
             assert!(source.contains(&format!("\"{harness}\",")), "{harness}");
         }

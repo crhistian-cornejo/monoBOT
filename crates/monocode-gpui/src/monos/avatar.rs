@@ -217,10 +217,25 @@ pub(crate) fn group_avatar_stack(
     let circle_size = px(side);
     let inner_size = (side * 0.72).round();
     let overlap = (side * 0.32).round();
-    let bg_base = rgb(crate::right_panel::BACKGROUND_BASE);
+    let bg_base = crate::theme::background_base();
     let lead_color = members.first().map_or(0xffffff, |m| m.color);
 
-    let mut stack = gpui::div().relative().flex().items_center().flex_shrink_0();
+    let count = members.len() + if more > 0 { 1 } else { 0 };
+    let total_width = if count <= 1 {
+        side
+    } else {
+        side + (count - 1) as f32 * (side - overlap)
+    };
+
+    let mut stack = gpui::div()
+        .id("group-avatar-stack")
+        .debug_selector(|| "group-avatar-stack".into())
+        .relative()
+        .flex()
+        .items_center()
+        .flex_shrink_0()
+        .w(px(total_width))
+        .h(circle_size);
 
     for (ix, member) in members.iter().enumerate() {
         stack = stack.child(

@@ -30,6 +30,33 @@ pub const SETTING_KEY: &str = "monocode.keepAwake";
 /// The preference when nobody chose.
 pub const DEFAULT: bool = true;
 
+/// Returns true if the laptop clamshell (lid) is closed.
+#[cfg(target_os = "macos")]
+pub fn is_clamshell_closed() -> bool {
+    platform::is_clamshell_closed()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn is_clamshell_closed() -> bool {
+    false
+}
+
+/// Returns true if the main display is currently asleep.
+#[cfg(target_os = "macos")]
+pub fn is_display_asleep() -> bool {
+    platform::is_display_asleep()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn is_display_asleep() -> bool {
+    false
+}
+
+/// Returns true if the device is in sleep state or the lid is closed.
+pub fn is_sleeping_or_closed() -> bool {
+    is_clamshell_closed() || is_display_asleep()
+}
+
 /// Windows and macOS can hold; Linux has no hold yet.
 pub const AVAILABLE: bool = cfg!(any(windows, target_os = "macos"));
 
@@ -189,6 +216,7 @@ mod platform {
             encoding: u32,
         ) -> CFStringRef;
         fn CFRelease(value: *const c_void);
+        fn CFBooleanGetValue(boolean: *const c_void) -> bool;
     }
 
     #[link(name = "IOKit", kind = "framework")]
@@ -200,6 +228,21 @@ mod platform {
             id: *mut u32,
         ) -> i32;
         fn IOPMAssertionRelease(id: u32) -> i32;
+        fn IOServiceMatching(name: *const c_char) -> *const c_void;
+        fn IOServiceGetMatchingService(main_port: u32, matching: *const c_void) -> u32;
+        fn IORegistryEntryCreateCFProperty(
+            entry: u32,
+            key: CFStringRef,
+            allocator: *const c_void,
+            options: u32,
+        ) -> *const c_void;
+        fn IOObjectRelease(object: u32) -> i32;
+    }
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    unsafe extern "C" {
+        fn CGMainDisplayID() -> u32;
+        fn CGDisplayIsAsleep(display: u32) -> u32;
     }
 
     const UTF8: u32 = 0x0800_0100;
@@ -250,6 +293,37 @@ mod platform {
             unsafe { IOPMAssertionRelease(self.0) };
         }
     }
+
+    pub fn is_clamshell_closed() -> bool {
+        let name = CString::new("IOPMrootDomain").expect("valid cstring");
+        let matching = unsafe { IOServiceMatching(name.as_ptr()) };
+        if matching.is_null() {
+            return false;
+        }
+        let service = unsafe { IOServiceGetMatchingService(0, matching) };
+        if service == 0 {
+            return false;
+        }
+        let key = cf_string("AppleClamshellState");
+        let prop = unsafe { IORegistryEntryCreateCFProperty(service, key, std::ptr::null(), 0) };
+        unsafe {
+            CFRelease(key);
+            IOObjectRelease(service);
+        }
+        if prop.is_null() {
+            return false;
+        }
+        let closed = unsafe { CFBooleanGetValue(prop) };
+        unsafe { CFRelease(prop) };
+        closed
+    }
+
+    pub fn is_display_asleep() -> bool {
+        unsafe {
+            let display = CGMainDisplayID();
+            CGDisplayIsAsleep(display) != 0
+        }
+    }
 }
 
 #[cfg(not(any(windows, target_os = "macos")))]
@@ -292,6 +366,13 @@ mod tests {
         assert!(has_work_underway(&[work(|w| w.retry_scheduled = true)]));
         assert!(has_work_underway(&[work(|w| w.resume_at_reset = true)]));
         assert!(has_work_underway(&[work(|w| w.scheduled_message = true)]));
+    }
+
+    #[test]
+    fn clamshell_and_sleep_queries_run_safely() {
+        let _ = is_clamshell_closed();
+        let _ = is_display_asleep();
+        let _ = is_sleeping_or_closed();
     }
 
     #[test]

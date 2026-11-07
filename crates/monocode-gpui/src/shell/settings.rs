@@ -64,6 +64,42 @@ impl Shell {
                 catalogs.insert(session.summary.provider.clone(), models);
             }
         }
+        for &kind in &Kind::ALL {
+            if catalogs.contains_key(kind.id()) {
+                continue;
+            }
+            let account_id = profiles
+                .get(&kind)
+                .cloned()
+                .unwrap_or_else(|| monocode_core::accounts::DEFAULT.into());
+            let profile = monocode_core::accounts::Profile::new(&account_id, std::path::Path::new(""));
+            if let Some(cached) = monocode_core::catalog::cached_models_for(kind, &profile) {
+                let models: Vec<(String, String)> = cached
+                    .into_iter()
+                    .map(|m| {
+                        (
+                            m.id.clone(),
+                            crate::pickers::model_display_name(kind, &m.id, &m.name).to_string(),
+                        )
+                    })
+                    .collect();
+                if !models.is_empty() {
+                    catalogs.insert(kind.id().to_owned(), models);
+                }
+            } else if kind == Kind::Kimi && monocode_core::provider::resolve(kind).is_some() {
+                let models: Vec<(String, String)> = crate::pickers::KIMI_MODELS
+                    .iter()
+                    .map(|(id, name)| (id.to_string(), name.to_string()))
+                    .collect();
+                catalogs.insert(kind.id().to_owned(), models);
+            } else if kind == Kind::Claude && monocode_core::provider::resolve(kind).is_some() {
+                let models: Vec<(String, String)> = crate::pickers::CLAUDE_MODELS
+                    .iter()
+                    .map(|(id, name)| (id.to_string(), name.to_string()))
+                    .collect();
+                catalogs.insert(kind.id().to_owned(), models);
+            }
+        }
         let (connectors, packs) = monocode_core::connectors::session_state();
         SettingsContext {
             remote: Some(self.remote.clone()),
@@ -125,6 +161,9 @@ impl Shell {
                 .map(|path| (path.clone(), self.project_label(path)))
                 .collect(),
             connectors,
+            data_dir: crate::runtime::locked(&self.store)
+                .ok()
+                .and_then(|store| store.data_dir().map(std::path::Path::to_path_buf)),
             packs,
             bot_sync: self
                 .monos
@@ -254,6 +293,9 @@ impl Shell {
                 SettingsEvent::MobileCancelInvite => this.mobile_cancel_invite(cx),
                 SettingsEvent::MobileRevoke(id) => this.mobile_revoke(id, cx),
                 SettingsEvent::Connector(id, on) => this.save_connector(id, *on, cx),
+                SettingsEvent::ConnectorCheckout(id, path) => {
+                    this.save_connector_checkout(id, path, cx)
+                }
                 SettingsEvent::SkillPack(id, on) => this.save_skill_pack(id, *on, cx),
                 SettingsEvent::BotsExport => this.export_bots(cx),
                 SettingsEvent::BotsImport => this.import_bots(cx),

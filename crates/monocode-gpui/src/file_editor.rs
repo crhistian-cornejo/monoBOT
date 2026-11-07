@@ -88,6 +88,7 @@ pub(crate) struct OpenPaper {
     pub path: String,
     pub page: usize,
     pub passage: Option<String>,
+    pub title: String,
 }
 
 /// File links may include a one-based line and column (`:12:4` or `#L12`).

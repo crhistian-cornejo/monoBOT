@@ -95,6 +95,49 @@ fn connector_and_skill_pack_switches_are_stored(cx: &mut TestAppContext) {
     assert_eq!(saved.as_deref(), Some("false"));
 }
 
+#[cfg(target_os = "macos")]
+#[gpui::test]
+fn poki_setup_sits_under_its_switch_and_its_folder_is_stored(cx: &mut TestAppContext) {
+    cx.update(super::super::bind_keys);
+    let (window, _, _) = window(cx);
+    window
+        .update(cx, |shell, w, cx| shell.open_settings(Section::Mcp, w, cx))
+        .unwrap();
+    let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    window
+        .update(visual, |shell, _, cx| {
+            shell.save_connector("poki", false, cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("settings-poki-setup").is_none());
+    window
+        .update(visual, |shell, _, cx| {
+            shell.save_connector("poki", true, cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("settings-poki-setup").is_some());
+    window
+        .update(visual, |shell, _, cx| {
+            shell.save_connector_checkout("poki", "/tmp/not-poki", cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let saved = stored(window, visual, connectors::checkout_key("poki"));
+    assert_eq!(saved.as_deref(), Some("/tmp/not-poki"));
+    click(visual, "settings-poki-tutorial-open");
+    assert!(visual.debug_bounds("settings-poki-tutorial").is_some());
+    window
+        .update(visual, |shell, _, cx| {
+            shell.save_connector("poki", false, cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("settings-poki-setup").is_none());
+}
+
 #[gpui::test]
 fn bots_on_another_computer_choose_and_turn_off_the_sync_folder(cx: &mut TestAppContext) {
     cx.update(super::super::bind_keys);

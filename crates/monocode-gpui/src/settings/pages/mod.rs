@@ -9,6 +9,7 @@ mod keybindings;
 mod mcp;
 mod mobile;
 mod monos;
+mod poki;
 mod providers;
 mod skills;
 mod worktrees;
@@ -18,6 +19,7 @@ pub(crate) use appearance::{ACCENTS, swatch};
 pub(super) use connections::ConnectionsState;
 pub(crate) use keybindings::command_shortcut;
 pub(super) use mobile::MobileState;
+pub(super) use poki::PokiState;
 
 use super::{Section, SettingsView};
 use gpui::{AnyElement, Context, Window};

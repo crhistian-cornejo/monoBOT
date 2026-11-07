@@ -77,7 +77,7 @@ bun run mobile:android   # Android Emulator
 │   ├── mobile-link/         # Rust QUIC/TLS pairing library for desktop and mobile
 │   ├── dictation/           # Local speech-to-text (sherpa-onnx)
 │   ├── voice/               # Local speech synthesis playback
-│   ├── email/               # Local IMAP/SMTP mail sync and triage
+│   ├── email/               # IMAP mail sync, triage and SMTP/HTTPS delivery
 │   └── http/                # Shared HTTP and TLS certificate verification
 ├── mobile/                  # React Native / Expo mobile companion app
 ├── vendor/                  # Pinned and patched GPUI framework crates
@@ -86,6 +86,9 @@ bun run mobile:android   # Android Emulator
 ```
 
 ---
+
+Optional mail infrastructure, Mailflare MCP, agent inboxes and agenda:
+[setup and remaining deployment steps](docs/native/mail-workspace.md).
 
 ## License
 

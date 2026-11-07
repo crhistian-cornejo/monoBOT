@@ -930,6 +930,21 @@ impl Mail {
         all: bool,
         now_ms: i64,
     ) -> Result<(), String> {
+        self.send_with_transport(accounts, id, text, subject, all, now_ms, &crate::http_send::Transport::Smtp, "")
+    }
+
+    /// The same approved reply, optionally delivered over HTTPS instead of SMTP.
+    pub fn send_with_transport(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        text: &str,
+        subject: Option<&str>,
+        all: bool,
+        now_ms: i64,
+        transport: &crate::http_send::Transport,
+        token: &str,
+    ) -> Result<(), String> {
         let (account, entry, text) = self.reply_parts(accounts, id, text)?;
         let people = recipients_of(&entry, &account.address, all);
         let addresses: Vec<String> = people
@@ -938,10 +953,15 @@ impl Mail {
             .chain(&people.cc)
             .map(|p| p.address.clone())
             .collect();
-        let password = secrets::get(&account.address)?;
         let message = compose_reply(&account, &entry, &people, subject, &text, now_ms);
-        crate::smtp::send(&account, &password, &addresses, &message)?;
-        if !account.is_gmail() {
+        if *transport == crate::http_send::Transport::Smtp {
+            let password = secrets::get(&account.address)?;
+            crate::smtp::send(&account, &password, &addresses, &message)?;
+        } else {
+            crate::http_send::send(transport, token, &account.address, &people, &message)?;
+        }
+        if !account.is_gmail() || *transport != crate::http_send::Transport::Smtp {
+            let password = secrets::get(&account.address).unwrap_or_default();
             if let Ok(mut imap) = connect(&self.open, &account, &password) {
                 if let Some(sent) = imap.mailboxes().ok().and_then(|list| boxes_of(&list).sent) {
                     let _ = imap.save_sent(&sent, &message);

@@ -153,13 +153,14 @@ pub fn locate_page(
     best
 }
 
-/// Resolve a scholarly citation without making a network request. Other links
-/// and papers without a cached PDF stay browser links.
+/// Resolve a scholarly citation to its cached PDF, the page the passage is on
+/// and the paper's title, without making a network request. Other links and
+/// papers without a cached PDF stay browser links.
 pub fn cached_citation(
     store: &PaperStore,
     href: &str,
     passage: Option<&str>,
-) -> Option<(std::path::PathBuf, usize)> {
+) -> Option<(std::path::PathBuf, usize, String)> {
     let url = url::Url::parse(href).ok()?;
     if !matches!(url.scheme(), "https" | "http") {
         return None;
@@ -169,7 +170,7 @@ pub fn cached_citation(
     } else {
         store.source_paper(href).ok().flatten()?
     };
-    store.meta(&key).ok().flatten()?;
+    let title = store.meta(&key).ok().flatten()?.paper.title;
     let path = store.pdf_path(&key);
     if !path.is_file() {
         return None;
@@ -178,7 +179,7 @@ pub fn cached_citation(
         .and_then(|passage| store.text(&key).ok().flatten().map(|text| (passage, text)))
         .and_then(|(passage, text)| locate_page(&text.pages, passage, None))
         .map_or(1, |(page, _)| page);
-    Some((path, page))
+    Some((path, page, title))
 }
 
 #[cfg(test)]
@@ -267,6 +268,7 @@ mod tests {
             cached_citation(&store, "https://doi.org/10.1234/EXAMPLE", Some(PASSAGE)).unwrap();
         assert_eq!(target.0, store.pdf_path(key));
         assert_eq!(target.1, 2);
+        assert_eq!(target.2, "Example");
         assert!(
             cached_citation(&store, "https://example.com/10.1234/example", Some(PASSAGE)).is_none()
         );

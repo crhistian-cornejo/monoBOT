@@ -26,8 +26,8 @@ pub(crate) fn bind(cx: &mut App) {
 
 use crate::accounts::{Cached as CachedUsage, Key};
 
-pub(crate) const RATE_LIMIT_PROVIDERS: [Kind; 4] =
-    [Kind::Claude, Kind::Codex, Kind::Devin, Kind::OpenCode];
+pub(crate) const RATE_LIMIT_PROVIDERS: [Kind; 5] =
+    [Kind::Claude, Kind::Codex, Kind::Devin, Kind::OpenCode, Kind::Kimi];
 
 /// The plans the footer shows: the one in view first, then every other
 /// provider whose CLI is installed and that this project does not hide.
@@ -1270,18 +1270,22 @@ mod tests {
     }
     #[test]
     fn footer_usage_providers_places_active_plan_first_and_skips_hidden_or_non_plan_harnesses() {
-        let installed = |kind: Kind| matches!(kind, Kind::Claude | Kind::Codex | Kind::Devin);
+        let installed = |kind: Kind| matches!(kind, Kind::Claude | Kind::Codex | Kind::Devin | Kind::Kimi);
         assert_eq!(
             footer_usage_providers(Some(Kind::Devin), installed, |_| false),
-            vec![Kind::Devin, Kind::Claude, Kind::Codex]
+            vec![Kind::Devin, Kind::Claude, Kind::Codex, Kind::Kimi]
+        );
+        assert_eq!(
+            footer_usage_providers(Some(Kind::Kimi), installed, |_| false),
+            vec![Kind::Kimi, Kind::Claude, Kind::Codex, Kind::Devin]
         );
         assert_eq!(
             footer_usage_providers(Some(Kind::Droid), installed, |_| false),
-            vec![Kind::Claude, Kind::Codex, Kind::Devin]
+            vec![Kind::Claude, Kind::Codex, Kind::Devin, Kind::Kimi]
         );
         assert_eq!(
             footer_usage_providers(Some(Kind::Droid), installed, |k| k == Kind::Codex),
-            vec![Kind::Claude, Kind::Devin]
+            vec![Kind::Claude, Kind::Devin, Kind::Kimi]
         );
     }
 }

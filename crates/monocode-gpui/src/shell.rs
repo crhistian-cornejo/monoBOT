@@ -8991,6 +8991,21 @@ impl Render for Shell {
             )
             .on_action(
                 cx.listener(|this, event: &crate::file_editor::OpenPaper, window, cx| {
+                    // A Mono reads its papers beside its documents, not in a code pane.
+                    if this.mono_active(cx)
+                        && let Some(monos) = this.monos.clone()
+                    {
+                        monos.update(cx, |monos, cx| {
+                            monos.open_paper(
+                                event.path.clone(),
+                                event.page,
+                                event.passage.clone(),
+                                event.title.clone(),
+                                cx,
+                            )
+                        });
+                        return;
+                    }
                     let cwd = this.git.read(cx).project().to_owned();
                     this.open_review(
                         crate::review::ReviewTab::File {

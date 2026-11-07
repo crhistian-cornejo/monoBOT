@@ -1361,6 +1361,26 @@ impl Monos {
             .detach();
     }
     pub(super) fn tick(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
+        let now = now_ms();
+        let was_asleep = if let Some(last) = self.last_tick {
+            now.saturating_sub(last) > 30_000
+        } else {
+            false
+        };
+        self.last_tick = Some(now);
+
+        if was_asleep {
+            for run in self.running.values_mut() {
+                if run.failure.is_none() {
+                    run.failure =
+                        Some("Interrupted: computer went to sleep while habit was running".into());
+                    run.mailbox.clear();
+                    run.view.update(cx, |v, cx| v.mono_stop(cx));
+                }
+            }
+        }
+
+        self.poll_cloud_mail(cx);
         self.sync_tick(cx);
         self.check_habits(cx);
         // A round still waiting checks again when a slow member runs out of time.
@@ -1397,7 +1417,9 @@ impl Monos {
             .collect();
         for id in timed_out {
             if let Some(run) = self.running.get_mut(&id) {
-                run.failure = Some("Habit timed out while waiting for work or an answer".into());
+                if run.failure.is_none() {
+                    run.failure = Some("Habit timed out while waiting for work or an answer".into());
+                }
                 run.mailbox.clear();
                 run.view.update(cx, |v, cx| v.mono_stop(cx));
             }
@@ -1422,7 +1444,10 @@ impl Monos {
             self.habit_changed(id, cx);
         }
         self.check_completions(cx);
-        if self.scheduling || self.active_run.is_some() {
+        if self.scheduling
+            || self.active_run.is_some()
+            || monocode_core::keep_awake::is_sleeping_or_closed()
+        {
             return;
         }
         self.scheduling = true;
@@ -1700,13 +1725,14 @@ impl Monos {
         let habit = run.habit.clone();
         let at = run.launched;
         let duration = now_ms().saturating_sub(at);
-        let error = (!ok).then_some(text);
         let stored = report.clone();
         let _ = (duration, stored);
         let result = if ok {
             monocode_core::mono::outcomes::RunResult::completed(at, tagged.clone())
+        } else if text.starts_with("Interrupted") {
+            monocode_core::mono::outcomes::RunResult::interrupted(at, Some(text))
         } else {
-            monocode_core::mono::outcomes::RunResult::failed(at, error)
+            monocode_core::mono::outcomes::RunResult::failed(at, Some(text))
         };
         let beat = habit == heartbeat::RUN_ID;
         if beat {

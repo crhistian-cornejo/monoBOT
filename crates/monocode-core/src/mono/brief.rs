@@ -113,7 +113,7 @@ mod tests {
             assert!(instructions.contains(part), "{part}");
         }
         // The same words as the desktop's.
-        let source = include_str!("../../../tests/fixtures/parity/dailyBrief.ts");
+        let source = include_str!("../../tests/fixtures/parity/dailyBrief.ts");
         assert!(source.contains(&format!("`{INSTRUCTIONS}`")));
     }
 

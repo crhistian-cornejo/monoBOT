@@ -753,12 +753,13 @@ pub(crate) fn open_citation(url: &str, passage: Option<&str>, window: &mut Windo
         .spawn(cx, async move |cx| {
             let target = work.await;
             let _ = cx.update(|window, cx| {
-                if let Some((path, page)) = target {
+                if let Some((path, page, title)) = target {
                     window.dispatch_action(
                         Box::new(crate::file_editor::OpenPaper {
                             path: path.to_string_lossy().into_owned(),
                             page,
                             passage,
+                            title,
                         }),
                         cx,
                     );

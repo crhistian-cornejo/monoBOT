@@ -2,6 +2,7 @@
 //! Blocking probes belong on a worker. Credentials are read only, never rotated.
 pub(crate) mod claude;
 mod devin;
+pub(crate) mod kimi;
 mod opencode;
 mod pi;
 
@@ -141,6 +142,9 @@ pub fn fetch_for(
     }
     if kind == Kind::Pi {
         return fetch_pi(model);
+    }
+    if kind == Kind::Kimi {
+        return kimi::fetch_for(profile);
     }
     if !kind.subscription_usage() {
         return Err(FetchError::unavailable(format!(

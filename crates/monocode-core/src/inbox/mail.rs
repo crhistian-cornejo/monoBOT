@@ -161,16 +161,32 @@ impl Service {
         let overview = mail().overview(&saved.accounts, &interesting(saved));
         self.keep_snapshot(&overview);
         *lock(last_read()) = Some(Instant::now());
+        self.with_cloud(overview)
+    }
+
+    fn with_cloud(&self, mut overview: Overview) -> Overview {
+        match super::workspace::Service::new(&self.data_dir).cloud_overview() {
+            Ok(cloud) => {
+                overview.accounts.extend(cloud.accounts);
+                overview.messages.extend(cloud.messages);
+                overview.messages.sort_by(|a,b| b.at.cmp(&a.at));
+            }
+            Err(error) => overview.problems.push(error),
+        }
         overview
     }
 
     /// The connected accounts, without reading their mail.
     pub fn accounts(&self) -> Vec<AccountView> {
-        self.load()
+        let mut accounts: Vec<AccountView> = self.load()
             .accounts
             .iter()
             .map(monobot_email::view_of)
-            .collect()
+            .collect();
+        if let Ok(cloud) = super::workspace::Service::new(&self.data_dir).cloud_overview() {
+            accounts.extend(cloud.accounts);
+        }
+        accounts
     }
 
     /// Connects an account: the server must accept the app password first, and only then
@@ -236,6 +252,9 @@ impl Service {
     /// The accounts' newest messages. A reading under 30 s old is reused unless `force`;
     /// an account that cannot be read says why in `problems`.
     pub fn overview(&self, force: bool) -> Overview {
+        let cloud_problem = if force {
+            super::workspace::Service::new(&self.data_dir).sync_inbound().err()
+        } else { None };
         let saved = self.load();
         for account in &saved.accounts {
             self.watch(account.clone());
@@ -243,27 +262,32 @@ impl Service {
         let fresh = lock(last_read()).is_some_and(|read| read.elapsed() < FRESH);
         if !force && fresh {
             if let Some(last) = mail().last() {
-                return last;
+                return self.with_cloud(last);
             }
         }
-        self.read_now(&saved)
+        let mut overview = self.read_now(&saved);
+        if let Some(problem) = cloud_problem { overview.problems.push(problem); }
+        overview
     }
 
     /// The last reading, at once: from memory, else the snapshot on disk. None before the
     /// first reading. The page shows it, then asks for a fresh one.
     pub fn last(&self) -> Option<Overview> {
         if let Some(last) = mail().last() {
-            return Some(last);
+            return Some(self.with_cloud(last));
         }
-        let snapshot = self.read_snapshot()?;
+        let Some(snapshot) = self.read_snapshot() else {
+            return super::workspace::Service::new(&self.data_dir).cloud_overview().ok()
+                .filter(|overview| !overview.accounts.is_empty());
+        };
         mail().restore(snapshot.clone());
-        Some(snapshot)
+        Some(self.with_cloud(snapshot))
     }
 
     /// Reads ahead the messages the user is likely to open next, so opening them comes
     /// from memory. Nothing is marked read.
     pub fn prefetch(&self, ids: Vec<String>) {
-        let ids: Vec<String> = ids.into_iter().filter(|id| !mail().is_warm(id)).collect();
+        let ids: Vec<String> = ids.into_iter().filter(|id| !super::workspace::is_cloud(id) && !mail().is_warm(id)).collect();
         if ids.is_empty() {
             return;
         }
@@ -284,11 +308,13 @@ impl Service {
 
     /// A message read whole. Opening it does not mark it read.
     pub fn open(&self, id: &str) -> Result<Opened, String> {
+        if super::workspace::is_cloud(id) { return super::workspace::Service::new(&self.data_dir).cloud_open(id); }
         mail().open(&self.load().accounts, id)
     }
 
     /// read, star, unstar or archive.
     pub fn act(&self, id: &str, action: Action) -> Result<(), String> {
+        if super::workspace::is_cloud(id) { return super::workspace::Service::new(&self.data_dir).cloud_act(id, action); }
         mail().act(&self.load().accounts, id, action)
     }
 
@@ -309,6 +335,7 @@ impl Service {
     /// Who a reply goes to: whom the message asks replies to go to, else its sender, and
     /// with `all` a copy to everyone else it went to. The page shows them; it cannot add anyone.
     pub fn recipients(&self, id: &str, all: bool) -> Result<Recipients, String> {
+        if super::workspace::is_cloud(id) { return super::workspace::Service::new(&self.data_dir).cloud_recipients(id); }
         mail().recipients(&self.load().accounts, id, all)
     }
 
@@ -321,6 +348,7 @@ impl Service {
         subject: Option<&str>,
         all: bool,
     ) -> Result<(), String> {
+        if super::workspace::is_cloud(id) { return super::workspace::Service::new(&self.data_dir).cloud_reply(id, text, subject, false); }
         may_answer(id)?;
         let subject = subject.map(str::trim).filter(|s| !s.is_empty());
         mail().draft(&self.load().accounts, id, text, subject, all, now_ms())
@@ -334,12 +362,14 @@ impl Service {
         subject: Option<&str>,
         all: bool,
     ) -> Result<(), String> {
+        if super::workspace::is_cloud(id) { return super::workspace::Service::new(&self.data_dir).cloud_reply(id, text, subject, true); }
         may_answer(id)?;
         if text.trim().is_empty() {
             return Err("Write the reply first.".into());
         }
         let subject = subject.map(str::trim).filter(|s| !s.is_empty());
-        mail().send(&self.load().accounts, id, text, subject, all, now_ms())
+        let (transport, token) = super::workspace::Service::new(&self.data_dir).outgoing()?;
+        mail().send_with_transport(&self.load().accounts, id, text, subject, all, now_ms(), &transport, &token)
     }
 
     /// A picture on the web the message names, which the user chose to load, as a data URL.
@@ -350,7 +380,9 @@ impl Service {
     /// Saves an attachment to the app's cache and returns its path, for the user to open
     /// with the system's app. It is never run.
     pub fn attachment(&self, id: &str, index: usize) -> Result<PathBuf, String> {
-        let (name, bytes) = mail().attachment(&self.load().accounts, id, index)?;
+        let (name, bytes) = if super::workspace::is_cloud(id) {
+            super::workspace::Service::new(&self.data_dir).cloud_attachment(id, index)?
+        } else { mail().attachment(&self.load().accounts, id, index)? };
         let folder = cache_dir()
             .join("mail-attachments")
             .join(id.replace(['/', '\\', ':'], "_"))
@@ -396,7 +428,7 @@ impl Service {
                 .filter_map(|job| job.join().ok())
                 .collect::<Vec<_>>()
         });
-        results
+        let mut results: Vec<AccountSearch> = results
             .into_iter()
             .map(|(account, result)| match result {
                 Ok((found, more)) => AccountSearch {
@@ -423,7 +455,27 @@ impl Service {
                     problem: Some(problem),
                 },
             })
-            .collect()
+            .collect();
+        if let Ok(cloud) = super::workspace::Service::new(&self.data_dir).cloud_overview() {
+            let asked = monobot_email::search::Query::parse(query);
+            for account in cloud.accounts {
+                if addresses.is_some_and(|wanted| !wanted.iter().any(|a| a.eq_ignore_ascii_case(&account.address))) { continue; }
+                let mut found: Vec<FoundMail> = cloud.messages.iter()
+                    .filter(|m| m.account_id == account.id && m.triage != Triage::Held)
+                    .filter(|m| asked.holds(&monobot_email::search::Found {
+                        at: m.at / 1000, from_name:m.from.clone(),from_address:m.address.clone(),
+                        subject:m.subject.clone(),text:m.body.join("\n"),..Default::default()
+                    }))
+                    .map(|m| FoundMail { at:m.at,from:m.from.clone(),address:m.address.clone(),
+                        subject:m.subject.clone(),text:m.body.join("\n"),message_id:m.id.clone(),gmail_id:String::new() })
+                    .collect();
+                found.sort_by_key(|m| if oldest_first { m.at } else { -m.at });
+                let more = found.len() > limit;
+                found.truncate(limit);
+                results.push(AccountSearch { address:account.address,found,more,problem:None });
+            }
+        }
+        results
     }
 }
 

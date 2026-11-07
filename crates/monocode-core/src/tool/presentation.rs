@@ -403,6 +403,8 @@ pub fn app_activity(action: &str, running: bool) -> (&'static str, &'static str)
         "papers.read" => ("Reading", "Read", "a paper"),
         "papers.figure" => ("Drawing", "Drew", "a paper page"),
         "papers.add" => ("Adding", "Added", "a paper PDF"),
+        "web.read" => ("Reading", "Read", "a web page"),
+        "web.download" => ("Downloading", "Downloaded", "a file"),
         "artifacts.write" => ("Writing", "Wrote", "a document"),
         "artifacts.list" | "artifacts.read" => ("Reading", "Read", "documents"),
         "notes.write" => ("Writing", "Wrote", "a note"),

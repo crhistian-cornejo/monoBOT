@@ -1,0 +1,235 @@
+# Correo, bots y agenda con Cloudflare y Mailflare
+
+## Estado de esta entrega
+
+La implementación es opcional. Las cuentas IMAP y el envío SMTP existentes
+siguen funcionando sin Cloudflare ni Mailflare.
+
+**No se ha desplegado nada ni se han cambiado DNS, dominios o cuentas.**
+No hay acceso autenticado a Cloudflare en esta sesión. Los pasos que requieren
+tu cuenta están en la lista de pendientes de este documento.
+
+Repositorio de referencia: **https://github.com/hieunc229/mailflare**
+
+Se usa el protocolo MCP público de Mailflare. No se ha copiado su código AGPL
+a los crates MIT de MonoBOT.
+
+| Bloque | Implementación |
+| --- | --- |
+| Mailflare MCP | Conector nativo, desactivado inicialmente y concedido explícitamente a cada bot. Proxy local con lista de herramientas permitidas y token en el llavero del sistema. |
+| Envío HTTP | Resend y Cloudflare Email Sending, además de SMTP. Lo usa el botón Enviar existente; los agentes solo guardan borradores. |
+| Recepción | Worker opcional, Email Routing → R2 + D1. El escritorio descarga páginas por HTTPS, sin abrir puertos públicos ni mantener IMAP para esos alias. |
+| Bandejas de bots | Alias → ID de bot y remitentes permitidos. Cola persistente; se crea o reanuda la conversación del bot. |
+| Agenda | Eventos locales, importación/exportación ICS y lectura del calendario de Mailflare, con zonas IANA y fechas con offset. |
+
+## Configuración en MonoBOT
+
+Abre **Inbox → Agenda**. Allí están los ajustes del espacio de correo:
+
+1. **Mailflare URL:** el origen HTTPS de tu instancia o su URL `/mcp`.
+2. **Mailflare token:** clave creada en Mailflare, no el token de Cloudflare.
+3. **Transporte de envío:** SMTP (predeterminado), Resend o Cloudflare.
+4. **Cloudflare account ID:** necesario únicamente para enviar con Cloudflare.
+5. **Inbound Worker URL:** el origen HTTPS del Worker de este repositorio.
+6. **Inbound token:** el mismo secreto `INBOUND_TOKEN` configurado en el Worker.
+7. **Rutas:** dirección del alias, ID del bot y lista de remitentes completos.
+   El usuario debe activar cada ruta expresamente.
+
+Los tokens se escriben en los campos protegidos, nunca en el chat. Los ajustes
+sin secretos se guardan en `<data-dir>/mail/workspace.json`; las credenciales
+se guardan en Keychain/Credential Manager o el almacén equivalente de Linux.
+Los campos vacíos de credenciales no deben sobrescribir los valores guardados.
+
+Después de configurar Mailflare, habilita el conector y concédelo al bot desde
+sus herramientas. Los agentes no pueden concedérselo a sí mismos. Las sesiones
+sin bot no reciben este conector privado automáticamente.
+
+### Mailflare MCP
+
+En tu instancia: **Settings → API keys → Allow MCP access**.
+
+- Selecciona únicamente las bandejas necesarias.
+- Concede lectura y borradores para trabajar con correo.
+- Concede `Read calendar` para mostrar la agenda remota.
+- Si quieres solicitudes de envío, concede el permiso de revisión
+  correspondiente. `request_send` devuelve un enlace: **no envía**.
+- No hace falta dar permisos de administración o gestión del calendario.
+
+MonoBOT lanza su propio proxy stdio (`--mailflare-mcp <data-dir>`).
+El token no aparece en argumentos de proceso, archivos MCP ni variables de
+entorno del agente. El proxy usa Streamable HTTP hacia `/mcp` y bloquea llamadas
+no revisadas aunque el cliente ignore la lista de herramientas.
+
+Se permiten lectura de correo/calendario, borradores y solicitudes de revisión.
+No se permiten borrado, organización destructiva, envío directo, administración
+ni escrituras en el calendario remoto. Los eventos que crea `calendar.create`
+son **locales**, no invitaciones externas.
+
+### Envío por API
+
+**Resend**
+
+- Verifica el dominio de la dirección remitente.
+- Crea una API key limitada a envío y guárdala en el campo Resend.
+- Endpoint: `POST https://api.resend.com/emails`.
+
+**Cloudflare Email Sending**
+
+- Activa Email Sending para la cuenta y verifica el dominio remitente.
+- Crea un token con `Email Sending: Edit`, limitado a la cuenta necesaria.
+- Guarda su account ID (32 caracteres hexadecimales) y el token en MonoBOT.
+- Endpoint:
+  `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/email/sending/send`.
+
+La dirección From sigue siendo la cuenta o alias que recibió el mensaje. Un
+proveedor HTTP no autoriza a suplantar una cuenta Gmail/iCloud; el dominio
+remitente debe estar verificado por el proveedor elegido.
+
+No hay reintentos automáticos ni cambio silencioso a SMTP. Un timeout puede
+ocurrir después de que el proveedor haya aceptado el correo: comprueba su panel
+antes de volver a pulsar Enviar. Las entregas parciales de Cloudflare se muestran
+como incidencia, no como éxito completo.
+
+### Recepción y bots
+
+El Worker está en [`deploy/cloudflare-mail`](../../deploy/cloudflare-mail/README.md).
+Ese README contiene los comandos de creación, migración, secretos y despliegue.
+
+El escritorio consulta una página de hasta 20 mensajes cada 30 segundos,
+aproximadamente, mientras está abierto. Una actualización manual de Email
+también sincroniza. El Worker recibe y almacena correo aunque el escritorio
+esté suspendido; el procesamiento de bots espera a que MonoBOT vuelva a estar
+abierto y tenga conexión.
+
+El cursor solo avanza después de guardar toda la página y su cola de entregas.
+Un fallo de red o escritura permite repetir la descarga sin duplicar la cola.
+Una entrega se confirma después de persistir el outbox del bot, antes de
+ejecutarla. Los mensajes mantienen IDs estables.
+
+Para ejecutar un bot deben cumplirse todas estas condiciones:
+
+- alias configurado y activado expresamente;
+- bot existente, no eliminado y con conversación disponible;
+- remitente SMTP en la lista exacta de direcciones permitidas;
+- comprobación conservadora SPF/DMARC del receptor;
+- cabecera From coherente con el remitente y mensaje no retenido por triage.
+
+El contenido llega como JSON de terceros, no como instrucciones del usuario.
+No se abren enlaces ni se ejecutan adjuntos. Los alias asignados a un bot no
+quedan disponibles para otros agentes a través de `mail.*`.
+
+Los mensajes aparecen también en Email. Sus borradores se guardan localmente,
+para que el usuario los revise y envíe mediante el transporte HTTP elegido.
+Marcar leído, destacar o archivar un mensaje cloud cambia su vista local, no
+el archivo original de R2.
+
+### Agenda e ICS
+
+Los eventos locales se guardan en `<data-dir>/mail/agenda.json`. Los tiempos
+de entrada deben llevar offset ISO 8601 y la zona debe ser IANA, por ejemplo
+`Europe/Madrid`. La agenda remota usa rangos positivos de hasta 90 días.
+Una respuesta remota truncada no se presenta como agenda completa.
+
+Acciones disponibles para los Monos:
+
+`calendar.list` solo incluye Mailflare si ese bot recibió el conector
+explícitamente y sigue habilitado. Los demás agentes solo leen la agenda local.
+
+```text
+calendar.list {"start":"2026-11-07T00:00:00+01:00","end":"2026-11-14T00:00:00+01:00"}
+calendar.create {"title":"Revisar lanzamiento","start":"2026-11-09T10:00:00+01:00","end":"2026-11-09T10:30:00+01:00","timezone":"Europe/Madrid"}
+```
+
+La importación ICS es atómica y conserva UID para no duplicar una segunda
+importación del mismo archivo. Admite eventos únicos UTC, `TZID` y días
+completos con `DTEND`, conservando `VALUE=DATE` al volver a exportar.
+Los bloques con hora no se convierten en días completos por empezar a medianoche.
+Rechaza recurrencias, horas flotantes y horas ambiguas
+durante cambios de horario, en lugar de interpretarlas incorrectamente.
+Las recurrencias de Mailflare sí se leen ya expandidas en su agenda.
+
+La exportación incluye los eventos locales/importados, no copia el calendario
+remoto. Usa CRLF, escape de texto y plegado de líneas UTF-8.
+
+## Pendientes de cuenta y despliegue
+
+Nada de esta sección se ha ejecutado contra una cuenta real.
+
+- [ ] Elegir cuenta, dominio, subdominio HTTPS de la API y alias definitivos.
+- [ ] Revisar costes/planes de Workers, D1, R2 y Email Sending. No se ha activado
+  facturación ni se garantiza que todo entre en cuotas gratuitas.
+- [ ] Crear D1 `monobot-inbound-mail` y R2 `monobot-inbound-mail-raw`.
+- [ ] Copiar `wrangler.example.toml` a `wrangler.toml` (ignorado por Git),
+  completar bindings, destinatarios permitidos y ruta HTTPS.
+- [ ] Aplicar la migración del Worker y desplegarlo con Wrangler autenticado.
+- [ ] Crear `INBOUND_TOKEN` con al menos 32 caracteres aleatorios y guardarlo
+  como secreto del Worker y en el llavero de MonoBOT.
+- [ ] Activar Email Routing y revisar los registros MX/SPF existentes antes de
+  cambiarlos. No sustituir sin revisión el correo de un dominio en producción.
+- [ ] Crear reglas de alias hacia el Worker. Mantener catch-all desactivado
+  salvo necesidad expresa; preferir destinatarios exactos.
+- [ ] Ajustar retención y lifecycle de R2. El lifecycle debe ser mayor que
+  `RETENTION_DAYS` (por defecto 30 días, lifecycle sugerido 37).
+- [ ] Comprobar con correo real que Cloudflare antepone exactamente su
+  `Authentication-Results` y que el formato coincide con `auth-results.ts`.
+  Sin esa evidencia, dejar las rutas de bots desactivadas. No rebajar la
+  comprobación para forzar que funcione.
+- [ ] Verificar que un fallo de D1/R2 durante `email()` no se presenta al
+  remitente como entrega aceptada. Las pruebas locales no prueban el
+  comportamiento SMTP de la plataforma.
+- [ ] Verificar recepción durante suspensión y recuperación posterior,
+  reintentos, alias desconocidos, remitentes no autorizados y SPF/DMARC fallido.
+- [ ] Verificar dominio de envío, DKIM/SPF/DMARC y claves Resend/Cloudflare.
+  Hacer el primer envío únicamente a un destinatario de prueba autorizado.
+- [ ] Desplegar o elegir una instancia Mailflare, terminar `/setup`, crear
+  usuario, dominios y bandejas, y generar una clave MCP de privilegios mínimos.
+  Seguir su [guía oficial de despliegue](https://github.com/hieunc229/mailflare/blob/main/docs/deployment.md).
+- [ ] Comprobar lectura, borradores, agenda y revisión humana con una instancia
+  real de Mailflare y los CLIs de agentes instalados.
+- [ ] Configurar alertas de consumo, backups, rotación de secretos y pruebas
+  de restauración de D1/R2.
+
+## Límites conocidos y siguientes extensiones
+
+- Los adjuntos entrantes están limitados por el mensaje completo de 2 MiB.
+- La vista local mantiene un caché acotado de 500 mensajes, conservando
+  borradores y entregas pendientes. No es un archivo histórico completo.
+- Un mensaje expirado en R2 se muestra como no disponible; su metadata no
+  bloquea para siempre el resto de la sincronización.
+- Permanecer desconectado más que la retención puede perder contenido antes
+  de que el escritorio lo descargue. No se promete almacenamiento infinito.
+- El Worker no envía push por sí mismo ni despierta el escritorio. La app móvil
+  conserva el acceso existente a las conversaciones de bots por el enlace
+  cifrado; una pantalla móvil de correo/agenda y push directo desde el Worker
+  quedan pendientes.
+- Los bloques de agenda no programan por sí solos una notificación o un
+  despertar del agente. Para eso existen hábitos y `wakes.add`; un sistema de
+  alarmas propio de calendario queda pendiente.
+- Edición de eventos desde la agenda nativa, recurrencia ICS y
+  sincronización bidireccional de calendario quedan pendientes.
+
+Los eventos locales o importados sí se pueden borrar desde Agenda con
+confirmación. Los eventos de Mailflare permanecen de solo lectura. Importar y
+exportar ICS usa el portapapeles, no un selector de archivos.
+
+## Validación
+
+Sin credenciales ni envío de correo real:
+
+```sh
+cargo test -p monobot-email --lib
+cargo test -p monocode-core --lib inbox::workspace
+cargo test -p monocode-core --lib connectors::
+cargo test -p monocode-gpui --profile native-dev cloud_mail_waits_for_a_separate_turn_and_failed_delivery_stays_blocked
+cargo test -p monocode-gpui --profile native-dev inbox::workspace::tests
+cargo check -p monocode-gpui --profile native-dev
+cd deploy/cloudflare-mail
+node ../../node_modules/typescript/bin/tsc -p tsconfig.json
+node --test "test/*.test.ts"
+```
+
+Documentación de contratos públicos:
+
+- [MCP de Mailflare](https://github.com/hieunc229/mailflare/blob/main/docs/email-assistant-and-mcp.md).
+- [Cloudflare REST Sending](https://developers.cloudflare.com/email-service/api/send-emails/rest-api/).
+- [Resend Send Email](https://resend.com/docs/api-reference/emails/send-email).

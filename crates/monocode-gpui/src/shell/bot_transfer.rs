@@ -60,6 +60,16 @@ impl Shell {
         self.sync_settings(cx);
     }
 
+    /// A connector's folder, such as the one Poki lives in.
+    pub(super) fn save_connector_checkout(&mut self, id: &str, path: &str, cx: &mut Context<Self>) {
+        let saved = crate::runtime::locked(&self.store)
+            .and_then(|db| monocode_core::connectors::save_checkout(&db, id, path));
+        if let Err(error) = saved {
+            eprintln!("Could not save the {id} folder: {error}");
+        }
+        self.sync_settings(cx);
+    }
+
     /// A skill pack's switch. The composer's /skill list notices the change
     /// the next time it opens.
     pub(super) fn save_skill_pack(&mut self, id: &str, on: bool, cx: &mut Context<Self>) {

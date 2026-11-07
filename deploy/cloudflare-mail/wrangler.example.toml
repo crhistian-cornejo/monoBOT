@@ -1,0 +1,38 @@
+# Copy to wrangler.toml (git-ignored) and replace every REPLACE_* value.
+# No account id is needed here: wrangler takes it from `wrangler login` or
+# from CLOUDFLARE_ACCOUNT_ID in the environment.
+name = "monobot-inbound-mail"
+main = "src/index.ts"
+compatibility_date = "2025-06-01"
+
+# The HTTP API is reachable only through the route below, never through
+# a public workers.dev hostname.
+workers_dev = false
+preview_urls = false
+
+# routes = [{ pattern = "mail-api.REPLACE_WITH_YOUR_DOMAIN", custom_domain = true }]
+
+[triggers]
+# Daily retention sweep (UTC).
+crons = ["17 3 * * *"]
+
+[vars]
+# Comma separated, required. Exact addresses, or "*@domain" for a whole domain.
+# The Worker rejects every other recipient and fails closed when this is empty.
+ALLOWED_RECIPIENTS = "REPLACE_bot@REPLACE_WITH_YOUR_DOMAIN"
+# Days to keep messages (1..365, default 30). Keep the R2 lifecycle rule longer.
+RETENTION_DAYS = "30"
+# authserv-id whose Authentication-Results header is trusted (default shown).
+TRUSTED_AUTHSERV_ID = "mx.cloudflare.net"
+
+# INBOUND_TOKEN is a secret: `wrangler secret put INBOUND_TOKEN`. Never put it here.
+
+[[d1_databases]]
+binding = "INBOUND_DB"
+database_name = "monobot-inbound-mail"
+database_id = "REPLACE_WITH_DATABASE_ID"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "RAW_MAIL"
+bucket_name = "monobot-inbound-mail-raw"

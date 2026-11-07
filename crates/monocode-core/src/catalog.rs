@@ -431,6 +431,33 @@ fn leaves<'a>(values: &'a Value, out: &mut Vec<&'a Value>) {
         }
     }
 }
+fn is_thought_effort(o: &Value) -> bool {
+    if o["type"] == "boolean" {
+        return false;
+    }
+    let mut choices = Vec::new();
+    leaves(&o["options"], &mut choices);
+    if !choices.is_empty()
+        && choices.iter().all(|c| {
+            let val = c.as_str().or_else(|| c["value"].as_str()).unwrap_or("");
+            matches!(val, "true" | "false") || c.is_boolean() || c["value"].is_boolean()
+        })
+    {
+        return false;
+    }
+    o["category"] == "thought_level"
+        || matches!(
+            o["id"].as_str(),
+            Some(
+                "thought_level"
+                    | "effort"
+                    | "reasoning"
+                    | "reasoning_effort"
+                    | "thinking_level"
+            )
+        )
+}
+
 fn acp_models(value: &Value) -> Vec<Model> {
     let configs: Vec<_> = value["configOptions"]
         .as_array()
@@ -455,21 +482,7 @@ fn acp_models(value: &Value) -> Vec<Model> {
     if rows.is_empty() {
         leaves(&value["availableModels"], &mut rows);
     }
-    let effort = configs.iter().find(|o| {
-        o["id"] != "thinking"
-            && o["type"] != "boolean"
-            && (o["category"] == "thought_level"
-                || matches!(
-                    o["id"].as_str(),
-                    Some(
-                        "thought_level"
-                            | "effort"
-                            | "reasoning"
-                            | "reasoning_effort"
-                            | "thinking_level"
-                    )
-                ))
-    });
+    let effort = configs.iter().find(|o| is_thought_effort(o));
     let mut choices = Vec::new();
     if let Some(effort) = effort {
         leaves(&effort["options"], &mut choices);
@@ -505,15 +518,7 @@ fn acp_models(value: &Value) -> Vec<Model> {
                 .into_iter()
                 .flatten()
                 .collect();
-            let row_effort = row_config.iter().find(|o| {
-                o["id"] != "thinking"
-                    && o["type"] != "boolean"
-                    && (o["category"] == "thought_level"
-                        || matches!(
-                            o["id"].as_str(),
-                            Some("reasoning" | "effort" | "reasoning_effort")
-                        ))
-            });
+            let row_effort = row_config.iter().find(|o| is_thought_effort(o));
             let mut row_choices = Vec::new();
             if let Some(option) = row_effort {
                 leaves(&option["options"], &mut row_choices);
@@ -988,5 +993,36 @@ mod tests {
         assert_eq!(rows[0].controls.len(), 2);
         assert_eq!(rows[0].controls[0].current, "false");
         assert_eq!(rows[0].controls[1].choices[1], ("1m".into(), "1M".into()));
+    }
+    #[test]
+    fn kimi_acp_catalog_extracts_models_and_thought_levels() {
+        let rows = acp_models(&json!({
+            "configOptions": [
+                {
+                    "category": "model",
+                    "id": "model",
+                    "currentValue": "kimi-code/k3-256k",
+                    "options": [
+                        {"value": "kimi-code/kimi-for-coding", "name": "K2.8 Preview"},
+                        {"value": "kimi-code/k3-256k", "name": "K3-256k"}
+                    ]
+                },
+                {
+                    "category": "thought_level",
+                    "id": "thinking",
+                    "currentValue": "high",
+                    "options": [
+                        {"value": "low", "name": "Low"},
+                        {"value": "high", "name": "High"},
+                        {"value": "max", "name": "Max"}
+                    ]
+                }
+            ]
+        }));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].id, "kimi-code/kimi-for-coding");
+        assert_eq!(rows[0].efforts, vec!["low", "high", "max"]);
+        assert_eq!(rows[1].id, "kimi-code/k3-256k");
+        assert_eq!(rows[1].efforts, vec!["low", "high", "max"]);
     }
 }

@@ -257,7 +257,7 @@ mod tests {
 
     #[test]
     fn roles_match_the_tauri_bots() {
-        let source = include_str!("../../../tests/fixtures/parity/bots.ts");
+        let source = include_str!("../../tests/fixtures/parity/bots.ts");
         for role in ROLES {
             assert!(
                 source.contains(&format!("role: \"{}\"", role.role)),

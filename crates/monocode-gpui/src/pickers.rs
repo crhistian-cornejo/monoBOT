@@ -23,12 +23,36 @@ pub(crate) const CLAUDE_MODELS: &[(&str, &str)] = &[
     ("claude-opus-4-5", "Opus 4.5"),
 ];
 
+pub(crate) const KIMI_MODELS: &[(&str, &str)] = &[
+    ("kimi-code/k3-256k", "K3-256k"),
+    ("kimi-code/k3", "K3"),
+    ("kimi-code/k3.1-pro", "K3.1 Pro"),
+    ("kimi-code/k3.1-pro-highspeed", "K3.1 Pro Highspeed"),
+    ("kimi-code/kimi-for-coding", "K2.8 Preview"),
+    ("kimi-code/kimi-for-coding-highspeed", "K2.7 Highspeed"),
+];
+
 /// The display name for a model id; `None` is the provider's default.
 pub(crate) fn model_name(kind: Kind, model: Option<&str>) -> SharedString {
     if model.is_some_and(contains_account_id) {
         return kind.label().into();
     }
-    match model {
+    let stripped = model.and_then(|m| m.strip_prefix(&format!("{}:", kind.id())).or(Some(m)));
+    if kind == Kind::Kimi {
+        match stripped {
+            None => return kind.label().into(),
+            Some(id) => {
+                if let Some((_, name)) = KIMI_MODELS.iter().find(|(m, _)| *m == id) {
+                    return (*name).into();
+                }
+                if let Some(rest) = id.strip_prefix("kimi-code/") {
+                    return rest.to_owned().into();
+                }
+                return id.to_owned().into();
+            }
+        }
+    }
+    match stripped {
         None => kind.label().into(),
         Some("sonnet") => "Sonnet".into(),
         Some("opus") => "Opus".into(),
@@ -575,18 +599,20 @@ impl ModelList {
     /// The live catalog entry behind a choice, once discovery has run.
     pub(crate) fn catalog_model(&self, kind: Kind, id: Option<&str>) -> Option<&Model> {
         let models = &self.catalogs.iter().find(|(k, _)| *k == kind)?.1;
-        match id {
+        let stripped = id.and_then(|i| i.strip_prefix(&format!("{}:", kind.id())).or(Some(i)));
+        match stripped {
             Some(id) => models.iter().find(|m| m.id == id),
             None => models.iter().find(|m| m.default).or(models.first()),
         }
     }
     fn favorite(&self, kind: Kind, id: Option<&str>, cx: &gpui::App) -> bool {
+        let stripped = id.and_then(|i| i.strip_prefix(&format!("{}:", kind.id())).or(Some(i)));
         cx.try_global::<crate::settings::Preferences>()
             .is_some_and(|prefs| {
                 prefs
                     .favorite_models
                     .iter()
-                    .any(|c| c.provider == kind.id() && c.model.as_deref() == id)
+                    .any(|c| c.provider == kind.id() && (c.model.as_deref() == id || c.model.as_deref() == stripped))
             })
     }
     fn toggle_favorite(&mut self, kind: Kind, id: Option<String>, cx: &mut Context<Self>) {
@@ -811,12 +837,18 @@ impl ModelList {
         // An override from the environment that the catalog doesn't name.
         if kind == self.provider
             && let Some(id) = &self.current
-            && !entries.iter().any(|e| e.id.as_ref() == Some(id))
+            && !entries.iter().any(|e| {
+                e.id.as_ref() == Some(id)
+                    || id
+                        .strip_prefix(&format!("{}:", kind.id()))
+                        .is_some_and(|stripped| e.id.as_deref() == Some(stripped))
+            })
         {
+            let stripped = id.strip_prefix(&format!("{}:", kind.id())).unwrap_or(id);
             entries.push(ModelEntry {
                 kind,
-                id: Some(id.clone()),
-                name: model_name(kind, Some(id)),
+                id: Some(stripped.to_string()),
+                name: model_name(kind, Some(stripped)),
                 enabled,
             });
         }
@@ -841,17 +873,30 @@ impl ModelList {
                     .is_some_and(|providers| providers.contains(&kind)))
     }
     fn saved_model_name(&self, kind: Kind, id: Option<&str>) -> SharedString {
+        let stripped = id.and_then(|i| i.strip_prefix(&format!("{}:", kind.id())).or(Some(i)));
         self.catalogs
             .iter()
             .find(|(provider, _)| *provider == kind)
-            .and_then(|(_, models)| models.iter().find(|model| Some(model.id.as_str()) == id))
+            .and_then(|(_, models)| {
+                models
+                    .iter()
+                    .find(|model| Some(model.id.as_str()) == stripped || Some(model.id.as_str()) == id)
+            })
             .map(|model| model_display_name(kind, &model.id, &model.name))
             .unwrap_or_else(|| model_name(kind, id))
     }
     fn current_index(&self, cx: &gpui::App) -> usize {
+        let stripped = self
+            .current
+            .as_deref()
+            .and_then(|c| c.strip_prefix(&format!("{}:", self.provider.id())));
         self.entries(cx)
             .iter()
-            .position(|entry| entry.kind == self.provider && entry.id == self.current)
+            .position(|entry| {
+                entry.kind == self.provider
+                    && (entry.id == self.current
+                        || (stripped.is_some() && entry.id.as_deref() == stripped))
+            })
             .unwrap_or(0)
     }
     fn select_tab(&mut self, tab: ModelTab, window: &mut Window, cx: &mut Context<Self>) {

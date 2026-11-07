@@ -144,6 +144,8 @@ pub(crate) struct Conversation {
     /// The composer box the /btw sheet morphs out of, and how visible the
     /// composer is under the sheet.
     btw_home: (AnchorSlot, f32),
+    /// The Astra / Opus 5.5 scene played after picking one of those models.
+    model_welcome: crate::model_welcome::State,
     _btw_observer: Option<Subscription>,
     pub(crate) summary: Session,
     remote_state: remote::State,
@@ -612,6 +614,7 @@ impl Conversation {
             editing_last_turn: Default::default(),
             btw: None,
             btw_home: (AnchorSlot::default(), 1.),
+            model_welcome: Default::default(),
             _btw_observer: None,
             store,
             mono_turn: 0,
@@ -1983,8 +1986,14 @@ impl Conversation {
         .detach();
     }
     fn model_info(&self) -> Option<&Model> {
-        match self.model.as_deref().or(self.resolved_model.as_deref()) {
-            Some(id) => self.catalog.iter().find(|m| m.id == id),
+        let current = self.model.as_deref().or(self.resolved_model.as_deref());
+        match current {
+            Some(id) => self.catalog.iter().find(|m| {
+                m.id == id
+                    || id
+                        .strip_prefix(&format!("{}:", self.summary.provider))
+                        .is_some_and(|stripped| stripped == m.id)
+            }),
             None => self
                 .catalog
                 .iter()
@@ -2354,6 +2363,11 @@ impl Conversation {
             }
         }
         self.model = picked.1.clone();
+        if changed_model {
+            let label = self.model_label();
+            let id = picked.1.as_deref().unwrap_or_default();
+            self.model_welcome.start(&[id, &label], cx);
+        }
         if let Some(context) = &mut self.context {
             context.window = None;
         }
@@ -3817,6 +3831,23 @@ mod composer_motion_tests {
 }
 impl Render for Conversation {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let body = self.render_body(window, cx);
+        if !self.model_welcome.active() {
+            return body;
+        }
+        // Only for the seconds a scene plays, so the pane's layout is the
+        // body's own the rest of the time.
+        div()
+            .relative()
+            .size_full()
+            .child(body)
+            .children(self.model_welcome.overlay())
+            .into_any_element()
+    }
+}
+
+impl Conversation {
+    fn render_body(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         if self._input_focus.is_none() {
             let focus = self.input.focus_handle(cx);
             self._input_focus = Some([
@@ -3919,6 +3950,7 @@ impl Render for Conversation {
                     .justify_center()
                     .child(
                         div()
+                            .relative()
                             .w_full()
                             .max_w(px(COMPOSER_COLUMN))
                             .opacity(self.btw_home.1)
@@ -3926,6 +3958,7 @@ impl Render for Conversation {
                             .flex_col()
                             .px(px(10.))
                             .pb(px(6.))
+                            .child(self.model_welcome.composer_probe())
                             .child({
                                 let composer = self
                                     .composer_motion

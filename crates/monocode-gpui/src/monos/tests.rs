@@ -3350,7 +3350,9 @@ fn the_group_speaks_with_the_principals_identity_in_its_transcript(cx: &mut Test
 fn group_avatar_stack_renders_lead_first_and_counts_rest(cx: &mut TestAppContext) {
     use monocode_core::mono::groups::Group;
     let s = setup(cx);
-    let (shown, more) = s.manager.update(cx, |m, _cx| {
+    let (shown, more) = s.manager.update(cx, |m, cx| {
+        m.settings = None;
+        m.close(cx);
         let root = m.root.clone();
         let p_id = m
             .roster
@@ -3393,6 +3395,28 @@ fn group_avatar_stack_renders_lead_first_and_counts_rest(cx: &mut TestAppContext
     assert_eq!(shown.len(), 2);
     assert_eq!(shown[0].mascot, "principal");
     assert_eq!(more, 2);
+
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    s.window
+        .update(visual, |shell, window, cx| {
+            shell.workspace.classic_layout = true;
+            shell.workspace.right_panel_open = false;
+            s.manager.update(cx, |m, cx| m.open(&s.id, window, cx));
+            cx.notify();
+        })
+        .unwrap();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+
+    let stack = visual.debug_bounds("group-avatar-stack").expect("group avatar stack rendered");
+    let name = visual.debug_bounds("original-mono-name").expect("group title rendered");
+    assert_eq!(stack.size.width, px(42.0));
+    assert!(
+        name.origin.x >= stack.origin.x + stack.size.width,
+        "name should start after avatar stack: name.x={}, stack.end={}",
+        name.origin.x,
+        stack.origin.x + stack.size.width
+    );
 }
 
 #[gpui::test]
@@ -3513,4 +3537,90 @@ fn bots_open_on_their_own_overview_tabs(cx: &mut TestAppContext) {
         assert!(m.shown_overview_tab(mono) == OverviewTab::Documents);
         assert!(panels::overview_tabs(mono).contains(&OverviewTab::Sessions));
     });
+}
+
+#[gpui::test]
+fn a_cited_paper_opens_in_the_documents_panel_not_a_code_pane(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let dir = std::env::temp_dir().join(format!("monobot-paper-route-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("paper.pdf");
+    std::fs::write(&path, b"%PDF-1.4\n").unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    s.window
+        .update(visual, |_, w, cx| {
+            s.manager.update(cx, |m, cx| m.open(&s.id, w, cx))
+        })
+        .unwrap();
+    s.manager.update(visual, |m, cx| {
+        m.open_paper(
+            path.clone(),
+            3,
+            Some("a passage".into()),
+            "A paper".into(),
+            cx,
+        );
+        assert_eq!(m.route, Some(Route::Paper(path.clone())));
+        assert!(m.overview_tab == OverviewTab::Documents);
+        assert!(m.loading_papers.contains(&path));
+    });
+    visual.run_until_parked();
+    s.manager.update(visual, |m, _| {
+        assert!(m.loading_papers.is_empty());
+        assert_eq!(m.papers[&path].title, "A paper");
+        assert_eq!(m.route, Some(Route::Paper(path.clone())));
+    });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn activity_follows_the_latest_turn_and_lists_what_it_researched(cx: &mut TestAppContext) {
+    use monocode_core::{tool::ToolCall, transcript::Row};
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    s.window
+        .update(visual, |_, w, cx| {
+            s.manager.update(cx, |m, cx| m.open(&s.id, w, cx))
+        })
+        .unwrap();
+    let mut search = ToolCall::new("t1", "WebSearch");
+    search.input = r#"{"query":"copper output"}"#.into();
+    search.output = r#"Links: [{"title":"Mining report","url":"https://a.example/report"}]"#.into();
+    let row = |role: &str, text: String, first: bool| Row {
+        role: role.into(),
+        text,
+        first,
+        sent_at: first.then_some(1),
+    };
+    s.manager.update(visual, |m, cx| {
+        m.chats[&s.id].update(cx, |view, cx| {
+            view.transcript.update(cx, |t, cx| {
+                let start = t.source_rows().len();
+                t.patch(
+                    start,
+                    vec![
+                        row("user", "How much copper?".into(), true),
+                        row("tool", serde_json::to_string(&search).unwrap(), true),
+                        row(
+                            "assistant",
+                            "Output grew [1](https://a.example/report \"Mining report | Grew 4%\")."
+                                .into(),
+                            true,
+                        ),
+                    ],
+                    cx,
+                );
+            });
+        });
+        m.select_overview(OverviewTab::Activity, cx);
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(
+        visual.debug_bounds("mono-research").is_some(),
+        "the latest turn's research shows without picking a message"
+    );
 }

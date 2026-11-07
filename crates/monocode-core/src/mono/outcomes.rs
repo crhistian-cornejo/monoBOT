@@ -73,6 +73,8 @@ pub enum Outcome {
     /// It found nothing worth saying.
     Quiet,
     Failed,
+    /// It was interrupted (e.g. computer went to sleep or app closed).
+    Interrupted,
 }
 
 impl Outcome {
@@ -81,6 +83,7 @@ impl Outcome {
             Self::Posted => "posted",
             Self::Quiet => "quiet",
             Self::Failed => "failed",
+            Self::Interrupted => "interrupted",
         }
     }
 }
@@ -122,6 +125,15 @@ impl RunResult {
             report: None,
             status: None,
             error: Some(error.unwrap_or_else(|| DEFAULT_ERROR.into())),
+        }
+    }
+    pub fn interrupted(started_at: u64, error: Option<String>) -> Self {
+        Self {
+            outcome: Outcome::Interrupted,
+            started_at,
+            report: None,
+            status: None,
+            error: Some(error.unwrap_or_else(|| "Interrupted by system sleep or shutdown".into())),
         }
     }
 }
@@ -311,6 +323,41 @@ mod tests {
         record_outcome(&mut h, RunResult::failed(3, Some("x".into())), 3);
         assert_eq!(failed_in_a_row(&h), 1);
         assert_eq!(h.last_outcome.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn interrupted_runs_do_not_count_towards_failure_streak_and_never_pause() {
+        let mut h = habit();
+        // 4 real failures in a row
+        for n in 1..4 {
+            record_outcome(&mut h, RunResult::failed(n, Some("network error".into())), 10 + n);
+        }
+        assert_eq!(failed_in_a_row(&h), 3);
+        assert!(h.enabled);
+
+        // Sleep interrupts the run
+        let interrupted = record_outcome(
+            &mut h,
+            RunResult::interrupted(99, Some("Interrupted: computer went to sleep".into())),
+            100,
+        );
+        // Interrupted does not produce a notice and does not count as failed
+        assert!(interrupted.notice.is_none());
+        assert_eq!(h.last_outcome.as_deref(), Some("interrupted"));
+        assert_eq!(failed_in_a_row(&h), 0);
+        assert!(h.enabled);
+
+        // Even 10 interrupted runs in a row never pause the habit
+        for n in 101..112 {
+            let res = record_outcome(
+                &mut h,
+                RunResult::interrupted(n, Some("Interrupted: computer went to sleep".into())),
+                n,
+            );
+            assert!(res.notice.is_none());
+            assert!(h.enabled);
+        }
+        assert!(h.enabled);
     }
 
     #[test]

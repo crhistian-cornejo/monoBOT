@@ -11,7 +11,10 @@
 //! Documents with [`keep`].
 
 mod fetch;
+mod icon;
 mod page;
+
+pub use icon::site_icon_png;
 
 use std::fs;
 use std::path::{Path, PathBuf};

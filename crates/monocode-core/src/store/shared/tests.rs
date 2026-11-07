@@ -54,7 +54,7 @@ fn saved_turn_metrics_reload_with_the_same_revision() {
 #[test]
 fn streamed_indexed_mono_load_preserves_projection_and_revision_guards() {
     let mut store = Store::open_monocode(Path::new(":memory:")).unwrap();
-    let legacy = include_str!("../../../../tests/fixtures/parity/mono_transcript.rs");
+    let legacy = include_str!("../../../tests/fixtures/parity/mono_transcript.rs");
     let schema = legacy
         .split("CREATE TABLE IF NOT EXISTS mono_transcripts (")
         .nth(1)
@@ -104,7 +104,7 @@ fn streamed_indexed_mono_load_preserves_projection_and_revision_guards() {
 }
 
 fn indexed_mono(store: &mut Store, turns: usize) -> (i64, String, Vec<Value>) {
-    let legacy = include_str!("../../../../tests/fixtures/parity/mono_transcript.rs");
+    let legacy = include_str!("../../../tests/fixtures/parity/mono_transcript.rs");
     let schema = legacy
         .split("CREATE TABLE IF NOT EXISTS mono_transcripts (")
         .nth(1)
@@ -366,7 +366,7 @@ fn search_connections_share_the_same_read_only_preference_snapshot() {
 fn original_desktop_schema_opens_without_schema_or_history_migration() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("monocode.db");
-    let source = include_str!("../../../../tests/fixtures/parity/session_store.rs");
+    let source = include_str!("../../../tests/fixtures/parity/session_store.rs");
     let schema = source
         .split("const MIGRATION_V1: &str = r#\"")
         .nth(1)
@@ -401,7 +401,7 @@ fn original_desktop_schema_opens_without_schema_or_history_migration() {
 fn indexed_mono_history_stays_in_its_desktop_tables_with_block_ids_intact() {
     let store = Store::open_monocode(Path::new(":memory:")).unwrap();
     let (id, source) = saved(&store, json!([]));
-    let legacy = include_str!("../../../../tests/fixtures/parity/mono_transcript.rs");
+    let legacy = include_str!("../../../tests/fixtures/parity/mono_transcript.rs");
     let schema = legacy
         .split("CREATE TABLE IF NOT EXISTS mono_transcripts (")
         .nth(1)
@@ -1115,7 +1115,7 @@ fn fresh_native_turn_receipts_persist_source_fields_without_changing_saved_prove
 fn indexed_mono_turn_receipts_restore_and_save_in_the_original_block_table() {
     let mut store = Store::open_monocode(Path::new(":memory:")).unwrap();
     let (id, original) = saved(&store, json!([]));
-    let legacy = include_str!("../../../../tests/fixtures/parity/mono_transcript.rs");
+    let legacy = include_str!("../../../tests/fixtures/parity/mono_transcript.rs");
     let schema = legacy
         .split("CREATE TABLE IF NOT EXISTS mono_transcripts (")
         .nth(1)

@@ -50,6 +50,7 @@ mod memory_log;
 mod metal_tests;
 mod mobile;
 mod modal;
+mod model_welcome;
 mod monos;
 mod notes;
 mod notifications;
@@ -82,6 +83,7 @@ mod session_mark;
 mod session_review;
 mod settings;
 mod shell;
+mod site_icons;
 mod sound;
 mod syntax;
 mod tab_label;
@@ -119,9 +121,10 @@ fn quit(cx: &mut App) {
     if notifications::updater::defer_quit(cx) {
         return;
     }
-    let shutdown = cx
-        .background_executor()
-        .spawn(async { monocode_core::process::shutdown_all() });
+    let shutdown = cx.background_executor().spawn(async {
+        monocode_core::poki::shutdown();
+        monocode_core::process::shutdown_all()
+    });
     cx.spawn(async move |cx| {
         shutdown.await;
         cx.update(|cx| cx.quit());
@@ -131,9 +134,10 @@ fn quit(cx: &mut App) {
 
 /// Quit, then relaunch the same app once this process has exited.
 fn restart(cx: &mut App) {
-    let shutdown = cx
-        .background_executor()
-        .spawn(async { monocode_core::process::shutdown_all() });
+    let shutdown = cx.background_executor().spawn(async {
+        monocode_core::poki::shutdown();
+        monocode_core::process::shutdown_all()
+    });
     cx.spawn(async move |cx| {
         shutdown.await;
         cx.update(|cx| cx.restart());
@@ -184,6 +188,13 @@ fn main() {
         std::process::exit(code);
     }
     let cli_args: Vec<_> = std::env::args().skip(1).collect();
+    if cli_args.first().is_some_and(|arg| arg == "--mailflare-mcp") {
+        let result = cli_args.get(1).filter(|_| cli_args.len() == 2)
+            .ok_or_else(|| "Mailflare proxy needs a data directory.".to_owned())
+            .and_then(|dir| monocode_core::inbox::workspace::run_mcp_proxy(dir));
+        if let Err(error) = result { eprintln!("{error}"); std::process::exit(1); }
+        return;
+    }
     if cli_args
         .first()
         .is_some_and(|arg| arg == "--version" || arg == "-V")
