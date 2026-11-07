@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useDragResize } from "../../../shared/hooks/useDragResize";
 import { Modal } from "../../../shared/ui/Modal";
 import { ScrollStrip } from "../../../shared/ui/ScrollStrip";
 import { Mail, RefreshCw, Search, Settings, Star } from "../../../shared/ui/icons";
@@ -19,6 +20,11 @@ import { MailAccounts } from "./MailAccounts";
 import { MailArt } from "./MailArt";
 import { MailReader } from "./MailReader";
 
+const MIN_LIST_WIDTH = 240;
+const MAX_LIST_WIDTH = 520;
+const DEFAULT_LIST_WIDTH = 340;
+let rememberedListWidth = DEFAULT_LIST_WIDTH;
+
 /** The user's mail, beside GitHub in the Inbox: read it, sort it, reply with AI. */
 export function MailInbox() {
   const [accounts, setAccounts] = useState<MailAccount[]>();
@@ -32,6 +38,15 @@ export function MailInbox() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [replyRequest, setReplyRequest] = useState(0);
   const latest = useRef(0);
+  const resize = useDragResize({
+    min: MIN_LIST_WIDTH,
+    max: () => Math.min(MAX_LIST_WIDTH, Math.round(window.innerWidth * 0.5)),
+    defaultWidth: DEFAULT_LIST_WIDTH,
+    initial: rememberedListWidth,
+    onCommit: (width) => {
+      rememberedListWidth = width;
+    },
+  });
 
   const read = useCallback(async (force: boolean) => {
     const ticket = ++latest.current;
@@ -161,7 +176,10 @@ export function MailInbox() {
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1">
-      <div className="flex min-h-0 w-[340px] shrink-0 flex-col border-r border-stroke">
+      <div
+        ref={resize.setPaneRef}
+        className="relative flex min-h-0 shrink-0 flex-col border-r border-stroke"
+      >
         <div className="shrink-0 border-b border-stroke">
         <ScrollStrip activeKey={view} label="folders" className="gap-1 px-2 py-1.5">
           {MAIL_VIEWS.map((option) => {
@@ -296,6 +314,16 @@ export function MailInbox() {
             </button>
           ) : null}
         </div>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize mail list"
+          className={`absolute inset-y-0 -right-px z-10 w-1.5 cursor-col-resize touch-none ${
+            resize.dragging ? "bg-content/15" : "hover:bg-content/10"
+          }`}
+          onPointerDown={resize.onPointerDown}
+          onDoubleClick={resize.onDoubleClick}
+        />
       </div>
 
       {selected ? (

@@ -192,13 +192,21 @@ impl Inbox {
         let connect_token =
             cx.new(|cx| Input::field("API token", "Personal access token", content(0.4), cx));
         let diff_view = cx.new(DiffView::new);
-        let mailbox = cx.new(|cx| mail::Mailbox::new(data_dir.clone(), state.mail_auto_images, cx));
+        let mailbox = cx.new(|cx| {
+            let mut mailbox = mail::Mailbox::new(data_dir.clone(), state.mail_auto_images, cx);
+            mailbox.set_list_width(state.mail_list_width);
+            mailbox
+        });
         let subscriptions = vec![
             cx.subscribe(
                 &mailbox,
                 |this, _, event: &mail::MailEvent, _| match event {
                     mail::MailEvent::AutoImages(on) => {
                         this.state.mail_auto_images = *on;
+                        this.save();
+                    }
+                    mail::MailEvent::ListWidth(width) => {
+                        this.state.mail_list_width = *width;
                         this.save();
                     }
                 },

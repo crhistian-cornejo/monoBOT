@@ -235,6 +235,8 @@ impl Shell {
                             )
                             .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
                                 if event.click_count() == 2 {
+                                    this.project_resize = None;
+                                    this.release_limit_glow();
                                     this.workspace.project_rail_width = 220.;
                                     this.fit_sidebar(cx);
                                     this.persist(cx);

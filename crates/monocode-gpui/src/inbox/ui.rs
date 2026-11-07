@@ -686,15 +686,26 @@ impl Inbox {
                     .bottom_0()
                     .w(px(6.))
                     .cursor(CursorStyle::ResizeLeftRight)
+                    .hover(|s| s.bg(content(0.1)))
+                    .when(self.resize_start.is_some(), |d| d.bg(content(0.15)))
                     .when_some(self.limit_glow.clone(), |d, glow| {
                         d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
                     })
                     .on_mouse_down(
                         MouseButton::Left,
                         cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
-                            this.resize_start =
-                                Some((f32::from(event.position.x), this.state.list_width));
+                            if event.click_count == 2 {
+                                this.state.list_width = 320.;
+                                this.resize_start = None;
+                                if let Some(glow) = &mut this.limit_glow {
+                                    glow.release();
+                                }
+                            } else {
+                                this.resize_start =
+                                    Some((f32::from(event.position.x), this.state.list_width));
+                            }
                             cx.stop_propagation();
+                            cx.notify();
                         }),
                     ),
             )

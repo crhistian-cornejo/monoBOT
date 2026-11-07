@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { HarnessEvent } from "../../../integrations/harness/core/types";
 import type { MailMessage } from "../model/mail";
 
-const harness = vi.hoisted(() => ({ run: vi.fn() }));
+const harness = vi.hoisted(() => ({
+  run: vi.fn(),
+  route: vi.fn(() => ["claude", "devin"]),
+}));
 const api = vi.hoisted(() => ({
   send: vi.fn(async () => undefined),
   draft: vi.fn(async () => undefined),
@@ -17,6 +20,7 @@ vi.mock("../../../integrations/harness/core/registry", () => ({
 }));
 vi.mock("../../../integrations/harness/core/textHarness", () => ({
   pickTextHarness: () => "claude",
+  routeTextHarnesses: () => harness.route(),
 }));
 vi.mock("../../../platform/tauri/fs", () => ({ homeDir: async () => "/home/me" }));
 vi.mock("../model/mailApi", () => ({ mailApi: api }));
@@ -66,6 +70,7 @@ beforeEach(() => {
   document.body.append(container);
   root = createRoot(container);
   harness.run.mockReset();
+  harness.route.mockReturnValue(["claude", "devin"]);
   api.send.mockClear();
   api.draft.mockClear();
   api.recipients.mockResolvedValue({
@@ -209,5 +214,30 @@ describe("MailReply", () => {
     expect(box()?.value).toBe("Hola");
     expect(container.querySelector(".ai-glow")).toBeNull();
     expect(container.textContent).toContain("Written with AI");
+  });
+
+  it("rotates automatically to the next provider when Claude hits its usage limit", async () => {
+    const tried: string[] = [];
+    harness.run.mockImplementation(
+      async (input: { harness: string; onEvent: (event: HarnessEvent) => void }) => {
+        tried.push(input.harness);
+        if (input.harness === "claude") {
+          throw new Error(
+            "Claude Code reached its usage limit. Choose another available model or retry when the limit resets.",
+          );
+        }
+        const reply = "Subject: Re: Feliz cumpleaños\n\nHola desde Devin!";
+        input.onEvent({ type: "message.delta", text: reply });
+        input.onEvent({ type: "message.completed" });
+        return reply;
+      },
+    );
+    render();
+    await flush();
+    act(() => button("Write").click());
+    await flush();
+    await flush();
+    expect(tried).toEqual(["claude", "devin"]);
+    expect(box()?.value).toBe("Hola desde Devin!");
   });
 });

@@ -219,6 +219,20 @@ fn adds_more_connectors_all_off() {
 }
 
 #[test]
+fn formats_connectors_for_acp() {
+    let settings = ConnectorSettings::default();
+    let servers = settings.acp_servers(&by_id(&["context7", "xmd", "playwright"]));
+    assert_eq!(
+        servers,
+        vec![
+            json!({"name": "context7", "type": "http", "url": "https://mcp.context7.com/mcp"}),
+            json!({"name": "xmd", "type": "http", "url": "https://mdfromx.com/mcp"}),
+            json!({"name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@0.0.84"]}),
+        ]
+    );
+}
+
+#[test]
 fn runs_playwright_locally_at_a_pinned_version() {
     let playwright = by_id(&["playwright"]);
     assert_eq!(

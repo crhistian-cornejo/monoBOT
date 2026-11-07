@@ -144,13 +144,15 @@ impl Conversation {
         mono: Mono,
         root: PathBuf,
         environment: std::collections::HashMap<String, String>,
+        speaker: Option<(String, u32, String)>,
         cx: &mut Context<Self>,
     ) {
         self.input
             .update(cx, |input, cx| input.mono_composer(&mono.label(), cx));
-        let name = mono.label();
+        let (mascot, color, name) =
+            speaker.unwrap_or_else(|| (mono.mascot.clone(), mono.color, mono.label()));
         self.transcript
-            .update(cx, |t, _| t.mono_mode(&mono.mascot, mono.color, &name));
+            .update(cx, |t, _| t.mono_mode(&mascot, color, &name));
         self.settings.environment = environment;
         self.mono_ui.pending = mono.outbox.clone();
         self.mono_ui
@@ -185,6 +187,15 @@ impl Conversation {
             context.groups = groups;
             cx.notify();
         }
+    }
+    /// People that the composer's @ menu can name (e.g. group members and lead).
+    pub(crate) fn set_mention_people(
+        &mut self,
+        people: Vec<crate::composer_completion::MentionPerson>,
+        cx: &mut Context<Self>,
+    ) {
+        self.completion
+            .update(cx, |completion, cx| completion.set_people(people, cx));
     }
     /// Appends rows outside any turn, such as a group member's post or the
     /// user's message to its members; false while a turn runs or history
@@ -1202,14 +1213,13 @@ impl Conversation {
         }
         pills
     }
-    /// MonoComposer's box: one row with the field, dictation and send, as
-    /// Tauri's. Square in the floating panel. A group's chat also puts attach,
-    /// emoji and the context meter on that line (its `fieldTools`), since its
-    /// agents come with their own models.
+    /// MonoComposer's box: one row with attach, emoji, the field, meter,
+    /// dictation and send, as Tauri's compact composer. Square in the floating
+    /// companion chat. The agent's model is configured in its Settings (⚙️).
     fn mono_composer_box(
         &mut self,
         square: bool,
-        group: bool,
+        _group: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1217,8 +1227,8 @@ impl Conversation {
         let has_value = self.input.read(cx).has_message_text()
             || !self.attachments.is_empty()
             || !self.quotes.is_empty();
-        let tools = (square || group).then(|| [self.mono_attach(cx), self.mono_emoji(cx)]);
-        let meter = group.then(|| self.mono_context_meter(cx));
+        let tools = [self.mono_attach(cx), self.mono_emoji(cx)];
+        let meter = (!square).then(|| self.mono_context_meter(cx));
         div()
             .id("mono-composer")
             .debug_selector(|| "mono-composer".into())
@@ -1253,9 +1263,9 @@ impl Conversation {
                     .debug_selector(|| "mono-composer-toolbar".into())
                     .flex()
                     .items_end()
-                    .gap(px(if square || group { 2. } else { 6. }))
+                    .gap(px(2.))
                     .p(px(5.))
-                    .children(tools.into_iter().flatten())
+                    .children(tools)
                     .child(
                         div()
                             .flex_1()
@@ -1280,6 +1290,7 @@ impl Conversation {
     fn mono_tool(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div> {
         div()
             .id(id)
+            .debug_selector(move || id.into())
             .role(Role::Button)
             .aria_label(label)
             .tooltip(chrome_tip(label, None))
@@ -1421,6 +1432,7 @@ impl Conversation {
     }
     /// ModelPicker's `text` look with `hideSettings`: the provider's icon
     /// and the model, and the model list opens on its own.
+    #[allow(dead_code)]
     fn mono_model_trigger(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let open = self.menu_is(ComposerMenu::Model)
             || self.menu_is(ComposerMenu::Recent)
@@ -1461,53 +1473,17 @@ impl Conversation {
             .child(div().min_w_0().truncate().child(self.model_label()))
             .into_any_element()
     }
-    /// Under the box, as MonoComposer: attach and emoji on the left; on the
-    /// right the model as text, its settings and how full the thread is. The
-    /// floating panel's square composer keeps attach and emoji only, and a
-    /// group's line already holds them.
+    /// Under the composer: emoji picker row when expanded on platforms without
+    /// a native emoji palette. The model selector is configured in the agent's
+    /// settings panel (⚙️), and tools/meter now live inside the input row.
     fn mono_composer_tools(
         &mut self,
-        floating: bool,
-        group: bool,
+        _floating: bool,
+        _group: bool,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let emoji = self.mono_emoji_row(cx);
-        if floating || group {
-            return emoji.map(|row| div().pt_1().pl_1().child(row).into_any_element());
-        }
-        let attach = self.mono_attach(cx);
-        let face = self.mono_emoji(cx);
-        let right = (!floating).then(|| {
-            let model = self.mono_model_trigger(cx);
-            let controls = self.model_controls(cx);
-            let meter = self.mono_context_meter(cx);
-            div()
-                .ml_auto()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .gap(px(2.))
-                .child(model)
-                .children(controls)
-                .child(meter)
-        });
-        Some(
-            div()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .gap(px(2.))
-                .pt_1()
-                .pl_1()
-                // The box's 1px border plus its row's 5px: the meter sits
-                // straight under send.
-                .pr(px(6.))
-                .child(attach)
-                .child(face)
-                .children(emoji)
-                .children(right)
-                .into_any_element(),
-        )
+        self.mono_emoji_row(cx)
+            .map(|row| div().pt_1().pl_1().child(row).into_any_element())
     }
 }
 

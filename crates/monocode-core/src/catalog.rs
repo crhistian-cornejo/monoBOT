@@ -373,7 +373,22 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
         }
     }
     if models.is_empty() {
-        return Err(format!("{} returned an empty model catalog", kind.label()));
+        if kind == Kind::Droid {
+            models.push(Model {
+                id: "auto".into(),
+                name: "Auto Model".into(),
+                alias_target: None,
+                efforts: vec!["low".into(), "medium".into(), "high".into(), "max".into()],
+                default_effort: Some("high".into()),
+                fast: false,
+                thinking: true,
+                default: true,
+                tiers: Vec::new(),
+                controls: Vec::new(),
+            });
+        } else {
+            return Err(format!("{} returned an empty model catalog", kind.label()));
+        }
     }
     let mut cache = cache.lock().unwrap();
     if cache

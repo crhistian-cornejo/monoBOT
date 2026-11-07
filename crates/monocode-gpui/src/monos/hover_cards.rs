@@ -456,13 +456,22 @@ impl Monos {
                             .gap_1p5()
                             .text_size(px(11.))
                             .text_color(content(0.55))
-                            .child(div().size(px(14.)).flex_shrink_0().child(avatar::avatar(
-                                &mono.mascot,
-                                mono.color,
-                                state,
-                                14.,
-                                true,
-                            )))
+                            .child(if mono.is_group() {
+                                let (shown, more) = self.group_stack_members(mono);
+                                avatar::group_avatar_stack(&shown, state, more, 16., false)
+                            } else {
+                                div()
+                                    .size(px(14.))
+                                    .flex_shrink_0()
+                                    .child(avatar::avatar(
+                                        &mono.mascot,
+                                        mono.color,
+                                        state,
+                                        14.,
+                                        true,
+                                    ))
+                                    .into_any_element()
+                            })
                             .child(div().min_w_0().truncate().child(kind)),
                     )
                     .child(

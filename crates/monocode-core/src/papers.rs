@@ -8,8 +8,8 @@ use unicode_normalization::UnicodeNormalization;
 #[path = "papers_text.rs"]
 mod text;
 pub use text::{
-    detect_doi, excerpt, extract_pdf_text, figures, outline, section, Excerpt, Figure,
-    OutlineEntry, PaperText,
+    detect_doi, excerpt, extract_page_spans, extract_pdf_text, figures, merge_span_rects, outline,
+    section, Excerpt, Figure, OutlineEntry, PageSpan, PaperText,
 };
 #[path = "papers_store.rs"]
 mod store;

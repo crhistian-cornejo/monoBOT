@@ -71,7 +71,6 @@ import {
 import { MonoHeader } from "../../monos/ui/MonoHeader";
 import { MonoComposer } from "../../monos/ui/MonoComposer";
 import type { LaunchedSessionView } from "../../monos/model/monoSpawnedSessions";
-import { ModelControlPills, ModelPicker } from "./ModelPicker";
 import { ContextMeter } from "./ContextMeter";
 import { UsageChips } from "../../../app/shell/UsageFooter";
 import type { RateLimitProvider } from "../../providers/model/rateLimits";
@@ -1296,59 +1295,15 @@ const LocalSessionPane = memo(function LocalSessionPane({
                         </div>
                       ) : undefined
                     }
-                    // A group's agents come with their own models: its line
-                    // keeps attach, emoji and how full the thread is.
+                    // The agent's model is configured in its Settings (⚙️).
+                    // Its composer line keeps attach, emoji and how full the thread is.
                     fieldTools={
-                      lead ? (
-                        <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
-                          <ContextMeter
-                            usage={session.context}
-                            empty={isEmpty}
-                          />
-                        </div>
-                      ) : undefined
-                    }
-                    controls={
-                      lead ? undefined : (
-                        <>
-                          <ModelPicker
-                            harness={session.harness}
-                            model={session.model}
-                            values={session.modelSettings}
-                            allowedHarnesses={allowedModelHarnesses}
-                            project={workCwd}
-                            hideSettings
-                            hotkeys={focused && !btw.open}
-                            variant="text"
-                            labelClassName="@max-sm:hidden"
-                            onChange={(harness, model) =>
-                              onModelChange(session.id, harness, model)
-                            }
-                            onSettingsChange={(settings) =>
-                              onModelSettingsChange(session.id, settings)
-                            }
-                          />
-                          <ModelControlPills
-                            harness={session.harness}
-                            model={session.model}
-                            values={session.modelSettings}
-                            variant="text"
-                            labelClassName="@max-sm:hidden"
-                            onSettingsChange={(settings) =>
-                              onModelSettingsChange(session.id, settings)
-                            }
-                          />
-                          {/* A Mono is one long conversation; this is how full
-                              its current thread is. It rotates threads itself,
-                              so there is nothing to compact here. */}
-                          <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
-                            <ContextMeter
-                              usage={session.context}
-                              empty={isEmpty}
-                            />
-                          </div>
-                        </>
-                      )
+                      <div className="grid size-6.5 place-items-center rounded-md transition-colors hover:bg-content/8">
+                        <ContextMeter
+                          usage={session.context}
+                          empty={isEmpty}
+                        />
+                      </div>
                     }
                   />
                 </>

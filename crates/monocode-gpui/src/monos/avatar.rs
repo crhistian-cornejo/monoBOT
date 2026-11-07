@@ -193,3 +193,120 @@ pub(crate) fn avatar(name: &str, color: u32, status: &str, side: f32, still: boo
     .flex_shrink_0()
     .into_any_element()
 }
+
+/// A member's look for an avatar stack (mascot and color).
+#[derive(Clone, Debug)]
+pub(crate) struct StackAvatar {
+    pub mascot: String,
+    pub color: u32,
+}
+
+/// A group's members as overlapping round avatars, the lead first, with the
+/// rest counted at the end: who is in the room, at a glance (matching
+/// GroupAvatarStack.tsx from Tauri).
+pub(crate) fn group_avatar_stack(
+    members: &[StackAvatar],
+    status: &str,
+    more: usize,
+    side: f32,
+    show_status: bool,
+) -> AnyElement {
+    if members.is_empty() {
+        return avatar("robot", 0xffffff, status, side, true);
+    }
+    let circle_size = px(side);
+    let inner_size = (side * 0.72).round();
+    let overlap = (side * 0.32).round();
+    let bg_base = rgb(crate::right_panel::BACKGROUND_BASE);
+    let lead_color = members.first().map_or(0xffffff, |m| m.color);
+
+    let mut stack = gpui::div().relative().flex().items_center().flex_shrink_0();
+
+    for (ix, member) in members.iter().enumerate() {
+        stack = stack.child(
+            gpui::div()
+                .size(circle_size)
+                .flex_shrink_0()
+                .rounded_full()
+                .border_1()
+                .border_color(bg_base)
+                .bg(bg_base)
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(ix > 0, |d| d.ml(px(-overlap)))
+                .child(
+                    gpui::div()
+                        .size_full()
+                        .rounded_full()
+                        .bg(crate::theme::content(0.07))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(avatar(
+                            &member.mascot,
+                            member.color,
+                            "idle",
+                            inner_size,
+                            true,
+                        )),
+                ),
+        );
+    }
+
+    if more > 0 {
+        let font_size = (side * 0.5).max(8.);
+        stack = stack.child(
+            gpui::div()
+                .size(circle_size)
+                .flex_shrink_0()
+                .rounded_full()
+                .border_1()
+                .border_color(bg_base)
+                .bg(bg_base)
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(!members.is_empty(), |d| d.ml(px(-overlap)))
+                .child(
+                    gpui::div()
+                        .size_full()
+                        .rounded_full()
+                        .bg(crate::theme::content(0.07))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(
+                            gpui::div()
+                                .text_size(px(font_size))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .text_color(crate::theme::content(0.7))
+                                .child(format!("+{more}")),
+                        ),
+                ),
+        );
+    }
+
+    if show_status {
+        let status_color = if status == "working" {
+            rgb(lead_color).into()
+        } else if status == "needs-you" {
+            crate::theme::accent_color()
+        } else {
+            crate::theme::content(0.3)
+        };
+        stack = stack.child(
+            gpui::div()
+                .absolute()
+                .right(px(-2.))
+                .top(px(-2.))
+                .size(px(6.))
+                .rounded_full()
+                .border_1()
+                .border_color(bg_base)
+                .bg(status_color),
+        );
+    }
+
+    stack.into_any_element()
+}

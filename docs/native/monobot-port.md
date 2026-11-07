@@ -21,7 +21,7 @@ para la lógica y `crates/monocode-gpui` para la interfaz.
 - La nativa ya tiene: Monos con alma, memoria, hábitos y latido; orquestación;
   documentos; visuales con gráficos tramados (`monocode-gpui/src/visuals/charts.rs`,
   de donde salió el port SVG de Tauri); Inbox de GitHub, GitLab, Jira, Linear y
-  Azure DevOps; notas; automatizaciones; 11 proveedores (Droid no está); skills de
+  Azure DevOps; notas; automatizaciones; 12 proveedores (incluyendo Droid); skills de
   `.agents/skills` y `.claude/skills`; terminal alacritty.
 - Compila y arranca en Windows (comprobado el 5 de noviembre: 13 min la primera vez).
 
@@ -261,7 +261,7 @@ Traducir `src/features/groups/model/*` (rondas, asientos, menciones, actividad, 
 | `468bec43` `580a9d13` | Lector de papers: PDFs en Documentos, pasajes citados, sitio de la cita en el PDF, añadir al chat las palabras seleccionadas |
 | `70fe70f1` `a7e33ad4` | Gráficos y explicaciones en línea: Tauri ya usa el mismo `crates/visual`; solo hay que verificar que se ven igual en las dos apps |
 
-Hecho en la nativa (`crates/monocode-gpui/src/file_editor/`): visores de `.xlsx/.xlsm` (`spreadsheet.rs`, `spreadsheet_chart.rs`, `chart_scale.rs`), de `.csv/.tsv` como vista previa de la hoja, de `.docx` (`word.rs`), de `.pptx` (`deck.rs`) y de `.pdf` (`pdf.rs`), con la lectura del core en segundo plano (`office.rs`, `papers_text.rs`). El visor PDF rasteriza páginas solo en Windows (`Windows.Data.Pdf`); en macOS y Linux muestra la vista de texto extraído y ofrece abrir con la app externa — falta un renderizador por plataforma (PDFKit/Quartz en macOS, pdfium/poppler en Linux) y el subrayado x/y sobre la página (hoy la cita selecciona el pasaje en la vista de texto). Pendiente además: girar y voltear formas en las diapositivas; título vertical del eje Y en los gráficos; paginación exacta de Word (las páginas se llenan con una estimación de la altura de cada bloque); archivos remotos.
+Hecho en la nativa (`crates/monocode-gpui/src/file_editor/`): visores de `.xlsx/.xlsm` (`spreadsheet.rs`, `spreadsheet_chart.rs`, `chart_scale.rs`), de `.csv/.tsv` como vista previa de la hoja, de `.docx` (`word.rs`), de `.pptx` (`deck.rs`) y de `.pdf` (`pdf.rs`), con la lectura del core en segundo plano (`office.rs`, `papers_text.rs`). El visor PDF rasteriza páginas nativamente sin Chromium/PDFium en macOS (`CoreGraphics` + `PDFKit`), Windows (`Windows.Data.Pdf`) y Linux (`libpoppler-glib` + `libcairo` vía `dlopen`, con fallback a vista de texto si no están instaladas), incluye buscador en el documento, subrayado x/y sobre la página para citas y búsquedas, selección interactiva con el ratón sobre el PDF renderizado y botón flotante «Add to chat» para enviar pasajes al agente. Pendiente además: girar y voltear formas en las diapositivas; título vertical del eje Y en los gráficos; paginación exacta de Word (las páginas se llenan con una estimación de la altura de cada bloque); archivos remotos.
 
 ### Fase 10: dictado y voz
 

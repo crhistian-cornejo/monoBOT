@@ -329,7 +329,7 @@ export const SETTINGS_INDEX: SettingsEntry[] = [
     section: "appearance",
     label: "Workspace theme",
     keywords:
-      "color colour palette scheme preset inset harbor moss ember orchid",
+      "color colour palette scheme preset inset harbor moss ember orchid monokai github solarized latte one-light paper",
   },
   {
     id: "accent-color",

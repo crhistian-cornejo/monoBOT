@@ -849,12 +849,120 @@ pub const QUICK_CHANGES: [(&str, &str); 3] = [
     ),
 ];
 
+/// Minimum remaining usage headroom (%) required for a provider to be preferred by the router
+/// when Claude has no usage or is below threshold.
+pub const ROUTER_MIN_HEADROOM: f64 = 40.0;
+
+/// Providers whose subscription usage headroom can be queried directly.
+pub const RATE_LIMIT_PROVIDERS: [crate::provider::Kind; 4] = [
+    crate::provider::Kind::Claude,
+    crate::provider::Kind::Codex,
+    crate::provider::Kind::Devin,
+    crate::provider::Kind::OpenCode,
+];
+
+/// Whether `kind` can draft a plain-text email reply.
+pub fn supports_reply(kind: crate::provider::Kind) -> bool {
+    crate::session_title::supports(kind) || kind == crate::provider::Kind::Devin
+}
+
+/// Remaining headroom percentage (`0.0..=100.0`) across a usage snapshot's windows,
+/// resilient to local clock skew (`resets_at` is only treated as elapsed when it is
+/// newer than `snapshot.updated_at`).
+pub fn router_headroom(snapshot: &crate::usage::Snapshot, now: i64) -> Option<f64> {
+    if snapshot.windows.is_empty() {
+        return None;
+    }
+    snapshot
+        .windows
+        .iter()
+        .map(|w| {
+            let reset = w.resets_at.is_some_and(|at| {
+                (snapshot.updated_at == 0 || at > snapshot.updated_at) && at <= now
+            });
+            if reset {
+                100.
+            } else {
+                (100. - w.used_percent.clamp(0., 100.)).max(0.)
+            }
+        })
+        .reduce(f64::min)
+}
+
+/// A candidate model/account for drafting an email reply along with its known remaining
+/// usage headroom (`0.0..=100.0`), if any.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ReplyCandidate {
+    pub text: crate::session_title::TextModel,
+    pub headroom: Option<f64>,
+}
+
+/// Orders reply candidate models so that when Claude has no usage (or `<= 40%` headroom),
+/// or when the primary model is at/below `40%` headroom, providers with `> 40%` remaining
+/// usage headroom are automatically routed first (ordered by highest remaining headroom).
+pub fn route_reply_models(
+    chosen: Option<ReplyCandidate>,
+    candidates: Vec<ReplyCandidate>,
+) -> Vec<crate::session_title::TextModel> {
+    let mut all = Vec::with_capacity(candidates.len() + 1);
+    let mut seen = HashSet::new();
+    for candidate in chosen.into_iter().chain(candidates) {
+        let key = (
+            candidate.text.kind,
+            candidate.text.account.id.clone(),
+            candidate.text.model.clone(),
+        );
+        if seen.insert(key) {
+            all.push(candidate);
+        }
+    }
+    let Some(first) = all.first() else {
+        return Vec::new();
+    };
+    let rotate_away = (first.text.kind == crate::provider::Kind::Claude
+        && !first.headroom.is_some_and(|h| h > ROUTER_MIN_HEADROOM))
+        || first.headroom.is_some_and(|h| h <= ROUTER_MIN_HEADROOM);
+
+    let sort_fallbacks = |mut list: Vec<ReplyCandidate>| -> Vec<crate::session_title::TextModel> {
+        let mut above = Vec::new();
+        let mut unknown = Vec::new();
+        let mut low = Vec::new();
+        let mut exhausted = Vec::new();
+        for item in list.drain(..) {
+            match item.headroom {
+                Some(h) if h > ROUTER_MIN_HEADROOM => above.push((item.text, h)),
+                None => unknown.push(item.text),
+                Some(h) if h > 0.0 => low.push((item.text, h)),
+                Some(_) => exhausted.push(item.text),
+            }
+        }
+        above.sort_by(|a, b| b.1.total_cmp(&a.1));
+        low.sort_by(|a, b| b.1.total_cmp(&a.1));
+        above
+            .into_iter()
+            .map(|(t, _)| t)
+            .chain(unknown)
+            .chain(low.into_iter().map(|(t, _)| t))
+            .chain(exhausted)
+            .collect()
+    };
+
+    if rotate_away {
+        sort_fallbacks(all)
+    } else {
+        let primary = all.remove(0).text;
+        let mut out = vec![primary];
+        out.extend(sort_fallbacks(all));
+        out
+    }
+}
+
 /// The first installed harness that answers plain text, for a reply when Settings picks no
 /// background model.
 pub fn text_harness() -> Option<crate::provider::Kind> {
-    crate::provider::Kind::ALL.into_iter().find(|kind| {
-        crate::session_title::supports(*kind) && crate::provider::resolve(*kind).is_some()
-    })
+    crate::provider::Kind::ALL
+        .into_iter()
+        .find(|kind| supports_reply(*kind) && crate::provider::resolve(*kind).is_some())
 }
 
 /// Asks a connected model for a reply; the user reviews it before anything is sent.
@@ -936,6 +1044,138 @@ pub fn write_reply(
     clean_reply(stream.last(&output))
         .filter(|text| !split_subject(text).body.trim().is_empty())
         .ok_or_else(|| "The model wrote nothing. Try again.".into())
+}
+
+fn probe_missing_headroom(
+    chosen: &mut Option<ReplyCandidate>,
+    candidates: &mut [ReplyCandidate],
+    cancel: &std::sync::atomic::AtomicBool,
+) {
+    let now = crate::usage::now_ms();
+    for candidate in chosen.iter_mut().chain(candidates.iter_mut()) {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            break;
+        }
+        if candidate.headroom.is_some() || !RATE_LIMIT_PROVIDERS.contains(&candidate.text.kind) {
+            continue;
+        }
+        candidate.headroom = match crate::usage::fetch_for(
+            candidate.text.kind,
+            &candidate.text.account,
+            candidate.text.model.as_deref(),
+        ) {
+            Ok(snapshot) => router_headroom(&snapshot, now),
+            Err(_) => Some(0.),
+        };
+    }
+}
+
+/// Runs `models` in order, automatically rotating to the next candidate if a provider fails
+/// (for example, when Claude reaches its usage limit).
+pub fn write_reply_with_fallback(
+    models: Vec<crate::session_title::TextModel>,
+    prompt: String,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    mut on_progress: impl FnMut(ReplyProgress),
+    mut runner: impl FnMut(
+        crate::session_title::TextModel,
+        String,
+        Arc<std::sync::atomic::AtomicBool>,
+        &mut dyn FnMut(ReplyProgress),
+    ) -> Result<String, String>,
+) -> Result<String, String> {
+    if models.is_empty() {
+        return Err("Connect an agent (Claude, Codex…) to write with AI.".into());
+    }
+    let mut last_error = None;
+    for (index, model) in models.into_iter().enumerate() {
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return Err(last_error.unwrap_or_else(|| "Cancelled".into()));
+        }
+        if index > 0 {
+            on_progress(ReplyProgress::Arrived(false));
+            on_progress(ReplyProgress::Text(String::new()));
+        }
+        match runner(model, prompt.clone(), cancel.clone(), &mut on_progress) {
+            Ok(written) => return Ok(written),
+            Err(error) => {
+                last_error = Some(error);
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "Connect an agent (Claude, Codex…) to write with AI.".into()))
+}
+
+/// Routes an email reply across available providers, automatically rotating away from Claude
+/// (or any exhausted primary model) to a provider with `> 40%` usage headroom, and falling
+/// back across remaining installed providers if a provider errors at runtime.
+pub fn write_reply_routed(
+    mut chosen: Option<ReplyCandidate>,
+    mut candidates: Vec<ReplyCandidate>,
+    prompt: String,
+    cancel: Arc<std::sync::atomic::AtomicBool>,
+    mut on_progress: impl FnMut(ReplyProgress),
+) -> Result<String, String> {
+    let installed = |kind: crate::provider::Kind| crate::provider::resolve(kind).is_some();
+    chosen = chosen.filter(|c| installed(c.text.kind));
+    candidates.retain(|c| installed(c.text.kind));
+    let primary_ready = chosen
+        .as_ref()
+        .or_else(|| candidates.first())
+        .is_some_and(|c| c.headroom.is_some_and(|h| h > ROUTER_MIN_HEADROOM));
+    if !primary_ready {
+        probe_missing_headroom(&mut chosen, &mut candidates, &cancel);
+        let models = route_reply_models(chosen, candidates);
+        return write_reply_with_fallback(
+            models,
+            prompt,
+            cancel,
+            on_progress,
+            |model, prompt, cancel, on_progress| write_reply(model, prompt, cancel, on_progress),
+        );
+    }
+    let models = route_reply_models(chosen.clone(), candidates.clone());
+    let Some((first, rest)) = models.split_first() else {
+        return Err("Connect an agent (Claude, Codex…) to write with AI.".into());
+    };
+    match write_reply(
+        first.clone(),
+        prompt.clone(),
+        cancel.clone(),
+        &mut on_progress,
+    ) {
+        Ok(written) => Ok(written),
+        Err(first_err) => {
+            if rest.is_empty() || cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(first_err);
+            }
+            candidates.retain(|c| {
+                !(c.text.kind == first.kind
+                    && c.text.account.id == first.account.id
+                    && c.text.model == first.model)
+            });
+            let mut none_chosen = None;
+            probe_missing_headroom(&mut none_chosen, &mut candidates, &cancel);
+            let fallback_models = route_reply_models(None, candidates);
+            if fallback_models.is_empty() {
+                return Err(first_err);
+            }
+            on_progress(ReplyProgress::Arrived(false));
+            on_progress(ReplyProgress::Text(String::new()));
+            write_reply_with_fallback(
+                fallback_models,
+                prompt,
+                cancel,
+                on_progress,
+                |model, prompt, cancel, on_progress| {
+                    write_reply(model, prompt, cancel, on_progress)
+                },
+            )
+        }
+    }
 }
 
 /// The message as the reply prompt reads it: its text, else its preview.
@@ -1580,5 +1820,122 @@ mod tests {
         assert_eq!(size_label(512), "512 B");
         assert_eq!(size_label(2048), "2 KB");
         assert_eq!(size_label(3 * 1024 * 1024), "3.0 MB");
+    }
+
+    #[test]
+    fn router_rotates_from_unavailable_or_low_claude_to_provider_above_40_percent() {
+        use crate::{
+            accounts::Profile,
+            provider::Kind,
+            session_title::TextModel,
+            usage::{Snapshot, Window},
+        };
+        assert!(supports_reply(Kind::Devin));
+        assert!(supports_reply(Kind::Claude));
+
+        // Clock-skewed Codex window (`resets_at <= updated_at` with 100% used) stays at 0% headroom.
+        let codex_skewed = Snapshot {
+            windows: vec![
+                Window {
+                    minutes: 300,
+                    used_percent: 100.0,
+                    resets_at: Some(1_000),
+                },
+                Window {
+                    minutes: 10_080,
+                    used_percent: 51.0,
+                    resets_at: Some(1_000),
+                },
+            ],
+            updated_at: 2_000,
+            ..Default::default()
+        };
+        assert_eq!(router_headroom(&codex_skewed, 2_500), Some(0.0));
+
+        // Devin window at 31% used has 69% remaining headroom (> 40%).
+        let devin_snapshot = Snapshot {
+            windows: vec![Window {
+                minutes: 43_200,
+                used_percent: 31.0,
+                resets_at: Some(5_000),
+            }],
+            updated_at: 2_000,
+            ..Default::default()
+        };
+        assert_eq!(router_headroom(&devin_snapshot, 2_500), Some(69.0));
+
+        let cand = |kind: Kind, headroom: Option<f64>| ReplyCandidate {
+            text: TextModel::automatic(kind, Profile::default()),
+            headroom,
+        };
+
+        // Claude unavailable (None), Codex 0%, Devin 69%, OpenCode 45% -> routes Devin (69%) then OpenCode (45%) first.
+        let routed = route_reply_models(
+            None,
+            vec![
+                cand(Kind::Claude, None),
+                cand(Kind::Codex, Some(0.0)),
+                cand(Kind::Devin, Some(69.0)),
+                cand(Kind::OpenCode, Some(45.0)),
+            ],
+        );
+        let kinds: Vec<Kind> = routed.iter().map(|m| m.kind).collect();
+        assert_eq!(
+            kinds,
+            vec![Kind::Devin, Kind::OpenCode, Kind::Claude, Kind::Codex]
+        );
+
+        // Claude at 35% (<= 40%) also routes to Devin (69%).
+        let routed_low = route_reply_models(
+            Some(cand(Kind::Claude, Some(35.0))),
+            vec![
+                cand(Kind::Claude, Some(35.0)),
+                cand(Kind::Devin, Some(69.0)),
+            ],
+        );
+        assert_eq!(routed_low[0].kind, Kind::Devin);
+        assert_eq!(routed_low[1].kind, Kind::Claude);
+
+        // Claude at 75% (> 40%) stays first.
+        let routed_ok = route_reply_models(
+            None,
+            vec![
+                cand(Kind::Claude, Some(75.0)),
+                cand(Kind::Devin, Some(69.0)),
+            ],
+        );
+        assert_eq!(routed_ok[0].kind, Kind::Claude);
+        assert_eq!(routed_ok[1].kind, Kind::Devin);
+    }
+
+    #[test]
+    fn write_reply_with_fallback_rotates_on_claude_usage_limit_error() {
+        use crate::{accounts::Profile, provider::Kind, session_title::TextModel};
+        let models = vec![
+            TextModel::automatic(Kind::Claude, Profile::default()),
+            TextModel::automatic(Kind::Devin, Profile::default()),
+        ];
+        let cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut events = Vec::new();
+        let mut tried = Vec::new();
+        let result = write_reply_with_fallback(
+            models,
+            "responde".into(),
+            cancel,
+            |progress| events.push(progress),
+            |model, _prompt, _cancel, on_progress| {
+                tried.push(model.kind);
+                if model.kind == Kind::Claude {
+                    Err("Claude Code reached its usage limit. Choose another available model or retry when the limit resets.".into())
+                } else {
+                    on_progress(ReplyProgress::Text("Subject: Re: Hi\n\nHola!".into()));
+                    on_progress(ReplyProgress::Arrived(true));
+                    Ok("Subject: Re: Hi\n\nHola!".into())
+                }
+            },
+        );
+        assert_eq!(result.unwrap(), "Subject: Re: Hi\n\nHola!");
+        assert_eq!(tried, vec![Kind::Claude, Kind::Devin]);
+        assert!(events.contains(&ReplyProgress::Arrived(false)));
     }
 }

@@ -433,7 +433,7 @@ impl Monos {
             .unwrap_or_default();
         let context = self.group_context(&member, Some(&key.0));
         view.update(cx, |view, cx| {
-            view.configure_mono(member, root, env, cx);
+            view.configure_mono(member, root, env, None, cx);
             if let Some(settings) = settings {
                 let config = view.settings.mono.take();
                 let env = std::mem::take(&mut view.settings.environment);

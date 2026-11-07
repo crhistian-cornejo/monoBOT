@@ -6,7 +6,7 @@ establish runtime or platform parity with the production React/Tauri app. See
 
 ## Providers
 
-All eleven providers have discovery, model selection and native transports.
+All twelve providers have discovery, model selection and native transports.
 The live results below are historical spot checks, not certification of every
 provider feature or the current revision.
 
@@ -23,6 +23,7 @@ provider feature or the current revision.
 | Hermes Agent | ACP | Catalog; prompt blocked by upstream account credit (Oct 19) |
 | Antigravity | ACP | Protocol fixtures only; no installed server for a live check |
 | Devin | ACP | Catalog, streaming, two-turn resume and supervised write approval (Oct 19) |
+| Droid | ACP | Catalog, streaming, autonomy mapping and fallback models |
 
 Changes to provider lifecycles on Oct 21 still need live checks, especially
 steering, compaction, rewind, warm resume, questions and MCP confirmations.
@@ -37,7 +38,7 @@ approval for every edit. Native Supervised mode does not add that guarantee.
 | Chat | Live attachment/steering/rewind checks, complete keyboard selection and screen-reader navigation, richer nested task artifacts and provider-specific task controls |
 | History and workspace | Transcript/database paging, cache runtime checks, remaining desktop layout consumers, explicit import/export |
 | Files and Git | Platform visual/IME checks, Linux/Windows media hosting, non-Git checkpoints, per-file checkpoint Undo/Keep and orchestration checkpoint integration |
-| Papers and PDF | The PDF page rasterizer is Windows-only (`file_editor/pdf.rs` renders with `Windows.Data.Pdf`). Detection by `%PDF-` signature, per-page text extraction, the shared paper cache, the `papers.*` app actions and citation passage matching are platform-neutral. On macOS and Linux the viewer shows the extracted-text view and offers "Open externally"; there is no page image and `papers.figure` fails with a platform error. Citation focus selects the quoted text in the text view — the rendered page has no x/y highlight yet. A macOS renderer (PDFKit/Quartz) and a Linux one (pdfium/poppler) are still needed, plus real-PDF visual checks on Windows |
+| Papers and PDF | The PDF page rasterizer runs natively without Chromium/PDFium on Windows (`Windows.Data.Pdf`), macOS (`CoreGraphics` + `PDFKit` word bounds) and Linux (`libpoppler-glib.so.8` + `libcairo.so.2` via runtime `dlopen`, falling back to extracted-text view when absent). Detection by `%PDF-` signature, per-page text extraction, positioned word-span extraction (`extract_page_spans`), the shared paper cache, the `papers.*` app actions, in-PDF search, on-page x/y citation/search/selection highlights, and "Add to chat" from visual or text selection are implemented. Real-PDF visual checks across platforms remain |
 | Accounts and settings | Live OAuth/MCP authentication checks and remaining platform-specific settings behavior |
 | Inbox | Runtime/visual checks, inline video, linked-update notices and richer CI evidence/repair progress |
 | Notes | Runtime/visual checks and composer note-card presentation |

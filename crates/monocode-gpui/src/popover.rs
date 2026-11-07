@@ -944,6 +944,7 @@ pub(crate) struct Menu {
     items: Vec<MenuItem>,
     style: MenuStyle,
     width: f32,
+    height: Option<f32>,
     row_metrics: Option<(f32, f32)>,
     search_navigation: bool,
     submenu_width: Option<f32>,
@@ -998,6 +999,7 @@ impl Menu {
             items,
             style: MenuStyle::Explorer,
             width: MENU_WIDTH,
+            height: None,
             row_metrics: None,
             search_navigation: false,
             submenu_width: None,
@@ -1011,6 +1013,10 @@ impl Menu {
     }
     pub(crate) fn width(mut self, width: f32) -> Self {
         self.width = width;
+        self
+    }
+    pub(crate) fn height(mut self, height: f32) -> Self {
+        self.height = Some(height);
         self
     }
     /// Override row and icon sizes for menus whose source uses taller rows.
@@ -1540,9 +1546,12 @@ impl Render for Menu {
             .iter()
             .enumerate()
             .map(|(ix, item)| match item {
-                MenuItem::Custom(view, _) => {
-                    div().flex_shrink_0().child(view.clone()).into_any_element()
-                }
+                MenuItem::Custom(view, _) => div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex_shrink_0()
+                    .child(view.clone())
+                    .into_any_element(),
                 MenuItem::Header(text) => div()
                     .flex_shrink_0()
                     .px_2()
@@ -1719,6 +1728,7 @@ impl Render for Menu {
                 }
             }))
             .min_h_0()
+            .when_some(self.height, |d, h| d.h(px(h)))
             .overflow_y_scroll()
             .flex()
             .flex_col()
@@ -1780,7 +1790,10 @@ pub(crate) fn menu_popover(menu: &Entity<Menu>, anchor: Anchor, cx: &App) -> Pop
                 p.max_width(m.width).min_width(MENU_MIN_WIDTH.min(m.width))
             }
         })
-        .when(m.style == MenuStyle::Filter, |p| p.max_height(480.))
+        .when_some(m.height, |p, h| p.height(h))
+        .when(m.style == MenuStyle::Filter && m.height.is_none(), |p| {
+            p.max_height(480.)
+        })
         .padding(m.style.padding())
         .track(m.surface.clone())
         .ignore(m.sub_region.clone())

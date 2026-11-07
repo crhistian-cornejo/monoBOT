@@ -1,13 +1,23 @@
 //! Bounded PDF text extraction and page-based excerpts for paper actions.
-use lopdf::{Document, LoadOptions};
+use lopdf::{content::Content, Document, LoadOptions, Object, ObjectId};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashSet, sync::OnceLock};
+use std::{
+    collections::{BTreeMap, HashSet},
+    sync::OnceLock,
+};
 
 const MAX_PDF_BYTES: usize = 40 * 1024 * 1024;
 const MAX_STREAM_BYTES: usize = 8 * 1024 * 1024;
 const MAX_PAGES: usize = 80;
 const MAX_TEXT_BYTES: usize = 16 * 1024 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PageSpan {
+    pub text: String,
+    /// Normalized [0.0, 1.0] top-left coordinates: [x, y, width, height].
+    pub rect: [f32; 4],
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -42,11 +52,21 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<PaperText, String> {
         ..Default::default()
     };
     let mut total_bytes = 0;
-    for page in pages.keys().take(MAX_PAGES) {
-        let text = match doc.extract_text_with_limit(&[*page], MAX_STREAM_BYTES) {
+    for (page, page_id) in pages.iter().take(MAX_PAGES) {
+        let mut text = match doc.extract_text_with_limit(&[*page], MAX_STREAM_BYTES) {
             Ok(text) => text,
             Err(_) => String::new(),
         };
+        if text.trim().is_empty() {
+            let spans = extract_page_spans_from_doc(&doc, *page_id);
+            if !spans.is_empty() {
+                text = spans
+                    .into_iter()
+                    .map(|span| span.text)
+                    .collect::<Vec<_>>()
+                    .join(" ");
+            }
+        }
         if text.trim().is_empty() {
             result.unreadable_pages.push(*page as usize);
         }
@@ -57,6 +77,345 @@ pub fn extract_pdf_text(bytes: &[u8]) -> Result<PaperText, String> {
         result.pages.push(text.trim().to_owned());
     }
     Ok(result)
+}
+
+/// Extract positioned word spans for a zero-based page index, normalized to
+/// `[0.0, 1.0]` top-left coordinates `[x, y, width, height]`.
+pub fn extract_page_spans(bytes: &[u8], page_index: usize) -> Vec<PageSpan> {
+    if bytes.len() > MAX_PDF_BYTES || !bytes.starts_with(b"%PDF-") {
+        return Vec::new();
+    }
+    let Ok(doc) = Document::load_mem_with_options(
+        bytes,
+        LoadOptions::with_max_decompressed_size(MAX_STREAM_BYTES),
+    ) else {
+        return Vec::new();
+    };
+    let pages = doc.get_pages();
+    let Some((_, &page_id)) = pages.iter().nth(page_index) else {
+        return Vec::new();
+    };
+    extract_page_spans_from_doc(&doc, page_id)
+}
+
+/// Merge adjacent word spans on the same horizontal line into clean highlight
+/// bars `[x, y, width, height]`.
+pub fn merge_span_rects(spans: &[PageSpan]) -> Vec<[f32; 4]> {
+    let mut out: Vec<[f32; 4]> = Vec::new();
+    for span in spans {
+        let [x, y, w, h] = span.rect;
+        if w <= 0.0 || h <= 0.0 {
+            continue;
+        }
+        if let Some(last) = out.last_mut() {
+            let last_cy = last[1] + last[3] * 0.5;
+            let cur_cy = y + h * 0.5;
+            let max_h = last[3].max(h);
+            let last_right = last[0] + last[2];
+            if (last_cy - cur_cy).abs() <= max_h * 0.65
+                && x >= last[0] - 0.01
+                && x <= last_right + 0.06
+            {
+                let min_x = last[0].min(x);
+                let min_y = last[1].min(y);
+                let max_x = last_right.max(x + w);
+                let max_y = (last[1] + last[3]).max(y + h);
+                *last = [min_x, min_y, max_x - min_x, max_y - min_y];
+                continue;
+            }
+        }
+        out.push([x, y, w, h]);
+    }
+    out
+}
+
+fn obj_f64(obj: &Object) -> Option<f64> {
+    match obj {
+        Object::Integer(i) => Some(*i as f64),
+        Object::Real(f) => Some(*f as f64),
+        _ => None,
+    }
+}
+
+fn page_box(doc: &Document, page_id: ObjectId) -> [f64; 4] {
+    let mut cur = Some(page_id);
+    for _ in 0..16 {
+        let Some(id) = cur else {
+            break;
+        };
+        let Ok(dict) = doc.get_dictionary(id) else {
+            break;
+        };
+        for key in [b"CropBox".as_slice(), b"MediaBox".as_slice()] {
+            if let Ok(obj) = dict.get_deref(key, doc) {
+                if let Ok(arr) = obj.as_array() {
+                    if arr.len() == 4 {
+                        if let (Some(x0), Some(y0), Some(x1), Some(y1)) = (
+                            obj_f64(&arr[0]),
+                            obj_f64(&arr[1]),
+                            obj_f64(&arr[2]),
+                            obj_f64(&arr[3]),
+                        ) {
+                            let w = (x1 - x0).abs();
+                            let h = (y1 - y0).abs();
+                            if w > 0.0 && h > 0.0 {
+                                return [x0.min(x1), y0.min(y1), w, h];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        cur = dict.get(b"Parent").and_then(Object::as_reference).ok();
+    }
+    [0.0, 0.0, 612.0, 792.0]
+}
+
+fn mat_mul(m1: [f64; 6], m2: [f64; 6]) -> [f64; 6] {
+    [
+        m1[0] * m2[0] + m1[1] * m2[2],
+        m1[0] * m2[1] + m1[1] * m2[3],
+        m1[2] * m2[0] + m1[3] * m2[2],
+        m1[2] * m2[1] + m1[3] * m2[3],
+        m1[4] * m2[0] + m1[5] * m2[2] + m2[4],
+        m1[4] * m2[1] + m1[5] * m2[3] + m2[5],
+    ]
+}
+
+fn decode_pdf_bytes(encoding: Option<&lopdf::Encoding>, bytes: &[u8]) -> String {
+    if let Some(enc) = encoding {
+        if let Ok(decoded) = Document::decode_text(enc, bytes) {
+            if !decoded.is_empty() {
+                return decoded;
+            }
+        }
+    }
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        let units: Vec<u16> = bytes[2..]
+            .chunks_exact(2)
+            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .collect();
+        return String::from_utf16_lossy(&units);
+    }
+    bytes.iter().map(|&b| b as char).collect()
+}
+
+fn extract_page_spans_from_doc(doc: &Document, page_id: ObjectId) -> Vec<PageSpan> {
+    let [bx, by, bw, bh] = page_box(doc, page_id);
+    let Ok(content_data) = doc.get_page_content_with_limit(page_id, MAX_STREAM_BYTES) else {
+        return Vec::new();
+    };
+    let Ok(content) = Content::decode(&content_data) else {
+        return Vec::new();
+    };
+    let encodings: BTreeMap<Vec<u8>, lopdf::Encoding> = doc
+        .get_page_fonts(page_id)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(name, font)| {
+            font.get_font_encoding_with_limit(doc, MAX_STREAM_BYTES)
+                .ok()
+                .map(|enc| (name, enc))
+        })
+        .collect();
+
+    let mut spans = Vec::new();
+    let mut ctm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut ctm_stack: Vec<[f64; 6]> = Vec::new();
+    let mut tm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+    let mut tlm = tm;
+    let mut font_size = 12.0_f64;
+    let mut leading = 0.0_f64;
+    let mut horiz_scale = 1.0_f64;
+    let mut current_encoding: Option<&lopdf::Encoding> = None;
+
+    let push_run = |spans: &mut Vec<PageSpan>,
+                    run: &str,
+                    tm: &mut [f64; 6],
+                    ctm: [f64; 6],
+                    font_size: f64,
+                    horiz_scale: f64| {
+        let char_adv = (font_size.abs().max(1.0)) * 0.52 * horiz_scale;
+        let mut word = String::new();
+        let mut word_start_adv = 0.0_f64;
+        let mut cur_adv = 0.0_f64;
+
+        let flush_word = |spans: &mut Vec<PageSpan>,
+                          word: &mut String,
+                          start_adv: f64,
+                          end_adv: f64,
+                          base_tm: [f64; 6]| {
+            if word.is_empty() {
+                return;
+            }
+            let text = std::mem::take(word);
+            let m_start = mat_mul(mat_mul([1.0, 0.0, 0.0, 1.0, start_adv, 0.0], base_tm), ctm);
+            let m_end = mat_mul(mat_mul([1.0, 0.0, 0.0, 1.0, end_adv, 0.0], base_tm), ctm);
+            let scale_y = (m_start[1].hypot(m_start[3])).max(1.0) * font_size.abs().max(1.0);
+            let x_min = m_start[4].min(m_end[4]);
+            let x_max = m_start[4].max(m_end[4]).max(x_min + scale_y * 0.25);
+            let y_bottom = m_start[5] - scale_y * 0.2;
+            let y_top = m_start[5] + scale_y * 0.85;
+            let nx = ((x_min - bx) / bw).clamp(0.0, 1.0) as f32;
+            let ny = (1.0 - (y_top - by) / bh).clamp(0.0, 1.0) as f32;
+            let nw = ((x_max - x_min) / bw).clamp(0.002, (1.0 - nx as f64).max(0.002)) as f32;
+            let nh = ((y_top - y_bottom) / bh).clamp(0.005, (1.0 - ny as f64).max(0.005)) as f32;
+            spans.push(PageSpan {
+                text,
+                rect: [nx, ny, nw, nh],
+            });
+        };
+
+        let base_tm = *tm;
+        for ch in run.chars() {
+            if ch.is_whitespace() {
+                flush_word(spans, &mut word, word_start_adv, cur_adv, base_tm);
+                cur_adv += char_adv;
+                word_start_adv = cur_adv;
+            } else {
+                if word.is_empty() {
+                    word_start_adv = cur_adv;
+                }
+                word.push(ch);
+                cur_adv += char_adv;
+            }
+        }
+        flush_word(spans, &mut word, word_start_adv, cur_adv, base_tm);
+        *tm = mat_mul([1.0, 0.0, 0.0, 1.0, cur_adv, 0.0], base_tm);
+    };
+
+    for op in &content.operations {
+        match op.operator.as_str() {
+            "q" => ctm_stack.push(ctm),
+            "Q" => {
+                if let Some(prev) = ctm_stack.pop() {
+                    ctm = prev;
+                }
+            }
+            "cm" if op.operands.len() == 6 => {
+                if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)) = (
+                    obj_f64(&op.operands[0]),
+                    obj_f64(&op.operands[1]),
+                    obj_f64(&op.operands[2]),
+                    obj_f64(&op.operands[3]),
+                    obj_f64(&op.operands[4]),
+                    obj_f64(&op.operands[5]),
+                ) {
+                    ctm = mat_mul([a, b, c, d, e, f], ctm);
+                }
+            }
+            "BT" => {
+                tm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
+                tlm = tm;
+            }
+            "Tf" => {
+                if let Some(Ok(name)) = op.operands.first().map(Object::as_name) {
+                    current_encoding = encodings.get(name);
+                }
+                if let Some(size) = op.operands.get(1).and_then(obj_f64) {
+                    font_size = size;
+                }
+            }
+            "TL" => {
+                if let Some(l) = op.operands.first().and_then(obj_f64) {
+                    leading = l;
+                }
+            }
+            "Tz" => {
+                if let Some(s) = op.operands.first().and_then(obj_f64) {
+                    horiz_scale = (s / 100.0).max(0.1);
+                }
+            }
+            "Td" if op.operands.len() >= 2 => {
+                if let (Some(tx), Some(ty)) = (obj_f64(&op.operands[0]), obj_f64(&op.operands[1])) {
+                    tlm = mat_mul([1.0, 0.0, 0.0, 1.0, tx, ty], tlm);
+                    tm = tlm;
+                }
+            }
+            "TD" if op.operands.len() >= 2 => {
+                if let (Some(tx), Some(ty)) = (obj_f64(&op.operands[0]), obj_f64(&op.operands[1])) {
+                    leading = -ty;
+                    tlm = mat_mul([1.0, 0.0, 0.0, 1.0, tx, ty], tlm);
+                    tm = tlm;
+                }
+            }
+            "Tm" if op.operands.len() == 6 => {
+                if let (Some(a), Some(b), Some(c), Some(d), Some(e), Some(f)) = (
+                    obj_f64(&op.operands[0]),
+                    obj_f64(&op.operands[1]),
+                    obj_f64(&op.operands[2]),
+                    obj_f64(&op.operands[3]),
+                    obj_f64(&op.operands[4]),
+                    obj_f64(&op.operands[5]),
+                ) {
+                    tm = [a, b, c, d, e, f];
+                    tlm = tm;
+                }
+            }
+            "T*" => {
+                tlm = mat_mul([1.0, 0.0, 0.0, 1.0, 0.0, -leading], tlm);
+                tm = tlm;
+            }
+            "Tj" => {
+                if let Some(Object::String(bytes, _)) = op.operands.first() {
+                    let s = decode_pdf_bytes(current_encoding, bytes);
+                    push_run(&mut spans, &s, &mut tm, ctm, font_size, horiz_scale);
+                }
+            }
+            "'" => {
+                tlm = mat_mul([1.0, 0.0, 0.0, 1.0, 0.0, -leading], tlm);
+                tm = tlm;
+                if let Some(Object::String(bytes, _)) = op.operands.first() {
+                    let s = decode_pdf_bytes(current_encoding, bytes);
+                    push_run(&mut spans, &s, &mut tm, ctm, font_size, horiz_scale);
+                }
+            }
+            "\"" => {
+                tlm = mat_mul([1.0, 0.0, 0.0, 1.0, 0.0, -leading], tlm);
+                tm = tlm;
+                if let Some(Object::String(bytes, _)) = op.operands.get(2) {
+                    let s = decode_pdf_bytes(current_encoding, bytes);
+                    push_run(&mut spans, &s, &mut tm, ctm, font_size, horiz_scale);
+                }
+            }
+            "TJ" => {
+                if let Some(Object::Array(items)) = op.operands.first() {
+                    let mut chunk = String::new();
+                    for item in items {
+                        match item {
+                            Object::String(bytes, _) => {
+                                chunk.push_str(&decode_pdf_bytes(current_encoding, bytes));
+                            }
+                            other => {
+                                if let Some(adj) = obj_f64(other) {
+                                    if adj <= -120.0 {
+                                        if !chunk.is_empty() {
+                                            push_run(
+                                                &mut spans,
+                                                &chunk,
+                                                &mut tm,
+                                                ctm,
+                                                font_size,
+                                                horiz_scale,
+                                            );
+                                            chunk.clear();
+                                        }
+                                        let shift = (-adj / 1000.0) * font_size * horiz_scale;
+                                        tm = mat_mul([1.0, 0.0, 0.0, 1.0, shift, 0.0], tm);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if !chunk.is_empty() {
+                        push_run(&mut spans, &chunk, &mut tm, ctm, font_size, horiz_scale);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    spans
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -435,5 +794,50 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(detect_doi(&paper).as_deref(), Some("10.1234/example.42"));
+    }
+
+    #[test]
+    fn extracts_lopdf_positioned_word_spans_and_merges_line_rects() {
+        let stream =
+            "BT /F1 12 Tf 40 240 Td (Alpha beta gamma) Tj 0 -24 Td (Second line text) Tj ET";
+        let objects = [
+            "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>".to_string(),
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 400 300] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>".to_string(),
+            format!("<< /Length {} >>\nstream\n{stream}\nendstream", stream.len()),
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        ];
+        let mut pdf = b"%PDF-1.4\n".to_vec();
+        let mut offsets = Vec::new();
+        for (index, body) in objects.iter().enumerate() {
+            offsets.push(pdf.len());
+            pdf.extend_from_slice(format!("{} 0 obj\n{body}\nendobj\n", index + 1).as_bytes());
+        }
+        let xref = pdf.len();
+        pdf.extend_from_slice(
+            format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+        );
+        for offset in offsets {
+            pdf.extend_from_slice(format!("{offset:010} 00000 n \n").as_bytes());
+        }
+        pdf.extend_from_slice(
+            format!(
+                "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+                objects.len() + 1
+            )
+            .as_bytes(),
+        );
+
+        let spans = extract_page_spans(&pdf, 0);
+        let words: Vec<&str> = spans.iter().map(|s| s.text.as_str()).collect();
+        assert_eq!(
+            words,
+            vec!["Alpha", "beta", "gamma", "Second", "line", "text"]
+        );
+        let first_line = merge_span_rects(&spans[0..3]);
+        assert_eq!(first_line.len(), 1);
+        let both_lines = merge_span_rects(&spans);
+        assert_eq!(both_lines.len(), 2);
+        assert!(both_lines[0][1] < both_lines[1][1]);
     }
 }

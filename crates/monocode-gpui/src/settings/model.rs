@@ -318,7 +318,7 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         "workspace-theme",
         Section::Appearance,
         "Workspace theme",
-        "workspace theme color colour text accent syntax scheme preset harbor moss ember orchid",
+        "workspace theme color colour text accent syntax scheme preset harbor moss ember orchid monokai github solarized latte one-light paper",
     ),
     (
         "accent-color",

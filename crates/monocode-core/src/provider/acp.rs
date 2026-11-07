@@ -107,7 +107,7 @@ pub(super) fn configure(command: &mut Command, request: &Request) -> Result<(), 
 }
 
 impl Protocol {
-    /// The native visual tools, plus a Mono's app tool.
+    /// The native visual tools, a Mono's app tool, and the session's connectors.
     fn mcp_servers(&self) -> Value {
         let settings = &self.request.settings;
         let mut servers = crate::visual_bridge::acp_servers(&settings.environment);
@@ -116,6 +116,25 @@ impl Protocol {
             crate::mono::bridge::acp_server(settings.mono.as_ref(), &settings.environment),
         ) {
             list.push(app);
+        }
+        if !settings.text_only {
+            let bot_connectors = settings
+                .mono
+                .as_ref()
+                .filter(|mono| mono.mono.is_bot())
+                .map(|mono| {
+                    crate::mono::bot_tools::launch_in_groups(
+                        &mono.mono,
+                        &self.request.cwd,
+                        &mono.groups.places,
+                    )
+                })
+                .and_then(|launch| launch.connectors);
+            let connector_servers =
+                crate::connectors::session_acp_servers(bot_connectors.as_deref());
+            if let Some(list) = servers.as_array_mut() {
+                list.extend(connector_servers);
+            }
         }
         servers
     }
@@ -364,7 +383,9 @@ impl Protocol {
                 }
             }
             Kind::Devin => {
-                if planning {
+                if settings.text_only {
+                    "ask"
+                } else if planning {
                     "plan"
                 } else {
                     match settings.access {
@@ -598,7 +619,7 @@ impl Protocol {
                 return self.acp_probe_next(stdin);
             }
             Stage::ListModels => return self.acp_session(stdin),
-            Stage::Authenticate if matches!(kind, Kind::Cursor | Kind::Grok) => {
+            Stage::Authenticate if matches!(kind, Kind::Cursor | Kind::Grok | Kind::Droid) => {
                 return self.acp_session(stdin);
             }
             Stage::Resume if !(kind == Kind::Antigravity && timed_out) => {
@@ -610,7 +631,7 @@ impl Protocol {
                     || lower.contains("no such session")
                     || (lower.contains("session") && lower.contains("not found"));
                 let replace = match kind {
-                    Kind::Cursor | Kind::Grok | Kind::Fx | Kind::Hermes => true,
+                    Kind::Cursor | Kind::Grok | Kind::Fx | Kind::Hermes | Kind::Droid => true,
                     Kind::Antigravity => !timed_out,
                     Kind::Devin => !timed_out && devin_missing,
                     _ => false,
@@ -654,6 +675,20 @@ impl Protocol {
                 }
             }
             _ => {}
+        }
+        if kind == Kind::Droid {
+            let lower = detail.to_lowercase();
+            if lower.contains("auth")
+                || lower.contains("login")
+                || lower.contains("sign in")
+                || lower.contains("credential")
+                || lower.contains("unauthori")
+            {
+                return Err(format!(
+                    "{}: {detail}\n\nRun `droid` once in Terminal to sign in to Factory, then retry.",
+                    kind.label()
+                ));
+            }
         }
         // A JSON-RPC failure is not evidence that the user needs to log in.
         Err(format!("{}: {detail}", kind.label()))
@@ -945,6 +980,17 @@ impl Protocol {
                 {
                     self.acp.stage = Stage::Background;
                     self.acp.background_poll = None;
+                } else if self.request.kind == Kind::Devin
+                    && self.request.settings.text_only
+                    && !self.acp.session.is_empty()
+                {
+                    events.push(Event::Done);
+                    self.acp_send(
+                        Stage::DeleteProbe,
+                        "session/delete",
+                        json!({"sessionId": self.acp.session}),
+                        stdin,
+                    )?;
                 } else {
                     self.done = true;
                     events.push(Event::Done);

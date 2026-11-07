@@ -421,6 +421,7 @@ pub struct ViewState {
     pub hidden_linear_teams: Vec<String>,
     pub hidden_jira_projects: Vec<String>,
     pub list_width: f32,
+    pub mail_list_width: f32,
     /// The Email tab, beside GitHub and the trackers.
     pub email_open: bool,
     /// Whether a message's pictures on the web load as it opens (the default). Off, they
@@ -436,6 +437,7 @@ impl Default for ViewState {
             hidden_linear_teams: vec![],
             hidden_jira_projects: vec![],
             list_width: 280.,
+            mail_list_width: 340.,
             email_open: false,
             mail_auto_images: true,
         }

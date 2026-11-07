@@ -58,13 +58,13 @@ impl Mailbox {
                 })),
             )
             .child(
-                tool(
+                tool_enabled(
                     "mail-archive",
                     "Archive",
                     "archive",
                     content(if archived { 0.25 } else { 0.6 }),
+                    !archived,
                 )
-                .when(archived, |d| d.cursor_default().hover(|s| s))
                 .on_click(cx.listener({
                     let id = id.clone();
                     move |this, _, _, cx| {

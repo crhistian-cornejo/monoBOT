@@ -2909,6 +2909,7 @@ impl Shell {
             self.review_drag = false;
             self.release_limit_glow();
             self.persist(cx);
+            cx.notify();
             return;
         }
         let bounds = self
@@ -4087,9 +4088,15 @@ impl Shell {
             self.dock_resize.take().is_some(),
         ]
         .contains(&true);
+        let glowing = self
+            .limit_glow
+            .as_ref()
+            .is_some_and(|(_, glow)| glow.released.is_none());
         self.release_limit_glow();
         if any {
             self.persist(cx);
+            cx.notify();
+        } else if glowing {
             cx.notify();
         }
         any
@@ -8708,7 +8715,7 @@ impl Render for Shell {
         // The corner's tools share the panel's header with client-drawn
         // window controls, so the panel keeps room for both. A Mono's icon
         // tabs need 252px (`corner_room`).
-        let tools = if self.window_controls > 0. && self.mono_active(cx) {
+        let tools = if self.mono_active(cx) {
             252.
         } else {
             crate::right_panel::WIDTH_MIN
@@ -9377,6 +9384,17 @@ impl Render for Shell {
                     if let Some(m) = this.monos.clone() {
                         m.update(cx, |m, cx| m.finish_reorder(cx));
                     }
+                    this.release_resizes(cx);
+                    if std::mem::take(&mut this.review_drag)
+                        && let Some(review) = this.active_review(cx)
+                    {
+                        review.update(cx, |_, cx| cx.emit(crate::review::ReviewEvent::Changed));
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
                     this.release_resizes(cx);
                     if std::mem::take(&mut this.review_drag)
                         && let Some(review) = this.active_review(cx)

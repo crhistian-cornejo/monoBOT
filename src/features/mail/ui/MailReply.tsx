@@ -6,7 +6,7 @@ import {
   canRunHarnessTextPrompt,
   runHarnessTextPrompt,
 } from "../../../integrations/harness/core/registry";
-import { pickTextHarness } from "../../../integrations/harness/core/textHarness";
+import * as textHarness from "../../../integrations/harness/core/textHarness";
 import { joinStreamText } from "../../../integrations/harness/core/streamText";
 import { StreamedPlainText } from "../../sessions/ui/StreamedPlainText";
 import {
@@ -54,48 +54,71 @@ async function writeWithAI(input: {
   /** The model finished its message (the agent may take a moment more to exit), or started another. */
   onArrived?: (arrived: boolean) => void;
 }): Promise<string> {
-  const harness = pickTextHarness();
-  if (!canRunHarnessTextPrompt(harness))
+  const routed =
+    typeof textHarness.routeTextHarnesses === "function"
+      ? textHarness.routeTextHarnesses()
+      : [textHarness.pickTextHarness()];
+  const candidates = routed.filter((id) => canRunHarnessTextPrompt(id));
+  if (candidates.length === 0)
     throw new Error("Connect an agent (Claude, Codex…) to write with AI.");
-  // Only the last message counts: a model that says something before the
-  // reply starts over with it.
-  let streamed = "";
-  let closed = false;
-  const output = await runHarnessTextPrompt({
-    harness,
-    cwd: await homeDir(),
-    prompt: replyPrompt({
-      from: `${input.message.from} <${input.message.address}>`,
-      subject: input.message.subject,
-      body: mailText(input.message, input.opened),
-      ask: input.ask,
-      draft: input.draft,
-      draftSubject: input.draftSubject,
-    }),
-    timeoutMs: 90_000,
-    signal: input.signal,
-    onEvent: (event) => {
-      if (input.signal.aborted) return;
-      if (event.type === "message.completed") {
-        closed = true;
-        input.onArrived?.(true);
-      }
-      if (event.type !== "message.delta") return;
-      if (closed) {
-        streamed = "";
-        closed = false;
-        input.onArrived?.(false);
-      }
-      // Some agents resend the whole message so far: join, don't append.
-      streamed = joinStreamText(streamed, event.text);
-      const text = cleanReply(streamed);
-      if (text) input.onText(text);
-    },
+  const cwd = await homeDir();
+  const prompt = replyPrompt({
+    from: `${input.message.from} <${input.message.address}>`,
+    subject: input.message.subject,
+    body: mailText(input.message, input.opened),
+    ask: input.ask,
+    draft: input.draft,
+    draftSubject: input.draftSubject,
   });
-  const text = cleanReply(output);
-  if (!text || !splitSubject(text).body.trim())
-    throw new Error("The model wrote nothing. Try again.");
-  return text;
+  let lastError: unknown;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const harness = candidates[index];
+    if (input.signal.aborted) break;
+    if (index > 0) {
+      input.onArrived?.(false);
+      input.onText("");
+    }
+    // Only the last message counts: a model that says something before the
+    // reply starts over with it.
+    let streamed = "";
+    let closed = false;
+    try {
+      const output = await runHarnessTextPrompt({
+        harness,
+        cwd,
+        prompt,
+        timeoutMs: 90_000,
+        signal: input.signal,
+        onEvent: (event) => {
+          if (input.signal.aborted) return;
+          if (event.type === "message.completed") {
+            closed = true;
+            input.onArrived?.(true);
+          }
+          if (event.type !== "message.delta") return;
+          if (closed) {
+            streamed = "";
+            closed = false;
+            input.onArrived?.(false);
+          }
+          // Some agents resend the whole message so far: join, don't append.
+          streamed = joinStreamText(streamed, event.text);
+          const text = cleanReply(streamed);
+          if (text) input.onText(text);
+        },
+      });
+      const text = cleanReply(output);
+      if (!text || !splitSubject(text).body.trim())
+        throw new Error("The model wrote nothing. Try again.");
+      return text;
+    } catch (failure) {
+      lastError = failure;
+      if (input.signal.aborted) throw failure;
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(String(lastError ?? "Connect an agent (Claude, Codex…) to write with AI."));
 }
 
 /**

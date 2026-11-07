@@ -1105,12 +1105,12 @@ fn chat_composer_matches_tauri_and_opens_the_model_list(cx: &mut TestAppContext)
     let field = visual.debug_bounds("mono-composer").unwrap();
     let send = visual.debug_bounds("mono-send").unwrap();
     let attach = visual.debug_bounds("mono-attach").unwrap();
-    let model = visual.debug_bounds("mono-model").unwrap();
+    assert!(visual.debug_bounds("mono-model").is_none());
     // A click anywhere in the box, beside the field included, focuses it.
     let toolbar = visual.debug_bounds("mono-composer-toolbar").unwrap();
     for point in [
         toolbar.center(),
-        gpui::point(send.left() - px(3.), send.center().y),
+        gpui::point(send.left() - px(1.), send.center().y),
     ] {
         handle.update(visual, |_, w, cx| w.blur(cx)).unwrap();
         visual.simulate_click(point, Default::default());
@@ -1127,24 +1127,22 @@ fn chat_composer_matches_tauri_and_opens_the_model_list(cx: &mut TestAppContext)
             "a click at {point:?} focuses the composer"
         );
     }
-    // MonoComposer's box: one line with the field, dictation and send, its
-    // 5px padding centring send; nothing about the model or access inside.
+    // MonoComposer's box: one line with attach, emoji, the field, meter,
+    // dictation and send, its 5px padding centring send. The model is
+    // configured in agent settings (⚙️), not in the chat prompt.
     assert_eq!(field.size.height, px(38.));
     assert_eq!(field.bottom() - send.bottom(), px(6.));
     assert!(field.contains(&send.center()));
     assert!(visual.debug_bounds("mono-access").is_none());
-    // Underneath: attach on the left, the model as text on the right, then
-    // the context meter straight under send.
-    assert!(attach.top() >= field.bottom());
-    assert!(model.top() >= field.bottom());
-    assert!(model.left() > attach.right());
+    // Inside the field: attach on the left, emoji next, context meter before send.
+    assert!(field.contains(&attach.center()));
     assert_eq!(attach.size, gpui::size(px(26.), px(26.)));
+    let emoji = visual.debug_bounds("mono-emoji").unwrap();
+    assert!(field.contains(&emoji.center()));
+    assert!(attach.right() <= emoji.left());
     let meter = visual.debug_bounds("mono-context-meter").unwrap();
-    assert!(meter.left() >= model.right());
-    assert!(
-        (f32::from(meter.center().x) - f32::from(send.center().x)).abs() < 0.5,
-        "the context meter sits under send: {meter:?} vs {send:?}"
-    );
+    assert!(field.contains(&meter.center()));
+    assert!(meter.right() <= send.left());
     let chat = visual.update(|_, cx| s.manager.read(cx).chat().unwrap());
     for draft in [
         "".to_owned(),
@@ -1161,7 +1159,7 @@ fn chat_composer_matches_tauri_and_opens_the_model_list(cx: &mut TestAppContext)
         let send = visual.debug_bounds("mono-send").unwrap();
         let attach = visual.debug_bounds("mono-attach").unwrap();
         assert!(field.contains(&send.center()));
-        assert!(attach.top() >= field.bottom());
+        assert!(field.contains(&attach.center()));
     }
     handle
         .update(visual, |_, w, cx| {
@@ -3284,6 +3282,117 @@ fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut Test
         [cash.clone(), docs.clone()]
     );
     assert_eq!(saved.seats.get(&cash), Some(&seat));
+}
+
+#[gpui::test]
+fn the_group_speaks_with_the_principals_identity_in_its_transcript(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    let handle: gpui::AnyWindowHandle = s.window.into();
+    handle
+        .update(cx, |_, window, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.dismiss_settings(window, cx);
+                let root = m.root.clone();
+                let id = m
+                    .roster
+                    .create_bot(&root, "principal", false)
+                    .unwrap()
+                    .id
+                    .clone();
+                let bot = m.roster.get_mut(&id).unwrap();
+                bot.name = "IVY".into();
+                bot.mascot = "principal".into();
+                bot.color = 0x5a9eff;
+
+                let group = m.roster.get_mut(&s.id).unwrap();
+                group.kind = Some("group".into());
+                group.name = "Testing Group".into();
+                group.mascot = "tree".into();
+                group.group = Some(Group {
+                    members: vec![id.clone()],
+                    ..Group::default()
+                });
+                m.configure_chat(&s.id, cx);
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+
+    let (speaker_mascot, speaker_color, speaker_name) = cx.update(|cx| {
+        let m = s.manager.read(cx);
+        let group = m.roster.get(&s.id).unwrap();
+        m.mono_speaker(group)
+    });
+    assert_eq!(speaker_name, "IVY");
+    assert_eq!(speaker_mascot, "principal");
+    assert_eq!(speaker_color, 0x5a9eff);
+
+    let chat = cx.update(|cx| s.manager.read(cx).chats[&s.id].clone());
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    chat.update(visual, |chat, cx| {
+        let mut transcript = monocode_core::transcript::Transcript::default();
+        transcript.begin("assistant");
+        transcript.append("Hola desde el líder");
+        chat.mono_append(transcript.rows, cx);
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("mono-signature-name-IVY").is_some());
+    assert!(
+        visual
+            .debug_bounds("mono-signature-name-Testing Group")
+            .is_none()
+    );
+}
+
+#[gpui::test]
+fn group_avatar_stack_renders_lead_first_and_counts_rest(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    let (shown, more) = s.manager.update(cx, |m, _cx| {
+        let root = m.root.clone();
+        let p_id = m
+            .roster
+            .create_bot(&root, "principal", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&p_id).unwrap().mascot = "principal".into();
+        let b1_id = m
+            .roster
+            .create_bot(&root, "assistant", false)
+            .unwrap()
+            .id
+            .clone();
+        let b2_id = m
+            .roster
+            .create_bot(&root, "assistant", false)
+            .unwrap()
+            .id
+            .clone();
+        let b3_id = m
+            .roster
+            .create_bot(&root, "assistant", false)
+            .unwrap()
+            .id
+            .clone();
+
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.name = "Test Stack Group".into();
+        group.group = Some(Group {
+            members: vec![b1_id, p_id.clone(), b2_id, b3_id],
+            ..Group::default()
+        });
+
+        let group_mono = m.roster.get(&s.id).unwrap().clone();
+        m.group_stack_members(&group_mono)
+    });
+
+    assert_eq!(shown.len(), 2);
+    assert_eq!(shown[0].mascot, "principal");
+    assert_eq!(more, 2);
 }
 
 #[gpui::test]

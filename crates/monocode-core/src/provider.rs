@@ -1452,6 +1452,24 @@ fn run_operation(
                 request.settings.mono.as_ref(),
                 &request.settings.environment,
             );
+            if !request.settings.text_only {
+                let bot_connectors = request
+                    .settings
+                    .mono
+                    .as_ref()
+                    .filter(|mono| mono.mono.is_bot())
+                    .map(|mono| {
+                        crate::mono::bot_tools::launch_in_groups(
+                            &mono.mono,
+                            &request.cwd,
+                            &mono.groups.places,
+                        )
+                    })
+                    .and_then(|launch| launch.connectors);
+                command.args(crate::connectors::session_codex_args(
+                    bot_connectors.as_deref(),
+                ));
+            }
             if let Some(mono) = &request.settings.mono {
                 if let Some(home) =
                     crate::mono::codex_home(&mono.root, &request.settings.account.id)?

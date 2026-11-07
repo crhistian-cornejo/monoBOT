@@ -98,6 +98,7 @@ pub fn model(
         "codex" => &["gpt-6-luna", "gpt-5.6-luna"],
         "pi" | "omp" => &["openai-codex/gpt-6-luna", "openai-codex/gpt-5.6-luna"],
         "cursor" => &["composer-2.5", "default"],
+        "droid" => &["auto", "default"],
         "fx" => &["anthropic/claude-haiku-5.5", "openai/gpt-5.4-mini"],
         // Stay on the route (and account) the Mono already uses.
         "hermes" => &[

@@ -606,6 +606,7 @@ impl FileEditor {
                                 .as_ref()
                                 .is_some_and(|pdf| pdf.read(cx).has_bytes(&bytes))
                         {
+                            this.apply_paper_focus(cx);
                             return;
                         }
                         let pdf = cx.new(|cx| pdf::PdfView::new(this.path.clone(), bytes, cx));

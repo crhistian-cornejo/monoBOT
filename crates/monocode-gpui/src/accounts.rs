@@ -315,6 +315,65 @@ impl Accounts {
     pub(crate) fn selected(&self, kind: Kind, project: &str) -> Profile {
         self.profile(&self.book.selected(kind, project))
     }
+    pub(crate) fn router_headroom(&self, kind: Kind, profile: &Profile) -> Option<f64> {
+        let state = self.usage.get(&Key::new(kind, profile.clone(), None))?;
+        let now = usage::now_ms();
+        if let Some(snapshot) = &state.snapshot
+            && let Some(room) = monocode_core::inbox::mail::router_headroom(snapshot, now)
+        {
+            return Some(room);
+        }
+        if state.error.is_some() {
+            return Some(0.);
+        }
+        None
+    }
+    pub(crate) fn reply_candidates(
+        &self,
+        project: &str,
+        chosen: Option<(Kind, Option<String>)>,
+    ) -> (
+        Option<monocode_core::inbox::mail::ReplyCandidate>,
+        Vec<monocode_core::inbox::mail::ReplyCandidate>,
+    ) {
+        use monocode_core::{inbox::mail::ReplyCandidate, session_title::TextModel};
+        let chosen = chosen.map(|(kind, model)| {
+            let account = self.selected(kind, project);
+            let headroom = self.router_headroom(kind, &account);
+            ReplyCandidate {
+                text: TextModel {
+                    kind,
+                    model,
+                    account,
+                },
+                headroom,
+            }
+        });
+        let mut candidates = Vec::new();
+        for kind in Kind::ALL {
+            if !monocode_core::inbox::mail::supports_reply(kind) {
+                continue;
+            }
+            let selected = self.selected(kind, project);
+            let headroom = self.router_headroom(kind, &selected);
+            candidates.push(ReplyCandidate {
+                text: TextModel::automatic(kind, selected.clone()),
+                headroom,
+            });
+            for account in self.book.list(kind) {
+                if account.id == selected.id {
+                    continue;
+                }
+                let profile = self.profile(&account.id);
+                let headroom = self.router_headroom(kind, &profile);
+                candidates.push(ReplyCandidate {
+                    text: TextModel::automatic(kind, profile),
+                    headroom,
+                });
+            }
+        }
+        (chosen, candidates)
+    }
     /// React's `accountStatus`: a tone, a word, and an optional detail.
     pub(crate) fn status(&self, kind: Kind, id: &str) -> Status {
         let key = Key::new(kind, self.profile(id), None);

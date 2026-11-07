@@ -11,12 +11,14 @@ use crate::{
     input::{self, Input},
     monos::html::Html,
     popover::{Anchor, AnchorSlot, popover},
+    resize_limit::{Axis, LimitGlow, limit_glow},
     theme::*,
 };
 use gpui::{
-    AnyElement, App, AppContext, Context, Div, Entity, EventEmitter, FocusHandle, Focusable,
-    FontWeight, Image, ImageFormat, KeyDownEvent, Role, SharedString, Stateful, Subscription, Task,
-    Window, div, prelude::*, px, rgb,
+    AnyElement, App, AppContext, Context, CursorStyle, Div, Entity, EventEmitter, FocusHandle,
+    Focusable, FontWeight, Image, ImageFormat, KeyDownEvent, MouseButton, Role, ScrollHandle,
+    SharedString, Stateful, Subscription, Task, Window, canvas, div, linear_color_stop,
+    linear_gradient, point, prelude::*, px, rgb,
 };
 use monocode_core::inbox::mail::{self as model, AccountView, Action, Message, Opened, Overview};
 use std::{
@@ -28,8 +30,12 @@ use std::{
 
 pub(crate) use reply::MailReply;
 
-/// The list's width, as `w-[340px]`.
+/// The list's default width, as `w-[340px]`.
 const LIST_WIDTH: f32 = 340.;
+const MIN_LIST_WIDTH: f32 = 240.;
+const MAX_LIST_WIDTH: f32 = 520.;
+/// How far into each edge of the folder strip the fade reaches (`ScrollStrip.tsx`).
+const VIEWS_FADE: f32 = 28.;
 /// Messages opened this session: going back to one shows it at once.
 const OPENED_KEPT: usize = 40;
 /// The most pictures on the web one message loads, and how many are fetched at once.
@@ -39,6 +45,8 @@ const IMAGES_AT_ONCE: usize = 6;
 pub(crate) enum MailEvent {
     /// The user turned automatic pictures on or off.
     AutoImages(bool),
+    /// The user resized the mail list sidebar.
+    ListWidth(f32),
 }
 
 /// The open message: what the reader shows of it.
@@ -83,6 +91,11 @@ pub(crate) struct Mailbox {
     accounts: Option<Vec<AccountView>>,
     overview: Option<Overview>,
     view: model::View,
+    views_scroll: ScrollHandle,
+    views_overflow: (bool, bool),
+    list_width: f32,
+    resize_start: Option<(f32, f32)>,
+    limit_glow: Option<LimitGlow>,
     account_id: Option<String>,
     account_menu: bool,
     account_anchor: AnchorSlot,
@@ -135,18 +148,33 @@ fn tool(
     name: &'static str,
     ink: gpui::Hsla,
 ) -> Stateful<Div> {
+    tool_enabled(id, label, name, ink, true)
+}
+
+fn tool_enabled(
+    id: impl Into<SharedString>,
+    label: &str,
+    name: &'static str,
+    ink: gpui::Hsla,
+    enabled: bool,
+) -> Stateful<Div> {
     let id: SharedString = id.into();
+    let tip = label.to_owned();
     div()
         .id(id)
         .role(Role::Button)
-        .aria_label(label.to_owned())
+        .aria_label(tip.clone())
         .size(px(28.))
+        .rounded(px(6.))
         .flex_shrink_0()
         .flex()
         .items_center()
         .justify_center()
-        .cursor_pointer()
-        .hover(|s| s.bg(content(0.08)))
+        .when(enabled, |d| {
+            d.cursor_pointer()
+                .tooltip(chrome_tip(tip, None))
+                .hover(|s| s.bg(content(0.08)))
+        })
         .child(icon(name, 14.).text_color(ink))
 }
 
@@ -244,6 +272,11 @@ impl Mailbox {
             accounts: None,
             overview: None,
             view: model::View::Inbox,
+            views_scroll: ScrollHandle::new(),
+            views_overflow: (false, true),
+            list_width: LIST_WIDTH,
+            resize_start: None,
+            limit_glow: None,
             account_id: None,
             account_menu: false,
             account_anchor: AnchorSlot::default(),
@@ -263,6 +296,12 @@ impl Mailbox {
             prefetched: Vec::new(),
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
+        }
+    }
+
+    pub(crate) fn set_list_width(&mut self, width: f32) {
+        if width.is_finite() && width >= MIN_LIST_WIDTH {
+            self.list_width = width.clamp(MIN_LIST_WIDTH, MAX_LIST_WIDTH);
         }
     }
 
@@ -506,8 +545,41 @@ impl Mailbox {
 
     fn change_view(&mut self, view: model::View, cx: &mut Context<Self>) {
         self.view = view;
+        if let Some(ix) = model::VIEWS.iter().position(|(v, _)| *v == view) {
+            self.views_scroll.scroll_to_item(ix);
+        }
+        self.views_overflow = self.measured_views_overflow();
         self.close_message(cx);
         self.prefetch_ahead(cx);
+        cx.notify();
+    }
+
+    /// Matches `stripOverflow(scrollLeft, clientWidth, scrollWidth)` in `ScrollStrip.tsx`.
+    fn measured_views_overflow(&self) -> (bool, bool) {
+        let width = f32::from(self.views_scroll.bounds().size.width);
+        let max = f32::from(self.views_scroll.max_offset().x);
+        if width <= 0. {
+            return (false, self.list_width < 390.);
+        }
+        if max <= 1. {
+            return (false, false);
+        }
+        let scroll_left = (-f32::from(self.views_scroll.offset().x)).clamp(0., max);
+        (scroll_left > 1., scroll_left < max - 1.)
+    }
+
+    fn scroll_views(&mut self, direction: f32, cx: &mut Context<Self>) {
+        let width = f32::from(self.views_scroll.bounds().size.width).max(self.list_width);
+        let step = (width * 0.6).max(96.);
+        self.scroll_views_by(-direction * step, cx);
+    }
+
+    fn scroll_views_by(&mut self, delta_x: f32, cx: &mut Context<Self>) {
+        let max = f32::from(self.views_scroll.max_offset().x).max(0.);
+        let current = f32::from(self.views_scroll.offset().x);
+        let next = (current + delta_x).clamp(-max, 0.);
+        self.views_scroll.set_offset(point(px(next), px(0.)));
+        self.views_overflow = self.measured_views_overflow();
         cx.notify();
     }
 
@@ -829,50 +901,167 @@ impl Mailbox {
 
     fn views_strip(&self, cx: &mut Context<Self>) -> AnyElement {
         let messages = self.messages();
+        let (overflow_left, overflow_right) = self.views_overflow;
+        let base = background_base();
+        let mut clear = base;
+        clear.a = 0.;
+        let entity = cx.entity();
+        let drawn_overflow = self.views_overflow;
+        let arrow = |id: &'static str,
+                     label: &'static str,
+                     glyph: &'static str,
+                     direction: f32,
+                     cx: &mut Context<Self>| {
+            div()
+                .id(id)
+                .debug_selector(move || id.into())
+                .role(Role::Button)
+                .aria_label(label)
+                .tooltip(chrome_tip(label, None))
+                .size(px(24.))
+                .rounded(px(6.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .cursor_pointer()
+                .bg(base.blend(content(0.1)))
+                .hover(move |s| s.bg(base.blend(content(0.16))))
+                .child(icon(glyph, 14.).text_color(content(0.75)))
+                .on_click(cx.listener(move |this, _, _, cx| this.scroll_views(direction, cx)))
+        };
         div()
-            .id("mail-views")
-            .role(Role::TabList)
-            .aria_label("folders")
+            .relative()
+            .min_w_0()
             .flex_shrink_0()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .px(px(8.))
-            .py(px(6.))
-            .overflow_x_scroll()
             .border_b_1()
             .border_color(content(0.07))
-            .children(model::VIEWS.into_iter().map(|(view, label)| {
-                let count = model::unread_count(messages, view);
-                let active = self.view == view;
+            .child(
                 div()
-                    .id(SharedString::from(format!("mail-view-{}", view.id())))
-                    .role(Role::Tab)
-                    .aria_label(label)
-                    .flex_shrink_0()
+                    .id("mail-views")
+                    .role(Role::TabList)
+                    .aria_label("folders")
+                    .track_scroll(&self.views_scroll)
+                    .on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, _, cx| {
+                        let delta = event.delta.pixel_delta(px(18.));
+                        let step = if delta.x.abs() > delta.y.abs() {
+                            f32::from(delta.x)
+                        } else {
+                            f32::from(delta.y)
+                        };
+                        this.scroll_views_by(step, cx);
+                        cx.stop_propagation();
+                    }))
                     .flex()
                     .items_center()
                     .gap(px(4.))
                     .px(px(8.))
-                    .py(px(4.))
-                    .text_size(px(12.))
-                    .cursor_pointer()
-                    .text_color(content(if active { 1. } else { 0.55 }))
-                    .when(active, |d| d.bg(content(0.1)))
-                    .when(!active, |d| {
-                        d.hover(|s| s.bg(content(0.05)).text_color(content(1.)))
-                    })
-                    .child(label)
-                    .when(count > 0 && view != model::View::Held, |d| {
-                        d.child(
-                            div()
-                                .text_size(px(10.))
-                                .text_color(accent_color())
-                                .child(count.to_string()),
-                        )
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| this.change_view(view, cx)))
-            }))
+                    .py(px(6.))
+                    .overflow_x_scroll()
+                    .children(model::VIEWS.into_iter().map(|(view, label)| {
+                        let count = model::unread_count(messages, view);
+                        let active = self.view == view;
+                        div()
+                            .id(SharedString::from(format!("mail-view-{}", view.id())))
+                            .role(Role::Tab)
+                            .aria_label(label)
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .px(px(8.))
+                            .py(px(4.))
+                            .rounded(px(6.))
+                            .text_size(px(12.))
+                            .cursor_pointer()
+                            .text_color(content(if active { 1. } else { 0.55 }))
+                            .when(active, |d| d.bg(content(0.1)))
+                            .when(!active, |d| {
+                                d.hover(|s| s.bg(content(0.05)).text_color(content(1.)))
+                            })
+                            .child(label)
+                            .when(count > 0 && view != model::View::Held, |d| {
+                                d.child(
+                                    div()
+                                        .text_size(px(10.))
+                                        .text_color(accent_color())
+                                        .child(count.to_string()),
+                                )
+                            })
+                            .on_click(cx.listener(move |this, _, _, cx| this.change_view(view, cx)))
+                    })),
+            )
+            .child(
+                canvas(
+                    |_, _, _| {},
+                    move |_, _, window, cx| {
+                        let current = entity.read(cx).measured_views_overflow();
+                        if current != drawn_overflow {
+                            let entity = entity.clone();
+                            window.defer(cx, move |_, cx| {
+                                entity.update(cx, |this, cx| {
+                                    let next = this.measured_views_overflow();
+                                    if this.views_overflow != next {
+                                        this.views_overflow = next;
+                                        cx.notify();
+                                    }
+                                });
+                            });
+                        }
+                    },
+                )
+                .size_0(),
+            )
+            .when(overflow_left, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(VIEWS_FADE))
+                        .bg(linear_gradient(
+                            90.,
+                            linear_color_stop(base, 0.),
+                            linear_color_stop(clear, 1.),
+                        ))
+                        .flex()
+                        .items_center()
+                        .pl(px(4.))
+                        .child(arrow(
+                            "mail-views-left",
+                            "Scroll folders left",
+                            "chevron-left",
+                            -1.,
+                            cx,
+                        )),
+                )
+            })
+            .when(overflow_right, |d| {
+                d.child(
+                    div()
+                        .absolute()
+                        .right_0()
+                        .top_0()
+                        .bottom_0()
+                        .w(px(VIEWS_FADE))
+                        .bg(linear_gradient(
+                            90.,
+                            linear_color_stop(clear, 0.),
+                            linear_color_stop(base, 1.),
+                        ))
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .pr(px(4.))
+                        .child(arrow(
+                            "mail-views-right",
+                            "Scroll folders right",
+                            "chevron-right",
+                            1.,
+                            cx,
+                        )),
+                )
+            })
             .into_any_element()
     }
 
@@ -1061,7 +1250,8 @@ impl Mailbox {
         };
         let archive = self.view == model::View::Archive && !shown.is_empty();
         div()
-            .w(px(LIST_WIDTH))
+            .relative()
+            .w(px(self.list_width.clamp(MIN_LIST_WIDTH, MAX_LIST_WIDTH)))
             .h_full()
             .flex_shrink_0()
             .flex()
@@ -1096,6 +1286,42 @@ impl Mailbox {
                             ),
                         )
                     }),
+            )
+            .child(
+                div()
+                    .id("mail-list-resize")
+                    .debug_selector(|| "mail-list-resize".into())
+                    .role(Role::Splitter)
+                    .aria_label("Resize mail list")
+                    .absolute()
+                    .right(px(-3.))
+                    .top_0()
+                    .bottom_0()
+                    .w(px(6.))
+                    .cursor(CursorStyle::ResizeLeftRight)
+                    .hover(|s| s.bg(content(0.1)))
+                    .when(self.resize_start.is_some(), |d| d.bg(content(0.15)))
+                    .when_some(self.limit_glow.clone(), |d, glow| {
+                        d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
+                    })
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                            if event.click_count == 2 {
+                                this.list_width = LIST_WIDTH;
+                                this.resize_start = None;
+                                if let Some(glow) = &mut this.limit_glow {
+                                    glow.release();
+                                }
+                                cx.emit(MailEvent::ListWidth(this.list_width));
+                            } else {
+                                this.resize_start =
+                                    Some((f32::from(event.position.x), this.list_width));
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
             )
             .into_any_element()
     }
@@ -1361,7 +1587,49 @@ impl gpui::Render for Mailbox {
             .min_h_0()
             .min_w_0()
             .flex()
-            .on_key_down(cx.listener(Self::on_key));
+            .on_key_down(cx.listener(Self::on_key))
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    if let Some((start, width)) = this.resize_start {
+                        let max = (f32::from(window.viewport_size().width) * 0.5)
+                            .clamp(MIN_LIST_WIDTH, MAX_LIST_WIDTH);
+                        let wanted = width + f32::from(event.position.x) - start;
+                        let applied = wanted.clamp(MIN_LIST_WIDTH, max);
+                        this.list_width = applied;
+                        // Past the limit the handle glows near the pointer.
+                        let along = f32::from(event.position.y);
+                        match &mut this.limit_glow {
+                            Some(glow) => glow.paint(wanted - applied, along),
+                            None => this.limit_glow = Some(LimitGlow::new(wanted - applied, along)),
+                        }
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this.resize_start.take().is_some() {
+                        if let Some(glow) = &mut this.limit_glow {
+                            glow.release();
+                        }
+                        cx.emit(MailEvent::ListWidth(this.list_width));
+                        cx.notify();
+                    }
+                }),
+            )
+            .on_mouse_up_out(
+                MouseButton::Left,
+                cx.listener(|this, _, _, cx| {
+                    if this.resize_start.take().is_some() {
+                        if let Some(glow) = &mut this.limit_glow {
+                            glow.release();
+                        }
+                        cx.emit(MailEvent::ListWidth(this.list_width));
+                        cx.notify();
+                    }
+                }),
+            );
         let Some(accounts) = self.accounts.as_ref() else {
             return root
                 .child(
@@ -1395,7 +1663,7 @@ impl gpui::Render for Mailbox {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{TestAppContext, VisualTestContext};
+    use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
     fn message(id: &str, ago: i64, unread: bool) -> Message {
         serde_json::from_value(serde_json::json!({
@@ -1457,14 +1725,65 @@ mod tests {
                 model::unread_count(mailbox.messages(), model::View::Inbox),
                 1
             );
+            mailbox.act("a.inbox.1", Action::Star, cx);
             mailbox.act("a.inbox.1", Action::Archive, cx);
             assert_eq!(ids(mailbox, cx), ["a.inbox.2"]);
-            mailbox.change_view(model::View::Archive, cx);
+            mailbox.change_view(model::View::Starred, cx);
             assert_eq!(ids(mailbox, cx), ["a.inbox.1"]);
+            mailbox.selected = Some("a.inbox.1".into());
+            mailbox.reader = Some(Reader::new("a.inbox.1".into()));
             assert!(!mailbox.escape(cx));
             mailbox.settings_open = true;
             assert!(mailbox.escape(cx) && !mailbox.settings_open);
+            cx.notify();
         });
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn folders_strip_scrolls_and_sidebar_resizes(cx: &mut TestAppContext) {
+        let (mailbox, cx) = mailbox(cx, "scroll-resize");
+        mailbox.update(cx, |mailbox, cx| {
+            mailbox.started = true;
+            mailbox.accounts = Some(vec![AccountView {
+                id: "a".into(),
+                name: "Ana".into(),
+                address: "ana@gmail.com".into(),
+                provider: "gmail".into(),
+            }]);
+            mailbox.overview = Some(Overview::default());
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let right = cx
+            .debug_bounds("mail-views-right")
+            .expect("the right scroll arrow is visible when folders overflow");
+        assert!(cx.debug_bounds("mail-views-left").is_none());
+        cx.simulate_click(right.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        assert!(
+            cx.debug_bounds("mail-views-left").is_some(),
+            "scrolling right reveals the left scroll arrow"
+        );
+        let splitter = cx
+            .debug_bounds("mail-list-resize")
+            .expect("the mail list resize splitter is visible");
+        cx.simulate_mouse_down(splitter.center(), MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(
+            point(splitter.center().x + px(80.), splitter.center().y),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.simulate_mouse_up(
+            point(splitter.center().x + px(80.), splitter.center().y),
+            MouseButton::Left,
+            Modifiers::default(),
+        );
+        cx.run_until_parked();
+        mailbox.read_with(cx, |mailbox, _| {
+            assert_eq!(mailbox.list_width, 420.);
+        });
     }
 }

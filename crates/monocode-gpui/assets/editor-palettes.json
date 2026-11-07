@@ -306,5 +306,173 @@
       "invalid": "#c00000",
       "heading": "#000000"
     }
+  },
+  "monokai": {
+    "dark": {
+      "keyword": "#f92672",
+      "callable": "#a6e22e",
+      "string": "#e6db74",
+      "type": "#66d9ef",
+      "tag": "#f92672",
+      "number": "#ae81ff",
+      "comment": "#75715e",
+      "property": "#fd971f",
+      "meta": "#a6e22e",
+      "invalid": "#f92672",
+      "heading": "#fd971f"
+    },
+    "light": {
+      "keyword": "#d01040",
+      "callable": "#598e14",
+      "string": "#b58900",
+      "type": "#177bb0",
+      "tag": "#d01040",
+      "number": "#7c44cf",
+      "comment": "#8c8774",
+      "property": "#d84315",
+      "meta": "#598e14",
+      "invalid": "#d01040",
+      "heading": "#d84315"
+    }
+  },
+  "github": {
+    "dark": {
+      "keyword": "#ff7b72",
+      "callable": "#d2a8ff",
+      "string": "#a5d6ff",
+      "type": "#ffa657",
+      "tag": "#7ee787",
+      "number": "#79c0ff",
+      "comment": "#8b949e",
+      "property": "#79c0ff",
+      "meta": "#d2a8ff",
+      "invalid": "#f85149",
+      "heading": "#e6edf3"
+    },
+    "light": {
+      "keyword": "#cf222e",
+      "callable": "#8250df",
+      "string": "#0a3069",
+      "type": "#953800",
+      "tag": "#116329",
+      "number": "#0550ae",
+      "comment": "#6e7781",
+      "property": "#0550ae",
+      "meta": "#8250df",
+      "invalid": "#82071e",
+      "heading": "#1f2328"
+    }
+  },
+  "solarized": {
+    "dark": {
+      "keyword": "#859900",
+      "callable": "#268bd2",
+      "string": "#2aa198",
+      "type": "#b58900",
+      "tag": "#268bd2",
+      "number": "#d33682",
+      "comment": "#586e75",
+      "property": "#839496",
+      "meta": "#b58900",
+      "invalid": "#dc322f",
+      "heading": "#cb4b16"
+    },
+    "light": {
+      "keyword": "#859900",
+      "callable": "#268bd2",
+      "string": "#2aa198",
+      "type": "#b58900",
+      "tag": "#268bd2",
+      "number": "#d33682",
+      "comment": "#93a1a1",
+      "property": "#657b83",
+      "meta": "#b58900",
+      "invalid": "#dc322f",
+      "heading": "#cb4b16"
+    }
+  },
+  "latte": {
+    "dark": {
+      "keyword": "#cba6f7",
+      "callable": "#89b4fa",
+      "string": "#a6e3a1",
+      "type": "#f9e2af",
+      "tag": "#94e2d5",
+      "number": "#fab387",
+      "comment": "#6c7086",
+      "property": "#89dceb",
+      "meta": "#f5c2e7",
+      "invalid": "#f38ba8",
+      "heading": "#f38ba8"
+    },
+    "light": {
+      "keyword": "#8839ef",
+      "callable": "#1e66f5",
+      "string": "#40a02b",
+      "type": "#df8e1d",
+      "tag": "#179299",
+      "number": "#fe640b",
+      "comment": "#9ca0b0",
+      "property": "#04a5e5",
+      "meta": "#ea76cb",
+      "invalid": "#d20f39",
+      "heading": "#d20f39"
+    }
+  },
+  "one-light": {
+    "dark": {
+      "keyword": "#c678dd",
+      "callable": "#61afef",
+      "string": "#98c379",
+      "type": "#e5c07b",
+      "tag": "#e06c75",
+      "number": "#d19a66",
+      "comment": "#5c6370",
+      "property": "#56b6c2",
+      "meta": "#c678dd",
+      "invalid": "#e06c75",
+      "heading": "#c678dd"
+    },
+    "light": {
+      "keyword": "#a626a4",
+      "callable": "#4078f2",
+      "string": "#50a14f",
+      "type": "#c18401",
+      "tag": "#e45649",
+      "number": "#986801",
+      "comment": "#a0a1a7",
+      "property": "#0184bc",
+      "meta": "#a626a4",
+      "invalid": "#e45649",
+      "heading": "#a626a4"
+    }
+  },
+  "paper": {
+    "dark": {
+      "keyword": "#e07a5f",
+      "callable": "#e9c46a",
+      "string": "#8ab17d",
+      "type": "#f4a261",
+      "tag": "#e07a5f",
+      "number": "#ee8968",
+      "comment": "#786e64",
+      "property": "#d6ccc2",
+      "meta": "#e9c46a",
+      "invalid": "#e76f51",
+      "heading": "#f4a261"
+    },
+    "light": {
+      "keyword": "#b85434",
+      "callable": "#7d5a2b",
+      "string": "#526e38",
+      "type": "#8c6218",
+      "tag": "#b85434",
+      "number": "#ad4e2b",
+      "comment": "#94846c",
+      "property": "#5e4a32",
+      "meta": "#7d5a2b",
+      "invalid": "#a82824",
+      "heading": "#6c3b1a"
+    }
   }
 }

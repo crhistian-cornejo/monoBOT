@@ -1581,7 +1581,7 @@ impl Monos {
                         let groups = this.group_context(&mono, None);
                         view.update(cx, |v, cx| {
                             v.install_transfer(settings, None, cx);
-                            v.configure_mono(mono, root, env, cx);
+                            v.configure_mono(mono, root, env, None, cx);
                             v.set_mono_groups(groups, cx);
                         });
                         this.observations.push(

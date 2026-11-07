@@ -707,11 +707,17 @@ impl Shell {
                 };
             div()
                 .id("sidebar-resize")
+                .role(Role::Splitter)
+                .aria_label("Resize sidebar")
                 .absolute()
                 .left(px(border - 2.))
                 .w(px(4.))
                 .h_full()
                 .cursor(CursorStyle::ResizeLeftRight)
+                .when(self.workspace.boxy_layout(), |d| {
+                    d.group("resize-handle")
+                        .child(super::resize_border(true, self.resize.is_some()))
+                })
                 .when_some(self.limit_glow(&GlowTarget::Sidebar), |d, glow| {
                     d.child(limit_glow(Axis::X, glow, cx.reduce_motion()))
                 })
@@ -720,8 +726,20 @@ impl Shell {
                     cx.listener(|this, event: &MouseDownEvent, _, cx| {
                         this.resize = Some((event.position.x, this.workspace.sidebar_width));
                         cx.stop_propagation();
+                        cx.notify();
                     }),
                 )
+                .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+                    if event.click_count() == 2 {
+                        this.resize = None;
+                        this.release_limit_glow();
+                        this.workspace.sidebar_width = 260.;
+                        this.fit_sidebar(cx);
+                        this.persist(cx);
+                        this.invalidate_chrome(cx);
+                        cx.notify();
+                    }
+                }))
                 .into_any_element()
         })
     }

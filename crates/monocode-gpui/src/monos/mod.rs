@@ -600,13 +600,12 @@ impl Monos {
             .flex()
             .items_center()
             .gap_2()
-            .child(avatar::avatar(
-                &mono.mascot,
-                mono.color,
-                state,
-                16.,
-                state == "idle",
-            ))
+            .child(if mono.is_group() {
+                let (shown, more) = self.group_stack_members(mono);
+                avatar::group_avatar_stack(&shown, state, more, 18., false)
+            } else {
+                avatar::avatar(&mono.mascot, mono.color, state, 16., state == "idle")
+            })
             .child(
                 div()
                     .debug_selector(|| "original-mono-name".into())
@@ -849,8 +848,10 @@ impl Monos {
                     .map(|b| b.environment(view.read(cx).summary.id))
                     .unwrap_or_default();
                 let groups = this.group_context(&mono, None);
+                let speaker = this.mono_speaker(&mono);
+                let people = this.group_mention_people(&mono);
                 view.update(cx, |view, cx| {
-                    view.configure_mono(mono, root, env, cx);
+                    view.configure_mono(mono, root, env, Some(speaker), cx);
                     if let Some(settings) = settings {
                         let config = view.settings.mono.take();
                         let env = std::mem::take(&mut view.settings.environment);
@@ -859,6 +860,7 @@ impl Monos {
                         view.settings.environment = env;
                     }
                     view.set_mono_groups(groups, cx);
+                    view.set_mention_people(people, cx);
                     view.load(cx);
                 });
                 let source = id.clone();
@@ -1005,6 +1007,122 @@ impl Monos {
         self.save(cx);
         self.configure_chat(source, cx);
     }
+    /// Who speaks in a Mono's chat: for a group, its leader (the Principal);
+    /// for every other Mono, itself.
+    pub(super) fn mono_speaker(&self, mono: &Mono) -> (String, u32, String) {
+        if mono.is_group() {
+            if let Some(group) = &mono.group {
+                let lead = group
+                    .members
+                    .iter()
+                    .filter_map(|id| self.roster.get(id))
+                    .find(|m| m.is_principal())
+                    .or_else(|| self.roster.monos.iter().find(|m| m.is_principal()));
+                if let Some(lead) = lead {
+                    return (lead.mascot.clone(), lead.color, lead.label());
+                }
+            }
+        }
+        (mono.mascot.clone(), mono.color, mono.label())
+    }
+
+    /// The people an @ mention can name when typing in this Mono's composer:
+    /// in a group chat, its leader and members; otherwise none.
+    pub(super) fn group_mention_people(
+        &self,
+        mono: &Mono,
+    ) -> Vec<crate::composer_completion::MentionPerson> {
+        let Some(group) = &mono.group else {
+            return Vec::new();
+        };
+        let roster = monocode_core::mono::groups::native::members(&self.roster.monos);
+        let lead = monocode_core::mono::groups::brief::group_lead(group, &roster);
+        let askable = monocode_core::mono::groups::brief::askable_members(group, &roster);
+
+        let mut people = Vec::new();
+        if let Some(lead) = lead {
+            let (mascot, color, name) = self
+                .roster
+                .get(&lead.id)
+                .map(|m| (m.mascot.clone(), m.color, m.label()))
+                .unwrap_or_else(|| ("principal".to_string(), 0x38bdf8, lead.name.clone()));
+            people.push(crate::composer_completion::MentionPerson {
+                id: lead.id.clone(),
+                name,
+                mascot,
+                color,
+                note: Some("Leads the group".to_string()),
+            });
+        }
+        for member in askable {
+            let (mascot, color, name) = self
+                .roster
+                .get(&member.id)
+                .map(|m| (m.mascot.clone(), m.color, m.label()))
+                .unwrap_or_else(|| ("robot".to_string(), 0x38bdf8, member.name.clone()));
+            people.push(crate::composer_completion::MentionPerson {
+                id: member.id.clone(),
+                name,
+                mascot,
+                color,
+                note: Some(monocode_core::mono::groups::brief::member_role(member)),
+            });
+        }
+        people
+    }
+
+    /// A group's members as avatar stack entries: the Principal first, then
+    /// other members, capped at 3 circles with a `+N` badge if more.
+    pub(crate) fn group_stack_members(&self, mono: &Mono) -> (Vec<avatar::StackAvatar>, usize) {
+        let Some(group) = &mono.group else {
+            return (
+                vec![avatar::StackAvatar {
+                    mascot: mono.mascot.clone(),
+                    color: mono.color,
+                }],
+                0,
+            );
+        };
+        let roster = monocode_core::mono::groups::native::members(&self.roster.monos);
+        let lead = monocode_core::mono::groups::brief::group_lead(group, &roster);
+        let askable = monocode_core::mono::groups::brief::askable_members(group, &roster);
+
+        let mut members = Vec::new();
+        if let Some(lead) = lead {
+            let (mascot, color) = self
+                .roster
+                .get(&lead.id)
+                .map(|m| (m.mascot.clone(), m.color))
+                .unwrap_or_else(|| ("principal".to_string(), 0x38bdf8));
+            members.push(avatar::StackAvatar { mascot, color });
+        }
+        for member in askable {
+            let (mascot, color) = self
+                .roster
+                .get(&member.id)
+                .map(|m| (m.mascot.clone(), m.color))
+                .unwrap_or_else(|| ("robot".to_string(), 0x38bdf8));
+            members.push(avatar::StackAvatar { mascot, color });
+        }
+
+        if members.is_empty() {
+            return (
+                vec![avatar::StackAvatar {
+                    mascot: mono.mascot.clone(),
+                    color: mono.color,
+                }],
+                0,
+            );
+        }
+
+        const SHOWN: usize = 3;
+        let count = members.len();
+        let take = if count > SHOWN { SHOWN - 1 } else { count };
+        let shown = members[..take].to_vec();
+        let more = count.saturating_sub(take);
+        (shown, more)
+    }
+
     fn configure_chat(&mut self, id: &str, cx: &mut Context<Self>) {
         self.refresh_work(id, cx);
         if let Some(mono) = self.roster.get(id) {
@@ -1025,9 +1143,12 @@ impl Monos {
                 .unwrap_or_default();
             let root = self.root.clone();
             let groups = self.group_context(&mono, None);
+            let speaker = self.mono_speaker(&mono);
+            let people = self.group_mention_people(&mono);
             view.update(cx, |view, cx| {
-                view.configure_mono(mono, root, env, cx);
+                view.configure_mono(mono, root, env, Some(speaker), cx);
                 view.set_mono_groups(groups, cx);
+                view.set_mention_people(people, cx);
             });
         }
     }
@@ -1605,7 +1726,19 @@ impl Monos {
                     .opacity(if active { 1. } else { 0.65 })
                     .when(active, |d| d.bg(content(0.1)))
                     .hover(|s| s.bg(content(0.08)).opacity(1.))
-                    .child(
+                    .child(if mono.is_group() && !compact {
+                        let (shown, more) = self.group_stack_members(&mono);
+                        avatar::group_avatar_stack(&shown, state, more, 18., original)
+                    } else if mono.is_group() && compact {
+                        let (shown, _) = self.group_stack_members(&mono);
+                        avatar::group_avatar_stack(
+                            &shown[..1.min(shown.len())],
+                            state,
+                            0,
+                            16.,
+                            original,
+                        )
+                    } else {
                         div()
                             .size(px(16.))
                             .relative()
@@ -1629,8 +1762,9 @@ impl Monos {
                                             content(0.3)
                                         }),
                                 )
-                            }),
-                    )
+                            })
+                            .into_any_element()
+                    })
                     .when(!compact, |d| {
                         // PersonalRail: the pill takes room from the name,
                         // never from the counts after it.

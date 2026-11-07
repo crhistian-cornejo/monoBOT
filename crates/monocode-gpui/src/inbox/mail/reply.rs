@@ -534,44 +534,44 @@ impl MailReply {
             draft: Some(original.0.clone()),
             draft_subject: Some(original.1.clone()),
         });
-        // The background model picked in Settings, else the first installed harness.
+        // The background model picked in Settings, else the first installed harness,
+        // routed automatically when Claude has no usage or <= 40% headroom.
         let chosen = cx
             .try_global::<crate::settings::Preferences>()
             .and_then(|p| p.background_text_model());
-        let chosen = chosen.map(|(kind, model)| {
-            let home = monocode_core::accounts::home()
-                .map(|home| home.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            TextModel {
-                kind,
-                model,
-                account: crate::accounts::get(cx)
-                    .map(|center| center.read(cx).selected(kind, &home))
-                    .unwrap_or_default(),
-            }
-        });
         let home = monocode_core::accounts::home()
             .map(|home| home.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let accounts = crate::accounts::get(cx)
-            .map(|center| {
-                monocode_core::provider::Kind::ALL
-                    .into_iter()
-                    .map(|kind| (kind, center.read(cx).selected(kind, &home)))
-                    .collect::<HashMap<_, _>>()
+        let (chosen, candidates) = if let Some(center) = crate::accounts::get(cx) {
+            center.update(cx, |center, cx| {
+                for kind in crate::usage_footer::RATE_LIMIT_PROVIDERS {
+                    let profile = center.selected(kind, &home);
+                    center.refresh(crate::accounts::Key::new(kind, profile, None), false, cx);
+                }
+                center.reply_candidates(&home, chosen)
             })
-            .unwrap_or_default();
+        } else {
+            let chosen = chosen.map(|(kind, model)| model::ReplyCandidate {
+                text: TextModel {
+                    kind,
+                    model,
+                    account: Default::default(),
+                },
+                headroom: None,
+            });
+            let candidates = monocode_core::provider::Kind::ALL
+                .into_iter()
+                .filter(|kind| model::supports_reply(*kind))
+                .map(|kind| model::ReplyCandidate {
+                    text: TextModel::automatic(kind, Default::default()),
+                    headroom: None,
+                })
+                .collect();
+            (chosen, candidates)
+        };
         let (tx, rx) = async_channel::unbounded::<model::ReplyProgress>();
         let task = cx.background_executor().spawn(async move {
-            let text = match chosen {
-                Some(text) => text,
-                None => {
-                    let kind = model::text_harness()
-                        .ok_or("Connect an agent (Claude, Codex…) to write with AI.")?;
-                    TextModel::automatic(kind, accounts.get(&kind).cloned().unwrap_or_default())
-                }
-            };
-            model::write_reply(text, prompt, cancel, |progress| {
+            model::write_reply_routed(chosen, candidates, prompt, cancel, |progress| {
                 let _ = tx.try_send(progress);
             })
         });

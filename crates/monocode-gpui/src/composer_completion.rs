@@ -31,6 +31,25 @@ pub(crate) fn bind(cx: &mut App) {
     ]);
 }
 pub(crate) struct ModePicked(pub &'static str);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MentionPerson {
+    pub id: String,
+    pub name: String,
+    pub mascot: String,
+    pub color: u32,
+    pub note: Option<String>,
+}
+
+impl monocode_core::mono::groups::mentions::Named for MentionPerson {
+    fn id(&self) -> &str {
+        &self.id
+    }
+    fn name(&self) -> &str {
+        &self.name
+    }
+}
+
 #[derive(Clone)]
 struct Choice {
     label: String,
@@ -40,6 +59,7 @@ struct Choice {
     mode: Option<&'static str>,
     file: bool,
     server: Option<monocode_core::mcp::McpConnection>,
+    person: Option<MentionPerson>,
 }
 impl Choice {
     fn icon(&self) -> (&'static str, gpui::Hsla) {
@@ -90,6 +110,7 @@ pub(crate) struct Completion {
     /// The skill packs turned on in Settings, whose skills /name offers.
     packs: Vec<String>,
     known: std::collections::HashSet<String>,
+    people: Vec<MentionPerson>,
     files: Vec<ProjectFile>,
     /// `@name` → `@relative/path` for file names unique in the project; the
     /// picker writes the short label and sending expands it back.
@@ -171,6 +192,7 @@ impl Completion {
             .map(str::to_owned)
             .into_iter()
             .collect(),
+            people: Vec::new(),
             files: Vec::new(),
             short_mentions: Default::default(),
             choices: Vec::new(),
@@ -239,12 +261,25 @@ impl Completion {
         ]
         .map(str::to_owned)
         .into_iter()
+        .chain(self.people.iter().map(|p| format!("@{}", p.name)))
         .collect();
         self.loaded = None;
         self.loading = false;
         self.token = None;
         self.dismissed = None;
         self.sync(cx);
+    }
+    pub(crate) fn set_people(&mut self, people: Vec<MentionPerson>, cx: &mut Context<Self>) {
+        for person in &self.people {
+            self.known.remove(&format!("@{}", person.name));
+        }
+        self.people = people;
+        for person in &self.people {
+            self.known.insert(format!("@{}", person.name));
+        }
+        self.highlight(cx);
+        self.rank();
+        cx.notify();
     }
     pub(crate) fn set_provider(&mut self, provider: &str, cx: &mut Context<Self>) {
         let provider = monocode_core::provider::Kind::from_id(provider);
@@ -565,6 +600,7 @@ impl Completion {
                 )
                 .chain(this.selected_mcp.iter().map(|(token, _)| token.clone()))
                 .chain(this.skills.iter().map(|s| format!("/{}", s.name)))
+                .chain(this.people.iter().map(|p| format!("@{}", p.name)))
                 .chain(
                     this.files
                         .iter()
@@ -620,21 +656,41 @@ impl Completion {
                     mode: None,
                     file: false,
                     server: Some(server),
+                    person: None,
                 })
                 .collect();
         } else if token.trigger == Trigger::Mention {
-            self.choices = composer::rank_files(&self.files, &token.query, 60)
-                .into_iter()
-                .map(|file| Choice {
-                    label: file.name.clone(),
-                    detail: file.relative.clone(),
-                    insertion: self.mention_label(file),
+            let mut choices = Vec::new();
+            if !self.people.is_empty() {
+                let ranked_people = monocode_core::mono::groups::mentions::rank_mention_people(
+                    &self.people,
+                    &token.query,
+                );
+                choices.extend(ranked_people.into_iter().map(|person| Choice {
+                    label: person.name.clone(),
+                    detail: person.note.clone().unwrap_or_default(),
+                    insertion: format!("@{}", person.name),
                     builtin: None,
                     mode: None,
-                    file: true,
+                    file: false,
                     server: None,
-                })
-                .collect();
+                    person: Some(person.clone()),
+                }));
+            }
+            choices.extend(
+                composer::rank_files(&self.files, &token.query, 60)
+                    .into_iter()
+                    .map(|file| Choice {
+                        label: file.name.clone(),
+                        detail: file.relative.clone(),
+                        insertion: self.mention_label(file),
+                        builtin: None,
+                        mode: None,
+                        file: true,
+                        server: None,
+                        person: None,
+                    }),
+            );
             let query = token
                 .query
                 .strip_prefix("note/")
@@ -659,18 +715,19 @@ impl Completion {
                 b_score.cmp(a_score).then(b.updated_at.cmp(&a.updated_at))
             });
             if token.query.starts_with("note/") {
-                self.choices.clear();
+                choices.clear();
             }
-            self.choices
-                .extend(notes.into_iter().take(8).map(|(_, note)| Choice {
-                    label: note.title.clone(),
-                    detail: format!("note/{}", note.slug),
-                    insertion: format!("@note/{}", note.slug),
-                    builtin: None,
-                    mode: None,
-                    file: false,
-                    server: None,
-                }));
+            choices.extend(notes.into_iter().take(8).map(|(_, note)| Choice {
+                label: note.title.clone(),
+                detail: format!("note/{}", note.slug),
+                insertion: format!("@note/{}", note.slug),
+                builtin: None,
+                mode: None,
+                file: false,
+                server: None,
+                person: None,
+            }));
+            self.choices = choices;
         } else {
             let mut choices = Vec::new();
             for (order, (id, label, detail)) in [
@@ -751,6 +808,7 @@ impl Completion {
                             .then_some(id),
                             file: false,
                             server: None,
+                            person: None,
                         },
                     ));
                 }
@@ -791,6 +849,7 @@ impl Completion {
                             mode: None,
                             file: false,
                             server: None,
+                            person: None,
                         },
                     ));
                 }
@@ -829,6 +888,7 @@ impl Completion {
                             mode: None,
                             file: false,
                             server: None,
+                            person: None,
                         },
                     ));
                 }
@@ -993,7 +1053,15 @@ impl Render for Completion {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(if choice.file {
+                                .child(if let Some(person) = &choice.person {
+                                    crate::monos::avatar::avatar(
+                                        &person.mascot,
+                                        person.color,
+                                        "idle",
+                                        18.,
+                                        true,
+                                    )
+                                } else if choice.file {
                                     crate::file_icons::file_type_icon(
                                         &choice.label,
                                         false,
@@ -1037,7 +1105,11 @@ impl Render for Completion {
                 .as_ref()
                 .is_some_and(|t| t.trigger == Trigger::Mention)
             {
-                "FILES & NOTES"
+                if !self.people.is_empty() {
+                    "AGENTS & FILES"
+                } else {
+                    "FILES & NOTES"
+                }
             } else {
                 "SKILLS & COMMANDS"
             };
@@ -1473,6 +1545,53 @@ mod tests {
                     v.expand_mentions("see @README.md and @src/mod.rs\n> @README.md"),
                     "see @app/apps/README.md and @src/mod.rs\n> @README.md"
                 );
+            })
+            .unwrap();
+    }
+    #[gpui::test]
+    fn group_mention_accept_replaces_token_with_agent_name(cx: &mut TestAppContext) {
+        let window = window(cx);
+        window
+            .update(cx, |v, _, cx| {
+                v.set_people(
+                    vec![
+                        MentionPerson {
+                            id: "ivy".into(),
+                            name: "IVY".into(),
+                            mascot: "principal".into(),
+                            color: 0x38bdf8,
+                            note: Some("Leads the group".into()),
+                        },
+                        MentionPerson {
+                            id: "docs".into(),
+                            name: "Documents".into(),
+                            mascot: "robot".into(),
+                            color: 0x10b981,
+                            note: Some("Documents bot".into()),
+                        },
+                    ],
+                    cx,
+                );
+                v.input.update(cx, |i, cx| {
+                    i.set_text("@iv".into(), cx);
+                    i.select_range(3..3, cx);
+                });
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |v, _, _cx| {
+                assert_eq!(v.choices.len(), 1);
+                assert_eq!(v.choices[0].label, "IVY");
+                assert_eq!(v.choices[0].detail, "Leads the group");
+                assert_eq!(v.choices[0].insertion, "@IVY");
+            })
+            .unwrap();
+        cx.simulate_keystrokes(window.into(), "tab");
+        cx.run_until_parked();
+        window
+            .update(cx, |v, _, cx| {
+                assert_eq!(v.input.read(cx).content, "@IVY ");
             })
             .unwrap();
     }

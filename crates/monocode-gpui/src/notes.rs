@@ -1049,9 +1049,9 @@ impl gpui::Render for Notes {
                             .when(note.tags.len() > 3, |d| d.child(div().text_size(px(10.)).text_color(content(0.4)).child(format!("+{}", note.tags.len() - 3))))))
                         .on_click(cx.listener(move |this, _, _, cx| this.select(id.clone(), cx)))
                 })))
-            .child(div().id("resize-notes-list").role(Role::Splitter).aria_label("Resize notes list").absolute().top_0().bottom_0().right(px(-3.)).w(px(6.)).cursor(CursorStyle::ResizeLeftRight).hover(|style| style.bg(content(0.1)))
+            .child(div().id("resize-notes-list").role(Role::Splitter).aria_label("Resize notes list").absolute().top_0().bottom_0().right(px(-3.)).w(px(6.)).cursor(CursorStyle::ResizeLeftRight).hover(|style| style.bg(content(0.1))).when(self.resize.is_some(), |d| d.bg(content(0.15)))
                 .when_some(self.limit_glow.clone(), |d, glow| d.child(limit_glow(Axis::X, glow, cx.reduce_motion())))
-                .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| { if event.click_count == 2 { this.list_width = 280.; } else { this.resize = Some((event.position.x.as_f32(), this.list_width)); } cx.notify(); })));
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| { if event.click_count == 2 { this.list_width = 280.; this.resize = None; if let Some(glow) = &mut this.limit_glow { glow.release(); } } else { this.resize = Some((event.position.x.as_f32(), this.list_width)); } cx.notify(); })));
         let detail = if let Some(note) = self.draft(cx) {
             self.detail(note, cx)
         } else {
@@ -1137,19 +1137,25 @@ impl gpui::Render for Notes {
             )
             .on_mouse_up(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.resize = None;
+                cx.listener(|this, _, _, cx| {
+                    let was_resizing = this.resize.take().is_some();
                     if let Some(glow) = &mut this.limit_glow {
                         glow.release();
+                    }
+                    if was_resizing {
+                        cx.notify();
                     }
                 }),
             )
             .on_mouse_up_out(
                 MouseButton::Left,
-                cx.listener(|this, _, _, _| {
-                    this.resize = None;
+                cx.listener(|this, _, _, cx| {
+                    let was_resizing = this.resize.take().is_some();
                     if let Some(glow) = &mut this.limit_glow {
                         glow.release();
+                    }
+                    if was_resizing {
+                        cx.notify();
                     }
                 }),
             )

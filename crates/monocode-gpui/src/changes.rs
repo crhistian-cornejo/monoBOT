@@ -643,12 +643,34 @@ impl Changes {
         }
     }
     /// pickTextHarness: the background model picked in Settings, else the
-    /// conversation's provider when installed, else Claude Code, then Codex.
+    /// conversation's provider when installed, else Claude Code, then Codex,
+    /// routed to a provider above 40% usage headroom when Claude is exhausted.
     fn text_harness(&self, cx: &App) -> Option<TextHarness> {
         let chosen = cx
             .try_global::<crate::settings::Preferences>()
             .and_then(|p| p.background_text_model());
-        pick_text_harness(self.text_provider, chosen)
+        let picked = pick_text_harness(self.text_provider, chosen.clone());
+        if let Some((kind, _, _)) = &picked
+            && *kind == Kind::Claude
+            && let Some(center) = crate::accounts::get(cx)
+        {
+            let center = center.read(cx);
+            let profile = center.selected(Kind::Claude, &self.cwd);
+            if center
+                .router_headroom(Kind::Claude, &profile)
+                .is_some_and(|h| h <= monocode_core::inbox::mail::ROUTER_MIN_HEADROOM)
+            {
+                let (chosen_cand, candidates) = center.reply_candidates(&self.cwd, chosen);
+                for routed in
+                    monocode_core::inbox::mail::route_reply_models(chosen_cand, candidates)
+                {
+                    if let Some(binary) = provider::resolve(routed.kind) {
+                        return Some((routed.kind, binary, routed.model));
+                    }
+                }
+            }
+        }
+        picked
     }
     fn generate(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let has_files = self.index(cx).is_some_and(|i| !i.files.is_empty());

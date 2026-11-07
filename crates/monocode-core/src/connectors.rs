@@ -553,6 +553,25 @@ impl ConnectorSettings {
         }
         out
     }
+
+    /// Each connector's MCP server formatted for ACP `mcpServers`.
+    pub fn acp_servers(&self, connectors: &[&Connector]) -> Vec<Value> {
+        connectors
+            .iter()
+            .map(|connector| match connector.server {
+                Server::Http { url } => json!({
+                    "name": connector.id,
+                    "type": "http",
+                    "url": url,
+                }),
+                Server::Stdio { command, .. } => json!({
+                    "name": connector.id,
+                    "command": command,
+                    "args": self.args(connector),
+                }),
+            })
+            .collect()
+    }
 }
 
 /// The `mcpServers` entries a session without a bot gives Claude in its
@@ -561,6 +580,28 @@ impl ConnectorSettings {
 /// it as `{"mcpServers": ...}` beside the app's own servers.
 pub fn mcp_servers(enabled: &ConnectorSettings, platform: Platform) -> Value {
     Value::Object(enabled.servers(&enabled.session_connectors(None, platform)))
+}
+
+/// The MCP server definitions formatted as an ACP array of server objects.
+pub fn session_acp_servers(bot_connectors: Option<&[String]>) -> Vec<Value> {
+    let (settings, _) = SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    let connectors = settings.session_connectors(bot_connectors, Platform::current());
+    settings.acp_servers(&connectors)
+}
+
+/// The Codex command line arguments for the session's connectors.
+pub fn session_codex_args(bot_connectors: Option<&[String]>) -> Vec<String> {
+    let (settings, _) = SESSION_DEFAULTS
+        .read()
+        .ok()
+        .and_then(|slot| slot.clone())
+        .unwrap_or_default();
+    let connectors = settings.session_connectors(bot_connectors, Platform::current());
+    settings.codex_args(&connectors)
 }
 
 #[cfg(test)]

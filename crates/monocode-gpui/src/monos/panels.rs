@@ -2224,6 +2224,7 @@ impl Monos {
                 cx,
             )
             .width(400.)
+            .height(crate::pickers::MODEL_FLYOUT_HEIGHT)
         });
         let closed = cx.subscribe(&menu, |this, _, _: &MenuEvent, cx| {
             this.picker = None;
@@ -2357,7 +2358,11 @@ impl Monos {
             MenuItem::Separator,
             MenuItem::Custom(list.into(), focus),
         ];
-        let menu = cx.new(|cx| Menu::new("Model", items, window, cx).width(400.));
+        let menu = cx.new(|cx| {
+            Menu::new("Model", items, window, cx)
+                .width(400.)
+                .height(crate::pickers::MODEL_FLYOUT_HEIGHT)
+        });
         let closed = cx.subscribe(&menu, |this, _, event: &MenuEvent, cx| {
             if let MenuEvent::Picked(id, _) = event
                 && id == "subsessions:inherit"

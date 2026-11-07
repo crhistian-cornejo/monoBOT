@@ -4,10 +4,12 @@
 use crate::{input, theme::*, workspace::project_name};
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FocusHandle, Focusable, Role, SharedString,
-    Subscription, Window, div, prelude::*, px,
+    Subscription, Window, div, linear_color_stop, linear_gradient, prelude::*, px,
 };
 use monocode_core::catalog::{self, Model};
 use monocode_core::provider::{self, Kind};
+
+pub(crate) const MODEL_FLYOUT_HEIGHT: f32 = 460.;
 
 /// Friendly names used before a provider's live catalog arrives.
 pub(crate) const CLAUDE_MODELS: &[(&str, &str)] = &[
@@ -1069,8 +1071,10 @@ impl Render for ModelList {
             .id("model-flyout")
             .role(Role::Dialog)
             .aria_label("Models")
-            .size_full()
-            .min_h_0()
+            .w_full()
+            .h(px(MODEL_FLYOUT_HEIGHT))
+            .min_h(px(MODEL_FLYOUT_HEIGHT))
+            .max_h(px(MODEL_FLYOUT_HEIGHT))
             .flex()
             .capture_action(cx.listener(|this, _: &input::Up, _, cx| {
                 this.step(-1, cx);
@@ -1086,37 +1090,55 @@ impl Render for ModelList {
             }))
             .child(
                 div()
-                    .id("model-providers")
-                    .role(Role::TabList)
-                    .aria_label("Providers")
+                    .relative()
                     .w(px(44.))
                     .flex_shrink_0()
-                    .flex()
-                    .flex_col()
-                    .overflow_y_scroll()
-                    .items_center()
-                    .gap_1()
-                    .p(px(6.))
+                    .h_full()
                     .border_r_1()
                     .border_color(content(0.07))
-                    .child(self.tab(ModelTab::Favorites, cx))
-                    .children(
-                        Kind::ALL
-                            .into_iter()
-                            .filter(|kind| {
-                                if self.remote_project.is_some() {
-                                    *kind == self.provider
-                                        || self
-                                            .remote_providers
-                                            .as_ref()
-                                            .is_some_and(|providers| providers.contains(kind))
-                                } else {
-                                    *kind == self.provider
-                                        || (!self.hidden.iter().any(|id| id == kind.id())
-                                            && !self.missing.contains(kind))
-                                }
-                            })
-                            .map(|kind| self.tab(ModelTab::Harness(kind), cx)),
+                    .child(
+                        div()
+                            .id("model-providers")
+                            .role(Role::TabList)
+                            .aria_label("Providers")
+                            .size_full()
+                            .flex()
+                            .flex_col()
+                            .overflow_y_scroll()
+                            .items_center()
+                            .gap_1()
+                            .p(px(6.))
+                            .child(self.tab(ModelTab::Favorites, cx))
+                            .children(
+                                Kind::ALL
+                                    .into_iter()
+                                    .filter(|kind| {
+                                        if self.remote_project.is_some() {
+                                            *kind == self.provider
+                                                || self.remote_providers.as_ref().is_some_and(
+                                                    |providers| providers.contains(kind),
+                                                )
+                                        } else {
+                                            *kind == self.provider
+                                                || (!self.hidden.iter().any(|id| id == kind.id())
+                                                    && !self.missing.contains(kind))
+                                        }
+                                    })
+                                    .map(|kind| self.tab(ModelTab::Harness(kind), cx)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(24.))
+                            .bg(linear_gradient(
+                                0.,
+                                linear_color_stop(background_base().opacity(0.9), 0.),
+                                linear_color_stop(background_base().opacity(0.), 1.),
+                            )),
                     ),
             )
             .child(
@@ -1124,6 +1146,7 @@ impl Render for ModelList {
                     .flex_1()
                     .min_w_0()
                     .min_h_0()
+                    .h_full()
                     .flex()
                     .flex_col()
                     .child(
@@ -1142,60 +1165,87 @@ impl Render for ModelList {
                     )
                     .child(
                         div()
-                            .id("model-list")
-                            .role(Role::ListBox)
-                            .aria_label("Models")
+                            .relative()
                             .flex_1()
                             .min_h_0()
-                            .overflow_y_scroll()
-                            .p_1()
-                            .flex()
-                            .flex_col()
-                            .when_some(empty, |d, text| {
-                                d.child(
-                                    div()
-                                        .px_2()
-                                        .py_3()
-                                        .text_size(px(12.))
-                                        .text_color(content(0.5))
-                                        .child(text),
-                                )
-                            })
-                            .children(rows)
-                            .when(loading, |d| {
-                                d.child(
-                                    div()
-                                        .px_2()
-                                        .py_2()
-                                        .text_size(px(12.))
-                                        .text_color(content(0.5))
-                                        .child("Loading models…"),
-                                )
-                            })
-                            .when_some(error, |d, error| {
-                                d.child(
-                                    div()
-                                        .px_2()
-                                        .py_2()
-                                        .text_size(px(12.))
-                                        .text_color(content(0.5))
-                                        .child(error)
-                                        .child(
+                            .child(
+                                div()
+                                    .id("model-list")
+                                    .role(Role::ListBox)
+                                    .aria_label("Models")
+                                    .size_full()
+                                    .overflow_y_scroll()
+                                    .p_1()
+                                    .flex()
+                                    .flex_col()
+                                    .when_some(empty, |d, text| {
+                                        d.child(
                                             div()
-                                                .id("retry-models")
-                                                .role(Role::Button)
-                                                .aria_label("Retry model discovery")
+                                                .px_2()
+                                                .py_3()
+                                                .text_size(px(12.))
+                                                .text_color(content(0.5))
+                                                .child(text),
+                                        )
+                                    })
+                                    .children(rows)
+                                    .when(loading, |d| {
+                                        d.child(
+                                            div()
+                                                .px_2()
                                                 .py_2()
-                                                .child("Retry")
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    if let Some(kind) = kind {
-                                                        this.discover(kind, cx);
-                                                        cx.notify();
-                                                    }
-                                                })),
-                                        ),
-                                )
-                            }),
+                                                .text_size(px(12.))
+                                                .text_color(content(0.5))
+                                                .child("Loading models…"),
+                                        )
+                                    })
+                                    .when_some(error, |d, error| {
+                                        d.child(
+                                            div()
+                                                .px_2()
+                                                .py_2()
+                                                .text_size(px(12.))
+                                                .text_color(content(0.5))
+                                                .child(error)
+                                                .child(
+                                                    div()
+                                                        .id("retry-models")
+                                                        .role(Role::Button)
+                                                        .aria_label("Retry model discovery")
+                                                        .py_2()
+                                                        .child("Retry")
+                                                        .on_click(cx.listener(
+                                                            move |this, _, _, cx| {
+                                                                if let Some(kind) = kind {
+                                                                    this.discover(kind, cx);
+                                                                    cx.notify();
+                                                                }
+                                                            },
+                                                        )),
+                                                ),
+                                        )
+                                    }),
+                            )
+                            .child(div().absolute().top_0().left_0().right_0().h(px(18.)).bg(
+                                linear_gradient(
+                                    180.,
+                                    linear_color_stop(background_base().opacity(0.85), 0.),
+                                    linear_color_stop(background_base().opacity(0.), 1.),
+                                ),
+                            ))
+                            .child(
+                                div()
+                                    .absolute()
+                                    .bottom_0()
+                                    .left_0()
+                                    .right_0()
+                                    .h(px(32.))
+                                    .bg(linear_gradient(
+                                        0.,
+                                        linear_color_stop(background_base().opacity(0.95), 0.),
+                                        linear_color_stop(background_base().opacity(0.), 1.),
+                                    )),
+                            ),
                     ),
             )
             .into_any_element()
@@ -1399,28 +1449,45 @@ impl ModelList {
             )
             .child(
                 div()
-                    .id("quick-model-list")
-                    .role(Role::ListBox)
-                    .aria_label("Models")
-                    .h(px(240.))
-                    .flex_shrink_0()
-                    .overflow_y_scroll()
-                    .p_2()
-                    .flex()
-                    .flex_col()
-                    .when_some(empty, |d, text| {
-                        d.child(
-                            div()
-                                .px_2()
-                                .py_6()
-                                .flex()
-                                .justify_center()
-                                .text_size(px(12.))
-                                .text_color(content(0.45))
-                                .child(text),
-                        )
-                    })
-                    .children(rows),
+                    .relative()
+                    .child(
+                        div()
+                            .id("quick-model-list")
+                            .role(Role::ListBox)
+                            .aria_label("Models")
+                            .h(px(240.))
+                            .flex_shrink_0()
+                            .overflow_y_scroll()
+                            .p_2()
+                            .flex()
+                            .flex_col()
+                            .when_some(empty, |d, text| {
+                                d.child(
+                                    div()
+                                        .px_2()
+                                        .py_6()
+                                        .flex()
+                                        .justify_center()
+                                        .text_size(px(12.))
+                                        .text_color(content(0.45))
+                                        .child(text),
+                                )
+                            })
+                            .children(rows),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(28.))
+                            .bg(linear_gradient(
+                                0.,
+                                linear_color_stop(background_base().opacity(0.95), 0.),
+                                linear_color_stop(background_base().opacity(0.), 1.),
+                            )),
+                    ),
             )
             .into_any_element()
     }
