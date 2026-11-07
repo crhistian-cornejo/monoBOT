@@ -1385,6 +1385,11 @@ impl Monos {
         self.check_habits(cx);
         // A round still waiting checks again when a slow member runs out of time.
         self.check_groups(cx);
+        if self.settings.is_some()
+            && let Some(id) = self.active.clone()
+        {
+            self.reload_files(&id, cx);
+        }
         cx.notify();
     }
     fn check_habits(&mut self, cx: &mut Context<Self>) {
@@ -1418,7 +1423,8 @@ impl Monos {
         for id in timed_out {
             if let Some(run) = self.running.get_mut(&id) {
                 if run.failure.is_none() {
-                    run.failure = Some("Habit timed out while waiting for work or an answer".into());
+                    run.failure =
+                        Some("Habit timed out while waiting for work or an answer".into());
                 }
                 run.mailbox.clear();
                 run.view.update(cx, |v, cx| v.mono_stop(cx));

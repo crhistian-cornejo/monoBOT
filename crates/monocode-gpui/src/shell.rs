@@ -1248,6 +1248,12 @@ impl Shell {
                 cx.notify();
             }),
         );
+        this.observations.push(
+            cx.subscribe(&monos, |this, _, _: &crate::monos::HoverChanged, cx| {
+                this.sidebar_frame.update(cx, |_, cx| cx.notify());
+                this.projects_frame.update(cx, |_, cx| cx.notify());
+            }),
+        );
         this.watch_bot_sync(&monos, cx);
         this.observations.push(cx.subscribe(
             &monos,
@@ -6103,9 +6109,15 @@ impl Shell {
             self.sidebar_frame.update(cx, |_, cx| cx.notify());
         }
     }
+    fn close_agent_previews(&self, cx: &mut Context<Self>) {
+        if let Some(monos) = self.monos.clone() {
+            cx.defer(move |cx| monos.update(cx, |m, cx| m.close_hover_cards(cx)));
+        }
+    }
     fn sidebar_scrolled(&mut self, cx: &mut Context<Self>) {
         self.sidebar_last_scroll = Some(std::time::Instant::now());
         self.close_preview(cx);
+        self.close_agent_previews(cx);
         if let Some(id) = self.session_hover
             && let Some(anchor) = self.session_row_bounds.get(&id).cloned()
         {
@@ -8850,6 +8862,7 @@ impl Render for Shell {
                 .push(cx.observe_window_activation(window, |this, window, cx| {
                     if !window.is_window_active() {
                         this.close_preview(cx);
+                        this.close_agent_previews(cx);
                     } else {
                         this.resume_git(cx);
                         this.check_github_star(true, cx);
@@ -8859,6 +8872,7 @@ impl Render for Shell {
                 .push(cx.observe_window_bounds(window, |this, window, cx| {
                     this.save_window_state(window, cx);
                     this.close_preview(cx);
+                    this.close_agent_previews(cx);
                 }));
         }
         self.viewport_width = window.viewport_size().width.as_f32();

@@ -907,16 +907,18 @@ impl Monos {
         let field = cx.new(|cx| {
             let mut f = if multi {
                 Input::markdown_editor(&label, cx)
-            } else if key == "memory-fact" || key.starts_with("memory-edit:") {
+            } else if key.starts_with("memory-fact:") || key.starts_with("memory-edit:") {
                 Input::memory_fact(&label, cx)
             } else {
                 Input::field(label.clone(), label.clone(), content(0.35), cx)
             };
-            f.set_font_size(if key == "memory-fact" || key.starts_with("memory-edit:") {
-                12.
-            } else {
-                13.
-            });
+            f.set_font_size(
+                if key.starts_with("memory-fact:") || key.starts_with("memory-edit:") {
+                    12.
+                } else {
+                    13.
+                },
+            );
             f.set_placeholder(label, cx);
             f.set_text(text, cx);
             f
@@ -1955,6 +1957,7 @@ impl Monos {
         // defaults for sessions it starts. A group answers through its lead.
         let personal = mono.is_personal();
         let group = mono.is_group();
+        let members = self.group_mention_people(mono);
         let group_model = format!(
             "{} answers here with its own model, effort and permissions. Change them in its settings.",
             self.roster
@@ -1968,13 +1971,25 @@ impl Monos {
             .flex_1().min_h_0().overflow_y_scroll().px_8().pt_6().pb_8()
             .child(div().text_size(px(14.)).font_weight(FontWeight::MEDIUM).child("General"))
             .child(div().flex().flex_col().items_center().pt_4().pb_6()
-                .child(div().id("mono-look").debug_selector(||"mono-look".into()).role(Role::Button)
+                .when(group, |d| d.child(div().id("mono-settings-members").debug_selector(||"mono-settings-members".into())
+                    .w_full().flex().flex_wrap().justify_center().gap_3()
+                    .children(members.into_iter().map(|member| {
+                        let selector = format!("mono-settings-member-{}", member.id);
+                        div().id(SharedString::from(selector.clone())).debug_selector(move || selector.clone())
+                            .flex().flex_col().items_center().gap_1().w(px(80.))
+                            .child(div().size(px(64.)).rounded_2xl().bg(content(0.04))
+                                .flex().items_center().justify_center()
+                                .child(avatar::avatar(&member.mascot, member.color, "idle", 48., true)))
+                            .child(div().w_full().text_center().text_size(px(11.)).text_color(content(0.65))
+                                .truncate().child(member.name))
+                    }))))
+                .when(!group, |d| d.child(div().id("mono-look").debug_selector(||"mono-look".into()).role(Role::Button)
                     .aria_label("Change mascot and color").relative().size(px(80.)).flex_shrink_0()
                     .flex().items_center().justify_center().rounded_2xl().border_1().border_color(content(0.04))
                     .bg(content(0.04)).hover(|s|s.bg(content(0.08)))
                     .child(self.settings_anchor.probe())
                     .child(avatar::avatar(&mono.mascot, mono.color, "idle", 48., false))
-                    .on_click(cx.listener(move |this, _, w, cx|this.open_settings_look(&look,w,cx))))
+                    .on_click(cx.listener(move |this, _, w, cx|this.open_settings_look(&look,w,cx)))))
                 .child(div().id("mono-name-field").debug_selector(||"mono-name-field".into()).mt_3().h(px(32.)).w(px(256.)).max_w_full().px_2().py_1p5()
                     .rounded_md().font_weight(FontWeight::MEDIUM).hover(|s|s.bg(content(0.05))).child(name))
                 .when(mono.is_principal(),|d|d.child(super::bot_settings::orchestrator_badge())))

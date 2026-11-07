@@ -260,14 +260,18 @@ pub fn edit(
                     rows.push(line);
                 }
             }
-            files::save(
+            match files::save(
                 root,
                 id,
                 None,
                 "memory/archive.md",
                 &join(&rows),
                 Some(&archive.hash),
-            )?;
+            ) {
+                Ok(_) => (),
+                Err(e) if e == files::CONFLICT => continue,
+                Err(e) => return Err(e),
+            }
         }
         match files::save(root, id, None, &path, &text, Some(&file.hash)) {
             Ok(hash) => return Ok(hash),

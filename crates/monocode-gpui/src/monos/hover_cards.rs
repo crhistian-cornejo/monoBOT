@@ -19,22 +19,36 @@ const SUMMARY_MAX: usize = 220;
 const LIST_MAX: usize = 4;
 
 /// One hover card's state: the row it shows for, where that row is, and the
-/// card's own bounds so the row's leave does not close a card being entered.
+/// actual hit-tested hover state, including the card's border.
 #[derive(Default)]
 pub(super) struct Hover {
     pub(super) shown: Option<String>,
     anchor: AnchorSlot,
     pending: Option<String>,
-    surface: AnchorSlot,
+    row: Option<String>,
+    card_hovered: bool,
     timer: Option<Task<()>>,
 }
 
 type Pick = fn(&mut Monos) -> &mut Hover;
 
 impl Hover {
+    #[cfg(test)]
+    pub(super) fn diagnostic(&self) -> String {
+        format!(
+            "row={:?}, card={}, pending={:?}, timer={}",
+            self.row,
+            self.card_hovered,
+            self.pending,
+            self.timer.is_some()
+        )
+    }
+
     pub(super) fn close(&mut self) -> bool {
         self.timer = None;
         self.pending = None;
+        self.row = None;
+        self.card_hovered = false;
         self.shown.take().is_some()
     }
 
@@ -51,11 +65,13 @@ impl Hover {
         let hover = pick(this);
         hover.timer = None;
         hover.pending = None;
+        hover.row = Some(key.clone());
+        hover.card_hovered = false;
         if hover.shown.is_some() || open_after == 0 {
             if hover.shown.as_deref() != Some(key.as_str()) {
                 hover.shown = Some(key);
                 hover.anchor = anchor;
-                cx.notify();
+                this.hover_changed(cx);
             }
             return;
         }
@@ -66,26 +82,34 @@ impl Hover {
                 .await;
             let _ = this.update(cx, |this, cx| {
                 let hover = pick(this);
+                if hover.pending.as_deref() != Some(key.as_str())
+                    || hover.row.as_deref() != Some(key.as_str())
+                {
+                    return;
+                }
                 hover.timer = None;
                 hover.pending = None;
                 hover.shown = Some(key);
                 hover.anchor = anchor;
-                cx.notify();
+                this.hover_changed(cx);
             });
         }));
     }
 
     /// The pointer left a row. A leave can arrive after the next row's
     /// enter, so only the row shown (or about to be) reacts to it.
-    fn leave(this: &mut Monos, pick: Pick, key: &str, window: &Window, cx: &mut Context<Monos>) {
+    fn leave(this: &mut Monos, pick: Pick, key: &str, cx: &mut Context<Monos>) {
         let hover = pick(this);
+        if hover.row.as_deref() == Some(key) {
+            hover.row = None;
+        }
         if hover.pending.as_deref() == Some(key) {
             hover.pending = None;
             hover.timer = None;
             return;
         }
         if hover.shown.as_deref() == Some(key) {
-            Self::schedule_close(this, pick, window, cx);
+            Self::schedule_close(this, pick, cx);
         }
     }
 
@@ -97,32 +121,42 @@ impl Hover {
         window: &Window,
         cx: &mut Context<Monos>,
     ) {
+        let hover = pick(this);
+        hover.card_hovered = hovered;
+        if !hovered
+            && !hover
+                .anchor
+                .get()
+                .is_some_and(|bounds| bounds.contains(&window.mouse_position()))
+        {
+            hover.row = None;
+        }
         if hovered {
             pick(this).timer = None;
         } else {
-            Self::schedule_close(this, pick, window, cx);
+            Self::schedule_close(this, pick, cx);
         }
     }
 
-    fn schedule_close(this: &mut Monos, pick: Pick, window: &Window, cx: &mut Context<Monos>) {
+    fn schedule_close(this: &mut Monos, pick: Pick, cx: &mut Context<Monos>) {
         let hover = pick(this);
-        // During the entrance the card can already cover the gap beside its
-        // row: the row's leave must not undo the card's enter.
-        if hover
-            .surface
-            .get()
-            .is_some_and(|bounds| bounds.contains(&window.mouse_position()))
+        if hover.row.is_some()
+            || hover.card_hovered
+            || hover.shown.is_none()
+            || hover.timer.is_some()
         {
-            hover.timer = None;
             return;
         }
+        let key = hover.shown.clone();
         hover.timer = Some(cx.spawn(async move |this, cx| {
             cx.background_executor()
                 .timer(Duration::from_millis(CLOSE_MS))
                 .await;
             let _ = this.update(cx, |this, cx| {
-                if pick(this).close() {
-                    cx.notify();
+                let hover = pick(this);
+                if hover.shown == key && hover.row.is_none() && !hover.card_hovered && hover.close()
+                {
+                    this.hover_changed(cx);
                 }
             });
         }));
@@ -232,13 +266,19 @@ fn detail(label: &'static str, value: impl IntoElement) -> gpui::Div {
 }
 
 impl Monos {
+    fn hover_changed(&self, cx: &mut Context<Self>) {
+        // Rail elements are painted by the cached sidebar, not this view.
+        cx.emit(HoverChanged);
+        cx.notify();
+    }
+
     /// Hover listener for an agent row in the rail.
     pub(super) fn mono_row_hover(
         &mut self,
         id: &str,
         anchor: AnchorSlot,
         hovered: bool,
-        window: &Window,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) {
         // Dragging a row to reorder it is not reading about it.
@@ -248,14 +288,20 @@ impl Monos {
         if hovered {
             Hover::enter(self, mono_preview, id.to_owned(), anchor, 0, cx);
         } else {
-            Hover::leave(self, mono_preview, id, window, cx);
+            Hover::leave(self, mono_preview, id, cx);
         }
     }
 
     /// Closes the agent card, e.g. once a row's menu or a drag takes over.
     pub(super) fn close_mono_preview(&mut self, cx: &mut Context<Self>) {
         if self.mono_preview.close() {
-            cx.notify();
+            self.hover_changed(cx);
+        }
+    }
+
+    pub(crate) fn close_hover_cards(&mut self, cx: &mut Context<Self>) {
+        if self.mono_preview.close() | self.news.summary.close() {
+            self.hover_changed(cx);
         }
     }
 
@@ -282,7 +328,9 @@ impl Monos {
             .solid(rail_color())
             .width(260.)
             .max_height(440.)
-            .track(self.mono_preview.surface.clone())
+            .on_hover(cx.listener(|this, hovered, window, cx| {
+                Hover::card_hover(this, mono_preview, *hovered, window, cx)
+            }))
             .child(
                 div()
                     .id("mono-preview-content")
@@ -290,9 +338,6 @@ impl Monos {
                     .role(Role::Tooltip)
                     .max_h(px(438.))
                     .overflow_y_scroll()
-                    .on_hover(cx.listener(|this, hovered, window, cx| {
-                        Hover::card_hover(this, mono_preview, *hovered, window, cx)
-                    }))
                     .child(self.mono_preview_body(mono, &state)),
             )
             .into_any_element(),
@@ -500,7 +545,7 @@ impl Monos {
         id: &str,
         anchor: AnchorSlot,
         hovered: bool,
-        window: &Window,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) {
         if hovered {
@@ -513,7 +558,7 @@ impl Monos {
                 cx,
             );
         } else {
-            Hover::leave(self, news_summary, id, window, cx);
+            Hover::leave(self, news_summary, id, cx);
         }
     }
 
@@ -537,7 +582,9 @@ impl Monos {
             .gap(8.)
             .solid(rail_color())
             .width(280.)
-            .track(self.news.summary.surface.clone())
+            .on_hover(cx.listener(|this, hovered, window, cx| {
+                Hover::card_hover(this, news_summary, *hovered, window, cx)
+            }))
             .child(
                 div()
                     .id("news-summary-content")
@@ -545,9 +592,6 @@ impl Monos {
                     .role(Role::Tooltip)
                     .px_3()
                     .py_2p5()
-                    .on_hover(cx.listener(|this, hovered, window, cx| {
-                        Hover::card_hover(this, news_summary, *hovered, window, cx)
-                    }))
                     .child(
                         div()
                             .flex()

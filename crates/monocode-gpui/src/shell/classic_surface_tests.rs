@@ -91,6 +91,56 @@ fn setup(cx: &mut TestAppContext, classic: bool, boxy: bool) -> (WindowHandle<Sh
 }
 
 #[gpui::test]
+fn mono_hover_card_closes_in_both_sidebars_without_rebuilding_chat(cx: &mut TestAppContext) {
+    for (classic, compact) in [(false, false), (true, false), (true, true)] {
+        let (window, session) = setup(cx, classic, false);
+        let (id, transcript) = window
+            .update(cx, |shell, _, cx| {
+                shell.workspace.project_rail_open = !compact;
+                shell.workspace.project_rail_monos_pinned = true;
+                shell.workspace.preferences.monos = true;
+                let project = shell.workspace.project.clone();
+                let id = shell.mono_manager().update(cx, |monos, cx| {
+                    let id = monos.roster.create(vec![project]).id.clone();
+                    monos.close(cx);
+                    id
+                });
+                let transcript = shell.sessions[&session].read(cx).transcript.clone();
+                shell.layout_changed(cx);
+                (id, transcript)
+            })
+            .unwrap();
+        let visual = &mut VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        let before = transcript.read_with(visual, |t, _| t.render_passes);
+        let selector: &'static str = Box::leak(format!("mono-rail-{id}").into_boxed_str());
+        let row = visual.debug_bounds(selector).expect("agent row renders");
+        visual.simulate_mouse_move(row.center(), None, Default::default());
+        visual.run_until_parked();
+        let card = visual
+            .debug_bounds("mono-preview")
+            .expect("hover opens the painted card");
+        visual.simulate_mouse_move(card.center(), None, Default::default());
+        visual.run_until_parked();
+        visual.simulate_mouse_move(gpui::point(px(5.), px(5.)), None, Default::default());
+        visual.run_until_parked();
+        visual
+            .executor()
+            .advance_clock(std::time::Duration::from_millis(150));
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("mono-preview").is_none(),
+            "classic={classic}, compact={compact}: the painted card must close"
+        );
+        assert_eq!(
+            transcript.read_with(visual, |t, _| t.render_passes),
+            before,
+            "hover must invalidate only its sidebar"
+        );
+    }
+}
+
+#[gpui::test]
 fn original_project_plus_offers_local_and_remote_folders(cx: &mut TestAppContext) {
     let (window, _) = setup(cx, true, false);
     let visual = &mut VisualTestContext::from_window(window.into(), cx);

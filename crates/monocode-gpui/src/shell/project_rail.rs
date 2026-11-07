@@ -48,6 +48,7 @@ impl ProjectRailList {
                 {
                     bounds.set(None);
                 }
+                this.close_agent_previews(cx);
                 this.projects_frame.update(cx, |_, cx| cx.notify());
             });
         });

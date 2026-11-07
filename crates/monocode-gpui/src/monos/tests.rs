@@ -507,7 +507,7 @@ fn memory_editor_saves_with_enter_and_stays_open_for_the_next_fact(cx: &mut Test
     visual.run_until_parked();
     s.window
         .update(visual, |_, w, cx| {
-            let field = s.manager.read(cx).fields["memory-fact"].clone();
+            let field = s.manager.read(cx).fields[&format!("memory-fact:{}", s.id)].clone();
             w.focus(&field.focus_handle(cx), cx);
         })
         .unwrap();
@@ -524,7 +524,242 @@ fn memory_editor_saves_with_enter_and_stays_open_for_the_next_fact(cx: &mut Test
     visual.update(|_, cx| {
         let m = s.manager.read(cx);
         assert!(m.memory_adding);
-        assert!(m.fields["memory-fact"].read(cx).content.is_empty());
+        assert!(
+            m.fields[&format!("memory-fact:{}", s.id)]
+                .read(cx)
+                .content
+                .is_empty()
+        );
+    });
+}
+
+#[gpui::test]
+fn group_settings_show_every_members_avatar_and_wrap(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let members = s.manager.update(cx, |m, cx| {
+        let root = m.root.clone();
+        let mut members = vec![
+            m.roster
+                .create_bot(&root, "principal", false)
+                .unwrap()
+                .id
+                .clone(),
+        ];
+        for _ in 0..6 {
+            members.push(
+                m.roster
+                    .create_bot(&root, "assistant", false)
+                    .unwrap()
+                    .id
+                    .clone(),
+            );
+        }
+        let mono = m.roster.get_mut(&s.id).unwrap();
+        mono.kind = Some("group".into());
+        mono.group = Some(monocode_core::mono::groups::Group {
+            members: members.clone(),
+            ..Default::default()
+        });
+        cx.notify();
+        members
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    for size in [
+        gpui::size(px(1200.), px(900.)),
+        gpui::size(px(700.), px(900.)),
+    ] {
+        visual.simulate_resize(size);
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        let container = visual.debug_bounds("mono-settings-members").unwrap();
+        for id in &members {
+            let selector = Box::leak(format!("mono-settings-member-{id}").into_boxed_str());
+            let bounds = visual
+                .debug_bounds(selector)
+                .expect("every member has an avatar");
+            assert!(bounds.left() >= container.left());
+            assert!(bounds.right() <= container.right());
+            assert!(bounds.bottom() <= container.bottom());
+        }
+        assert!(
+            visual.debug_bounds("mono-look").is_none(),
+            "groups do not use a single unrelated mascot"
+        );
+    }
+}
+
+#[gpui::test]
+fn memory_learning_refreshes_and_persists_for_monos_bots_and_groups(cx: &mut TestAppContext) {
+    use mono::groups::{learning, native};
+    for kind in ["mono", "assistant", "principal", "group"] {
+        let s = setup(cx);
+        let (chat_id, last) = s.manager.update(cx, |m, cx| {
+            if kind != "mono" {
+                let mono = m.roster.get_mut(&s.id).unwrap();
+                mono.kind = Some(if kind == "group" { "group" } else { "bot" }.into());
+                mono.bot_role = (kind != "group").then(|| kind.into());
+                mono.group = (kind == "group").then(Default::default);
+            }
+            m.settings = Some(SettingsSection::Memory);
+            m.chats[&s.id].update(cx, |chat, cx| {
+                let mut transcript = monocode_core::transcript::Transcript::default();
+                transcript.begin("user");
+                transcript.append("Usaremos el informe de octubre");
+                transcript.begin("assistant");
+                transcript.append("De acuerdo");
+                chat.mono_append(transcript.rows, cx);
+            });
+            let mono = m.roster.get(&s.id).unwrap().clone();
+            m.chats[&s.id].update(cx, |chat, _| chat.busy = true);
+            assert!(m.pending_learning(&mono, &HashMap::new(), cx).is_none());
+            m.chats[&s.id].update(cx, |chat, _| chat.busy = false);
+            let (chat_id, exchange) = m.pending_learning(&mono, &HashMap::new(), cx).unwrap();
+            m.finish_learning(
+                &s.id,
+                &chat_id,
+                &exchange.last_id,
+                Err("Temporary failure".into()),
+                cx,
+            );
+            assert!(m.pending_learning(&mono, &HashMap::new(), cx).is_none());
+            m.groups.learn_failed.insert(
+                format!("{chat_id}:{}", exchange.last_id),
+                monocode_core::time::now_ms() - 60_001,
+            );
+            assert!(
+                m.pending_learning(&mono, &HashMap::new(), cx).is_some(),
+                "transient failures are retried"
+            );
+            (chat_id, exchange.last_id)
+        });
+        learning::save_learned(&s.root, &s.id, "- Usaremos el informe de octubre").unwrap();
+        mono::memory::edit(&s.root, mono::memory::TEAM_MEMORY_ID, None, |_| {
+            Ok("- 2026-11-07 · Shared preference: Spanish reports\n".into())
+        })
+        .unwrap();
+        s.manager.update(cx, |m, cx| {
+            m.finish_learning(&s.id, &chat_id, &last, Ok(()), cx)
+        });
+        cx.run_until_parked();
+        s.manager.update(cx, |m, cx| {
+            assert!(
+                m.files
+                    .as_ref()
+                    .unwrap()
+                    .memory
+                    .contains("informe de octubre")
+            );
+            let mono = m.roster.get(&s.id).unwrap().clone();
+            assert!(
+                m.pending_learning(&mono, &HashMap::new(), cx).is_none(),
+                "a learned exchange is not repeated"
+            );
+            let files = mono::load_files(&s.root, &mono).unwrap();
+            assert!(
+                mono::context(&mono, &files, std::path::Path::new("/app"), false)
+                    .contains("Shared preference: Spanish reports")
+            );
+            assert!(
+                mono::context(&mono, &files, std::path::Path::new("/app"), false)
+                    .contains("informe de octubre")
+            );
+        });
+        assert_eq!(
+            native::load_learned(&locked(&s.store).unwrap()).learned_up_to(&chat_id),
+            Some(last.as_str())
+        );
+    }
+}
+
+#[gpui::test]
+fn memory_actions_update_private_shared_and_topic_memory(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    for (suffix, extra) in [
+        ("private", json!({})),
+        ("shared", json!({"shared":true})),
+        ("topic", json!({"topic":"reports"})),
+    ] {
+        let mut input = extra.clone();
+        input["fact"] = json!("Use the October report");
+        assert!(
+            call(&s, &format!("add-{suffix}"), "memory.add", input, cx)
+                .recv()
+                .unwrap()
+                .is_ok()
+        );
+        let read = call(
+            &s,
+            &format!("read-{suffix}"),
+            "memory.read",
+            extra.clone(),
+            cx,
+        )
+        .recv()
+        .unwrap()
+        .unwrap();
+        assert!(read["text"].as_str().unwrap().contains("October report"));
+        let mut input = extra.clone();
+        input["find"] = json!("October report");
+        input["fact"] = json!("Use the November report");
+        assert!(
+            call(
+                &s,
+                &format!("replace-{suffix}"),
+                "memory.replace",
+                input,
+                cx
+            )
+            .recv()
+            .unwrap()
+            .is_ok()
+        );
+        let read = call(
+            &s,
+            &format!("updated-{suffix}"),
+            "memory.read",
+            extra.clone(),
+            cx,
+        )
+        .recv()
+        .unwrap()
+        .unwrap();
+        assert!(read["text"].as_str().unwrap().contains("November report"));
+        let mut input = extra;
+        input["find"] = json!("November report");
+        assert!(
+            call(&s, &format!("remove-{suffix}"), "memory.remove", input, cx)
+                .recv()
+                .unwrap()
+                .is_ok()
+        );
+    }
+}
+
+#[gpui::test]
+fn memory_settings_refresh_external_edits_on_tick(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    mono::memory::edit(&s.root, &s.id, None, |_| {
+        Ok("- 2026-11-07 · New external fact\n".into())
+    })
+    .unwrap();
+    let window: gpui::AnyWindowHandle = s.window.into();
+    window
+        .update(cx, |_, window, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.settings = Some(SettingsSection::Memory);
+                m.tick(window, cx);
+            });
+        })
+        .unwrap();
+    cx.run_until_parked();
+    s.manager.read_with(cx, |m, _| {
+        assert!(
+            m.files
+                .as_ref()
+                .unwrap()
+                .memory
+                .contains("New external fact")
+        )
     });
 }
 
@@ -1802,6 +2037,177 @@ fn new_habit_click_transfers_composer_focus_after_the_animated_page_mounts(
                 .unwrap();
         }
     }
+}
+
+#[gpui::test]
+fn mono_hover_card_closes_after_crossing_its_border(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    s.window
+        .update(cx, |_, _, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.settings = None;
+                m.close(cx);
+            });
+        })
+        .unwrap();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    let row_selector: &'static str = Box::leak(format!("mono-rail-{}", s.id).into_boxed_str());
+    let row = visual.debug_bounds(row_selector).unwrap();
+    visual.simulate_mouse_move(row.center(), None, Default::default());
+    visual.run_until_parked();
+    let card = visual
+        .debug_bounds("mono-preview")
+        .expect("row opens its preview");
+    visual.simulate_mouse_move(card.center(), None, Default::default());
+    visual.run_until_parked();
+    let entered = s
+        .manager
+        .read_with(visual, |m, _| m.mono_preview.diagnostic());
+    // The popover's 1px frame is outside its content's hover listener.
+    let border = gpui::point(card.left() - px(0.5), card.center().y);
+    visual.simulate_mouse_move(border, None, Default::default());
+    visual.run_until_parked();
+    let framed = s
+        .manager
+        .read_with(visual, |m, _| m.mono_preview.diagnostic());
+    visual.simulate_mouse_move(gpui::point(px(5.), px(5.)), None, Default::default());
+    visual.run_until_parked();
+    let left = s
+        .manager
+        .read_with(visual, |m, _| m.mono_preview.diagnostic());
+    for step in 1..=3 {
+        visual.executor().advance_clock(Duration::from_millis(50));
+        visual.run_until_parked();
+        visual.simulate_mouse_move(
+            gpui::point(px(5. + step as f32), px(5.)),
+            None,
+            Default::default(),
+        );
+        visual.run_until_parked();
+    }
+    let settled = s
+        .manager
+        .read_with(visual, |m, _| m.mono_preview.diagnostic());
+    assert!(
+        visual.debug_bounds("mono-preview").is_none(),
+        "leaving through the frame must dismiss the preview: entered={entered}; frame={framed}; left={left}; settled={settled}"
+    );
+    s.manager
+        .read_with(visual, |m, _| assert!(m.mono_preview.shown.is_none()));
+}
+
+#[gpui::test]
+fn mono_hover_card_survives_the_gap_but_closes_on_sidebar_scroll_and_blur(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    s.window
+        .update(cx, |_, _, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.settings = None;
+                m.close(cx);
+            });
+        })
+        .unwrap();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let selector: &'static str = Box::leak(format!("mono-rail-{}", s.id).into_boxed_str());
+    let row = visual.debug_bounds(selector).unwrap();
+    visual.simulate_mouse_move(row.center(), None, Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let card = visual.debug_bounds("mono-preview").unwrap();
+    visual.simulate_mouse_move(
+        gpui::point(row.right() + px(4.), row.center().y),
+        None,
+        Default::default(),
+    );
+    visual.run_until_parked();
+    visual.executor().advance_clock(Duration::from_millis(50));
+    visual.simulate_mouse_move(card.center(), None, Default::default());
+    visual.run_until_parked();
+    visual.executor().advance_clock(Duration::from_millis(150));
+    visual.refresh().unwrap();
+    assert!(
+        visual.debug_bounds("mono-preview").is_some(),
+        "crossing the gap must let the user read the card"
+    );
+    visual.simulate_mouse_move(row.center(), None, Default::default());
+    visual.simulate_event(gpui::ScrollWheelEvent {
+        position: row.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-40.))),
+        modifiers: Default::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(
+        visual.debug_bounds("mono-preview").is_none(),
+        "scrolling must not leave a detached preview"
+    );
+    visual.simulate_mouse_move(gpui::point(px(5.), px(5.)), None, Default::default());
+    visual.simulate_mouse_move(row.center(), None, Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("mono-preview").is_some());
+    s.window
+        .update(visual, |_, window, _| window.activate_window())
+        .unwrap();
+    visual.deactivate_window();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(
+        visual.debug_bounds("mono-preview").is_none(),
+        "changing windows dismisses the hover card"
+    );
+}
+
+#[gpui::test]
+fn mono_hover_card_switching_rows_cancels_the_old_close_timer(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    s.manager.update(cx, |m, cx| {
+        m.settings = None;
+        m.close(cx);
+        m.roster.monos.push(Mono {
+            id: "hover-second".into(),
+            name: "Second agent".into(),
+            projects: vec![s.project.clone()],
+            ..Default::default()
+        });
+        cx.notify();
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let first: &'static str = Box::leak(format!("mono-rail-{}", s.id).into_boxed_str());
+    let first = visual.debug_bounds(first).unwrap();
+    let second = visual.debug_bounds("mono-rail-hover-second").unwrap();
+    visual.simulate_mouse_move(first.center(), None, Default::default());
+    visual.run_until_parked();
+    visual.simulate_mouse_move(gpui::point(px(5.), px(5.)), None, Default::default());
+    visual.run_until_parked();
+    visual.executor().advance_clock(Duration::from_millis(60));
+    visual.simulate_mouse_move(second.center(), None, Default::default());
+    visual.run_until_parked();
+    visual.executor().advance_clock(Duration::from_millis(90));
+    visual.run_until_parked();
+    s.manager.read_with(visual, |m, _| {
+        assert_eq!(m.mono_preview.shown.as_deref(), Some("hover-second"))
+    });
+    visual.simulate_mouse_move(first.center(), None, Default::default());
+    visual.run_until_parked();
+    s.manager.read_with(visual, |m, _| {
+        assert_eq!(m.mono_preview.shown.as_deref(), Some(s.id.as_str()))
+    });
+    visual.simulate_mouse_move(gpui::point(px(5.), px(5.)), None, Default::default());
+    visual.run_until_parked();
+    visual.executor().advance_clock(Duration::from_millis(150));
+    visual.run_until_parked();
+    s.manager
+        .read_with(visual, |m, _| assert!(m.mono_preview.shown.is_none()));
 }
 
 #[gpui::test]
@@ -3408,8 +3814,12 @@ fn group_avatar_stack_renders_lead_first_and_counts_rest(cx: &mut TestAppContext
     visual.run_until_parked();
     visual.refresh().unwrap();
 
-    let stack = visual.debug_bounds("group-avatar-stack").expect("group avatar stack rendered");
-    let name = visual.debug_bounds("original-mono-name").expect("group title rendered");
+    let stack = visual
+        .debug_bounds("group-avatar-stack")
+        .expect("group avatar stack rendered");
+    let name = visual
+        .debug_bounds("original-mono-name")
+        .expect("group title rendered");
     assert_eq!(stack.size.width, px(42.0));
     assert!(
         name.origin.x >= stack.origin.x + stack.size.width,

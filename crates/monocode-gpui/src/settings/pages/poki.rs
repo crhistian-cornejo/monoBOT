@@ -17,6 +17,8 @@ use gpui::{
 use monocode_core::poki::{self, Next, Stage, Status};
 use std::time::Duration;
 
+mod scenes;
+
 const FOLDER: &str = "poki-folder";
 const REPO: &str = "https://github.com/JosssphZhou/poki";
 
@@ -718,6 +720,7 @@ impl SettingsView {
                     .flex()
                     .flex_col()
                     .gap_3()
+                    .child(scenes::view(at))
                     .child(
                         div()
                             .flex()

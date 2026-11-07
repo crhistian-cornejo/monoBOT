@@ -82,6 +82,7 @@ fn can_dispatch(message: &Message, busy: bool) -> bool {
 }
 
 pub(crate) struct Changed;
+pub(crate) struct HoverChanged;
 pub(crate) struct TabOpened(pub String);
 pub(crate) struct ShowDetails(pub String);
 pub(crate) use notifications::{NotificationChanged, NotificationFinished, NotificationPosted};
@@ -226,6 +227,7 @@ pub(crate) struct Monos {
     last_tick: Option<u64>,
 }
 impl EventEmitter<Changed> for Monos {}
+impl EventEmitter<HoverChanged> for Monos {}
 impl EventEmitter<TabOpened> for Monos {}
 impl EventEmitter<ShowDetails> for Monos {}
 impl EventEmitter<SyncUpdated> for Monos {}
@@ -1650,6 +1652,7 @@ impl Monos {
             )
         });
         div()
+            .on_scroll_wheel(cx.listener(|this, _, _, cx| this.close_mono_preview(cx)))
             .when(!original, |d| d.px_2().pb_3())
             .when(original && !compact, |d| d.pb_2())
             .when(compact, |d| {

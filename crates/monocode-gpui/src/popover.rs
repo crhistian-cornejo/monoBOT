@@ -5,7 +5,7 @@ use crate::theme::*;
 use gpui::{
     AnyElement, AnyView, App, Bounds, BoxShadow, Context, Corners, DispatchPhase, Display, Element,
     ElementId, Entity, EventEmitter, FocusHandle, Focusable, GlobalElementId, Hsla,
-    InspectorElementId, KeyBinding, LayoutId, MouseDownEvent, Pixels, Point,
+    InspectorElementId, KeyBinding, LayoutId, MouseDownEvent, MouseMoveEvent, Pixels, Point,
     Position as CssPosition, Role, SharedString, Style, Toggled, Window, actions, canvas, deferred,
     div, point, prelude::*, px, rgb, rgba, size,
 };
@@ -320,6 +320,7 @@ pub(crate) struct Popover {
     track: Vec<AnchorSlot>,
     ignore: Vec<AnchorSlot>,
     on_dismiss: Option<Dismiss>,
+    on_hover: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
     consume_outside_press: bool,
     modal_classic: Option<bool>,
     animate: bool,
@@ -338,6 +339,7 @@ pub(crate) fn popover(id: impl Into<ElementId>, anchor: Anchor) -> Popover {
         track: Vec::new(),
         ignore: Vec::new(),
         on_dismiss: None,
+        on_hover: None,
         consume_outside_press: true,
         modal_classic: None,
         animate: true,
@@ -429,6 +431,11 @@ impl Popover {
         self.on_dismiss = Some(Rc::new(f));
         self
     }
+    /// Observe the complete hit-tested surface, including its border/padding.
+    pub(crate) fn on_hover(mut self, f: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_hover = Some(Rc::new(f));
+        self
+    }
 }
 impl ParentElement for Popover {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
@@ -477,8 +484,12 @@ impl Popover {
             .max_height
             .unwrap_or(f32::INFINITY)
             .min(viewport);
+        let on_hover = self.on_hover.clone();
         let frame = div()
             .id(self.id)
+            .when_some(self.on_hover, |d, callback| {
+                d.on_hover(move |hovered, window, cx| callback(hovered, window, cx))
+            })
             .occlude()
             .relative()
             .flex()
@@ -525,6 +536,7 @@ impl Popover {
             track: self.track,
             ignore: self.ignore,
             on_dismiss: self.on_dismiss,
+            on_hover,
             consume_outside_press: self.consume_outside_press,
         })
         .with_priority(self.priority)
@@ -604,6 +616,7 @@ struct Placed {
     track: Vec<AnchorSlot>,
     ignore: Vec<AnchorSlot>,
     on_dismiss: Option<Dismiss>,
+    on_hover: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
     consume_outside_press: bool,
 }
 impl IntoElement for Placed {
@@ -689,6 +702,16 @@ impl Element for Placed {
         cx: &mut App,
     ) {
         self.frame.paint(window, cx);
+        if let Some(on_hover) = self.on_hover.clone() {
+            let surface = *surface;
+            // A toolbar can consume the bubble phase before normal hover
+            // listeners see the exit. Capture still dismisses the old card.
+            window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+                if phase == DispatchPhase::Capture && !surface.contains(&event.position) {
+                    on_hover(&false, window, cx);
+                }
+            });
+        }
         let Some(dismiss) = self.on_dismiss.clone() else {
             return;
         };

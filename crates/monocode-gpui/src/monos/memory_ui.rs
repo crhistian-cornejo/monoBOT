@@ -93,13 +93,12 @@ impl Monos {
                                 this.memory_edit = None;
                                 this.memory_adding = true;
                                 this.error = None;
-                                let editor = this.field(
-                                    "memory-fact",
-                                    "New memory",
-                                    String::new(),
-                                    false,
-                                    cx,
+                                let key = format!(
+                                    "memory-fact:{}",
+                                    this.active.as_deref().unwrap_or_default()
                                 );
+                                let editor =
+                                    this.field(&key, "New memory", String::new(), false, cx);
                                 editor.update(cx, |f, cx| f.set_text(String::new(), cx));
                                 window.focus(&editor.focus_handle(cx), cx);
                                 cx.notify();
@@ -172,7 +171,7 @@ impl Monos {
                     mono::files::content_hash(line)
                 )
             })
-            .unwrap_or_else(|| "memory-fact".into());
+            .unwrap_or_else(|| format!("memory-fact:{}", mono.id));
         let editor = self.field(
             &key,
             if original.is_some() {
@@ -188,18 +187,14 @@ impl Monos {
             f.set_placeholder("Something it should remember", cx)
         });
         if self.field_blurs.insert(editor.entity_id()) {
-            let (mono, row, field) = (mono.id.clone(), original.map(str::to_owned), key.clone());
+            let (id, row, field) = (mono.id.clone(), original.map(str::to_owned), key.clone());
             self.observations.push(cx.subscribe(
                 &editor,
                 move |this, _, _: &input::Submitted, cx| {
-                    this.commit_memory_input(&mono, &field, row.as_deref(), false, cx)
+                    this.commit_memory_input(&id, &field, row.as_deref(), false, cx)
                 },
             ));
-            let (mono, row, field) = (
-                self.active.clone().unwrap_or_default(),
-                original.map(str::to_owned),
-                key.clone(),
-            );
+            let (mono, row, field) = (mono.id.clone(), original.map(str::to_owned), key.clone());
             self.observations.push(cx.on_blur(
                 &editor.focus_handle(cx),
                 window,
@@ -322,6 +317,9 @@ impl Monos {
                                 );
                                 let field =
                                     this.field(&key, "Edit memory", memory::fact(&edit), false, cx);
+                                field.update(cx, |field, cx| {
+                                    field.set_text(memory::fact(&edit), cx)
+                                });
                                 window.focus(&field.focus_handle(cx), cx);
                                 cx.notify();
                             })),
@@ -357,6 +355,9 @@ impl Monos {
                                                 false,
                                                 cx,
                                             );
+                                            field.update(cx, |field, cx| {
+                                                field.set_text(memory::fact(&edit_button), cx)
+                                            });
                                             window.focus(&field.focus_handle(cx), cx);
                                             cx.notify();
                                         },
@@ -440,20 +441,27 @@ impl Monos {
                 this.memory_pending.remove(&key);
                 match result {
                     Ok(()) => {
-                        if original.is_some() {
-                            this.memory_edit = None;
-                        } else if close {
-                            this.memory_adding = false;
-                        } else if let Some(field) = this.fields.get(&key)
-                            && field
+                        let unchanged = this.fields.get(&key).is_some_and(|field| {
+                            field
                                 .read(cx)
                                 .content
                                 .split_whitespace()
                                 .collect::<Vec<_>>()
                                 .join(" ")
                                 == text
-                        {
-                            field.update(cx, |f, cx| f.set_text(String::new(), cx));
+                        });
+                        if this.active.as_deref() == Some(&id) && unchanged {
+                            if original.is_some()
+                                && this.memory_edit.as_deref() == original.as_deref()
+                            {
+                                this.memory_edit = None;
+                            } else if original.is_none() && close {
+                                this.memory_adding = false;
+                            } else if original.is_none()
+                                && let Some(field) = this.fields.get(&key)
+                            {
+                                field.update(cx, |f, cx| f.set_text(String::new(), cx));
+                            }
                         }
                         this.error = None;
                         this.reload_files(&id, cx);

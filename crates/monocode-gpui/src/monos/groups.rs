@@ -84,7 +84,7 @@ pub(super) struct Groups {
     dropped: Option<DroppedRequests>,
     learned: Option<LearnedMarks>,
     learning: bool,
-    learn_failed: HashSet<String>,
+    pub(super) learn_failed: HashMap<String, u64>,
 }
 
 impl Monos {
@@ -616,6 +616,7 @@ impl Monos {
     /// a settled exchange teach the group (App.tsx's group effects).
     pub(super) fn check_groups(&mut self, cx: &mut Context<Self>) {
         if !self.roster.monos.iter().any(Mono::is_group) {
+            self.learn(&HashMap::new(), cx);
             return;
         }
         self.call_progress(cx);
@@ -896,9 +897,85 @@ impl Monos {
         }
     }
 
-    /// What a group's chat settles joins the project's memory on its own
-    /// (useGroupLearning): one group at a time, once its chat and members
-    /// are idle, read by the cheapest model its harness has.
+    /// Learn from settled conversations, including bots and coding Monos.
+    /// Only one pass runs at a time, using its harness's small text model.
+    pub(super) fn pending_learning(
+        &mut self,
+        mono: &Mono,
+        seats: &HashMap<(String, String), (Vec<Block>, bool)>,
+        cx: &mut Context<Self>,
+    ) -> Option<(String, learning::GroupExchange)> {
+        let chat = self.chats.get(&mono.id)?.clone();
+        if chat.read(cx).busy
+            || seats
+                .iter()
+                .any(|((owner, _), (_, busy))| owner == &mono.id && *busy)
+            || self.groups.seats.iter().any(|((owner, _), seat)| {
+                owner == &mono.id && (seat.sending.is_some() || !seat.queue.is_empty())
+            })
+            || self
+                .groups
+                .posts
+                .get(&mono.id)
+                .is_some_and(|posts| !posts.is_empty())
+            || self.groups.posting.contains(&mono.id)
+        {
+            return None;
+        }
+        let chat_id = chat.read(cx).summary.id.to_string();
+        let mark = self.learned().learned_up_to(&chat_id).map(String::from);
+        let roster = native::members(&self.roster.monos);
+        let lead = mono
+            .group
+            .as_ref()
+            .and_then(|group| group_lead(group, &roster))
+            .map_or_else(|| mono.label(), |m| m.name.clone());
+        let blocks = native::blocks(chat.read(cx).mono_rows(cx));
+        let exchange = learning::pending_exchange(&blocks, mark.as_deref(), &lead)?;
+        let failure_key = format!("{chat_id}:{}", exchange.last_id);
+        if self
+            .groups
+            .learn_failed
+            .get(&failure_key)
+            .is_some_and(|at| now_ms().saturating_sub(*at) < 60_000)
+        {
+            return None;
+        }
+        Some((chat_id, exchange))
+    }
+
+    pub(super) fn finish_learning(
+        &mut self,
+        id: &str,
+        chat_id: &str,
+        last: &str,
+        result: Result<(), String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.groups.learning = false;
+        let failure_key = format!("{chat_id}:{last}");
+        if result.is_err() {
+            self.groups.learn_failed.insert(failure_key, now_ms());
+            return;
+        }
+        self.groups.learn_failed.remove(&failure_key);
+        self.reload_files(id, cx);
+        self.learned().mark_learned(chat_id, last);
+        let marks = self.learned().clone();
+        let store = self.store.clone();
+        let previous = self.writes.take();
+        self.writes = Some(cx.spawn(async move |_, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = locked(&store).and_then(|db| native::save_learned(&db, &marks));
+                })
+                .await;
+        }));
+    }
+
     fn learn(
         &mut self,
         seats: &HashMap<(String, String), (Vec<Block>, bool)>,
@@ -907,43 +984,26 @@ impl Monos {
         if self.groups.learning || cfg!(test) {
             return;
         }
-        let roster = native::members(&self.roster.monos);
-        for group in native::group_monos(&self.roster.monos) {
-            let Some(chat) = self.chats.get(&group.id).cloned() else {
+        for mono in self.roster.monos.clone() {
+            let Some((chat_id, exchange)) = self.pending_learning(&mono, seats, cx) else {
                 continue;
             };
-            if chat.read(cx).busy
-                || seats
-                    .iter()
-                    .any(|((owner, _), (_, busy))| owner == &group.id && *busy)
-            {
-                continue;
-            }
-            let chat_id = chat.read(cx).summary.id.to_string();
-            let mark = self.learned().learned_up_to(&chat_id).map(String::from);
-            let lead =
-                group_lead(&group.group, &roster).map_or("Lead".to_owned(), |m| m.name.clone());
-            let blocks = native::blocks(chat.read(cx).mono_rows(cx));
-            let Some(exchange) = learning::pending_exchange(&blocks, mark.as_deref(), &lead) else {
-                continue;
-            };
-            if self.groups.learn_failed.contains(&exchange.last_id) {
-                continue;
-            }
+            let chat = self.chats[&mono.id].clone();
             let text = chat.read(cx).background_text_model(cx);
             let Some(binary) = monocode_core::provider::resolve(text.kind) else {
-                return;
+                continue;
             };
             self.groups.learning = true;
             let root = self.root.clone();
-            let id = group.id.clone();
-            let name = group.name.clone();
-            let goal = group.group.goal.clone();
+            let id = mono.id.clone();
+            let target = id.clone();
+            let name = mono.label();
+            let group = mono.group.clone();
             let cancel = Arc::new(AtomicBool::new(false));
             let stop = cancel.clone();
             let last = exchange.last_id.clone();
             let work = cx.background_executor().spawn(async move {
-                let current = files::read(&root, &id, None, "MEMORY.md")?;
+                let current = files::read(&root, &target, None, "MEMORY.md")?;
                 let memory = current.text.clone().unwrap_or_default();
                 let home = std::env::var("HOME")
                     .or_else(|_| std::env::var("USERPROFILE"))
@@ -953,12 +1013,16 @@ impl Monos {
                         kind: text.kind,
                         binary,
                         cwd: home.into(),
-                        prompt: learning::learning_prompt(
-                            &name,
-                            goal.as_deref(),
-                            &memory,
-                            &exchange,
-                        ),
+                        prompt: if let Some(group) = &group {
+                            learning::learning_prompt(
+                                &name,
+                                group.goal.as_deref(),
+                                &memory,
+                                &exchange,
+                            )
+                        } else {
+                            learning::agent_learning_prompt(&name, &memory, &exchange)
+                        },
                         provider_id: None,
                         model: text.model,
                         settings: Settings {
@@ -968,17 +1032,7 @@ impl Monos {
                     },
                     cancel,
                 )?;
-                let facts = learning::parse_learned(&output, &memory);
-                if !facts.is_empty() {
-                    let next = monocode_core::mono::groups::project::memory_seed(
-                        &memory,
-                        &facts.join("\n"),
-                        &monocode_core::mono::memory::date(),
-                    )?;
-                    if next != memory {
-                        files::save(&root, &id, None, "MEMORY.md", &next, Some(&current.hash))?;
-                    }
-                }
+                learning::save_learned(&root, &target, &output)?;
                 Ok::<_, String>(())
             });
             cx.spawn(async move |_, cx| {
@@ -989,19 +1043,7 @@ impl Monos {
             cx.spawn(async move |this, cx| {
                 let result = work.await;
                 let _ = this.update(cx, |this, cx| {
-                    this.groups.learning = false;
-                    if result.is_err() {
-                        this.groups.learn_failed.insert(last);
-                        return;
-                    }
-                    this.learned().mark_learned(&chat_id, &last);
-                    let marks = this.learned().clone();
-                    let store = this.store.clone();
-                    cx.background_executor()
-                        .spawn(async move {
-                            let _ = locked(&store).and_then(|db| native::save_learned(&db, &marks));
-                        })
-                        .detach();
+                    this.finish_learning(&id, &chat_id, &last, result, cx);
                 });
             })
             .detach();
