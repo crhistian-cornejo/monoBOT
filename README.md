@@ -1,98 +1,92 @@
 <h1 align="center">MonoBOT</h1>
 
 <p align="center">
-  <strong>A GUI for your coding agents.</strong>
+  <strong>A fast, native GUI for your coding agents — Desktop (Rust + GPUI) & Mobile (Expo).</strong>
 </p>
 
 <p align="center">
   <img width="1680" height="1050" alt="MonoBOT with agent sessions open side by side" src="https://github.com/user-attachments/assets/89e04066-69de-473d-9aab-88b9ca3e3b7b" />
 </p>
 
-> [!NOTE]
-> **Try the new [MonoBOT Native preview](https://github.com/hardbeat920/monocode/releases)**, our experimental Rust + GPUI app for macOS, Linux and Windows. Read the [preview details](#monobot-native-preview) before installing.
+MonoBOT provides a unified native desktop and mobile interface for your existing coding agent CLI subscriptions: **Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin**.
 
-Works with your subscriptions on Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin. If they’re installed and logged in, MonoBOT can run them. Tabs are sessions. The composer is the input. MonoBOT does not sell tokens.
+No extra API token fees or middleman servers — it talks directly to your locally installed agent CLIs and communicates securely between desktop and mobile over peer-to-peer encrypted QUIC (TLS 1.3).
 
-## Install
+---
 
-Install and sign in to at least one supported agent first. See [provider setup](docs/providers.md) for instructions.
+## Architecture
 
-| Platform | Native | Tauri |
-| --- | --- | --- |
-| macOS, Apple Silicon | [MonocodeNative_aarch64.dmg](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_aarch64.dmg) | [MonoBOT.dmg](https://dl.usemono.dev/MonoBOT.dmg) |
-| macOS, Intel | [MonocodeNative_x64.dmg](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_x64.dmg) | [MonoCode_x64.dmg](https://dl.usemono.dev/MonoCode_x64.dmg) |
-| Linux, x86_64 | [.deb, .rpm, or AppImage](https://github.com/hardbeat920/monocode/releases/tag/native-v0.16.0-preview.13) | [.deb, .rpm, or AppImage](https://github.com/hardbeat920/monocode/releases/latest) |
-| Windows, x86_64 | [Installer](https://github.com/hardbeat920/monocode/releases/download/native-v0.16.0-preview.13/MonocodeNative_0.16.0-preview.13_x64-setup.exe) | [Installer](https://github.com/hardbeat920/monocode/releases/latest) |
+- **Desktop (`crates/monocode-gpui`)**: 100% native Rust GUI built on GPUI (GPU-accelerated, high frame rate, sub-millisecond input latency).
+- **Core Engine (`crates/monocode-core`)**: Provider transports, session persistence, SQLite storage, local git/file orchestration, and background bots.
+- **Mobile Companion (`mobile/`)**: React Native & Expo app for iOS and Android with live session viewing, chat composer, and project navigation.
+- **Transport (`crates/mobile-link`)**: Mutual TLS 1.3 / QUIC bridge pairing mobile devices with the desktop engine.
 
-On macOS, open the DMG and drag MonoBOT to Applications. On Windows, run the installer. See [Linux setup](docs/install.md) for dependencies and package instructions.
+---
 
-## Get started
+## Prerequisites
 
-Open a project folder, choose an agent, and send a message. Each tab is a session. Split panes to work with sessions side by side.
+- [Rust](https://rustup.rs/) (stable)
+- [Bun](https://bun.sh/)
+- macOS with Xcode (for macOS native builds and iOS simulator) or Linux / Windows with standard build tools.
+- At least one installed and authenticated agent CLI (e.g. `claude`, `codex`, `agy`).
 
-- Keep conversations organized by project.
-- Use separate Git worktrees for parallel tasks.
-- Edit files and review changes in the app.
-- Start a message with `/operator` to let an agent open sessions and manage worktrees and notes.
+---
 
-Monos are experimental agents that work across your projects. They keep a memory and can run scheduled tasks you set up with them.
+## Quick Start
 
-MonoBOT is still early. If something breaks, [report a bug](https://github.com/hardbeat920/monocode/issues).
+All scripts run via **Bun**:
 
-## Guides
-
-- [Provider setup](docs/providers.md)
-- [Linux installation](docs/install.md)
-- [Agent access with /operator](docs/agent-access.md)
-- [Remote sessions, experimental](docs/remote-access.md)
-
-## Build from source
-
-You’ll need Node.js 20+, [pnpm](https://pnpm.io/installation) (`corepack enable` picks the pinned version) and a stable Rust toolchain. See [build setup](docs/building.md) for platform dependencies and packaging.
-
-The mobile app is a separate Expo project in [`mobile/`](mobile/README.md). Run it with `cd mobile && pnpm install && pnpm start`.
+### Desktop App (GPUI)
 
 ```bash
-pnpm install
-pnpm tauri dev
+# Launch native app in development mode
+bun run dev
+
+# Open directly into a specific project folder
+bun run dev -- --cwd /path/to/project
+
+# Build release bundle
+bun run build
 ```
 
-Small, focused contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
+> In development mode, press `r` + `Enter` in the terminal to rebuild and reload the application.
 
-## MonoBOT Native preview
+### Mobile App (Expo)
 
-The Rust + GPUI app is an experimental preview. React/Tauri remains the
-production app.
+```bash
+# Install mobile dependencies
+bun run mobile:install
 
-Download a packaged preview for macOS, Linux or Windows from the
-[releases page](https://github.com/hardbeat920/monocode/releases). See
-[known limitations](docs/native/parity.md) before testing.
+# Start Metro bundler
+bun run mobile:dev
 
-You can install it alongside MonoBOT, but **the preview uses your existing
-MonoBOT database and saves changes there**. Back up your data with the app
-closed before testing, and avoid editing the same conversations in both apps
-at once.
-
-To try GPUI from this checkout with Node.js 22+, Rust and Xcode on macOS:
-
-```sh
-pnpm native:dev     # launch with a separate development database
-pnpm native:build   # create an optimized app using installed MonoBOT data
+# Build native Rust transport and launch simulator
+bun run mobile:ios       # iOS Simulator
+bun run mobile:android   # Android Emulator
 ```
 
-Type `r` then Enter in the development terminal to rebuild and restart; there is
-no hot reload. The release app saves changes to your installed MonoBOT data.
-See the [native guide](docs/native/README.md) for prerequisites, build output,
-checks and preview limitations.
+---
 
-## Contributors
+## Project Structure
 
-Thanks to everyone who contributes to MonoBOT!
+```text
+├── assets/                  # Application icons, macOS entitlements, and bundled assets
+├── crates/
+│   ├── monocode-gpui/       # Native GPUI desktop application
+│   ├── monocode-core/       # Business logic, provider transports, SQLite database
+│   ├── mobile-link/         # Rust QUIC/TLS pairing library for desktop and mobile
+│   ├── dictation/           # Local speech-to-text (sherpa-onnx)
+│   ├── voice/               # Local speech synthesis playback
+│   ├── email/               # Local IMAP/SMTP mail sync and triage
+│   └── http/                # Shared HTTP and TLS certificate verification
+├── mobile/                  # React Native / Expo mobile companion app
+├── vendor/                  # Pinned and patched GPUI framework crates
+├── scripts/                 # Build, packaging, and developer automation scripts
+└── docs/native/             # Architecture, porting notes, and native guides
+```
 
-[![MonoBOT contributors](https://contrib.rocks/image?repo=hardbeat920/monocode)](https://github.com/hardbeat920/monocode/graphs/contributors)
-
-Contributor image by [contrib.rocks](https://contrib.rocks).
+---
 
 ## License
 
-[MIT](LICENSE). Provider names and logos are trademarks of their owners. See [NOTICE](NOTICE).
+[MIT](LICENSE). Provider names and logos are trademarks of their respective owners. See [NOTICE](NOTICE).
