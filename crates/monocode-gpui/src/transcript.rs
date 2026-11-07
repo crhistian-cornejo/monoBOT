@@ -1476,6 +1476,7 @@ impl TranscriptView {
                             Anchor::Slot(stamp_anchor.clone()),
                         )
                         .side(Side::Top)
+                        .solid(rail_color())
                         .padding(8.)
                         .child(div().text_size(px(12.)).child(label)),
                     )
@@ -2507,6 +2508,7 @@ impl TranscriptView {
                 row = row.child(
                     popover(("response-tooltip", turn), Anchor::Slot(anchor.clone()))
                         .side(Side::Top)
+                        .solid(rail_color())
                         .max_width(if action == "metrics" { 300. } else { 240. })
                         .padding(8.)
                         .child(

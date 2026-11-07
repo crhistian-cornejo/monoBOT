@@ -7,6 +7,7 @@ import {
 } from "react";
 import { ChevronLeft, type IconComponent } from "../../../shared/ui/icons";
 import { IconButton } from "../../../app/shell/TitleBar";
+import { useRailTooltip } from "../../../app/shell/RailTooltip";
 import { PROJECT_MASCOTS } from "../../projects/model/projectMascots";
 import { MONO_COLORS } from "../model/mono";
 import {
@@ -40,9 +41,11 @@ export function PageHeader({
   onBack?: () => void;
   children?: ReactNode;
 }) {
+  const tip = useRailTooltip("bottom");
   return (
     // Same height as the panel's own header, so a page does not jump.
     <header
+      {...tip.handlers}
       className={`flex h-10 shrink-0 items-center gap-1 border-b border-stroke ${
         onBack ? "pl-2" : "pl-4"
       }`}
@@ -60,6 +63,7 @@ export function PageHeader({
         {title}
       </h3>
       {children}
+      {tip.tooltip}
     </header>
   );
 }

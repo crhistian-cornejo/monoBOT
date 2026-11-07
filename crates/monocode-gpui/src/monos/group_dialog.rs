@@ -4,22 +4,24 @@ use super::*;
 use crate::{
     input::{Changed as InputChanged, Input},
     modal,
-    popover::AnchorSlot,
     theme::*,
 };
 use gpui::{
-    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, KeyDownEvent,
-    Role, SharedString, Subscription, Window, div, prelude::*, px, rgb,
+    AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, Role,
+    SharedString, Subscription, Window, div, prelude::*, px, rgb,
 };
 use monocode_core::mono::{
-    bot_tools,
-    groups::{project::GroupDraft, Folder},
-    Mono, Roster,
+    Mono, Roster, bot_tools,
+    groups::{
+        Folder, Group,
+        brief::member_role,
+        group::{FOLDERS_MAX, GROUP_CONTEXT_MAX, GROUP_MAX_MEMBERS},
+        native,
+        project::{GroupDraft, group_draft, seed_group_memory},
+    },
+    memory,
 };
 use std::collections::HashSet;
-
-pub(crate) const GROUP_MAX_MEMBERS: usize = 10;
-pub(crate) const GROUP_CONTEXT_MAX: usize = 20;
 
 #[derive(Clone, Debug)]
 pub(crate) struct GroupCreate {
@@ -55,11 +57,15 @@ pub(crate) struct GroupDialog {
     sections_open: HashSet<&'static str>,
     problem: Option<String>,
     focus: FocusHandle,
-    bounds: AnchorSlot,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<Event> for GroupDialog {}
+impl Focusable for GroupDialog {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
 
 impl GroupDialog {
     pub(crate) fn new(
@@ -73,10 +79,22 @@ impl GroupDialog {
             None => (None, None),
         };
 
-        let initial_name = initial_draft.as_ref().map(|d| d.name.clone()).unwrap_or_default();
-        let initial_goal = initial_draft.as_ref().map(|d| d.goal.clone()).unwrap_or_default();
-        let initial_folders = initial_draft.as_ref().map(|d| d.folders.clone()).unwrap_or_default();
-        let initial_context = initial_draft.as_ref().map(|d| d.context.clone()).unwrap_or_default();
+        let initial_name = initial_draft
+            .as_ref()
+            .map(|d| d.name.clone())
+            .unwrap_or_default();
+        let initial_goal = initial_draft
+            .as_ref()
+            .map(|d| d.goal.clone())
+            .unwrap_or_default();
+        let initial_folders = initial_draft
+            .as_ref()
+            .map(|d| d.folders.clone())
+            .unwrap_or_default();
+        let initial_context = initial_draft
+            .as_ref()
+            .map(|d| d.context.clone())
+            .unwrap_or_default();
 
         let mut members = initial_draft
             .as_ref()
@@ -133,11 +151,9 @@ impl GroupDialog {
             )
         });
 
-        let subscriptions = vec![
-            cx.subscribe(&name, |_, _, _: &InputChanged, cx| {
-                cx.notify();
-            }),
-        ];
+        let subscriptions = vec![cx.subscribe(&name, |_, _, _: &InputChanged, cx| {
+            cx.notify();
+        })];
 
         Self {
             initial_id,
@@ -153,13 +169,8 @@ impl GroupDialog {
             sections_open,
             problem: None,
             focus: cx.focus_handle(),
-            bounds: AnchorSlot::default(),
             _subscriptions: subscriptions,
         }
-    }
-
-    pub(crate) fn measured_height(&self) -> Option<f32> {
-        self.bounds.get().map(|bounds| bounds.size.height.as_f32())
     }
 
     fn editing(&self) -> bool {
@@ -190,19 +201,11 @@ impl GroupDialog {
         } else {
             let instructions = {
                 let t = self.instructions.read(cx).content.trim().to_string();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t)
-                }
+                if t.is_empty() { None } else { Some(t) }
             };
             let memory = {
                 let t = self.memory.read(cx).content.trim().to_string();
-                if t.is_empty() {
-                    None
-                } else {
-                    Some(t)
-                }
+                if t.is_empty() { None } else { Some(t) }
             };
             cx.emit(Event::Create(GroupCreate {
                 name,
@@ -242,9 +245,9 @@ impl GroupDialog {
                         next.push(Folder::new(&path_str, false));
                     }
                 }
-                if next.len() > GROUP_CONTEXT_MAX {
-                    problem = Some(format!("At most {GROUP_CONTEXT_MAX} folders"));
-                    next.truncate(GROUP_CONTEXT_MAX);
+                if next.len() > FOLDERS_MAX {
+                    problem = Some(format!("At most {FOLDERS_MAX} folders"));
+                    next.truncate(FOLDERS_MAX);
                 }
                 this.problem = problem;
                 this.folders = next;
@@ -306,8 +309,16 @@ fn check_icon(checked: bool) -> gpui::Div {
         .size(px(16.))
         .rounded(px(4.))
         .border_1()
-        .border_color(if checked { accent_color() } else { content(0.25) })
-        .bg(if checked { accent_color() } else { gpui::transparent_black() })
+        .border_color(if checked {
+            accent_color()
+        } else {
+            content(0.25)
+        })
+        .bg(if checked {
+            accent_color()
+        } else {
+            gpui::transparent_black()
+        })
         .flex()
         .items_center()
         .justify_center()
@@ -347,6 +358,7 @@ impl gpui::Render for GroupDialog {
 
         div()
             .id("group-dialog")
+            .debug_selector(|| "group-dialog".into())
             .key_context("GroupDialog")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
@@ -357,10 +369,10 @@ impl gpui::Render for GroupDialog {
             }))
             .relative()
             .w_full()
+            .h_full()
             .flex()
             .flex_col()
             .text_color(content(1.))
-            .child(self.bounds.probe())
             // Header
             .child(
                 div()
@@ -373,7 +385,11 @@ impl gpui::Render for GroupDialog {
                             .text_size(px(15.))
                             .line_height(px(20.))
                             .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(if editing { "Group settings" } else { "New group" }),
+                            .child(if editing {
+                                "Group settings"
+                            } else {
+                                "New group"
+                            }),
                     )
                     .child(
                         div()
@@ -391,6 +407,7 @@ impl gpui::Render for GroupDialog {
             .child(
                 div()
                     .id("group-dialog-body")
+                    .debug_selector(|| "group-dialog-body".into())
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scroll()
@@ -445,14 +462,9 @@ impl gpui::Render for GroupDialog {
                                             .child("Members"),
                                     )
                                     .child(
-                                        div()
-                                            .text_size(px(12.))
-                                            .text_color(content(0.35))
-                                            .child(format!(
-                                                "{}/{}",
-                                                self.members.len(),
-                                                GROUP_MAX_MEMBERS
-                                            )),
+                                        div().text_size(px(12.)).text_color(content(0.35)).child(
+                                            format!("{}/{}", self.members.len(), GROUP_MAX_MEMBERS),
+                                        ),
                                     ),
                             )
                             .child(
@@ -471,10 +483,8 @@ impl gpui::Render for GroupDialog {
                                         let cid = candidate.id.clone();
                                         let on = self.members.contains(&cid);
                                         let full = self.members.len() >= GROUP_MAX_MEMBERS;
-                                        let specialty = candidate
-                                            .specialty
-                                            .clone()
-                                            .unwrap_or_else(|| {
+                                        let specialty =
+                                            candidate.specialty.clone().unwrap_or_else(|| {
                                                 if is_lead {
                                                     "Orchestrator".into()
                                                 } else {
@@ -484,7 +494,10 @@ impl gpui::Render for GroupDialog {
 
                                         if is_lead {
                                             div()
-                                                .id(SharedString::from(format!("lead-{}", candidate.id)))
+                                                .id(SharedString::from(format!(
+                                                    "lead-{}",
+                                                    candidate.id
+                                                )))
                                                 .h(px(32.))
                                                 .px_2()
                                                 .flex()
@@ -543,7 +556,6 @@ impl gpui::Render for GroupDialog {
                                                 .gap_2()
                                                 .cursor_pointer()
                                                 .hover(|s| s.bg(content(0.04)))
-                                                .child(check_icon(on))
                                                 .child(avatar::avatar(
                                                     &candidate.mascot,
                                                     candidate.color,
@@ -572,6 +584,7 @@ impl gpui::Render for GroupDialog {
                                                                 .child(specialty),
                                                         ),
                                                 )
+                                                .child(check_icon(on))
                                                 .on_click(cx.listener(move |this, _, _, cx| {
                                                     if this.members.contains(&cid) {
                                                         this.members.retain(|x| x != &cid);
@@ -599,11 +612,7 @@ impl gpui::Render for GroupDialog {
                                     .text_size(px(12.))
                                     .text_color(content(0.7))
                                     .child("Project")
-                                    .child(
-                                        div()
-                                            .text_color(content(0.4))
-                                            .child("· optional"),
-                                    ),
+                                    .child(div().text_color(content(0.4)).child("· optional")),
                             )
                             .child(
                                 div()
@@ -644,6 +653,7 @@ impl gpui::Render for GroupDialog {
             // Footer
             .child(
                 div()
+                    .debug_selector(|| "group-dialog-footer".into())
                     .flex_shrink_0()
                     .flex()
                     .items_center()
@@ -929,19 +939,16 @@ impl GroupDialog {
             )
             .when(!editing && open, |d| {
                 d.child(
-                    div()
-                        .px_3()
-                        .pb_3()
-                        .child(
-                            div()
-                                .rounded_md()
-                                .border_1()
-                                .border_color(content(0.1))
-                                .bg(background_base())
-                                .px_2p5()
-                                .py_1p5()
-                                .child(self.instructions.clone()),
-                        ),
+                    div().px_3().pb_3().child(
+                        div()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(content(0.1))
+                            .bg(background_base())
+                            .px_2p5()
+                            .py_1p5()
+                            .child(self.instructions.clone()),
+                    ),
                 )
             })
             .into_any_element()
@@ -1011,52 +1018,46 @@ impl GroupDialog {
                     ),
             )
             .when(open && count > 0, |d| {
-                d.child(
-                    div()
-                        .px_3()
-                        .pb_2()
-                        .flex()
-                        .flex_col()
-                        .gap_1()
-                        .children(self.context.iter().enumerate().map(|(ix, path)| {
-                            let path_val = path.clone();
-                            div()
-                                .id(SharedString::from(format!("context-file-{ix}")))
-                                .h(px(26.))
-                                .px_2()
-                                .rounded_md()
-                                .bg(content(0.03))
-                                .flex()
-                                .items_center()
-                                .gap_2()
-                                .child(icon("file", 13.).text_color(content(0.5)))
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .truncate()
-                                        .text_size(px(12.))
-                                        .text_color(content(0.85))
-                                        .child(pretty_file_path(path)),
-                                )
-                                .child(
-                                    div()
-                                        .id(SharedString::from(format!("context-del-{ix}")))
-                                        .cursor_pointer()
-                                        .size(px(20.))
-                                        .rounded_md()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .hover(|s| s.bg(content(0.08)))
-                                        .child(icon("close", 12.).text_color(content(0.45)))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            this.context.retain(|p| p != &path_val);
-                                            cx.notify();
-                                        })),
-                                )
-                        })),
-                )
+                d.child(div().px_3().pb_2().flex().flex_col().gap_1().children(
+                    self.context.iter().enumerate().map(|(ix, path)| {
+                        let path_val = path.clone();
+                        div()
+                            .id(SharedString::from(format!("context-file-{ix}")))
+                            .h(px(26.))
+                            .px_2()
+                            .rounded_md()
+                            .bg(content(0.03))
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(icon("file", 13.).text_color(content(0.5)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .text_color(content(0.85))
+                                    .child(pretty_file_path(path)),
+                            )
+                            .child(
+                                div()
+                                    .id(SharedString::from(format!("context-del-{ix}")))
+                                    .cursor_pointer()
+                                    .size(px(20.))
+                                    .rounded_md()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .hover(|s| s.bg(content(0.08)))
+                                    .child(icon("close", 12.).text_color(content(0.45)))
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        this.context.retain(|p| p != &path_val);
+                                        cx.notify();
+                                    })),
+                            )
+                    }),
+                ))
             })
             .into_any_element()
     }
@@ -1144,19 +1145,16 @@ impl GroupDialog {
             )
             .when(!editing && open, |d| {
                 d.child(
-                    div()
-                        .px_3()
-                        .pb_3()
-                        .child(
-                            div()
-                                .rounded_md()
-                                .border_1()
-                                .border_color(content(0.1))
-                                .bg(background_base())
-                                .px_2p5()
-                                .py_1p5()
-                                .child(self.memory.clone()),
-                        ),
+                    div().px_3().pb_3().child(
+                        div()
+                            .rounded_md()
+                            .border_1()
+                            .border_color(content(0.1))
+                            .bg(background_base())
+                            .px_2p5()
+                            .py_1p5()
+                            .child(self.memory.clone()),
+                    ),
                 )
             })
             .into_any_element()
@@ -1225,6 +1223,14 @@ impl GroupDialog {
             } else {
                 div()
                     .id("habits-toggle-btn")
+                    .debug_selector(|| {
+                        if add_task {
+                            "group-dialog-habits-undo"
+                        } else {
+                            "group-dialog-habits-toggle"
+                        }
+                        .into()
+                    })
                     .cursor_pointer()
                     .px_2()
                     .py_1()
@@ -1240,5 +1246,383 @@ impl GroupDialog {
                     .into_any_element()
             })
             .into_any_element()
+    }
+}
+
+impl Monos {
+    /// The group editor over the whole surface (App.tsx's `groupDialogOpen`
+    /// and `groupSettingsFor`): `edit` names the group to change, `None`
+    /// starts a new one. One dialog at a time.
+    pub(super) fn open_group_dialog(
+        &mut self,
+        edit: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.group_dialog.is_some() {
+            return;
+        }
+        let initial = edit.and_then(|id| {
+            let mono = self.roster.get(&id)?;
+            let group = mono.group.as_ref()?;
+            Some((id, group_draft(&mono.label(), group)))
+        });
+        let roster = self.roster.clone();
+        let view = cx.new(|cx| GroupDialog::new(initial, roster, window, cx));
+        let events = cx.subscribe_in(
+            &view,
+            window,
+            |this, _, event: &Event, window, cx| match event {
+                Event::Create(draft) => this.create_group(draft, window, cx),
+                Event::Save(id, draft) => {
+                    this.update_group(id, draft, cx);
+                    this.close_group_dialog(cx);
+                }
+                Event::OpenPage(id, page) => {
+                    let (id, page) = (id.clone(), *page);
+                    this.close_group_dialog(cx);
+                    this.open(&id, window, cx);
+                    match page {
+                        "instructions" => {
+                            this.open_current_settings_section(SettingsSection::Soul, window, cx)
+                        }
+                        "memory" => {
+                            this.open_current_settings_section(SettingsSection::Memory, window, cx)
+                        }
+                        "habits" => {
+                            this.overview_tab = OverviewTab::Habits;
+                            this.show_overview(cx);
+                        }
+                        _ => {}
+                    }
+                }
+                Event::Close => this.close_group_dialog(cx),
+            },
+        );
+        window.focus(&view.focus_handle(cx), cx);
+        self.group_dialog = Some((view, events, window.viewport_size()));
+        cx.notify();
+    }
+
+    fn close_group_dialog(&mut self, cx: &mut Context<Self>) {
+        if self.group_dialog.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// App.tsx's `onStartGroup`: the group itself, its first memories, and
+    /// its chat — or its Habits on a new scheduled task when asked.
+    fn create_group(&mut self, draft: &GroupCreate, window: &mut Window, cx: &mut Context<Self>) {
+        let group = Group {
+            members: draft.members.clone(),
+            goal: (!draft.goal.is_empty()).then(|| draft.goal.clone()),
+            folders: draft.folders.clone(),
+            context: draft.context.clone(),
+            ..Group::default()
+        };
+        let id = self
+            .roster
+            .create_group(
+                &self.root,
+                &draft.name,
+                group,
+                draft.instructions.as_deref(),
+            )
+            .id
+            .clone();
+        if let Some(memory) = &draft.memory {
+            seed_group_memory(&self.root, &id, memory, &memory::date());
+        }
+        self.close_group_dialog(cx);
+        self.open(&id, window, cx);
+        // Its Members (or a new scheduled task on its Habits), like the
+        // desktop app lands on after creating a group.
+        self.overview_tab = if draft.add_task {
+            self.route = Some(Route::NewHabit);
+            OverviewTab::Habits
+        } else {
+            OverviewTab::Members
+        };
+        self.show_overview(cx);
+    }
+
+    /// App.tsx's `onSaveGroup`: the draft's fields, keeping the answers,
+    /// requests and seats the group collected meanwhile.
+    fn update_group(&mut self, id: &str, draft: &GroupDraft, cx: &mut Context<Self>) {
+        let mut group = self
+            .roster
+            .get(id)
+            .and_then(|mono| mono.group.clone())
+            .unwrap_or_default();
+        group.members = draft.members.clone();
+        group.goal = (!draft.goal.is_empty()).then(|| draft.goal.clone());
+        group.folders = draft.folders.clone();
+        group.context = draft.context.clone();
+        self.roster.save_group(id, &draft.name, group);
+        self.configure_chat(id, cx);
+        self.save(cx);
+    }
+
+    /// The open group editor, when there is one: a scrim under the centred
+    /// card, like the Mono settings modal. Rendered on both surfaces, since
+    /// the dialog also opens from the rail with no Mono selected.
+    pub(super) fn group_dialog_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (view, _, size) = self.group_dialog.as_ref()?;
+        let width = 560f32.min(size.width.as_f32() - 24.);
+        let height = 680f32.min(size.height.as_f32() - 32.);
+        let weak = cx.weak_entity();
+        Some(
+            div()
+                .absolute()
+                .size_full()
+                .child(
+                    gpui::deferred(
+                        gpui::anchored()
+                            .position(gpui::point(px(0.), px(0.)))
+                            .child(
+                                div()
+                                    .w(size.width)
+                                    .h(size.height)
+                                    .bg(gpui::black().opacity(0.4))
+                                    .occlude(),
+                            ),
+                    )
+                    .with_priority(94),
+                )
+                .child(
+                    popover(
+                        "group-dialog",
+                        Anchor::Point(gpui::point(
+                            px((size.width.as_f32() - width) / 2.),
+                            px((size.height.as_f32() - height) / 2.),
+                        )),
+                    )
+                    .ignore(self.notice_region.clone())
+                    .modal_surface(true)
+                    .without_animation()
+                    .priority(95)
+                    .width(width)
+                    .height(height)
+                    .gap(0.)
+                    .on_dismiss(move |_, cx| {
+                        let _ = weak.update(cx, |this, cx| this.close_group_dialog(cx));
+                    })
+                    .child(view.clone()),
+                )
+                .into_any_element(),
+        )
+    }
+
+    /// The group's Members tab (`GroupMembers`): who is in it, with adding
+    /// and removing. The Principal leads every group and cannot leave.
+    pub(super) fn members_list(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
+        let group = mono.group.clone().unwrap_or_default();
+        let brief = native::members(&self.roster.monos);
+        let role_of = |id: &str| {
+            brief
+                .iter()
+                .find(|member| member.id == id)
+                .map(member_role)
+                .unwrap_or_default()
+        };
+        let gid = mono.id.clone();
+        let row = |mono: &Mono, action: Option<AnyElement>| {
+            let role = role_of(&mono.id);
+            div()
+                .id(SharedString::from(format!("group-member-{}", mono.id)))
+                .min_h(px(36.))
+                .px_2()
+                .py_1()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(avatar::avatar(&mono.mascot, mono.color, "idle", 16., true))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(13.))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .child(mono.label()),
+                        )
+                        .child(
+                            div()
+                                .truncate()
+                                .text_size(px(11.))
+                                .text_color(content(0.5))
+                                .child(role),
+                        ),
+                )
+                .children(action)
+                .into_any_element()
+        };
+        let leads_tag = || {
+            div()
+                .flex_shrink_0()
+                .px_1p5()
+                .py_0p5()
+                .rounded_md()
+                .bg(accent_color().opacity(0.1))
+                .text_color(accent_color())
+                .text_size(px(11.))
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .child("Leads")
+                .into_any_element()
+        };
+        let current: Vec<AnyElement> = group
+            .members
+            .iter()
+            .filter_map(|id| self.roster.get(id).cloned())
+            .map(|member| {
+                if member.is_principal() {
+                    row(&member, Some(leads_tag()))
+                } else {
+                    let (gid, member_id) = (gid.clone(), member.id.clone());
+                    row(
+                        &member,
+                        Some(
+                            div()
+                                .id(SharedString::from(format!(
+                                    "group-member-remove-{}",
+                                    member.id
+                                )))
+                                .cursor_pointer()
+                                .size(px(24.))
+                                .rounded_md()
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .hover(|s| s.bg(content(0.08)))
+                                .child(icon("trash", 14.).text_color(content(0.45)))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.move_group_member(&gid, &member_id, false, cx)
+                                }))
+                                .into_any_element(),
+                        ),
+                    )
+                }
+            })
+            .collect();
+        let others: Vec<AnyElement> = if self.members_adding {
+            self.roster
+                .monos
+                .iter()
+                .filter(|m| !m.is_group() && !group.members.contains(&m.id))
+                .cloned()
+                .map(|member| {
+                    let (gid, member_id) = (gid.clone(), member.id.clone());
+                    row(
+                        &member,
+                        Some(
+                            div()
+                                .id(SharedString::from(format!(
+                                    "group-member-add-{}",
+                                    member.id
+                                )))
+                                .cursor_pointer()
+                                .px_2()
+                                .py_0p5()
+                                .rounded_md()
+                                .text_size(px(12.))
+                                .text_color(accent_color())
+                                .hover(|s| s.bg(content(0.06)))
+                                .child("Add")
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.move_group_member(&gid, &member_id, true, cx)
+                                }))
+                                .into_any_element(),
+                        ),
+                    )
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let full = group.members.len() >= GROUP_MAX_MEMBERS;
+        let has_others = self
+            .roster
+            .monos
+            .iter()
+            .any(|m| !m.is_group() && !group.members.contains(&m.id));
+        div()
+            .id("group-members")
+            .debug_selector(|| "group-members".into())
+            .size_full()
+            .overflow_y_scroll()
+            .px_2()
+            .py_2()
+            .flex()
+            .flex_col()
+            .gap(px(1.))
+            .when(current.is_empty(), |d| {
+                d.child(panels::empty_state(
+                    "users",
+                    "Add the agents this group brings together. Its chat leads them and brings each one in when its part comes up.",
+                ))
+            })
+            .children(current)
+            .when(self.members_adding && !others.is_empty(), |d| {
+                d.child(
+                    div()
+                        .mt_2()
+                        .pt_2()
+                        .border_t_1()
+                        .border_color(content(0.07))
+                        .flex()
+                        .flex_col()
+                        .gap(px(1.))
+                        .children(others),
+                )
+            })
+            .when(has_others && !full && !self.members_adding, |d| {
+                d.child(
+                    div()
+                        .id("group-member-adding")
+                        .cursor_pointer()
+                        .mt_1()
+                        .px_2()
+                        .py_1p5()
+                        .rounded_md()
+                        .flex()
+                        .items_center()
+                        .gap_1p5()
+                        .text_size(px(13.))
+                        .text_color(content(0.6))
+                        .hover(|s| s.bg(content(0.06)).text_color(content(1.)))
+                        .child(icon("plus", 14.))
+                        .child("Add member")
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.members_adding = true;
+                            cx.notify();
+                        })),
+                )
+            })
+            .into_any_element()
+    }
+
+    /// Adds or removes a member (`saveGroupMembers`): the Principal's own
+    /// seat cannot leave.
+    fn move_group_member(&mut self, id: &str, member: &str, add: bool, cx: &mut Context<Self>) {
+        let Some(mono) = self.roster.get(id) else {
+            return;
+        };
+        let mut group = mono.group.clone().unwrap_or_default();
+        if add {
+            if group.members.len() >= GROUP_MAX_MEMBERS
+                || group.members.iter().any(|id| id == member)
+            {
+                return;
+            }
+            group.members.push(member.into());
+        } else {
+            group.members.retain(|id| id != member);
+        }
+        let name = mono.name.clone();
+        self.roster.save_group(id, &name, group);
+        self.configure_chat(id, cx);
+        self.save(cx);
     }
 }

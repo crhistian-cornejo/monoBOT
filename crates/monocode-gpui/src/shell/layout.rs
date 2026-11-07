@@ -114,6 +114,10 @@ fn panel_button(enabled: bool, dot: bool) -> gpui::Stateful<gpui::Div> {
         .aria_label(super::TOGGLE_RIGHT_PANEL_LABEL)
         .group(id)
         .cursor_pointer()
+        .tooltip(chrome_tip(
+            "Toggle right sidebar",
+            Some("App: Toggle Session Sidebar"),
+        ))
         .size(px(24.))
         .flex_shrink_0()
         .flex()

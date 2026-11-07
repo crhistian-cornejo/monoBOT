@@ -1,4 +1,7 @@
-use gpui::{AnyElement, Div, Hsla, Role, Stateful, Svg, div, img, prelude::*, px, rgb, rgba, svg};
+use gpui::{
+    AnyElement, AnyView, App, Context, Div, Hsla, Role, SharedString, Stateful, Svg, Window, div,
+    img, prelude::*, px, rgb, rgba, svg,
+};
 // Shared appearance tokens. Interaction fills use translucent content ink
 // rather than opaque replacement greys.
 pub(crate) const CHAT: u32 = 0x141414;
@@ -536,6 +539,54 @@ pub(crate) fn provider_icon(provider: &str, side: f32) -> Div {
         .justify_center()
         .child(mark)
 }
+/// A chrome button's hover tip: its name and, when a command drives it, the
+/// shortcut the user has bound — read when the tip opens so rebinding and
+/// disabling show correctly.
+struct LabelTooltip {
+    label: SharedString,
+    command: Option<&'static str>,
+}
+impl Render for LabelTooltip {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let keys = self.command.and_then(|command| {
+            cx.try_global::<crate::settings::Preferences>()
+                .and_then(|prefs| crate::settings::command_shortcut(prefs, command))
+        });
+        div()
+            .px_2()
+            .py_1()
+            .rounded_md()
+            // Opaque like the React tooltip's surface, so nothing bleeds through.
+            .bg(rail_color())
+            .border_1()
+            .border_color(content(0.15))
+            .shadow_lg()
+            .text_size(px(12.))
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .whitespace_nowrap()
+            .child(div().text_color(content(1.)).child(self.label.clone()))
+            .when_some(keys, |d, keys| {
+                d.child(div().text_color(content(0.55)).child(keys))
+            })
+    }
+}
+/// The `.tooltip` builder for chrome controls without an `icon_button`, like
+/// the zone switch or the right-panel toggle.
+pub(crate) fn chrome_tip(
+    label: impl Into<SharedString>,
+    command: Option<&'static str>,
+) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let label = label.into();
+    move |_, cx| {
+        cx.new(|_| LabelTooltip {
+            label: label.clone(),
+            command,
+        })
+        .into()
+    }
+}
 pub(crate) fn icon_button(
     id: &'static str,
     label: &'static str,
@@ -543,13 +594,31 @@ pub(crate) fn icon_button(
 ) -> Stateful<Div> {
     icon_button_hover(id, label, path, 0.1)
 }
+/// An icon button whose hover tip also shows its command's bound shortcut.
+pub(crate) fn command_icon_button(
+    id: &'static str,
+    label: &'static str,
+    path: &'static str,
+    command: &'static str,
+) -> Stateful<Div> {
+    chrome_button(id, label, path, true, 0.1, Some(command))
+}
+pub(crate) fn command_icon_button_enabled(
+    id: &'static str,
+    label: &'static str,
+    path: &'static str,
+    enabled: bool,
+    command: &'static str,
+) -> Stateful<Div> {
+    chrome_button(id, label, path, enabled, 0.1, Some(command))
+}
 pub(crate) fn icon_button_hover(
     id: &'static str,
     label: &'static str,
     path: &'static str,
     hover_alpha: f32,
 ) -> Stateful<Div> {
-    chrome_button(id, label, path, true, hover_alpha)
+    chrome_button(id, label, path, true, hover_alpha, None)
 }
 pub(crate) fn icon_button_enabled(
     id: &'static str,
@@ -557,7 +626,7 @@ pub(crate) fn icon_button_enabled(
     path: &'static str,
     enabled: bool,
 ) -> Stateful<Div> {
-    chrome_button(id, label, path, enabled, 0.1)
+    chrome_button(id, label, path, enabled, 0.1, None)
 }
 fn chrome_button(
     id: &'static str,
@@ -565,6 +634,7 @@ fn chrome_button(
     path: &'static str,
     enabled: bool,
     hover_alpha: f32,
+    command: Option<&'static str>,
 ) -> Stateful<Div> {
     div()
         .id(id)
@@ -582,6 +652,7 @@ fn chrome_button(
         .when(enabled, |d| {
             d.hover(|s| s.bg(content(hover_alpha)).text_color(content(1.)))
         })
+        .tooltip(chrome_tip(label, command))
         .child(
             icon(path, 14.)
                 .text_color(content(if enabled { 0.5 } else { 0.25 }))

@@ -18,6 +18,8 @@ import {
 import { ExplorerMenu } from "../../files/ui/ExplorerMenu";
 import { SurfaceTabs } from "../../workspace/ui/SurfaceTabs";
 import { IconButton } from "../../../app/shell/TitleBar";
+import { useRailTooltip } from "../../../app/shell/RailTooltip";
+import { useKeybindingLabel } from "../../../shared/hooks/useKeybindingLabel";
 import {
   clampDockSize,
   defaultDockSize,
@@ -95,6 +97,12 @@ export function ProjectTerminalDock({
   const [dragging, setDragging] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const sideButton = useRef<HTMLDivElement>(null);
+  const dockTip = useRailTooltip("top");
+  const newTerminalShortcut = useKeybindingLabel("Terminal: New", `${MOD}\``);
+  const toggleDockShortcut = useKeybindingLabel(
+    "Terminal: Toggle Dock",
+    `${MOD}J`,
+  );
   const drag = useRef<{ start: number; size: number } | null>(null);
   const sizeRef = useRef(dock.size);
   sizeRef.current = dock.size;
@@ -231,9 +239,13 @@ export function ProjectTerminalDock({
         onCloseOtherFiles={onCloseOtherTerminals}
         onReorder={onReorderTerminals}
         trailing={
-          <div className="flex shrink-0 items-center gap-0.5 pr-1.5">
+          <div
+            {...dockTip.handlers}
+            className="flex shrink-0 items-center gap-0.5 pr-1.5"
+          >
             <IconButton
-              label={`New Terminal (${MOD}\`)`}
+              label="New Terminal"
+              shortcut={newTerminalShortcut}
               onClick={onAddTerminal}
             >
               <Plus className="size-3.5" strokeWidth={1.75} />
@@ -251,11 +263,13 @@ export function ProjectTerminalDock({
             </IconButton>
             </div>
             <IconButton
-              label={`Hide Terminal (${MOD}J)`}
+              label="Hide Terminal"
+              shortcut={toggleDockShortcut}
               onClick={onHide}
             >
               <HideIcon className="size-3.5" strokeWidth={1.75} />
             </IconButton>
+            {dockTip.tooltip}
           </div>
         }
       />

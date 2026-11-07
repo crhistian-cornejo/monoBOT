@@ -98,6 +98,14 @@ impl Shell {
                             } else {
                                 "Show overview"
                             })
+                            .tooltip(chrome_tip(
+                                if open {
+                                    "Hide overview"
+                                } else {
+                                    "Show overview"
+                                },
+                                Some("App: Toggle Session Sidebar"),
+                            ))
                             .h(px(24.))
                             .px_2()
                             .flex()

@@ -79,16 +79,26 @@ pub fn team_within_budget(text: &str) -> (String, usize) {
     let dropped = lines.len().saturating_sub(TEAM_MAX_LINES);
     (lines[dropped..].join("\n"), dropped)
 }
-pub fn within_budget(text: &str) -> String {
+/// The part of MEMORY.md that fits the budget (whole lines only) and how
+/// many lines did not load, as the desktop's `memoryWithinBudget` counts them.
+pub fn budget(text: &str) -> (String, usize) {
+    let trimmed = text.trim_end();
+    if trimmed.is_empty() {
+        return (String::new(), 0);
+    }
     let mut bytes = 0;
-    text.lines()
+    let kept: Vec<&str> = trimmed
+        .lines()
         .take(MAX_LINES)
         .take_while(|line| {
             bytes += line.len() + 1;
             bytes <= MAX_BYTES
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect();
+    (kept.join("\n"), trimmed.lines().count() - kept.len())
+}
+pub fn within_budget(text: &str) -> String {
+    budget(text).0
 }
 fn dated(line: &str) -> bool {
     let line = line
@@ -273,41 +283,79 @@ pub struct Hit {
     pub line: String,
     pub date: Option<String>,
 }
-pub fn search(root: &Path, id: &str, query: &str, since: Option<&str>) -> Result<Vec<Hit>, String> {
-    let words:Vec<_>=query.to_lowercase().split(|c:char|!c.is_alphanumeric()&&!"_.-".contains(c)).filter(|w|w.len()>=3&&!"the and for are was were with that this what when where which who how why did does have has had you your our not but can will from into about there their them then than just any all its".split_whitespace().any(|stop|stop==*w)).map(str::to_owned).collect();
-    if words.is_empty() {
-        return Err("Use a few specific words to search memory".into());
+/// Words too common to say anything about which note a question is after
+/// (the desktop's STOPWORDS).
+const STOPWORDS: &[&str] = &[
+    "the", "and", "for", "are", "was", "were", "with", "that", "this", "what", "when", "where",
+    "which", "who", "how", "why", "did", "does", "have", "has", "had", "you", "your", "our", "not",
+    "but", "can", "will", "from", "into", "about", "there", "their", "them", "then", "than",
+    "just", "any", "all", "its",
+];
+/// `2026-10-01`, or a span back from today: `7d`, `24h`, `2w` (sinceDate).
+fn since_date(value: &str) -> Result<String, String> {
+    static SPAN: LazyLock<Regex> =
+        LazyLock::new(|| Regex::new(r"(?i)^(\d{1,4})\s*([hdw])$").unwrap());
+    static DATE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^\d{4}-\d{2}-\d{2}$").unwrap());
+    let value = value.trim();
+    if DATE.is_match(value) {
+        return Ok(value.to_string());
     }
-    let since = since
-        .map(|value| {
-            if NaiveDate::parse_from_str(value, "%Y-%m-%d").is_ok() {
-                Ok(value.to_string())
-            } else {
-                let (digits, unit) = value.split_at(
-                    value
-                        .char_indices()
-                        .next_back()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0),
-                );
-                let count = digits
-                    .parse::<i64>()
-                    .map_err(|_| "since must be YYYY-MM-DD, 7d, 24h or 2w")?;
-                if !(0..=876_000).contains(&count) {
-                    return Err("since must be a recent positive duration");
-                }
-                let hours = match unit {
-                    "h" => count,
-                    "d" => count * 24,
-                    "w" => count * 168,
-                    _ => return Err("since must be YYYY-MM-DD, 7d, 24h or 2w"),
-                };
-                Ok((Local::now() - chrono::Duration::hours(hours))
-                    .format("%Y-%m-%d")
-                    .to_string())
-            }
-        })
-        .transpose()?;
+    let captures = SPAN
+        .captures(value)
+        .ok_or_else(|| "since must be a date like 2026-10-01 or a span like \"7d\"".to_string())?;
+    let count = captures[1]
+        .parse::<i64>()
+        .map_err(|_| "since must be a date like 2026-10-01 or a span like \"7d\"".to_string())?;
+    let hours = count
+        * match captures[2].to_ascii_lowercase().as_str() {
+            "h" => 1,
+            "d" => 24,
+            "w" => 168,
+            _ => unreachable!(),
+        };
+    Ok((Local::now() - chrono::Duration::hours(hours))
+        .format("%Y-%m-%d")
+        .to_string())
+}
+/// The date a line carries, when it is a dated entry (struck ones too), as
+/// the desktop's DATED reads it.
+fn line_date(line: &str) -> Option<String> {
+    dated(line).then(|| {
+        line.strip_prefix("- ")
+            .unwrap_or(line)
+            .trim_start_matches("~~")
+            .chars()
+            .take(10)
+            .collect()
+    })
+}
+pub fn search(root: &Path, id: &str, query: &str, since: Option<&str>) -> Result<Vec<Hit>, String> {
+    // The desktop's queryWords: unique words of three letters or more that
+    // are not stopwords.
+    let mut words: Vec<String> = Vec::new();
+    for word in query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric() && !"_.-".contains(c))
+    {
+        let word = word.trim_matches(|c| c == '.' || c == '-');
+        if word.chars().count() >= 3
+            && !STOPWORDS.contains(&word)
+            && !words.iter().any(|w| w == word)
+        {
+            words.push(word.to_owned());
+        }
+    }
+    let since = since.map(since_date).transpose()?;
+    if words.is_empty() && since.is_none() {
+        return Err("query needs at least one word of three letters or more".into());
+    }
+    // A long query needs two of its words on a line, so common words alone
+    // do not drag in half the file (the desktop's `needed`).
+    let needed = if words.len() >= 4 {
+        2
+    } else {
+        usize::from(!words.is_empty())
+    };
     let loaded = files::load(root, id, None)?;
     let mut paths: Vec<(String, String)> = ["MEMORY.md".to_owned(), "memory/archive.md".into()]
         .into_iter()
@@ -321,7 +369,7 @@ pub fn search(root: &Path, id: &str, query: &str, since: Option<&str>) -> Result
                 .map(|file| (format!("team:{file}"), file.to_owned())),
         );
     }
-    let mut hits = Vec::new();
+    let mut hits: Vec<(usize, String, Hit)> = Vec::new();
     for (file, path) in paths {
         let owner = if file.starts_with("team:") {
             TEAM_MEMORY_ID
@@ -334,26 +382,34 @@ pub fn search(root: &Path, id: &str, query: &str, since: Option<&str>) -> Result
             Err(error) => return Err(error),
         };
         for line in text.lines() {
-            let lower = line.to_lowercase();
-            if line.contains("~~") || !words.iter().all(|w| lower.contains(w)) {
+            if line.trim().is_empty() || line.starts_with("# ") {
                 continue;
             }
-            let at = dated(line).then(|| line.trim_start_matches("- ")[..10].to_string());
+            let at = line_date(line);
             if since
                 .as_ref()
                 .is_some_and(|since| at.as_ref().is_none_or(|at| at < since))
             {
                 continue;
             }
-            hits.push(Hit {
-                file: file.clone(),
-                line: line.into(),
-                date: at,
-            });
-            if hits.len() == 50 {
-                return Ok(hits);
+            let lower = line.to_lowercase();
+            let score = words.iter().filter(|w| lower.contains(w.as_str())).count();
+            if score < needed {
+                continue;
             }
+            hits.push((
+                score,
+                at.clone().unwrap_or_default(),
+                Hit {
+                    file: file.clone(),
+                    line: line.into(),
+                    date: at,
+                },
+            ));
         }
     }
-    Ok(hits)
+    // Best matches first, then newest; the desktop shows up to 20.
+    hits.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| b.1.cmp(&a.1)));
+    hits.truncate(20);
+    Ok(hits.into_iter().map(|(_, _, hit)| hit).collect())
 }

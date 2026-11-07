@@ -889,6 +889,7 @@ impl Shell {
                                 .items_center()
                                 .justify_center()
                                 .hover(|s| s.opacity(1.).bg(content(0.07)))
+                                .tooltip(chrome_tip("New Terminal", Some("Terminal: New")))
                                 .child(
                                     icon("plus", 14.)
                                         .group_hover("new-terminal", |s| s.text_color(content(1.))),
@@ -910,7 +911,13 @@ impl Shell {
                         .gap(px(2.))
                         .pr(px(6.))
                         .child(
-                            icon_button("new-terminal", NEW_TERMINAL_LABEL, "plus").on_click(
+                            command_icon_button(
+                                "new-terminal",
+                                "New Terminal",
+                                "plus",
+                                "Terminal: New",
+                            )
+                            .on_click(
                                 cx.listener(|this, _, window, cx| this.new_terminal(window, cx)),
                             ),
                         )
@@ -933,7 +940,13 @@ impl Shell {
                                 })),
                         )
                         .child(
-                            icon_button("hide-terminal", HIDE_TERMINAL_LABEL, hide).on_click(
+                            command_icon_button(
+                                "hide-terminal",
+                                "Hide Terminal",
+                                hide,
+                                "Terminal: Toggle Dock",
+                            )
+                            .on_click(
                                 cx.listener(|this, _, window, cx| this.toggle_terminal(window, cx)),
                             ),
                         ),
@@ -1017,6 +1030,18 @@ impl Shell {
                             })
                             .child(icon("terminal", 14.))
                             .child("Terminal")
+                            .tooltip(chrome_tip(
+                                if has_terminals {
+                                    "Terminal"
+                                } else {
+                                    "New Terminal"
+                                },
+                                Some(if has_terminals {
+                                    "Terminal: Toggle Dock"
+                                } else {
+                                    "Terminal: New"
+                                }),
+                            ))
                             .on_click(
                                 cx.listener(|this, _, window, cx| this.toggle_terminal(window, cx)),
                             ),
@@ -1143,11 +1168,6 @@ const NEW_TERMINAL_LABEL: &str = if cfg!(target_os = "macos") {
     "New Terminal (⌘`)"
 } else {
     "New Terminal (Ctrl+`)"
-};
-const HIDE_TERMINAL_LABEL: &str = if cfg!(target_os = "macos") {
-    "Hide Terminal (⌘J)"
-} else {
-    "Hide Terminal (Ctrl+J)"
 };
 
 #[cfg(test)]

@@ -207,6 +207,7 @@ import {
   SearchableProjectPicker,
 } from "../../features/projects/ui/SearchableProjectPicker";
 import { useRailTooltip } from "./RailTooltip";
+import { useKeybindingLabel } from "../../shared/hooks/useKeybindingLabel";
 import { useProjectMenu } from "./useProjectMenu";
 import { SessionFiltersMenu } from "../../features/sessions/ui/SessionFiltersMenu";
 import { LinkSessionWorkItemDialog } from "../../features/sessions/ui/LinkSessionWorkItemDialog";
@@ -2123,6 +2124,7 @@ function SidebarComponent({
   });
 
   const projectLabel = useProjectLabel(cwd);
+  const settingsShortcut = useKeybindingLabel("App: Settings", `${MOD},`);
   const [insetInboxMenu, setInsetInboxMenu] = useState<{
     x: number;
     y: number;
@@ -2151,7 +2153,7 @@ function SidebarComponent({
           />
         ),
         onOpenSettings,
-        settingsShortcut: `${MOD},`,
+        settingsShortcut: settingsShortcut ?? undefined,
         keepOpen: headerProjectMenu.isActive,
         // The right-click project menu, as a flyout level with its row.
         onOpenProjectSettings: (row: HTMLElement) => {
@@ -2385,6 +2387,8 @@ function SidebarComponent({
   }, [cwd, pendingFirstLoad, startSpaceSlide]);
   useEffect(() => endSpaceSlide, [endSpaceSlide]);
 
+  const sidebarTip = useRailTooltip("bottom");
+
   const workspaceHeader = (
     <div
       ref={(el) => {
@@ -2566,6 +2570,7 @@ function SidebarComponent({
   const sidebarContent = (
     <aside
       ref={setSidebarRef}
+      {...sidebarTip.handlers}
       // The inset card's own edge separates it from the sidebar.
       className={`relative flex h-full min-h-0 shrink-0 flex-col${
         inset
@@ -3141,8 +3146,12 @@ function SidebarComponent({
                   label="Settings"
                   icon={Settings}
                   onClick={onOpenSettings}
-                  shortcut={`${MOD},`}
-                  ariaLabel={`Settings (${MOD},)`}
+                  shortcut={settingsShortcut}
+                  ariaLabel={
+                    settingsShortcut
+                      ? `Settings (${settingsShortcut})`
+                      : "Settings"
+                  }
                 />
               ) : null}
             </div>
@@ -3243,6 +3252,7 @@ function SidebarComponent({
         onPointerDown={resize.onPointerDown}
         onDoubleClick={resize.onDoubleClick}
       />
+      {sidebarTip.tooltip}
     </aside>
   );
 
@@ -3480,6 +3490,8 @@ function SidebarProjectPicker({
     null,
   );
   const inboxTrigger = useRef<HTMLElement | null>(null);
+  const newTabShortcut = useKeybindingLabel("Tab: New", `${MOD}T`);
+  const searchShortcut = useKeybindingLabel("App: Search", `${MOD}K`);
   return (
     <div
       className="flex h-9 items-center gap-0.5 border-b border-stroke px-2"
@@ -3497,13 +3509,18 @@ function SidebarProjectPicker({
       />
       <div className="ml-auto flex items-center">
         {onNew ? (
-          <IconButton label={`New tab (${MOD}T)`} onClick={onNew}>
+          <IconButton
+            label="New tab"
+            shortcut={newTabShortcut}
+            onClick={onNew}
+          >
             <Plus className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
         {onSearch ? (
           <IconButton
-            label={`Search (${MOD}K)`}
+            label="Search"
+            shortcut={searchShortcut}
             active={searchActive}
             onClick={onSearch}
           >
@@ -3512,7 +3529,9 @@ function SidebarProjectPicker({
         ) : null}
         {onOpenInbox ? (
           <IconButton
-            label={inboxUnseen ? "Inbox, new items" : "Inbox"}
+            label="Inbox"
+            ariaLabel={inboxUnseen ? "Inbox, new items" : undefined}
+            tipDetail={inboxUnseen ? "New items" : undefined}
             active={inboxActive}
             onClick={onOpenInbox}
             onOpenContextMenu={(x, y) => {
@@ -3688,6 +3707,9 @@ function CompactProjectRail({
     onTabChange(nextTab);
   };
   const railTooltip = useRailTooltip();
+  const sidebarShortcut = useKeybindingLabel("App: Toggle Sidebar", `${MOD}B`);
+  const searchShortcut = useKeybindingLabel("App: Search", `${MOD}K`);
+  const settingsShortcut = useKeybindingLabel("App: Settings", `${MOD},`);
   // The title bar row holds the macOS window buttons. Elsewhere it would be
   // an empty strip, so the expand button sits in it instead.
   const trafficLights = useTrafficLightsVisible();
@@ -3695,7 +3717,7 @@ function CompactProjectRail({
   const expand = (
     <CompactRailAction
       label="Expand projects"
-      tooltip={false}
+      shortcut={sidebarShortcut}
       icon={PanelLeft}
       onClick={onTogglePanel}
     />
@@ -3860,7 +3882,7 @@ function CompactProjectRail({
         </div>
         <CompactRailAction
           label="Search"
-          shortcut={`${MOD}K`}
+          shortcut={searchShortcut}
           icon={Search}
           active={searchActive}
           onClick={action(searchActive, onSearch)}
@@ -3900,8 +3922,7 @@ function CompactProjectRail({
       <div className="flex w-full flex-col items-center gap-1 py-1.5">
         <CompactRailAction
           label="Settings"
-          shortcut={`${MOD},`}
-          tooltip={false}
+          shortcut={settingsShortcut}
           icon={Settings}
           onClick={onOpenSettings}
         />
@@ -4435,6 +4456,7 @@ function SidebarNavList({
   items: readonly (SidebarNavItem | false | undefined)[];
 }) {
   const shown = items.filter((item): item is SidebarNavItem => !!item);
+  const searchShortcut = useKeybindingLabel("App: Search", `${MOD}K`);
   if (!search && !shown.length) return null;
   return (
     <nav
@@ -4450,8 +4472,10 @@ function SidebarNavList({
             icon={Search}
             onClick={search.onClick}
             active={search.active}
-            shortcut={`${MOD}K`}
-            ariaLabel={`Search (${MOD}K)`}
+            shortcut={searchShortcut}
+            ariaLabel={
+              searchShortcut ? `Search (${searchShortcut})` : "Search"
+            }
           />
           <div className="mt-0.5" />
         </>
@@ -4482,6 +4506,8 @@ function WorkspaceTitleActions({
   onSearch?: () => void;
   onNew?: () => void;
 }) {
+  const goToFileShortcut = useKeybindingLabel("App: Go to File", `${MOD}P`);
+  const newTabShortcut = useKeybindingLabel("Tab: New", `${MOD}T`);
   if (!onSearch && !onNew) return null;
   return (
     <div
@@ -4489,12 +4515,20 @@ function WorkspaceTitleActions({
       data-tauri-drag-region="false"
     >
       {onSearch ? (
-        <IconButton label={`Go to File (${MOD}P)`} onClick={onSearch}>
+        <IconButton
+          label="Go to File"
+          shortcut={goToFileShortcut}
+          onClick={onSearch}
+        >
           <Search className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
       {onNew ? (
-        <IconButton label={`New session (${MOD}T)`} onClick={onNew}>
+        <IconButton
+          label="New session"
+          shortcut={newTabShortcut}
+          onClick={onNew}
+        >
           <Plus className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
@@ -4522,6 +4556,7 @@ function SessionsHeaderButton({
       type="button"
       title={label}
       aria-label={label}
+      data-rail-tip={label}
       aria-expanded={open}
       aria-haspopup={hasPopup ? "menu" : undefined}
       onPointerDown={(event) => event.stopPropagation()}

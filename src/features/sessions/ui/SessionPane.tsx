@@ -94,6 +94,7 @@ import { useMonoTranscript } from "../../monos/hooks/useMonoTranscript";
 import { MONO_PAGE_TURNS, shouldPersistSession } from "../data/sessionStore";
 import { useComposerDockMotion } from "./useComposerDockMotion";
 import { MOD } from "../../../platform/tauri/platform";
+import { useKeybindingLabel } from "../../../shared/hooks/useKeybindingLabel";
 import {
   acknowledgeQuoteRequest,
   ADD_TO_CHAT_EVENT,
@@ -510,6 +511,7 @@ const LocalSessionPane = memo(function LocalSessionPane({
   const quoteRequestId = useRef(0);
   const jumpVisibility = useTranscriptJumpVisibility();
   const [editingLastTurn, setEditingLastTurn] = useState(false);
+  const closePaneShortcut = useKeybindingLabel("Pane: Close", `${MOD}W`);
   useEffect(() => {
     setEditingLastTurn(false);
   }, [session.id, editLastTurnSupported]);
@@ -910,7 +912,11 @@ const LocalSessionPane = memo(function LocalSessionPane({
           </span>
           <button
             type="button"
-            title={`Close Pane (${MOD}W)`}
+            title={
+              closePaneShortcut
+                ? `Close Pane (${closePaneShortcut})`
+                : "Close Pane"
+            }
             aria-label="Close pane"
             data-no-drag
             className="grid size-5 shrink-0 place-items-center rounded text-content/50 hover:bg-content/10 hover:text-content"

@@ -143,9 +143,10 @@ impl Render for ProjectTooltip {
             .px_2()
             .py_1()
             .rounded_md()
-            .bg(pane_fill())
+            .bg(rail_color())
             .border_1()
             .border_color(content(0.15))
+            .shadow_lg()
             .text_size(px(12.))
             .text_color(content(1.))
             .child(self.0.clone())
@@ -297,11 +298,16 @@ impl Shell {
                 .child(div().min_h(px(8.)).flex_1())
                 .child(
                     div().w_full().py(px(6.)).flex().justify_center().child(
-                        icon_button("rail-settings", "Settings", "settings")
-                            .size(px(32.))
-                            .on_click(cx.listener(|this, _, w, cx| {
-                                this.open_settings(crate::settings::Section::General, w, cx)
-                            })),
+                        command_icon_button(
+                            "rail-settings",
+                            "Settings",
+                            "settings",
+                            "App: Settings",
+                        )
+                        .size(px(32.))
+                        .on_click(cx.listener(|this, _, w, cx| {
+                            this.open_settings(crate::settings::Section::General, w, cx)
+                        })),
                     ),
                 )
                 .into_any();
@@ -511,26 +517,31 @@ impl Shell {
             .when(label == "Projects", |d| {
                 let anchor = AnchorSlot::default();
                 d.child(
-                    icon_button("rail-open-project", "Open project", "plus")
-                        .debug_selector(|| "rail-open-project".into())
-                        .child(anchor.probe())
-                        .aria_expanded(self.menu_open(&MenuTarget::ProjectRailAdd))
-                        .size(px(20.))
-                        .when(self.menu_open(&MenuTarget::ProjectRailAdd), |d| {
-                            d.bg(content(0.08)).text_color(content(1.))
-                        })
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            if this.menu_open(&MenuTarget::ProjectRailAdd) {
-                                this.close_menu(cx);
-                            } else {
-                                this.open_menu(
-                                    MenuTarget::ProjectRailAdd,
-                                    Anchor::Slot(anchor.clone()),
-                                    window,
-                                    cx,
-                                );
-                            }
-                        })),
+                    command_icon_button(
+                        "rail-open-project",
+                        "Open project",
+                        "plus",
+                        "App: Open Project",
+                    )
+                    .debug_selector(|| "rail-open-project".into())
+                    .child(anchor.probe())
+                    .aria_expanded(self.menu_open(&MenuTarget::ProjectRailAdd))
+                    .size(px(20.))
+                    .when(self.menu_open(&MenuTarget::ProjectRailAdd), |d| {
+                        d.bg(content(0.08)).text_color(content(1.))
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        if this.menu_open(&MenuTarget::ProjectRailAdd) {
+                            this.close_menu(cx);
+                        } else {
+                            this.open_menu(
+                                MenuTarget::ProjectRailAdd,
+                                Anchor::Slot(anchor.clone()),
+                                window,
+                                cx,
+                            );
+                        }
+                    })),
                 )
             })
             .into_any()
@@ -806,8 +817,9 @@ impl Shell {
                     .id("rail-current-project")
                     .debug_selector(|| "rail-current-project".into())
                     .role(Role::Button)
-                    .aria_label(picker_label)
+                    .aria_label(picker_label.clone())
                     .aria_expanded(self.menu_open(&MenuTarget::CompactProjectPicker))
+                    .tooltip(chrome_tip(picker_label, None))
                     .size(px(32.))
                     .rounded_md()
                     .flex()
@@ -881,7 +893,7 @@ impl Shell {
                 }))
             }))
             .child(
-                icon_button("rail-global-search", "Search", "search")
+                command_icon_button("rail-global-search", "Search", "search", "App: Search")
                     .size(px(32.))
                     .when(self.app_search.is_some(), |d| d.bg(content(0.1)))
                     .on_click(cx.listener(|this, _, w, cx| {

@@ -217,6 +217,7 @@ export function MonoRailSection({
             type="button"
             title={newLabel}
             aria-label={newLabel}
+            data-rail-tip={newLabel}
             aria-haspopup={bots ? "menu" : undefined}
             onClick={(event) => create(event.currentTarget)}
             className={`grid size-5 shrink-0 place-items-center rounded-md text-content/50 hover:bg-content/8 hover:text-content${
@@ -340,6 +341,7 @@ export function MonoRailSection({
                 data-no-drag
                 title="Mono options"
                 aria-label={`${look.name} options`}
+                data-rail-tip="Mono options"
                 aria-haspopup="menu"
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {

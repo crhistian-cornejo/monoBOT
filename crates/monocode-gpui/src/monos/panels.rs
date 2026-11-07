@@ -21,6 +21,10 @@ pub(super) enum OverviewTab {
     Bots,
     /// A bot's subagents: what it ran in parallel.
     Subagents,
+    /// A group's members, with adding and removing.
+    Members,
+    /// The group's local voice call.
+    Call,
 }
 /// MonoOverview's tab sets, in the order they show. A personal bot works in
 /// no project: no sessions to list and no code changes, but the subagents it
@@ -29,7 +33,7 @@ pub(super) enum OverviewTab {
 pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
     use OverviewTab::*;
     if mono.is_group() {
-        &[Documents, Habits]
+        &[Members, Call, Documents, Habits]
     } else if mono.is_principal() {
         &[News, Habits, Documents, Bots]
     } else if mono.is_bot() {
@@ -976,6 +980,9 @@ impl Monos {
         }
     }
     pub(super) fn select_overview(&mut self, tab: OverviewTab, cx: &mut Context<Self>) {
+        if self.overview_tab == OverviewTab::Call && tab != OverviewTab::Call {
+            self.call_hang_up(cx);
+        }
         if tab != OverviewTab::Changes {
             self.pause_changes(cx);
         }
@@ -1088,6 +1095,13 @@ impl Monos {
                 }
                 OverviewTab::Bots => (tab, "Bots", "users", 0),
                 OverviewTab::Subagents => (tab, "Sub-agents", "users", 0),
+                OverviewTab::Members => (
+                    tab,
+                    "Members",
+                    "users",
+                    mono.group.as_ref().map(|g| g.members.len()).unwrap_or(0),
+                ),
+                OverviewTab::Call => (tab, "Call", "mic-01", 0),
                 OverviewTab::Activity => (tab, "Activity", "list-bullet", 0),
             })
             .collect();
@@ -1120,6 +1134,8 @@ impl Monos {
                     OverviewTab::News => "mono-overview-News",
                     OverviewTab::Bots => "mono-overview-Bots",
                     OverviewTab::Subagents => "mono-overview-Subagents",
+                    OverviewTab::Members => "mono-overview-Members",
+                    OverviewTab::Call => "mono-overview-Call",
                     OverviewTab::Activity => unreachable!(),
                 };
                 crate::project_tabs::tab_button(
@@ -1182,6 +1198,8 @@ impl Monos {
             OverviewTab::News => self.news_list(cx),
             OverviewTab::Bots => self.delegations_list(mono, cx),
             OverviewTab::Subagents => self.subagents_list(mono, cx),
+            OverviewTab::Members => self.members_list(mono, cx),
+            OverviewTab::Call => self.call_panel(mono, cx),
             OverviewTab::Activity => self.activity_view(mono, cx),
         };
         div()
@@ -2103,31 +2121,39 @@ impl Monos {
             this.menu = None;
             cx.notify();
         });
+        let mut items = vec![
+            MenuItem::Custom(AnyView::from(editor), focus.clone()),
+            MenuItem::Separator,
+        ];
+        // A group's settings are its own dialog; other Monos have theirs in
+        // their chat (MonoMenu's onSettings).
+        if mono.is_group() {
+            items.push(
+                MenuAction::new("group-settings", "Group settings…")
+                    .icon("settings")
+                    .into(),
+            );
+        }
+        items.extend([
+            MenuAction::new("background", "Background image")
+                .icon("image-add")
+                .into(),
+            MenuAction::new("delete", "Delete mono…")
+                .icon("trash")
+                .danger()
+                .into(),
+        ]);
         let menu = cx.new(|cx| {
-            Menu::new(
-                "Mono options",
-                vec![
-                    MenuItem::Custom(AnyView::from(editor), focus.clone()),
-                    MenuItem::Separator,
-                    MenuAction::new("background", "Background image")
-                        .icon("image-add")
-                        .into(),
-                    MenuAction::new("delete", "Delete mono…")
-                        .icon("trash")
-                        .danger()
-                        .into(),
-                ],
-                window,
-                cx,
-            )
-            .width(280.)
-            .style(MenuStyle::Group)
+            Menu::new("Mono options", items, window, cx)
+                .width(280.)
+                .style(MenuStyle::Group)
         });
         let target = id.to_string();
         let picked = cx.subscribe_in(&menu, window, move |this, _, event: &MenuEvent, w, cx| {
             this.menu = None;
             if let MenuEvent::Picked(action, _) = event {
                 match action.as_ref() {
+                    "group-settings" => this.open_group_dialog(Some(target.clone()), w, cx),
                     "background" => this.open_background(&target, w, cx),
                     "delete" => this.delete_mono(&target, w, cx),
                     _ => {}

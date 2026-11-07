@@ -84,6 +84,19 @@ impl Conversation {
     pub(crate) fn mono_external_pending(&self) -> bool {
         self.mono_ui.external.is_some()
     }
+    /// A call can wait for history to load, but must not wait on an occupied
+    /// seat or a draft the user needs to resolve.
+    pub(crate) fn mono_call_blocked(&self, cx: &App) -> bool {
+        self.busy
+            || self.stopping
+            || self.settings.usage_limit.is_some()
+            || self.account_switching
+            || self.preparing_worktree
+            || self.attaching
+            || self.editing_last_turn.pending()
+            || !self.input.read(cx).content.is_empty()
+            || !self.attachments.is_empty()
+    }
     pub(crate) fn mono_external_send(
         &mut self,
         prompt: String,
@@ -1381,6 +1394,7 @@ impl Conversation {
                         Anchor::Slot(self.context_anchor.clone()),
                     )
                     .side(Side::Top)
+                    .solid(rail_color())
                     .align(Align::End)
                     .max_width(240.)
                     .padding(10.)

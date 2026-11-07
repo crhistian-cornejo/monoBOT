@@ -95,12 +95,14 @@ impl Dictation {
         self.phase
     }
 
-    #[cfg(test)]
     pub(crate) fn partial(&self) -> &str {
         &self.partial
     }
 
-    #[cfg(test)]
+    pub(crate) fn speaking(&self) -> bool {
+        self.speaking
+    }
+
     pub(crate) fn error(&self) -> Option<&str> {
         self.error.as_deref()
     }
@@ -224,7 +226,12 @@ impl Dictation {
                 self.partial = text;
                 cx.notify();
             }
-            Event::Speech(speaking) => self.speaking = speaking,
+            Event::Speech(speaking) => {
+                if self.speaking != speaking {
+                    self.speaking = speaking;
+                    cx.notify();
+                }
+            }
         }
     }
 
@@ -233,14 +240,24 @@ impl Dictation {
             return self.set_phase(Phase::Idle, cx);
         };
         self.generation += 1;
+        let generation = self.generation;
         self.set_phase(Phase::Finishing, cx);
         let engine = self.engine.clone();
-        let text = cx
-            .background_executor()
-            .spawn(async move { engine.stop(ticket) });
+        let (done, result) = async_channel::bounded(1);
+        cx.background_executor()
+            .spawn(async move {
+                let text = engine.stop(ticket);
+                let _ = done.send(text).await;
+            })
+            .detach();
         self.task = Some(cx.spawn(async move |this, cx| {
-            let text = text.await;
+            let Ok(text) = result.recv().await else {
+                return;
+            };
             let _ = this.update(cx, |this, cx| {
+                if this.generation != generation || this.phase != Phase::Finishing {
+                    return;
+                }
                 this.unlisten();
                 this.partial.clear();
                 this.set_phase(Phase::Idle, cx);
@@ -338,6 +355,19 @@ impl Dictation {
                 .spawn(async move { engine.cancel(ticket) })
                 .detach();
         }
+        self.unlisten();
+        self.partial.clear();
+        self.set_phase(Phase::Idle, cx);
+    }
+
+    /// Discards a call turn even if final transcription is still in flight.
+    pub(crate) fn cancel_pending(&mut self, cx: &mut Context<Self>) {
+        if self.phase != Phase::Finishing {
+            self.cancel(cx);
+            return;
+        }
+        self.generation += 1;
+        self.task = None;
         self.unlisten();
         self.partial.clear();
         self.set_phase(Phase::Idle, cx);

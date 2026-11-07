@@ -20,6 +20,32 @@ type Tip = {
 /** Any rail control carrying this attribute gets an instant tooltip. */
 const TIP = "[data-rail-tip]";
 
+/**
+ * Events an inner tooltip host already answered. Tooltip hosts nest (a
+ * widget inside a bar that also hosts), and a pointer event reaches every
+ * host up the tree; the innermost claims it and the rest hide instead of
+ * drawing a second tooltip on top.
+ */
+const claimedTips = new WeakSet<Event>();
+
+/**
+ * Buttons keep their `title` as a fallback where no host delegates, so a
+ * hosted one hides it while the styled tooltip is up (and restores it
+ * after) rather than showing both.
+ */
+function suppressNativeTitle(el: HTMLElement) {
+  if (!el.title) return;
+  el.dataset.railTipTitle = el.title;
+  el.title = "";
+}
+
+function restoreNativeTitle(el: HTMLElement) {
+  const saved = el.dataset.railTipTitle;
+  if (saved == null) return;
+  delete el.dataset.railTipTitle;
+  if (!el.title) el.title = saved;
+}
+
 function tipFor(target: EventTarget | null): Tip | null {
   const el =
     target instanceof Element ? target.closest<HTMLElement>(TIP) : null;
@@ -53,6 +79,7 @@ export function useRailTooltip(side: PopoverSide = "right"): {
 } {
   const [tip, setTip] = useState<Tip | null>(null);
   const clicked = useRef<HTMLElement | null>(null);
+  const tippedEl = useRef<HTMLElement | null>(null);
 
   const show = (next: Tip | null) => {
     if (next?.el !== clicked.current) clicked.current = null;
@@ -61,6 +88,11 @@ export function useRailTooltip(side: PopoverSide = "right"): {
       (next.el === clicked.current || next.el.ariaExpanded === "true")
     ) {
       next = null;
+    }
+    if (tippedEl.current !== next?.el) {
+      if (tippedEl.current) restoreNativeTitle(tippedEl.current);
+      tippedEl.current = next?.el ?? null;
+      if (tippedEl.current) suppressNativeTitle(tippedEl.current);
     }
     setTip((prev) =>
       prev?.el === next?.el &&
@@ -74,24 +106,38 @@ export function useRailTooltip(side: PopoverSide = "right"): {
   };
 
   const handlers = {
-    onPointerOver: (event: PointerEvent) => show(tipFor(event.target)),
+    onPointerOver: (event: PointerEvent) => {
+      if (claimedTips.has(event.nativeEvent)) {
+        show(null);
+        return;
+      }
+      const next = tipFor(event.target);
+      if (next) claimedTips.add(event.nativeEvent);
+      show(next);
+    },
     onPointerLeave: () => {
       clicked.current = null;
-      setTip(null);
+      show(null);
     },
     onPointerDown: () => {
       clicked.current = tip?.el ?? null;
-      setTip(null);
+      show(null);
     },
     onFocus: (event: FocusEvent) => {
+      if (claimedTips.has(event.nativeEvent)) {
+        show(null);
+        return;
+      }
       if (
         event.target instanceof Element &&
         event.target.matches(":focus-visible")
       ) {
-        show(tipFor(event.target));
+        const next = tipFor(event.target);
+        if (next) claimedTips.add(event.nativeEvent);
+        show(next);
       }
     },
-    onBlur: () => setTip(null),
+    onBlur: () => show(null),
   };
 
   const tooltip = tip ? (

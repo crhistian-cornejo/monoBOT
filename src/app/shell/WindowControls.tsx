@@ -60,6 +60,7 @@ export function WindowControls() {
         type="button"
         title="Minimize"
         aria-label="Minimize window"
+        data-rail-tip="Minimize"
         data-tauri-drag-region="false"
         onClick={handleMinimize}
         className="flex w-10 items-center justify-center text-content/60 transition-colors hover:bg-content/10 hover:text-content"
@@ -70,6 +71,7 @@ export function WindowControls() {
         type="button"
         title={isMaximized ? "Restore" : "Maximize"}
         aria-label={isMaximized ? "Restore window" : "Maximize window"}
+        data-rail-tip={isMaximized ? "Restore" : "Maximize"}
         data-tauri-drag-region="false"
         onClick={handleToggleMaximize}
         className="flex w-10 items-center justify-center text-content/60 transition-colors hover:bg-content/10 hover:text-content"
@@ -84,6 +86,7 @@ export function WindowControls() {
         type="button"
         title="Close"
         aria-label="Close window"
+        data-rail-tip="Close"
         data-tauri-drag-region="false"
         onClick={handleClose}
         className="flex w-10 items-center justify-center text-content/60 transition-colors hover:bg-red-600 hover:text-white"

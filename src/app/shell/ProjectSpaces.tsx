@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, type RefObject } from "react";
 import { basename } from "../../platform/tauri/fs";
 import { MOD } from "../../platform/tauri/platform";
+import { useKeybindingLabel } from "../../shared/hooks/useKeybindingLabel";
 import { useProjectAppearance } from "../../features/projects/hooks/useProjectAppearance";
 import {
   projectRailItems,
@@ -89,6 +90,11 @@ export function ProjectSpacesBar({
 }) {
   const { groupLabels } = useProjectAppearance();
   const busy = useMemo(() => [...(busyPaths ?? [])], [busyPaths]);
+  const settingsShortcut = useKeybindingLabel("App: Settings", `${MOD},`);
+  const openProjectShortcut = useKeybindingLabel(
+    "App: Open Project",
+    `${MOD}O`,
+  );
   return (
     <div
       className="grid h-10 shrink-0 grid-cols-[auto_1fr_auto] items-center gap-1 px-2"
@@ -96,7 +102,11 @@ export function ProjectSpacesBar({
     >
       <div className="flex w-7 justify-start">
         {onOpenSettings ? (
-          <IconButton label={`Settings (${MOD},)`} onClick={onOpenSettings}>
+          <IconButton
+            label="Settings"
+            shortcut={settingsShortcut}
+            onClick={onOpenSettings}
+          >
             <Settings className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}
@@ -121,6 +131,8 @@ export function ProjectSpacesBar({
               type="button"
               title={label}
               aria-label={working ? `${label}, working` : label}
+              data-rail-tip={label}
+              data-rail-tip-detail={working ? "Working" : undefined}
               aria-current={current ? "true" : undefined}
               data-tauri-drag-region="false"
               onClick={() => {
@@ -143,7 +155,11 @@ export function ProjectSpacesBar({
       </nav>
       <div className="flex w-7 justify-end">
         {onOpenProject ? (
-          <IconButton label={`Open project (${MOD}O)`} onClick={onOpenProject}>
+          <IconButton
+            label="Open project"
+            shortcut={openProjectShortcut}
+            onClick={onOpenProject}
+          >
             <Plus className="size-3.5" strokeWidth={1.75} />
           </IconButton>
         ) : null}

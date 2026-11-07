@@ -71,6 +71,7 @@ import {
 import { ExplorerMenu, type ExplorerMenuItem } from "./ExplorerMenu";
 import { FileTypeIcon } from "./FileTypeIcon";
 import { PaneHeader } from "../../../shared/ui/PaneHeader";
+import { useKeybindingLabel } from "../../../shared/hooks/useKeybindingLabel";
 
 const GIT_STATUS_COLOR: Record<string, string> = {
   modified: "text-amber-400",
@@ -284,6 +285,10 @@ export const FileTree = memo(function FileTree({
   const suppressFileClickUntil = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
+  const findShortcut = useKeybindingLabel(
+    "App: Find in Files",
+    `${MOD}${SHIFT}F`,
+  );
   const name = rootLabel?.trim() || basename(cwd);
   const rootOpen = expanded.has(cwd);
 
@@ -1042,7 +1047,8 @@ export const FileTree = memo(function FileTree({
           </HeaderIcon>
           {onSearch ? (
             <HeaderIcon
-              label={`Search in files (${MOD}Shift+F)`}
+              label="Search in files"
+              shortcut={findShortcut}
               onClick={onSearch}
             >
               <Search className="size-3.5" strokeWidth={1.75} />
@@ -1125,20 +1131,26 @@ export const FileTree = memo(function FileTree({
 
 function HeaderIcon({
   label,
+  shortcut,
   onClick,
   active = false,
   children,
 }: {
   label: string;
+  /** Displayed keys, e.g. "Ctrl+Shift+F"; joins the label in title and aria. */
+  shortcut?: string;
   onClick?: () => void;
   active?: boolean;
   children: ReactNode;
 }) {
+  const titled = shortcut ? `${label} (${shortcut})` : label;
   return (
     <button
       type="button"
-      title={label}
-      aria-label={label}
+      title={titled}
+      aria-label={titled}
+      data-rail-tip={label}
+      data-rail-tip-detail={shortcut}
       aria-pressed={active || undefined}
       onMouseDown={(e) => e.preventDefault()}
       onClick={onClick}

@@ -21,6 +21,11 @@ pub(super) struct NewsState {
     pub(super) summary: super::hover_cards::Hover,
     /// Each report header's bounds, for its summary to open against.
     pub(super) anchors: HashMap<String, AnchorSlot>,
+    /// The feed's scroll, for the fade that says there is more below.
+    pub(super) scroll: gpui::ScrollHandle,
+    /// Reports being saved as a note, and each one's last result.
+    pub(super) note_pending: HashSet<String>,
+    pub(super) note_feedback: HashMap<String, Result<(), String>>,
 }
 
 impl NewsState {
@@ -152,6 +157,73 @@ impl Monos {
                 session,
                 body: format!("{}: {}", habit, news::preview(text, 240)),
             });
+        }
+    }
+
+    /// "Save as note" on a report: the same note the transcript's saves,
+    /// titled after the bot and where it posted (SaveNoteButton).
+    pub(super) fn save_report_note(
+        &mut self,
+        item_id: &str,
+        title: String,
+        body: String,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.news.note_pending.insert(item_id.to_owned()) {
+            return;
+        }
+        self.news.note_feedback.remove(item_id);
+        let note = monocode_core::response::Note {
+            id: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos() as u64,
+            title: title
+                .chars()
+                .take(monocode_core::notes::MAX_TITLE)
+                .collect(),
+            body,
+            tags: Vec::new(),
+            source_session: 0,
+            source_cwd: String::new(),
+        };
+        let store = self.store.clone();
+        let work = cx
+            .background_executor()
+            .spawn(async move { locked(&store)?.save_note(&note) });
+        let item_id = item_id.to_owned();
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.news_note_result(&item_id, result, cx)
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    fn news_note_result(
+        &mut self,
+        item_id: &str,
+        result: Result<(), String>,
+        cx: &mut Context<Self>,
+    ) {
+        self.news.note_pending.remove(item_id);
+        let success = result.is_ok();
+        self.news.note_feedback.insert(item_id.to_owned(), result);
+        cx.notify();
+        if success {
+            let item_id = item_id.to_owned();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_secs(2))
+                    .await;
+                let _ = this.update(cx, |this, cx| {
+                    this.news.note_feedback.remove(&item_id);
+                    cx.notify();
+                });
+            })
+            .detach();
         }
     }
 

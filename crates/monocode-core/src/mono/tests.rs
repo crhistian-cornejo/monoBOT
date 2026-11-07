@@ -29,6 +29,15 @@ fn identity_projects_order_and_hidden_sessions_survive_restart() {
     assert_ne!(saved.monos[0].mascot, saved.monos[1].mascot);
 }
 #[test]
+fn an_agent_message_names_its_sender_for_route_recovery() {
+    let text = agents::agent_message("Principal", "principal", "Check the invoices");
+    assert_eq!(agents::message_sender(&text), Some("Principal"));
+    assert!(agents::message_sender("hola").is_none());
+    assert!(agents::message_sender("<agent_message from=\"\">x</agent_message>").is_none());
+    assert!(agents::message_sender("<agent_message from=").is_none());
+}
+
+#[test]
 fn memory_supersedes_uniquely_redacts_and_archives_before_prompt_budget() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path();
@@ -57,12 +66,11 @@ fn memory_supersedes_uniquely_redacts_and_archives_before_prompt_budget() {
         .text
         .unwrap()
         .contains("fact number 0"));
-    assert_eq!(
-        memory::search(root, id, "fact number 204", None)
-            .unwrap()
-            .len(),
-        1
-    );
+    // A loose query scores every line sharing a word; the best match wins.
+    let hits = memory::search(root, id, "fact number 204", None).unwrap();
+    assert!(hits.len() <= 20);
+    assert_eq!(hits[0].line, "- 2026-10-18 · fact number 204");
+    assert_eq!(hits[0].date.as_deref(), Some("2026-10-18"));
     assert!(memory::topic("../secret").is_err());
 }
 #[test]

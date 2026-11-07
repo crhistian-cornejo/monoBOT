@@ -46,6 +46,33 @@ pub(super) struct AgentCalls {
     delegations: Option<Vec<Delegation>>,
     /// By the outbox message that carried each request.
     routes: HashMap<String, AgentRoute>,
+    writes: Option<gpui::Task<()>>,
+    completed: std::collections::VecDeque<String>,
+}
+
+impl AgentCalls {
+    /// Whether a live route is still waiting on this delegation's answer:
+    /// the panel's "awaiting reply" mark. Routes live in memory, so a
+    /// restart drops them and a stale entry shows nothing rather than
+    /// claim a wait that is no longer running.
+    pub(super) fn pending_delegation(&self, id: &str) -> bool {
+        self.routes
+            .values()
+            .any(|route| route.delegation.as_deref() == Some(id))
+    }
+
+    pub(super) fn retry_route(&mut self, previous: &str, next: &str) {
+        if let Some(route) = self.routes.remove(previous) {
+            self.routes.insert(next.to_owned(), route);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn forget_routes(&mut self) {
+        self.routes.clear();
+        self.delegations = None;
+        self.completed.clear();
+    }
 }
 
 impl Monos {
@@ -60,11 +87,22 @@ impl Monos {
     fn save_delegations(&mut self, cx: &mut Context<Self>) {
         let list = self.delegations().clone();
         let store = self.store.clone();
-        cx.background_executor()
-            .spawn(async move {
-                let _ = locked(&store).and_then(|db| delegations::save(&db, &list));
-            })
-            .detach();
+        let previous = self.agent_calls.writes.take();
+        self.agent_calls.writes = Some(cx.spawn(async move |this, cx| {
+            if let Some(previous) = previous {
+                previous.await;
+            }
+            let result = cx
+                .background_executor()
+                .spawn(async move { locked(&store).and_then(|db| delegations::save(&db, &list)) })
+                .await;
+            if let Err(error) = result {
+                let _ = this.update(cx, |this, cx| {
+                    this.error = Some(error);
+                    cx.notify();
+                });
+            }
+        }));
     }
 
     /// Whether this action is one of the agents' own; answers it if so.
@@ -245,8 +283,16 @@ impl Monos {
             }
         };
         let wait = input["wait"] == true;
-        let text = agents::agent_message(&sender.label(), &agents::member_role(sender), &message);
+        let delegation =
+            delegations::record(self.delegations(), &sender.id, &target.id, &message, now);
+        let text = agents::agent_message_with_delegation(
+            &sender.label(),
+            &agents::member_role(sender),
+            &message,
+            Some(&delegation),
+        );
         let Some(message_id) = self.enqueue(&target.id, text, Vec::new(), false, cx) else {
+            self.delegations().retain(|entry| entry.id != delegation);
             self.finish_call(
                 call,
                 Err("That agent's conversation is not available".into()),
@@ -256,8 +302,6 @@ impl Monos {
         };
         self.ensure_chat(&target.id, cx);
         self.agent_calls.messaging.mark_answering(&target.id, now);
-        let delegation =
-            delegations::record(self.delegations(), &sender.id, &target.id, &message, now);
         self.save_delegations(cx);
         let mut route = AgentRoute {
             from_mono: sender.id.clone(),
@@ -352,18 +396,127 @@ impl Monos {
         }
     }
 
+    /// The answer an agent wrote after the message `sent` landed, as
+    /// Tauri's replyAfter reads it: every assistant row until the next
+    /// user message. The clipped notification body would cut a longer
+    /// answer at its first paragraph, so it is not used here.
+    fn agent_reply(&self, chat: &str, sent: &str, cx: &App) -> Option<String> {
+        let view = self.chats.get(chat)?;
+        let rows = view.read(cx).mono_rows(cx);
+        let message = self.inflight.get(chat).filter(|m| m.id == sent)?;
+        let start = {
+            rows.iter().enumerate().rev().find_map(|(index, row)| {
+                if !row.is_prompt() || !row.first {
+                    return None;
+                }
+                let text: String = rows[index..]
+                    .iter()
+                    .take_while(|part| {
+                        part.role == row.role && (std::ptr::eq(*part, row) || !part.first)
+                    })
+                    .map(|part| part.text.as_str())
+                    .collect();
+                (text.trim() == message.text.trim()).then_some(index)
+            })
+        }?;
+        agents::reply_after(rows, start, false).map(|(_, reply)| reply)
+    }
+
     /// The other agent's turn ended after the message `sent` landed: its
     /// answer goes to the call waiting for it, or to the asker's chat.
-    pub(super) fn agent_answered(&mut self, chat: &str, sent: &str, cx: &mut Context<Self>) {
-        if !self.agent_calls.routes.contains_key(sent) {
-            return;
+    pub(super) fn agent_answered(
+        &mut self,
+        chat: &str,
+        sent: &str,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.agent_calls.completed.iter().any(|id| id == sent) {
+            return true;
         }
-        let reply = self
-            .chats
+        if self.agent_calls.routes.contains_key(sent) {
+            let Some(reply) = self.agent_reply(chat, sent, cx) else {
+                return false;
+            };
+            self.agent_calls.completed.push_back(sent.to_owned());
+            if self.agent_calls.completed.len() > delegations::MAX {
+                self.agent_calls.completed.pop_front();
+            }
+            self.route_answered(sent, reply, cx);
+            return true;
+        }
+        // Routes live in memory, so a restart loses them while the queued
+        // agent_message survives: the answer still goes to the agent the
+        // message names, else the asker would wait on it forever.
+        let Some(text) = self
+            .inflight
             .get(chat)
-            .map(|view| view.read(cx).notification_reply_body(cx))
-            .unwrap_or_default();
-        self.route_answered(sent, reply, cx);
+            .filter(|m| m.id == sent)
+            .map(|m| m.text.clone())
+        else {
+            return true;
+        };
+        let Some(from) = agents::message_sender(&text) else {
+            return true;
+        };
+        let delegation_id = agents::message_delegation(&text).map(str::to_owned);
+        let stored_sender = delegation_id.as_deref().and_then(|id| {
+            self.delegations()
+                .iter()
+                .find(|entry| entry.id == id && entry.to == chat)
+                .map(|entry| entry.from.clone())
+        });
+        let asker = stored_sender
+            .as_deref()
+            .and_then(|id| self.roster.get(id).cloned())
+            .or_else(|| {
+                agents::find_agent(chat, &self.roster.monos, from)
+                    .cloned()
+                    .ok()
+            });
+        let Some(asker) = asker else {
+            return false;
+        };
+        let Some(reply) = self.agent_reply(chat, sent, cx) else {
+            return false;
+        };
+        self.agent_calls.completed.push_back(sent.to_owned());
+        if self.agent_calls.completed.len() > delegations::MAX {
+            self.agent_calls.completed.pop_front();
+        }
+        let reply = if reply.trim().is_empty() {
+            "(no written answer)".to_owned()
+        } else {
+            reply
+        };
+        let pending = self
+            .delegations()
+            .iter()
+            .rev()
+            .find(|d| {
+                d.from == asker.id
+                    && d.to == chat
+                    && d.reply.is_none()
+                    && delegation_id.as_deref().is_none_or(|id| id == d.id)
+            })
+            .map(|d| d.id.clone());
+        if let Some(id) = pending
+            && delegations::answer(self.delegations(), &id, &reply)
+        {
+            self.save_delegations(cx);
+        }
+        let name = self
+            .roster
+            .get(chat)
+            .map_or_else(|| chat.to_owned(), Mono::label);
+        let message = format!(
+            "<agent_reply from=\"{}\">\n{}\n</agent_reply>\n{} answered the message you sent with agents.message.",
+            name,
+            reply.trim(),
+            name
+        );
+        self.enqueue(&asker.id, message, Vec::new(), true, cx);
+        self.ensure_chat(&asker.id, cx);
+        true
     }
 
     /// A group's chat waits for one member's answer to group.ask, keyed by
@@ -410,17 +563,17 @@ impl Monos {
         let Some(mut route) = self.agent_calls.routes.remove(sent) else {
             return;
         };
+        let reply = if reply.trim().is_empty() {
+            "(no written answer)".to_owned()
+        } else {
+            reply
+        };
         self.answer_delegation(&route, &reply, cx);
         if let Some(call) = route.call.take() {
             let id = route.wait.clone().unwrap_or_default();
             self.finish_call(call, Ok(route.waited(&id, Some(&reply))), cx);
             return;
         }
-        let reply = if reply.trim().is_empty() {
-            "(no written answer)".to_owned()
-        } else {
-            reply
-        };
         let message = format!(
             "<agent_reply from=\"{}\">\n{}\n</agent_reply>\n{} answered the message you sent with agents.message.",
             route.name,

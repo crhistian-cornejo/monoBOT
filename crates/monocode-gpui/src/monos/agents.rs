@@ -274,6 +274,37 @@ impl Monos {
             .into_any_element()
     }
 
+    /// The Groups label's "+": opens the group editor for a new group.
+    pub(super) fn new_group_button(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        icon_button("new-group", "New group", "plus")
+            .debug_selector(|| "sidebar-new-group".into())
+            .size(px(20.))
+            .mr(px(-3.))
+            .on_click(cx.listener(|this, _, w, cx| this.open_group_dialog(None, w, cx)))
+            .into_any_element()
+    }
+
+    /// With no group yet, a "New group" row opens the same editor.
+    pub(super) fn new_group_row(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        div()
+            .id("new-group-row")
+            .debug_selector(|| "new-group".into())
+            .role(Role::Button)
+            .aria_label("New group")
+            .h(px(32.))
+            .px_2()
+            .flex()
+            .items_center()
+            .gap_2()
+            .text_size(px(14.))
+            .text_color(content(0.5))
+            .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
+            .child(icon("plus", 16.))
+            .child("New group")
+            .on_click(cx.listener(|this, _, w, cx| this.open_group_dialog(None, w, cx)))
+            .into_any_element()
+    }
+
     /// With no bot yet, a "New bot" row opens the same menu.
     pub(super) fn new_bot_row(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()

@@ -4061,6 +4061,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "monobot-voice"
+version = "0.16.0"
+dependencies = [
+ "bzip2 0.5.2",
+ "cpal",
+ "monobot-dictation",
+ "serde_json",
+ "sherpa-onnx",
+ "tar",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "monocode-core"
 version = "0.16.0"
 dependencies = [
@@ -4127,6 +4140,7 @@ dependencies = [
  "mermaid-rs-renderer",
  "mimalloc",
  "monobot-dictation",
+ "monobot-voice",
  "monocode-core",
  "notify",
  "objc2 0.6.4",
@@ -4144,6 +4158,7 @@ dependencies = [
  "similar",
  "streaming-iterator",
  "syntect",
+ "sys-locale",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c",

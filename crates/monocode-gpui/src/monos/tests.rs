@@ -992,6 +992,26 @@ fn mono_app_launch_visibility_can_be_toggled_and_survives_roster_reload(cx: &mut
             .show_started_sessions_in_sidebar
     );
 }
+#[test]
+fn agent_requests_wait_for_a_separate_turn_while_normal_messages_can_steer() {
+    let mut message = Message {
+        id: "request".into(),
+        text: monocode_core::mono::agents::agent_message("Principal", "principal", "Do work"),
+        sent_at: None,
+        internal: false,
+        error: None,
+        attachments: Vec::new(),
+    };
+    assert!(can_dispatch(&message, false));
+    assert!(!can_dispatch(&message, true));
+    message.text = "A follow-up from the user".into();
+    assert!(can_dispatch(&message, true));
+    message.internal = true;
+    assert!(!can_dispatch(&message, true));
+    message.error = Some("Retry required".into());
+    assert!(!can_dispatch(&message, false));
+}
+
 #[gpui::test]
 fn queued_messages_are_saved_before_dispatch_and_do_not_run_while_blocked(cx: &mut TestAppContext) {
     let s = setup(cx);
@@ -1022,6 +1042,52 @@ fn queued_messages_are_saved_before_dispatch_and_do_not_run_while_blocked(cx: &m
             .len(),
         0
     );
+}
+
+#[gpui::test]
+fn a_failed_queued_message_does_not_hold_back_the_next(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let failed = mono::new_id();
+    let clean = mono::new_id();
+    cx.update(|cx| {
+        s.manager.update(cx, |m, cx| {
+            let outbox = &mut m.roster.get_mut(&s.id).unwrap().outbox;
+            for (id, text, error) in [
+                (
+                    failed.clone(),
+                    "This send failed",
+                    Some("Retry required".to_string()),
+                ),
+                (clean.clone(), "This one must still go", None),
+            ] {
+                outbox.push(Message {
+                    sent_at: None,
+                    id,
+                    text: text.into(),
+                    internal: false,
+                    error,
+                    attachments: Vec::new(),
+                });
+            }
+            m.save(cx);
+            m.configure_chat(&s.id, cx);
+        })
+    });
+    cx.run_until_parked();
+    s.manager.read_with(cx, |m, cx| {
+        assert_eq!(
+            m.chats[&s.id].read(cx).settings.mono_message_id.as_deref(),
+            Some(clean.as_str()),
+            "the message behind a failed send still dispatches"
+        );
+        let outbox = &m.roster.get(&s.id).unwrap().outbox;
+        assert!(
+            outbox
+                .iter()
+                .any(|entry| entry.id == failed && entry.error.is_some()),
+            "the failed one keeps its Retry/Discard card"
+        );
+    });
 }
 
 #[gpui::test]
@@ -1405,6 +1471,46 @@ fn a_session_open_in_mono_details_keeps_its_history(cx: &mut TestAppContext) {
             assert!(!chat.update(cx, |chat, cx| chat.unload_history(cx)));
         })
         .unwrap();
+}
+
+#[gpui::test]
+fn group_dialog_scrolls_and_keeps_actions_visible(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.simulate_resize(gpui::size(px(800.), px(600.)));
+    s.window
+        .update(visual, |_, window, cx| {
+            s.manager
+                .update(cx, |m, cx| m.open_group_dialog(None, window, cx));
+        })
+        .unwrap();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+
+    let dialog = visual.debug_bounds("group-dialog").unwrap();
+    let body = visual.debug_bounds("group-dialog-body").unwrap();
+    let footer = visual.debug_bounds("group-dialog-footer").unwrap();
+    let habits = visual.debug_bounds("group-dialog-habits-toggle").unwrap();
+    assert!(dialog.bottom() <= px(600.));
+    assert!(footer.bottom() <= dialog.bottom());
+    assert!(footer.top() >= body.bottom());
+
+    visual.simulate_event(gpui::ScrollWheelEvent {
+        position: gpui::point(body.right() - px(4.), body.center().y),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-3000.))),
+        modifiers: Default::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+
+    let scrolled_habits = visual.debug_bounds("group-dialog-habits-toggle").unwrap();
+    assert!(scrolled_habits.top() < habits.top());
+    assert!(scrolled_habits.bottom() <= body.bottom());
+    assert_eq!(visual.debug_bounds("group-dialog-footer").unwrap(), footer);
+    visual.simulate_click(scrolled_habits.center(), Default::default());
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("group-dialog-habits-undo").is_some());
 }
 
 #[gpui::test]
@@ -2056,6 +2162,344 @@ fn the_principal_makes_bots_and_agents_write_to_each_other(cx: &mut TestAppConte
 }
 
 #[gpui::test]
+fn an_agents_reply_comes_back_whole_not_the_notification_clip(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    s.manager.update(cx, |m, _| {
+        let mono = m.roster.get_mut(&s.id).unwrap();
+        mono.kind = Some("bot".into());
+        mono.bot_role = Some("principal".into());
+    });
+    call(
+        &s,
+        "make",
+        "bots.create",
+        json!({"role": "finance", "name": "Cash"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    let cash = s.manager.update(cx, |m, cx| {
+        let cash = m
+            .roster
+            .monos
+            .iter()
+            .find(|m| m.name == "Cash")
+            .unwrap()
+            .id
+            .clone();
+        let mono = m.roster.get_mut(&cash).unwrap();
+        mono.kind = None;
+        mono.bot_role = None;
+        m.ensure_chat(&cash, cx);
+        cash
+    });
+    cx.run_until_parked();
+    s.manager.update(cx, |m, cx| {
+        for id in [&s.id, &cash] {
+            m.chats[id].update(cx, |chat, _| {
+                chat.settings.usage_limit = Some(Default::default());
+            });
+        }
+    });
+    let request = format!("Sum October {}", "x".repeat(2500));
+    call(
+        &s,
+        "ask",
+        "agents.message",
+        json!({"to": "cash", "message": request}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    let (cash, sent_id, sent_text) = s.manager.read_with(cx, |m, _| {
+        let cash = m.roster.monos.iter().find(|m| m.name == "Cash").unwrap();
+        let last = cash.outbox.last().unwrap();
+        (cash.id.clone(), last.id.clone(), last.text.clone())
+    });
+    // A reply a notification clip would mangle: a second paragraph plus a
+    // fenced block, well past its 240-unit cap.
+    let answer = "Hash: ca5bfeee\n\nThe details follow in a second paragraph that the \
+        notification body would have dropped entirely, because it sits past the first \
+        paragraph break and well past its two hundred and forty unit cap on purpose.\n\n\
+        ```text\nfeat(groups): wire the native group dialog\n```";
+    s.manager.update(cx, |m, cx| {
+        m.inflight.insert(
+            cash.clone(),
+            monocode_core::mono::Message {
+                id: sent_id.clone(),
+                text: sent_text.clone(),
+                sent_at: Some(1),
+                internal: false,
+                error: None,
+                attachments: Vec::new(),
+            },
+        );
+        assert!(
+            !m.agent_answered(&cash, &sent_id, cx),
+            "a missing request must not consume the route"
+        );
+        let retry_id = format!("{sent_id}-retry");
+        m.agent_calls.retry_route(&sent_id, &retry_id);
+        m.inflight.get_mut(&cash).unwrap().id = retry_id.clone();
+        m.chats[&cash].update(cx, |view, cx| {
+            view.transcript.update(cx, |t, cx| {
+                let start = t.source_rows().len();
+                t.patch(
+                    start,
+                    vec![
+                        monocode_core::transcript::Row {
+                            role: "user".into(),
+                            text: sent_text[..1000].to_owned(),
+                            first: true,
+                            sent_at: Some(1),
+                        },
+                        monocode_core::transcript::Row {
+                            role: "user".into(),
+                            text: sent_text[1000..].to_owned(),
+                            first: false,
+                            sent_at: None,
+                        },
+                        monocode_core::transcript::Row {
+                            role: "assistant".into(),
+                            text: answer[..100].to_owned(),
+                            first: true,
+                            sent_at: Some(2),
+                        },
+                        monocode_core::transcript::Row {
+                            role: "assistant".into(),
+                            text: answer[100..].to_owned(),
+                            first: false,
+                            sent_at: None,
+                        },
+                    ],
+                    cx,
+                );
+            });
+        });
+        assert!(m.agent_answered(&cash, &retry_id, cx));
+        assert!(m.agent_answered(&cash, &retry_id, cx));
+    });
+    s.manager.read_with(cx, |m, _| {
+        let reply = m
+            .roster
+            .get(&s.id)
+            .unwrap()
+            .outbox
+            .last()
+            .expect("the reply lands back in the asker's chat");
+        assert!(reply.internal);
+        assert!(reply.text.starts_with("<agent_reply from=\"Cash\">"));
+        for part in [
+            "Hash: ca5bfeee",
+            "second paragraph",
+            "two hundred and forty unit cap",
+            "feat(groups): wire the native group dialog",
+        ] {
+            assert!(reply.text.contains(part), "reply is missing {part:?}");
+        }
+    });
+    s.manager.update(cx, |m, _| {
+        let entry = m
+            .delegations()
+            .iter()
+            .find(|d| d.to == cash)
+            .expect("the delegation was recorded");
+        assert_eq!(entry.reply.as_deref(), Some(answer));
+    });
+    cx.run_until_parked();
+    let saved = monocode_core::mono::delegations::load(&locked(&s.store).unwrap());
+    let entry = saved.iter().find(|d| d.to == cash).unwrap();
+    assert_eq!(entry.reply.as_deref(), Some(answer));
+}
+
+#[gpui::test]
+fn a_stopped_agent_request_stays_retryable_without_a_false_reply(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    s.manager.update(cx, |m, _| {
+        let mono = m.roster.get_mut(&s.id).unwrap();
+        mono.kind = Some("bot".into());
+        mono.bot_role = Some("principal".into());
+    });
+    call(
+        &s,
+        "make",
+        "bots.create",
+        json!({"role": "finance", "name": "Cash"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    let cash = s.manager.update(cx, |m, cx| {
+        let id = m
+            .roster
+            .monos
+            .iter()
+            .find(|m| m.name == "Cash")
+            .unwrap()
+            .id
+            .clone();
+        m.ensure_chat(&id, cx);
+        id
+    });
+    cx.run_until_parked();
+    s.manager.update(cx, |m, cx| {
+        m.chats[&cash].update(cx, |chat, _| {
+            chat.settings.usage_limit = Some(Default::default());
+        });
+    });
+    call(
+        &s,
+        "ask",
+        "agents.message",
+        json!({"to": "cash", "message": "Find the invoice"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    s.manager.update(cx, |m, cx| {
+        let request = m.roster.get(&cash).unwrap().outbox.last().unwrap().clone();
+        m.inflight.insert(cash.clone(), request);
+        m.chats[&cash].update(cx, |chat, cx| {
+            chat.busy = true;
+            chat.stop_if_busy(cx);
+        });
+    });
+    cx.run_until_parked();
+    s.manager.update(cx, |m, _| {
+        let request = m.roster.get(&cash).unwrap().outbox.last().unwrap();
+        assert!(request.error.as_deref().unwrap().contains("stopped"));
+        assert!(
+            !m.roster
+                .get(&s.id)
+                .unwrap()
+                .outbox
+                .iter()
+                .any(|message| { message.text.starts_with("<agent_reply") })
+        );
+        let delegation = m.delegations().iter().find(|d| d.to == cash).unwrap();
+        let id = delegation.id.clone();
+        assert!(delegation.reply.is_none());
+        assert!(m.agent_calls.pending_delegation(&id));
+    });
+}
+
+#[gpui::test]
+fn a_restarted_agent_routes_the_answer_to_the_original_delegation(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    s.manager.update(cx, |m, _| {
+        let principal = m.roster.get_mut(&s.id).unwrap();
+        principal.kind = Some("bot".into());
+        principal.bot_role = Some("principal".into());
+        principal.name = "Principal".into();
+    });
+    call(
+        &s,
+        "make",
+        "bots.create",
+        json!({"role": "finance", "name": "Cash"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    let cash = s.manager.update(cx, |m, cx| {
+        let id = m
+            .roster
+            .monos
+            .iter()
+            .find(|m| m.name == "Cash")
+            .unwrap()
+            .id
+            .clone();
+        let mono = m.roster.get_mut(&id).unwrap();
+        mono.kind = None;
+        mono.bot_role = None;
+        m.ensure_chat(&id, cx);
+        id
+    });
+    cx.run_until_parked();
+    s.manager.update(cx, |m, cx| {
+        for id in [&s.id, &cash] {
+            m.chats[id].update(cx, |chat, _| {
+                chat.settings.usage_limit = Some(Default::default());
+            });
+        }
+    });
+    for (id, message) in [("first", "First request"), ("second", "Second request")] {
+        call(
+            &s,
+            id,
+            "agents.message",
+            json!({"to": "cash", "message": message}),
+            cx,
+        )
+        .try_recv()
+        .unwrap()
+        .unwrap();
+    }
+    s.manager.update(cx, |m, cx| {
+        let first = m.roster.get(&cash).unwrap().outbox[0].clone();
+        m.agent_calls.forget_routes();
+        m.roster.get_mut(&s.id).unwrap().name = "Renamed Principal".into();
+        m.inflight.insert(cash.clone(), first.clone());
+        m.chats[&cash].update(cx, |view, cx| {
+            view.transcript.update(cx, |transcript, cx| {
+                let start = transcript.source_rows().len();
+                transcript.patch(
+                    start,
+                    vec![
+                        monocode_core::transcript::Row {
+                            role: "user".into(),
+                            text: first.text,
+                            first: true,
+                            sent_at: first.sent_at,
+                        },
+                        monocode_core::transcript::Row {
+                            role: "assistant".into(),
+                            text: "Answer to first request".into(),
+                            first: true,
+                            sent_at: None,
+                        },
+                    ],
+                    cx,
+                );
+            });
+        });
+        assert!(m.agent_answered(&cash, &first.id, cx));
+        let entries = m.delegations();
+        assert_eq!(
+            entries
+                .iter()
+                .find(|d| d.message == "First request")
+                .unwrap()
+                .reply
+                .as_deref(),
+            Some("Answer to first request")
+        );
+        assert!(
+            entries
+                .iter()
+                .find(|d| d.message == "Second request")
+                .unwrap()
+                .reply
+                .is_none()
+        );
+        assert!(
+            m.roster
+                .get(&s.id)
+                .unwrap()
+                .outbox
+                .iter()
+                .any(|message| { message.text.contains("Answer to first request") })
+        );
+    });
+}
+
+#[gpui::test]
 fn a_bots_settings_show_its_specialty_and_save_its_tools(cx: &mut TestAppContext) {
     let s = setup(cx);
     cx.update(|cx| cx.set_reduce_motion(true));
@@ -2080,6 +2524,492 @@ fn a_bots_settings_show_its_specialty_and_save_its_tools(cx: &mut TestAppContext
     assert!(!access.iter().any(|a| a == "web"));
     assert!(access.iter().any(|a| a == "read"));
     assert_eq!(mono.specialty.as_deref(), Some("Runs the team"));
+}
+
+struct CallTestVoice {
+    spoken: mpsc::Sender<String>,
+}
+
+impl monobot_voice::queue::Backend for CallTestVoice {
+    fn synthesize(&self, text: &str, _: &str, _: i32) -> Result<Vec<u8>, String> {
+        Ok(text.as_bytes().to_vec())
+    }
+
+    fn play(&self, audio: &[u8], _: Arc<std::sync::atomic::AtomicBool>) -> Result<(), String> {
+        self.spoken
+            .send(String::from_utf8_lossy(audio).into_owned())
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[gpui::test]
+fn group_call_streams_a_member_and_saves_the_transcript(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::{Group, native::Mark};
+    use monocode_core::transcript::Row;
+    let s = setup(cx);
+    let fake_mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(fake_mic)));
+    let (member, key, before) = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.name = "Team".into();
+        group.group = Some(Group {
+            members: vec![member.clone()],
+            ..Group::default()
+        });
+        let key = (s.id.clone(), member.clone());
+        assert!(m.ensure_seat(&key, cx));
+        let before = m.chats[&s.id].read(cx).mono_rows(cx).len();
+        (member, key, before)
+    });
+    cx.run_until_parked();
+    let (spoken, heard) = mpsc::channel();
+    let (seat, request) = s.manager.update(cx, |m, cx| {
+        let seat = m.groups.seats.get_mut(&key).unwrap().view.take().unwrap();
+        let group = m.roster.get(&s.id).unwrap().clone();
+        assert!(panels::overview_tabs(&group).contains(&OverviewTab::Call));
+        m.overview_tab = OverviewTab::Call;
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_say("Cash, what happened?", cx);
+        let (target, request) = m.call_test_current_request().unwrap();
+        assert_eq!(target, member);
+        seat.update(cx, |seat, cx| {
+            seat.input
+                .update(cx, |input, cx| input.set_text("hold".into(), cx));
+        });
+        m.groups.seats.get_mut(&key).unwrap().view = Some(seat.clone());
+        (seat, request)
+    });
+    let answer_index = s.manager.update(cx, |m, cx| {
+        let index = seat.update(cx, |seat, cx| {
+            seat.busy = true;
+            seat.transcript.update(cx, |transcript, cx| {
+                let start = transcript.source_rows().len();
+                transcript.patch(
+                    start,
+                    vec![
+                        Mark::GroupRequest(request.clone()).row(Some(1)),
+                        Row {
+                            role: "user".into(),
+                            text: "call prompt".into(),
+                            first: true,
+                            sent_at: Some(1),
+                        },
+                        Row {
+                            role: "assistant".into(),
+                            text: "First sentence. ".into(),
+                            first: true,
+                            sent_at: None,
+                        },
+                    ],
+                    cx,
+                );
+                start + 2
+            })
+        });
+        m.call_progress(cx);
+        index
+    });
+    assert_eq!(
+        heard.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "First sentence."
+    );
+    s.manager.update(cx, |m, cx| {
+        seat.update(cx, |seat, cx| {
+            seat.busy = false;
+            seat.transcript.update(cx, |transcript, cx| {
+                transcript.patch(
+                    answer_index,
+                    vec![Row {
+                        role: "assistant".into(),
+                        text: "First sentence. Second sentence.".into(),
+                        first: true,
+                        sent_at: None,
+                    }],
+                    cx,
+                );
+            });
+        });
+        m.call_progress(cx);
+        let lines = m.call_test_lines();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[1].text, "First sentence. Second sentence.");
+        assert!(m.roster.get(&s.id).unwrap().outbox.is_empty());
+        assert_eq!(m.chats[&s.id].read(cx).mono_rows(cx).len(), before);
+    });
+    assert_eq!(
+        heard.recv_timeout(Duration::from_secs(5)).unwrap(),
+        "Second sentence."
+    );
+    s.manager.update(cx, |m, cx| {
+        m.select_overview(OverviewTab::Members, cx);
+        let documents = &m.roster.get(&s.id).unwrap().documents;
+        assert_eq!(documents.len(), 1);
+        assert!(
+            documents[0]
+                .body
+                .contains("**Cash:** First sentence. Second sentence.")
+        );
+    });
+    cx.run_until_parked();
+    let roster = Roster::load(&locked(&s.store).unwrap()).unwrap();
+    assert!(
+        roster.get(&s.id).unwrap().documents[0]
+            .body
+            .contains("**You:** Cash, what happened?")
+    );
+}
+
+#[gpui::test]
+fn interrupting_a_call_cancels_only_its_queued_request(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    let mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(mic)));
+    let (member, key) = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member.clone()],
+            ..Group::default()
+        });
+        let key = (s.id.clone(), member.clone());
+        assert!(m.ensure_seat(&key, cx));
+        (member, key)
+    });
+    cx.run_until_parked();
+    let (spoken, _heard) = mpsc::channel();
+    s.manager.update(cx, |m, cx| {
+        let seat = m.groups.seats.get_mut(&key).unwrap().view.take().unwrap();
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_say("Cash, respond", cx);
+        let (_, request) = m.call_test_current_request().unwrap();
+        seat.update(cx, |seat, cx| {
+            seat.input
+                .update(cx, |input, cx| input.set_text("hold".into(), cx));
+        });
+        m.groups.seats.get_mut(&key).unwrap().view = Some(seat);
+        assert!(m.call_test_queued(&s.id, &member, &request));
+        m.send_to_member(
+            &s.id,
+            &member,
+            "Other request".into(),
+            "other".into(),
+            false,
+            cx,
+        );
+        m.call_test_interrupt(cx);
+        assert!(!m.call_test_queued(&s.id, &member, &request));
+        assert!(m.call_test_queued(&s.id, &member, "other"));
+        assert!(m.call_test_current_request().is_none());
+        assert_eq!(
+            m.call_test_lines()[1].status,
+            monocode_core::mono::groups::call::LineStatus::Stopped
+        );
+        m.call_hang_up(cx);
+        assert!(m.roster.get(&s.id).unwrap().documents.is_empty());
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn group_call_sends_dictation_after_the_user_pauses(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    let mic = crate::dictation::tests::Fake::installed("Cash hello");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(mic.clone())));
+    let (member, key) = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member.clone()],
+            ..Group::default()
+        });
+        let key = (s.id.clone(), member.clone());
+        assert!(m.ensure_seat(&key, cx));
+        (member, key)
+    });
+    cx.run_until_parked();
+    let (spoken, _heard) = mpsc::channel();
+    let seat = s.manager.update(cx, |m, cx| {
+        let seat = m.groups.seats.get_mut(&key).unwrap().view.take().unwrap();
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_input().update(cx, |input, cx| {
+            input.set_text("Unsent draft".into(), cx);
+        });
+        m.call_test_dictated().update(cx, |input, cx| {
+            input.set_text("Stale dictated text".into(), cx);
+        });
+        m.call_test_interrupt(cx);
+        seat
+    });
+    cx.run_until_parked();
+    mic.hear(monobot_dictation::Event::Speech(true));
+    mic.hear(monobot_dictation::Event::Partial("Cash hello".into()));
+    mic.hear(monobot_dictation::Event::Speech(false));
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(600));
+    cx.run_until_parked();
+    s.manager.update(cx, |m, cx| {
+        assert_eq!(m.call_test_lines()[0].text, "Cash hello");
+        assert_eq!(m.call_test_current_request().unwrap().0, member);
+        assert_eq!(
+            m.call_test_input().read(cx).content.as_ref(),
+            "Unsent draft"
+        );
+        seat.update(cx, |seat, cx| {
+            seat.input
+                .update(cx, |input, cx| input.set_text("hold".into(), cx));
+        });
+        m.groups.seats.get_mut(&key).unwrap().view = Some(seat);
+        m.call_hang_up(cx);
+    });
+    cx.run_until_parked();
+    assert!(mic.calls().iter().any(|call| call == "stop 7"));
+}
+
+#[gpui::test]
+fn group_call_skips_a_member_with_an_unsent_draft(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::{Group, call::LineStatus};
+    let s = setup(cx);
+    let mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(mic)));
+    let (member, key) = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member.clone()],
+            ..Group::default()
+        });
+        let key = (s.id.clone(), member.clone());
+        assert!(m.ensure_seat(&key, cx));
+        (member, key)
+    });
+    cx.run_until_parked();
+    let (spoken, _heard) = mpsc::channel();
+    s.manager.update(cx, |m, cx| {
+        let seat = m.groups.seats[&key].view.clone().unwrap();
+        seat.update(cx, |seat, cx| {
+            seat.input
+                .update(cx, |input, cx| input.set_text("draft".into(), cx));
+        });
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_say("Cash, please answer", cx);
+        assert!(m.call_test_current_request().is_none());
+        let lines = m.call_test_lines();
+        assert_eq!(lines[1].who, member);
+        assert_eq!(lines[1].status, LineStatus::Busy);
+        m.call_hang_up(cx);
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn group_call_recovers_mic_errors_and_keeps_muted_installation_quiet(cx: &mut TestAppContext) {
+    use monocode_core::{dictation::Phase, mono::groups::Group};
+    let s = setup(cx);
+    let fake = crate::dictation::tests::Fake::installed("");
+    *fake.start_error.lock().unwrap() = Some("Microphone unavailable".into());
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(fake.clone())));
+    let (spoken, _heard) = mpsc::channel();
+    let mic = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member],
+            ..Group::default()
+        });
+        let group = group.clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_mic()
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        mic.read_with(cx, |mic, _| mic.error().map(str::to_owned))
+            .as_deref(),
+        Some("Microphone unavailable")
+    );
+    *fake.start_error.lock().unwrap() = None;
+    mic.update(cx, |mic, cx| mic.dismiss(cx));
+    cx.run_until_parked();
+    assert_eq!(mic.read_with(cx, |mic, _| mic.phase()), Phase::Listening);
+
+    s.manager.update(cx, |m, cx| m.call_test_mute(cx));
+    cx.run_until_parked();
+    *fake.installed.lock().unwrap() = false;
+    mic.update(cx, |mic, cx| mic.install(cx));
+    cx.run_until_parked();
+    assert_eq!(mic.read_with(cx, |mic, _| mic.phase()), Phase::Idle);
+    assert!(
+        fake.calls()
+            .iter()
+            .filter(|call| *call == "cancel 7")
+            .count()
+            >= 2
+    );
+    s.manager.update(cx, |m, cx| m.call_hang_up(cx));
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn group_call_tab_is_visible_and_closing_the_panel_hangs_up(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(mic.clone())));
+    s.window
+        .update(cx, |shell, _, cx| {
+            shell.workspace.right_panel_width = 400.;
+            s.manager.update(cx, |m, cx| {
+                let member = m
+                    .roster
+                    .create_bot(&m.root, "finance", false)
+                    .unwrap()
+                    .id
+                    .clone();
+                m.roster.get_mut(&member).unwrap().name = "Cash".into();
+                let group = m.roster.get_mut(&s.id).unwrap();
+                group.kind = Some("group".into());
+                group.group = Some(Group {
+                    members: vec![member],
+                    ..Group::default()
+                });
+                m.settings = None;
+                m.select_overview(OverviewTab::Members, cx);
+            });
+        })
+        .unwrap();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    let tab = visual.debug_bounds("mono-overview-Call").unwrap();
+    visual.simulate_click(tab.center(), Default::default());
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("group-call-content").is_some());
+    assert!(visual.debug_bounds("group-call-start").is_some());
+    let (spoken, _heard) = mpsc::channel();
+    s.manager.update(visual, |m, cx| {
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+    });
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("group-call-hang-up").is_some());
+    let toggle = visual.debug_bounds("toggle-right-panel").unwrap();
+    visual.simulate_click(toggle.center(), Default::default());
+    visual.run_until_parked();
+    assert!(s.manager.read_with(visual, |m, _| m.call.is_none()));
+    assert!(mic.calls().iter().any(|call| call == "cancel 7"));
+}
+
+#[gpui::test]
+fn old_voice_setup_cannot_change_a_new_call(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    let fake = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(fake)));
+    s.manager.update(cx, |m, cx| {
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group::default());
+        let group = group.clone();
+        let old = m.call_test_pending_voice(&group, cx);
+        m.call_hang_up(cx);
+        let current = m.call_test_pending_voice(&group, cx);
+        assert_ne!(old, current);
+        m.call_test_voice_failure(&s.id, old, cx);
+        assert!(m.call_test_voice_error().is_none());
+        m.call_test_voice_failure(&s.id, current, cx);
+        assert_eq!(m.call_test_voice_error().as_deref(), Some("voice failure"));
+        m.call_hang_up(cx);
+    });
+    cx.run_until_parked();
+}
+
+#[gpui::test]
+fn old_silence_timer_cannot_finish_a_new_calls_turn(cx: &mut TestAppContext) {
+    use monocode_core::{dictation::Phase, mono::groups::Group};
+    let s = setup(cx);
+    let fake = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(fake.clone())));
+    let (spoken, _heard) = mpsc::channel();
+    s.manager.update(cx, |m, cx| {
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group::default());
+        let group = group.clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+    });
+    cx.run_until_parked();
+    let say_partial = |fake: &crate::dictation::tests::Fake, cx: &mut TestAppContext| {
+        fake.hear(monobot_dictation::Event::Speech(true));
+        fake.hear(monobot_dictation::Event::Partial("hola".into()));
+        fake.hear(monobot_dictation::Event::Speech(false));
+        cx.run_until_parked();
+    };
+    say_partial(&fake, cx);
+    let old = s.manager.update(cx, |m, cx| {
+        let epoch = m.call_test_pause_epoch();
+        m.call_hang_up(cx);
+        epoch
+    });
+    cx.run_until_parked();
+    let (spoken, _heard) = mpsc::channel();
+    let mic = s.manager.update(cx, |m, cx| {
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_mic()
+    });
+    cx.run_until_parked();
+    say_partial(&fake, cx);
+    s.manager.update(cx, |m, cx| {
+        let current = m.call_test_pause_epoch();
+        assert_ne!(old, current);
+        m.call_test_end_silence(&s.id, old, cx);
+        assert_eq!(mic.read(cx).phase(), Phase::Listening);
+        m.call_test_end_silence(&s.id, current, cx);
+        assert_eq!(mic.read(cx).phase(), Phase::Finishing);
+    });
+    cx.run_until_parked();
+    assert!(fake.calls().iter().any(|call| call == "stop 7"));
+    s.manager.update(cx, |m, cx| m.call_hang_up(cx));
+    cx.run_until_parked();
 }
 
 #[gpui::test]

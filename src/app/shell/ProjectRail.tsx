@@ -76,6 +76,8 @@ import { LiveAgentsPreview } from "../../features/sessions/ui/LiveAgentsPreview"
 import { ProjectLogoIcon } from "../../features/projects/ui/ProjectLogoIcon";
 import { ProjectMascot } from "../../features/projects/ui/ProjectMascot";
 import { RailAction, RailSearch } from "./RailAction";
+import { useRailTooltip } from "./RailTooltip";
+import { useKeybindingLabel } from "../../shared/hooks/useKeybindingLabel";
 import { DevModeSlot, TabVisitNav } from "./TitleBar";
 import { SidebarUpdateFooter } from "./SidebarUpdate";
 import type { InstalledUpdate } from "../model/updateNotice";
@@ -239,6 +241,9 @@ export function ProjectRail({
     x: number;
     y: number;
   } | null>(null);
+  const railTip = useRailTooltip("bottom");
+  const searchShortcut = useKeybindingLabel("App: Search", `${MOD}K`);
+  const settingsShortcut = useKeybindingLabel("App: Settings", `${MOD},`);
   const projectMenu = useProjectMenu({
     onRemoveProject,
     onOpenNotificationSettings,
@@ -383,6 +388,7 @@ export function ProjectRail({
   return (
     <nav
       ref={resize.setPaneRef}
+      {...railTip.handlers}
       aria-label="Projects"
       className={`sidebar-glass relative shrink-0 flex-col border-r border-stroke ${visible ? "flex" : "hidden"}`}
     >
@@ -425,8 +431,10 @@ export function ProjectRail({
               label="Settings"
               icon={Settings}
               onClick={onOpenSettings}
-              shortcut={`${MOD},`}
-              ariaLabel={`Settings (${MOD},)`}
+              shortcut={settingsShortcut}
+              ariaLabel={
+                settingsShortcut ? `Settings (${settingsShortcut})` : "Settings"
+              }
             />
           </div>
         </>
@@ -439,8 +447,10 @@ export function ProjectRail({
               icon={Search}
               onClick={onSearch}
               active={searchActive}
-              shortcut={`${MOD}K`}
-              ariaLabel={`Search (${MOD}K)`}
+              shortcut={searchShortcut}
+              ariaLabel={
+                searchShortcut ? `Search (${searchShortcut})` : "Search"
+              }
             />
             <div className="mt-0.5" />
             <RailAction
@@ -600,8 +610,10 @@ export function ProjectRail({
               label="Settings"
               icon={Settings}
               onClick={onOpenSettings}
-              shortcut={`${MOD},`}
-              ariaLabel={`Settings (${MOD},)`}
+              shortcut={settingsShortcut}
+              ariaLabel={
+                settingsShortcut ? `Settings (${settingsShortcut})` : "Settings"
+              }
             />
           </div>
         </>
@@ -635,6 +647,7 @@ export function ProjectRail({
         onPointerDown={resize.onPointerDown}
         onDoubleClick={resize.onDoubleClick}
       />
+      {railTip.tooltip}
     </nav>
   );
 }
@@ -739,6 +752,7 @@ function ProjectSectionHeader({
           type="button"
           title="New project group"
           aria-label="New project group"
+          data-rail-tip="New project group"
           onClick={(event) => {
             const rect = event.currentTarget.getBoundingClientRect();
             onAddGroup(rect.left, rect.bottom);
@@ -878,6 +892,7 @@ function ProjectGroupSection({
           data-no-drag
           title="Group options"
           aria-label={`${group.name} group options`}
+          data-rail-tip="Group options"
           aria-haspopup="menu"
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => {
@@ -1116,6 +1131,7 @@ function ProjectCard({
         data-no-drag
         title="Project options"
         aria-label="Project options"
+        data-rail-tip="Project options"
         aria-haspopup="menu"
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
@@ -1136,6 +1152,7 @@ function ProjectCard({
         data-no-drag
         title={pinned ? "Unpin project" : "Pin project"}
         aria-label={pinned ? "Unpin project" : "Pin project"}
+        data-rail-tip={pinned ? "Unpin project" : "Pin project"}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
@@ -1247,6 +1264,7 @@ function AddProjectButton({ onOpenFolder }: { onOpenFolder: () => void }) {
         type="button"
         title="Open project"
         aria-label="Open project"
+        data-rail-tip="Open project"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}

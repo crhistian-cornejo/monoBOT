@@ -333,14 +333,11 @@ impl Shell {
                                     .gap_0p5()
                                     .child(self.file_search_button(cx))
                                     .child(
-                                        icon_button(
+                                        command_icon_button(
                                             "classic-new-session",
-                                            if cfg!(target_os = "macos") {
-                                                "New session (⌘T)"
-                                            } else {
-                                                "New session (Ctrl+T)"
-                                            },
+                                            "New session",
                                             "plus",
+                                            "Tab: New",
                                         )
                                         .debug_selector(|| "classic-new-session".into())
                                         .on_mouse_down(MouseButton::Left, |_, _, cx| {
@@ -413,6 +410,7 @@ impl Shell {
                     .debug_selector(|| "classic-workspace-picker".into())
                     .role(Role::Button)
                     .aria_label("Switch working copy")
+                    .tooltip(chrome_tip("Switch working copy", None))
                     .aria_description(self.working_copy().to_owned())
                     .aria_expanded(self.classic_worktree_picker.is_some())
                     .cursor_pointer()
@@ -923,6 +921,7 @@ impl Shell {
             popover("session-preview", Anchor::Slot(preview.anchor.clone()))
                 .side(Side::Right)
                 .gap(8.)
+                .solid(rail_color())
                 .width(260.)
                 .max_height(440.)
                 .track(preview.surface.clone())

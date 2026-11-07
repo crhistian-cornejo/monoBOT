@@ -325,6 +325,7 @@ pub(crate) struct Popover {
     animate: bool,
     /// Without a fixed width, the card hugs its content between these.
     fit: (Option<f32>, Option<f32>),
+    solid: Option<Hsla>,
     children: Vec<AnyElement>,
 }
 pub(crate) fn popover(id: impl Into<ElementId>, anchor: Anchor) -> Popover {
@@ -341,6 +342,7 @@ pub(crate) fn popover(id: impl Into<ElementId>, anchor: Anchor) -> Popover {
         modal_classic: None,
         animate: true,
         fit: (None, None),
+        solid: None,
         children: Vec::new(),
     }
 }
@@ -401,6 +403,12 @@ impl Popover {
     /// The content's own padding, the caller's `className="p-…"`.
     pub(crate) fn padding(mut self, padding: f32) -> Self {
         self.padding = padding;
+        self
+    }
+    /// Tooltip-style cards: an opaque surface instead of the glass blur,
+    /// so nothing bleeds through behind small text.
+    pub(crate) fn solid(mut self, fill: Hsla) -> Self {
+        self.solid = Some(fill);
         self
     }
     pub(crate) fn priority(mut self, priority: usize) -> Self {
@@ -488,7 +496,8 @@ impl Popover {
             .rounded(px(radius))
             .opacity(enter)
             .shadow(shadow())
-            .child(glass(tint, radius))
+            .when_some(self.solid, |d, fill| d.bg(fill))
+            .when(self.solid.is_none(), |d| d.child(glass(tint, radius)))
             .child(
                 div()
                     .relative()

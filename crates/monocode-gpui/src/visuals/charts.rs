@@ -1,16 +1,16 @@
 //! Charts drawn as dithered cells: bar, area, line, stat, gauge, donut,
 //! heatmap and progress.
 use super::{
-    color,
+    VisualView, color,
     dither::{
         Align, CELL, Curve, Grid, Label, Motion, Scale, compact, crosshair, glow, glowing_line,
         hoverable, inked, marker, pointer, readout, swatch,
     },
 };
-use crate::theme::content;
+use crate::theme::{accent_color, content};
 use gpui::{
-    AnyElement, App, Bounds, FontWeight, Hsla, IntoElement, Pixels, SharedString, Window, canvas,
-    div, point, prelude::*, px,
+    AnyElement, App, Bounds, Context, FocusHandle, FontWeight, Hsla, IntoElement, Pixels, Role,
+    SharedString, Window, canvas, div, point, prelude::*, px,
 };
 use monocode_core::visual::{ChartKind, Series, Slice, ThemeColor};
 
@@ -55,6 +55,18 @@ fn drawn_to(points: &[[f32; 2]], curve: &Curve, x: f32) -> Vec<[f32; 2]> {
     out
 }
 
+/// A cartesian chart's keyboard and legend state, kept by the view across
+/// renders (charts.tsx: `active`, `spot`).
+pub(super) struct ChartFocus {
+    /// The focus the chart takes for its arrow-key readout.
+    pub(super) handle: FocusHandle,
+    /// The category the arrow keys picked; the pointer's pick wins while it
+    /// hovers.
+    pub(super) active: Option<usize>,
+    /// The legend's spotlight: (series, locked by a click).
+    pub(super) spot: Option<(usize, bool)>,
+}
+
 pub(super) fn chart(
     kind: ChartKind,
     series: Vec<Series>,
@@ -62,53 +74,290 @@ pub(super) fn chart(
     height: f32,
     motion: Motion,
     id: SharedString,
+    key: String,
+    focus: FocusHandle,
+    active: Option<usize>,
+    spot: Option<(usize, bool)>,
+    cx: &mut Context<VisualView>,
 ) -> AnyElement {
+    let count = series
+        .iter()
+        .map(|s| s.values.len())
+        .max()
+        .unwrap_or(0)
+        .max(labels.len());
+    let spot_index = spot.map(|(index, _)| index);
+    let summary: SharedString = format!(
+        "{} chart of {}, {count} points",
+        match kind {
+            ChartKind::Bar => "bar",
+            ChartKind::Line => "line",
+            ChartKind::Area => "area",
+        },
+        series
+            .iter()
+            .map(|s| s.label.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
+    )
+    .into();
+    // What the desktop's aria-live span announces as the pick changes.
+    let live: Option<SharedString> = active.map(|i| {
+        let title = labels
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| format!("#{}", i + 1));
+        format!(
+            "{title}: {}",
+            series
+                .iter()
+                .map(|s| {
+                    format!(
+                        "{} {}",
+                        s.label,
+                        s.values.get(i).map_or_else(|| "–".into(), |v| reading(*v))
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+        .into()
+    });
+    let table_series = series.clone();
+    let table_labels = labels.clone();
     let legend = (series.len() > 1).then(|| {
         div()
             .flex()
             .flex_wrap()
             .gap_x_4()
             .gap_y_1()
-            .children(series.iter().map(|s| {
+            .children(series.iter().enumerate().map(|(index, s)| {
+                let key_on = key.clone();
+                let key_click = key.clone();
+                // Hover spotlights a series; a click locks it (charts.tsx).
                 div()
+                    .id(SharedString::from(format!("{id}-legend-{index}")))
+                    .role(Role::Button)
+                    .cursor_pointer()
+                    .aria_label(s.label.clone())
+                    .aria_toggled(if spot == Some((index, true)) {
+                        gpui::Toggled::True
+                    } else {
+                        gpui::Toggled::False
+                    })
                     .flex()
                     .items_center()
                     .gap(px(6.))
+                    .px(px(4.))
+                    .rounded_md()
                     .text_size(px(11.))
                     .font_family(crate::fonts::mono())
-                    .text_color(content(0.6))
+                    .text_color(content(if spot_index.is_some_and(|on| on != index) {
+                        0.35
+                    } else {
+                        0.6
+                    }))
+                    .hover(|s| s.bg(content(0.08)))
                     .child(swatch(color(&s.color)))
                     .child(s.label.clone())
+                    .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                        if let Some(entry) = this.charts.get_mut(&key_on) {
+                            let changed = if *hovered {
+                                if entry.spot.is_none_or(|(_, locked)| !locked) {
+                                    entry.spot = Some((index, false));
+                                    true
+                                } else {
+                                    false
+                                }
+                            } else if entry.spot.is_none_or(|(_, locked)| !locked) {
+                                entry.spot.take().is_some()
+                            } else {
+                                false
+                            };
+                            if changed {
+                                cx.notify();
+                            }
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        if let Some(entry) = this.charts.get_mut(&key_click) {
+                            entry.spot = if entry.spot == Some((index, true)) {
+                                None
+                            } else {
+                                Some((index, true))
+                            };
+                            cx.notify();
+                        }
+                    }))
             }))
     });
+    let keys = key.clone();
+    let id_table = SharedString::from(format!("{id}-data"));
     div()
         .w_full()
         .flex()
         .flex_col()
         .gap_3()
         .child(
-            hoverable(id).w_full().h(px(height)).child(
-                canvas(
-                    |_, _, _| {},
-                    move |bounds, _, window, cx| {
-                        window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-                            cartesian(kind, &series, &labels, bounds, motion, window, cx)
-                        })
-                    },
-                )
-                .size_full(),
-            ),
+            hoverable(id)
+                .w_full()
+                .h(px(height))
+                .role(Role::Group)
+                .aria_label(summary.clone())
+                .when_some(live, |d, text| d.aria_description(text))
+                .track_focus(&focus)
+                .tab_stop(true)
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus(|s| s.border_color(accent_color()))
+                .on_key_down(cx.listener(move |this, event: &gpui::KeyDownEvent, _window, cx| {
+                    let Some(entry) = this.charts.get_mut(&keys) else {
+                        return;
+                    };
+                    let last = count.saturating_sub(1);
+                    let key = event.keystroke.key.as_str();
+                    if key == "escape" {
+                        entry.active = None;
+                        entry.spot = None;
+                        cx.stop_propagation();
+                        cx.notify();
+                        return;
+                    }
+                    let page = (count / 10).max(1) as i64;
+                    let step = match key {
+                        "left" => -1i64,
+                        "right" => 1,
+                        "pageup" => -page,
+                        "pagedown" => page,
+                        _ => 0,
+                    };
+                    let next = match key {
+                        "home" => Some(0),
+                        "end" => Some(last),
+                        _ if step != 0 && count > 0 => {
+                            let base = entry
+                                .active
+                                .map(|i| i as i64)
+                                .unwrap_or(if key == "left" { last as i64 + 1 } else { -1 });
+                            Some((base + step).clamp(0, last as i64) as usize)
+                        }
+                        _ => None,
+                    };
+                    let Some(next) = next else {
+                        return;
+                    };
+                    entry.active = Some(next);
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+                .child(
+                    canvas(
+                        |_, _, _| {},
+                        move |bounds, _, window, cx| {
+                            window.with_content_mask(
+                                Some(gpui::ContentMask { bounds }),
+                                |window| {
+                                    cartesian(
+                                        kind,
+                                        &series,
+                                        &labels,
+                                        bounds,
+                                        motion,
+                                        active.filter(|_| focus.is_focused(window)),
+                                        spot_index,
+                                        window,
+                                        cx,
+                                    )
+                                },
+                            )
+                        },
+                    )
+                    .size_full(),
+                ),
         )
         .children(legend)
+        .child(data_table(
+            id_table,
+            summary,
+            &table_series,
+            &table_labels,
+            count,
+        ))
         .into_any_element()
 }
 
+/// The data behind a chart, for screen readers: the desktop's sr-only
+/// `<table>`, kept to a clipped pixel so it stays in the a11y tree.
+fn data_table(
+    id: SharedString,
+    summary: SharedString,
+    series: &[Series],
+    labels: &[String],
+    count: usize,
+) -> AnyElement {
+    let title = |i: usize| {
+        labels
+            .get(i)
+            .cloned()
+            .unwrap_or_else(|| format!("#{}", i + 1))
+    };
+    div()
+        .id(id.clone())
+        .absolute()
+        .size(px(1.))
+        .overflow_hidden()
+        .role(Role::Table)
+        .aria_label(summary)
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-head")))
+                .role(Role::Row)
+                .child(
+                    div()
+                        .id(SharedString::from(format!("{id}-h0")))
+                        .role(Role::ColumnHeader)
+                        .child("Label"),
+                )
+                .children(series.iter().enumerate().map(|(j, s)| {
+                    div()
+                        .id(SharedString::from(format!("{id}-h{}", j + 1)))
+                        .role(Role::ColumnHeader)
+                        .child(s.label.clone())
+                })),
+        )
+        .children((0..count).map(|i| {
+            div()
+                .id(SharedString::from(format!("{id}-r{i}")))
+                .role(Role::Row)
+                .child(
+                    div()
+                        .id(SharedString::from(format!("{id}-r{i}-label")))
+                        .role(Role::RowHeader)
+                        .child(title(i)),
+                )
+                .children(series.iter().enumerate().map(|(j, s)| {
+                    div()
+                        .id(SharedString::from(format!("{id}-r{i}-{j}")))
+                        .role(Role::Cell)
+                        .child(
+                            s.values
+                                .get(i)
+                                .map_or_else(|| "–".into(), |v| reading(*v)),
+                        )
+                }))
+        }))
+        .into_any_element()
+}
+
+#[allow(clippy::too_many_arguments)]
 fn cartesian(
     kind: ChartKind,
     series: &[Series],
     labels: &[String],
     bounds: Bounds<Pixels>,
     motion: Motion,
+    keys: Option<usize>,
+    spot: Option<usize>,
     window: &mut Window,
     cx: &mut App,
 ) {
@@ -201,6 +450,16 @@ fn cartesian(
     let hover = pointer(bounds, window)
         .map(|(x, y)| (x - (origin.x - bounds.origin.x).as_f32(), y))
         .filter(|(x, _)| (0. ..=plot_w).contains(x));
+    // The keyboard's pick stands in for the pointer's while it is away.
+    let pick = |i: Option<usize>| i.or(keys).filter(|&i| i < count);
+    // Series the legend's spotlight leaves out draw muted, never gone.
+    let tint = |j: usize, c: Hsla| {
+        if spot.is_some_and(|on| on != j) {
+            faint(c, 0.25)
+        } else {
+            c
+        }
+    };
     let title = |i: usize| {
         labels
             .get(i)
@@ -217,7 +476,7 @@ fn cartesian(
             .collect()
     };
     if bars {
-        let hovered = hover.map(|(x, _)| ((x / band) as usize).min(count - 1));
+        let hovered = pick(hover.map(|(x, _)| ((x / band) as usize).min(count - 1)));
         if let Some(i) = hovered {
             // A soft column behind the hovered category.
             window.paint_quad(gpui::fill(
@@ -229,7 +488,7 @@ fn cartesian(
             ));
         }
         bar_marks(
-            series, count, &scale, &grid, band, hovered, motion, window, cx,
+            series, count, &scale, &grid, band, hovered, spot, motion, window, cx,
         );
         if let Some(i) = hovered {
             let peak = series
@@ -267,7 +526,11 @@ fn cartesian(
     let reach = motion.at(0., 900., window, cx) * plot_w;
     if matches!(kind, ChartKind::Area) {
         let baseline = y_of(scale.min.max(0.));
-        let colors: Vec<Hsla> = series.iter().map(|s| color(&s.color)).collect();
+        let colors: Vec<Hsla> = series
+            .iter()
+            .enumerate()
+            .map(|(j, s)| tint(j, color(&s.color)))
+            .collect();
         // A wash of each colour under its area stands in for bloom.
         for (curve, color) in curves.iter().zip(&colors) {
             let mut area: Vec<[f32; 2]> = curve
@@ -307,18 +570,22 @@ fn cartesian(
             inked(col, row, tone).then_some(colors[index])
         });
     }
-    let hovered = hover.map(|(x, _)| {
+    let hovered = pick(hover.map(|(x, _)| {
         if count <= 1 {
             0
         } else {
             ((x / plot_w) * (count - 1) as f32).round() as usize
         }
-    });
+    }));
     if let Some(i) = hovered {
         crosshair(origin, x_of(i), plot_h, window);
     }
-    for (curve, (s, points)) in curves.iter().zip(series.iter().zip(&points)) {
-        let c = color(&s.color);
+    for (j, (curve, (s, points))) in curves
+        .iter()
+        .zip(series.iter().zip(&points))
+        .enumerate()
+    {
+        let c = tint(j, color(&s.color));
         let samples = drawn_to(&curve.samples(2.), curve, reach);
         glowing_line(&samples, origin, 2., c, window);
         // The end marker rides the head of the line as it draws in.
@@ -366,6 +633,7 @@ fn bar_marks(
     grid: &Grid,
     band: f32,
     hovered: Option<usize>,
+    spot: Option<usize>,
     motion: Motion,
     window: &mut Window,
     cx: &mut App,
@@ -405,7 +673,18 @@ fn bar_marks(
             }
         }
     }
-    let colors: Vec<Hsla> = series.iter().map(|s| color(&s.color)).collect();
+    let colors: Vec<Hsla> = series
+        .iter()
+        .enumerate()
+        .map(|(j, s)| {
+            let c = color(&s.color);
+            if spot.is_some_and(|on| on != j) {
+                faint(c, 0.25)
+            } else {
+                c
+            }
+        })
+        .collect();
     grid.paint(window, |col, row| {
         let (top, bottom, j, i) = columns.get(col as usize).copied().flatten()?;
         if row < top || row >= bottom {

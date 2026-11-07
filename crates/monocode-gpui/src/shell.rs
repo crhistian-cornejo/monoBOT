@@ -410,21 +410,6 @@ const CORNER_TABS_LEAD: f32 = 7.;
 const CORNER_CONTROL_GAP: f32 = 4.;
 const CORNER_BUTTONS_WIDTH: f32 = 48. + 2. * CORNER_CONTROL_GAP;
 // TitleBar.tsx's labels, with their shortcuts.
-const TOGGLE_SIDEBAR_LABEL: &str = if cfg!(target_os = "macos") {
-    "Toggle Sidebar (⌘B)"
-} else {
-    "Toggle Sidebar (Ctrl+B)"
-};
-const BACK_LABEL: &str = if cfg!(target_os = "macos") {
-    "Back (⌘[)"
-} else {
-    "Back (Ctrl+[)"
-};
-const FORWARD_LABEL: &str = if cfg!(target_os = "macos") {
-    "Forward (⌘])"
-} else {
-    "Forward (Ctrl+])"
-};
 const TOGGLE_RIGHT_PANEL_LABEL: &str = if cfg!(target_os = "macos") {
     "Toggle right sidebar (⌘⇧B)"
 } else {
@@ -1781,6 +1766,9 @@ impl Shell {
             || self.workspace.right_panel_open == open
         {
             return;
+        }
+        if !open && let Some(monos) = self.monos.clone() {
+            monos.update(cx, |monos, cx| monos.close_group_call(cx));
         }
         let details_focus =
             if let Some(monos) = self.monos.as_ref().filter(|m| m.read(cx).active.is_some()) {
@@ -4678,13 +4666,14 @@ impl Shell {
             .child(self.sidebar_toggle(cx))
             .child(titlebar_drag_area().flex_1())
             .child(
-                icon_button_enabled(
+                command_icon_button_enabled(
                     "visit-back",
-                    BACK_LABEL,
+                    "Back",
                     "chevron-left",
                     self.settings.is_some()
                         || (self.workspace.classic_layout && self.mono_active(cx))
                         || !self.history.back.is_empty(),
+                    "Tab: Back",
                 )
                 .debug_selector(|| "visit-back".into())
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -4697,11 +4686,12 @@ impl Shell {
                 })),
             )
             .child(
-                icon_button_enabled(
+                command_icon_button_enabled(
                     "visit-forward",
-                    FORWARD_LABEL,
+                    "Forward",
                     "chevron-right",
                     !self.history.forward.is_empty(),
+                    "Tab: Forward",
                 )
                 .debug_selector(|| "visit-forward".into())
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -4719,17 +4709,22 @@ impl Shell {
                 .size(px(24.))
                 .child(self.peek_toggle_bounds.probe());
         }
-        icon_button("toggle-sidebar", TOGGLE_SIDEBAR_LABEL, "sidebar")
-            .debug_selector(|| "toggle-sidebar".into())
-            .child(self.peek_toggle_bounds.probe())
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            // Hovering the toggle peeks a collapsed sidebar out.
-            .on_hover(cx.listener(|this, hovered, _, cx| {
-                if !this.workspace.classic_layout {
-                    this.hover_peek_toggle(*hovered, cx)
-                }
-            }))
-            .on_click(cx.listener(|this, _, window, cx| this.toggle_primary_sidebar(window, cx)))
+        command_icon_button(
+            "toggle-sidebar",
+            "Toggle Sidebar",
+            "sidebar",
+            "App: Toggle Sidebar",
+        )
+        .debug_selector(|| "toggle-sidebar".into())
+        .child(self.peek_toggle_bounds.probe())
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        // Hovering the toggle peeks a collapsed sidebar out.
+        .on_hover(cx.listener(|this, hovered, _, cx| {
+            if !this.workspace.classic_layout {
+                this.hover_peek_toggle(*hovered, cx)
+            }
+        }))
+        .on_click(cx.listener(|this, _, window, cx| this.toggle_primary_sidebar(window, cx)))
     }
     /// Part of the card: the project tools beside the workspace, behind a
     /// hairline. Its contents keep their full width while it slides.
@@ -5114,6 +5109,10 @@ impl Shell {
                                             )
                                         }),
                                 )
+                                .tooltip(chrome_tip(
+                                    "Toggle right sidebar",
+                                    Some("App: Toggle Session Sidebar"),
+                                ))
                                 .when(!panel_off, |d| {
                                     d.on_click(cx.listener(|this, _, window, cx| {
                                         this.toggle_right_panel(window, cx)
@@ -5188,16 +5187,16 @@ impl Shell {
         })
     }
     fn file_search_button(&self, cx: &Context<Self>) -> gpui::Stateful<gpui::Div> {
-        let label = if cfg!(target_os = "macos") {
-            "Search files (⌘P)"
-        } else {
-            "Search files (Ctrl+P)"
-        };
-        icon_button("titlebar-file-search", label, "search")
-            .debug_selector(|| "titlebar-file-search".into())
-            .flex_shrink_0()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .on_click(cx.listener(|this, _, window, cx| this.open_quick_open(false, window, cx)))
+        command_icon_button(
+            "titlebar-file-search",
+            "Search files",
+            "search",
+            "App: Go to File",
+        )
+        .debug_selector(|| "titlebar-file-search".into())
+        .flex_shrink_0()
+        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+        .on_click(cx.listener(|this, _, window, cx| this.open_quick_open(false, window, cx)))
     }
     fn diff_stat_room(&self, cx: &App) -> f32 {
         if self.mono_active(cx) || !self.git.read(cx).available() {
@@ -5385,21 +5384,32 @@ impl Shell {
                 200.,
                 MenuStyle::Explorer,
             ),
-            MenuTarget::NewTab => (
-                "New tab".into(),
-                vec![
-                    MenuAction::new("session", "New Session")
-                        .icon("plus")
-                        .shortcut(format!("{MOD}N"))
+            MenuTarget::NewTab => {
+                let keyed = |action: MenuAction, command| match crate::settings::command_shortcut(
+                    &self.workspace.preferences,
+                    command,
+                ) {
+                    Some(keys) => action.shortcut(keys),
+                    None => action,
+                };
+                (
+                    "New tab".into(),
+                    vec![
+                        keyed(
+                            MenuAction::new("session", "New Session").icon("plus"),
+                            "Tab: New",
+                        )
                         .into(),
-                    MenuAction::new("terminal", "New Terminal")
-                        .icon("terminal")
-                        .shortcut(format!("{MOD}J"))
+                        keyed(
+                            MenuAction::new("terminal", "New Terminal").icon("terminal"),
+                            "Terminal: New",
+                        )
                         .into(),
-                ],
-                200.,
-                MenuStyle::Explorer,
-            ),
+                    ],
+                    200.,
+                    MenuStyle::Explorer,
+                )
+            }
             MenuTarget::Tab(_)
             | MenuTarget::MonoTab(_)
             | MenuTarget::SearchTab
@@ -5416,6 +5426,13 @@ impl Shell {
                 let count = tabs.len();
                 let closable = tab.session().is_none_or(|id| self.tab_can_close(id, cx));
                 let pinned = self.tab_pinned(&tab);
+                let keyed = |action: MenuAction, command| match crate::settings::command_shortcut(
+                    &self.workspace.preferences,
+                    command,
+                ) {
+                    Some(keys) => action.shortcut(keys),
+                    None => action,
+                };
                 let mut items = vec![
                     MenuAction::new(
                         if pinned { "unpin" } else { "pin" },
@@ -5423,28 +5440,28 @@ impl Shell {
                     )
                     .into(),
                     MenuItem::Separator,
-                    MenuAction::new("close", "Close Tab")
-                        .shortcut(format!("{MOD}W"))
-                        .disabled(!closable)
-                        .into(),
+                    keyed(
+                        MenuAction::new("close", "Close Tab").disabled(!closable),
+                        "Pane: Close",
+                    )
+                    .into(),
                     MenuItem::Separator,
-                    MenuAction::new("others", "Close Other Tabs")
-                        .disabled(count < 2)
-                        .into(),
+                    keyed(
+                        MenuAction::new("others", "Close Other Tabs").disabled(count < 2),
+                        "Tab: Close Others",
+                    )
+                    .into(),
                     MenuAction::new("right", "Close Tabs to the Right")
                         .disabled(ix + 1 >= count)
                         .into(),
                     MenuAction::new("left", "Close Tabs to the Left")
                         .disabled(ix == 0)
                         .into(),
-                    MenuAction::new("all", "Close All Tabs")
-                        .shortcut(if cfg!(target_os = "macos") {
-                            "⌘⇧W"
-                        } else {
-                            "Ctrl+Shift+W"
-                        })
-                        .disabled(count < 2 && !closable)
-                        .into(),
+                    keyed(
+                        MenuAction::new("all", "Close All Tabs").disabled(count < 2 && !closable),
+                        "Tab: Close All",
+                    )
+                    .into(),
                 ];
                 // Closing a tab keeps its session; archive also hides it from
                 // the active history while preserving everything on disk.
@@ -5686,10 +5703,18 @@ impl Shell {
                         MenuAction::new("open-remote-project", "Open folder on a machine…")
                             .icon("globe")
                             .into(),
-                        MenuAction::new("settings", "Settings")
-                            .icon("settings")
-                            .shortcut(format!("{MOD},"))
-                            .into(),
+                        match crate::settings::command_shortcut(
+                            &self.workspace.preferences,
+                            "App: Settings",
+                        ) {
+                            Some(keys) => MenuAction::new("settings", "Settings")
+                                .icon("settings")
+                                .shortcut(keys)
+                                .into(),
+                            None => MenuAction::new("settings", "Settings")
+                                .icon("settings")
+                                .into(),
+                        },
                     ],
                     240.,
                     MenuStyle::Switcher,
@@ -6892,16 +6917,23 @@ impl Shell {
                                 )
                                 .when(self.workspace.sidebar_search_visible && !agents, |d| {
                                     d.child(
-                                        icon_button("sidebar-search", "Search", "search")
-                                            .debug_selector(|| "sidebar-search-button".into())
-                                            .when(self.app_search.is_some(), |d| d.bg(content(0.1)))
-                                            .on_click(cx.listener(|this, _, window, cx| {
+                                        command_icon_button(
+                                            "sidebar-search",
+                                            "Search",
+                                            "search",
+                                            "App: Search",
+                                        )
+                                        .debug_selector(|| "sidebar-search-button".into())
+                                        .when(self.app_search.is_some(), |d| d.bg(content(0.1)))
+                                        .on_click(
+                                            cx.listener(|this, _, window, cx| {
                                                 if this.app_search.is_some() {
                                                     this.close_app_search(window, cx)
                                                 } else {
                                                     this.focus_search(window, cx)
                                                 }
-                                            })),
+                                            }),
+                                        ),
                                     )
                                 })
                                 .child(
@@ -6954,6 +6986,7 @@ impl Shell {
                     popover("session-preview", Anchor::Slot(preview.anchor.clone()))
                         .side(Side::Right)
                         .gap(8.)
+                        .solid(rail_color())
                         .width(260.)
                         .max_height(440.)
                         .track(preview.surface.clone())
@@ -7046,6 +7079,7 @@ impl Shell {
             .align(Align::Center)
             .gap(8.)
             .padding(8.)
+            .solid(rail_color())
             .without_animation()
             .allow_outside_press()
             .child(
@@ -8120,6 +8154,7 @@ impl Shell {
                                 .group("tab-close")
                                 .role(Role::Button)
                                 .aria_label(format!("Close tab {}", copy.headline))
+                                .tooltip(chrome_tip("Close Tab", Some("Pane: Close")))
                                 .absolute()
                                 .right_1()
                                 .top(px(10.))
@@ -8387,6 +8422,7 @@ impl Shell {
                             .group("new-tab")
                             .role(Role::Button)
                             .aria_label("New session tab")
+                            .tooltip(chrome_tip("New session tab", Some("Tab: New")))
                             .cursor_pointer()
                             .size(px(TAB_PLATE_HEIGHT))
                             .flex_shrink_0()

@@ -34,6 +34,7 @@ import {
   type RunningTerminal,
 } from "../../features/terminal/model/terminalTab";
 import { MOD } from "../../platform/tauri/platform";
+import { useKeybindingLabel } from "../../shared/hooks/useKeybindingLabel";
 import {
   USAGE_CHIP_CLASSES,
   USAGE_REFRESH_CLASSES,
@@ -110,9 +111,14 @@ export function UsageFooter({
   const showTerminalButton = Boolean(
     onNewTerminal || onToggleProjectTerminal,
   );
-  const terminalLabel = projectTerminalActive
-    ? "Terminal"
-    : `New Terminal (${MOD}\`)`;
+  const newTerminalShortcut = useKeybindingLabel("Terminal: New", `${MOD}\``);
+  const terminalTip = projectTerminalActive ? "Terminal" : "New Terminal";
+  const terminalTipDetail = projectTerminalActive
+    ? undefined
+    : (newTerminalShortcut ?? undefined);
+  const terminalLabel = terminalTipDetail
+    ? `${terminalTip} (${terminalTipDetail})`
+    : terminalTip;
   const onTerminalClick = projectTerminalActive
     ? (onToggleProjectTerminal ?? onNewTerminal)
     : (onNewTerminal ?? onToggleProjectTerminal);
@@ -181,6 +187,8 @@ export function UsageFooter({
               aria-label={terminalLabel}
               aria-pressed={projectTerminalOpen}
               title={terminalLabel}
+              data-rail-tip={terminalTip}
+              data-rail-tip-detail={terminalTipDetail}
               onClick={onTerminalClick}
             >
               <Terminal className="size-3.5" strokeWidth={1.75} aria-hidden />

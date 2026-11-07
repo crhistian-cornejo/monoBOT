@@ -52,6 +52,10 @@ qrcode = { version = "0.14", default-features = false }
 # The composer's local dictation: the microphone (cpal), Silero and Parakeet
 # through sherpa-onnx, and the pinned model download Tauri shares.
 monobot-dictation = { path = "../dictation" }
+# Group calls use the same local voices as Tauri and play them natively.
+monobot-voice = { path = "../voice", features = ["playback"] }
+# Match Tauri's navigator.language when speech has no clear language.
+sys-locale = "0.3"
 
 [build-dependencies]
 embed-resource = "3"

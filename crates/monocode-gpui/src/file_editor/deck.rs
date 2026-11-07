@@ -1,8 +1,8 @@
 //! A PowerPoint deck as its slides, read-only: each slide scaled to fit the
 //! panel with its shapes, text, pictures and tables where the file puts them.
 //! Ported from the slide half of `DocumentView.tsx`. What the viewer cannot
-//! draw (charts, SmartArt, video) shows as a labelled box; rotation and
-//! flips are not applied.
+//! draw (charts, SmartArt, video) shows as a labelled box. Rotations and
+//! flips apply to pictures and shape geometry; text never turns with them.
 use super::office::{self, Pictures, identity};
 use super::spreadsheet_chart::parse_hex;
 use super::*;
@@ -11,7 +11,7 @@ use gpui::{
     UnderlineStyle, canvas, list, relative,
 };
 use monocode_core::office::pptx::{
-    Align, Anchor, Deck, Paragraph, ShapeGeometry, SlideItem, TextBody,
+    Align, Anchor, Deck, Frame, Paragraph, ShapeGeometry, SlideItem, TextBody,
 };
 use std::{cell::Cell, collections::HashMap, ops::Range, rc::Rc};
 
@@ -41,6 +41,65 @@ pub(super) fn paragraph_points(paragraph: &Paragraph) -> f64 {
             Some(best.map_or(size, |b| b.max(size)))
         })
         .unwrap_or(paragraph.size)
+}
+
+/// A turned or flipped picture as SVG markup, so the element can carry
+/// the transform (the file's bytes ride in a base64 `data:` image).
+fn image_svg(bytes: &[u8], mime: &str, w: f32, h: f32) -> String {
+    use base64::Engine as _;
+    format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {w} {h}'>\
+         <image href='data:{mime};base64,{data}' width='{w}' height='{h}' preserveAspectRatio='none'/>\
+         </svg>",
+        data = base64::engine::general_purpose::STANDARD.encode(bytes),
+    )
+}
+
+/// The frame's rotation and flips as one element transform, about its
+/// centre as PowerPoint turns them (`DocumentView.tsx`'s CSS transform).
+fn transform_of(frame: &Frame) -> Option<gpui::Transformation> {
+    let degrees = frame.rotate.unwrap_or(0.);
+    (degrees != 0. || frame.flip_h || frame.flip_v).then(|| {
+        gpui::Transformation::default()
+            .with_rotation(gpui::radians(degrees as f32 * std::f32::consts::TAU / 360.))
+            .with_scaling(gpui::size(
+                if frame.flip_h { -1. } else { 1. },
+                if frame.flip_v { -1. } else { 1. },
+            ))
+    })
+}
+
+/// A rotated or flipped shape's fill and stroke as SVG markup, so the
+/// element can carry the transform (rect, ellipse or rounded rect only).
+fn shape_svg(shape: &monocode_core::office::pptx::ShapeItem, scale: f32) -> Option<String> {
+    let fill = shape.fill.as_deref().and_then(parse_hex);
+    let line = shape.line.as_deref().and_then(parse_hex);
+    if fill.is_none() && line.is_none() {
+        return None;
+    }
+    let w = shape.frame.w as f32 * scale;
+    let h = shape.frame.h as f32 * scale;
+    let fill = fill.map_or_else(|| "none".to_string(), |c| format!("#{c:06x}"));
+    let stroke = line.map_or_else(|| "none".to_string(), |c| format!("#{c:06x}"));
+    let figure = match shape.shape {
+        Some(ShapeGeometry::Ellipse) => format!(
+            "<ellipse cx='{cx}' cy='{cy}' rx='{rx}' ry='{ry}' fill='{fill}' stroke='{stroke}' stroke-width='1'/>",
+            cx = w / 2.,
+            cy = h / 2.,
+            rx = w / 2.,
+            ry = h / 2.
+        ),
+        Some(ShapeGeometry::Round) => format!(
+            "<rect width='{w}' height='{h}' rx='{r}' fill='{fill}' stroke='{stroke}' stroke-width='1'/>",
+            r = w.min(h) * 0.12
+        ),
+        None => format!(
+            "<rect width='{w}' height='{h}' fill='{fill}' stroke='{stroke}' stroke-width='1'/>"
+        ),
+    };
+    Some(format!(
+        "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {w} {h}'>{figure}</svg>"
+    ))
 }
 
 impl DeckView {
@@ -166,16 +225,32 @@ impl DeckView {
                 .h(px(f.h as f32 * scale))
         };
         match item {
-            SlideItem::Image(image) => match self.picture(&image.image.bytes) {
-                Some(picture) => frame(&image.frame)
-                    .child(
-                        office::picture(picture)
-                            .size_full()
-                            .object_fit(ObjectFit::Fill),
-                    )
-                    .into_any_element(),
-                None => frame(&image.frame).into_any_element(),
-            },
+            SlideItem::Image(image) => {
+                if let Some(transform) = transform_of(&image.frame) {
+                    let w = image.frame.w as f32 * scale;
+                    let h = image.frame.h as f32 * scale;
+                    return frame(&image.frame)
+                        .child(
+                            gpui::svg()
+                                .data(image_svg(&image.image.bytes, &image.image.mime, w, h).as_bytes())
+                                .absolute()
+                                .inset_0()
+                                .size_full()
+                                .with_transformation(transform),
+                        )
+                        .into_any_element();
+                }
+                match self.picture(&image.image.bytes) {
+                    Some(picture) => frame(&image.frame)
+                        .child(
+                            office::picture(picture)
+                                .size_full()
+                                .object_fit(ObjectFit::Fill),
+                        )
+                        .into_any_element(),
+                    None => frame(&image.frame).into_any_element(),
+                }
+            }
             SlideItem::Unsupported(item) => frame(&item.frame)
                 .flex()
                 .items_center()
@@ -226,19 +301,34 @@ impl DeckView {
             }
             SlideItem::Shape(shape) => {
                 let mut surface = frame(&shape.frame).flex().flex_col();
-                if let Some(fill) = shape.fill.as_deref().and_then(parse_hex) {
-                    surface = surface.bg(gpui::rgb(fill));
-                }
-                if let Some(line) = shape.line.as_deref().and_then(parse_hex) {
-                    surface = surface.border_1().border_color(gpui::rgb(line));
-                }
-                match shape.shape {
-                    Some(ShapeGeometry::Ellipse) => surface = surface.rounded_full(),
-                    Some(ShapeGeometry::Round) => {
-                        let side = (shape.frame.w.min(shape.frame.h) as f32 * scale) * 0.12;
-                        surface = surface.rounded(px(side));
+                let svg = transform_of(&shape.frame)
+                    .and_then(|transform| {
+                        shape_svg(shape, scale).map(|markup| (markup, transform))
+                    });
+                if let Some((markup, transform)) = svg {
+                    surface = surface.child(
+                        gpui::svg()
+                            .data(markup.as_bytes())
+                            .absolute()
+                            .inset_0()
+                            .size_full()
+                            .with_transformation(transform),
+                    );
+                } else {
+                    if let Some(fill) = shape.fill.as_deref().and_then(parse_hex) {
+                        surface = surface.bg(gpui::rgb(fill));
                     }
-                    None => {}
+                    if let Some(line) = shape.line.as_deref().and_then(parse_hex) {
+                        surface = surface.border_1().border_color(gpui::rgb(line));
+                    }
+                    match shape.shape {
+                        Some(ShapeGeometry::Ellipse) => surface = surface.rounded_full(),
+                        Some(ShapeGeometry::Round) => {
+                            let side = (shape.frame.w.min(shape.frame.h) as f32 * scale) * 0.12;
+                            surface = surface.rounded(px(side));
+                        }
+                        None => {}
+                    }
                 }
                 if let Some(body) = &shape.text {
                     surface = surface.child(self.text(body, scale));

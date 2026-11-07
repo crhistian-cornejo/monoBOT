@@ -1920,7 +1920,7 @@ describe("collapsed rail Inbox actions", () => {
     act(() =>
       rail
         .querySelector<HTMLButtonElement>(
-          'button[aria-label="Expand projects"]',
+          'button[aria-label^="Expand projects"]',
         )!
         .click(),
     );

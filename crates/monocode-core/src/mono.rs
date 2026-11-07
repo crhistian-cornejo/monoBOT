@@ -581,11 +581,33 @@ pub fn context(
     } else {
         format!("{}\n\n", instructions(mono, executable))
     };
+    // The same <memory> block the desktop builds: the part of MEMORY.md that
+    // fits, a marker when it is still empty, how much did not load, and the
+    // topic notes the agent can read on demand.
+    let (text, dropped) = memory::budget(&files.memory);
+    let body = if text.is_empty() {
+        "(Empty. Nothing has been remembered yet.)".to_string()
+    } else {
+        text
+    };
+    let overflow = if dropped > 0 {
+        format!(
+            "\n[{dropped} more lines in MEMORY.md did not load; move older detail into topic files.]"
+        )
+    } else {
+        String::new()
+    };
+    let topics = if files.topics.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n\nTopic notes, read on demand with memory.read: {}",
+            files.topics.join(", ")
+        )
+    };
     format!(
-        "<monocode_context>\nMonoBOT adds this context, not the user. Act on it without quoting or describing it.\n\n{rules}<soul>\n{}\n</soul>\n\n<memory>\n{}\nTopic notes: {}\n</memory>{}\n</monocode_context>",
+        "<monocode_context>\nMonoBOT adds this context, not the user. Act on it without quoting or describing it.\n\n{rules}<soul>\n{}\n</soul>\n\n<memory>\n{body}{overflow}{topics}\n</memory>{}\n</monocode_context>",
         files.soul.as_deref().unwrap_or_default(),
-        memory::within_budget(&files.memory),
-        files.topics.join(", "),
         files
             .team
             .as_deref()

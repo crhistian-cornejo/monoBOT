@@ -3275,6 +3275,7 @@ impl Conversation {
                                             Anchor::Slot(self.context_anchor.clone()),
                                         )
                                         .side(Side::Top)
+                                        .solid(rail_color())
                                         .align(Align::End)
                                         .max_width(240.)
                                         .padding(10.)

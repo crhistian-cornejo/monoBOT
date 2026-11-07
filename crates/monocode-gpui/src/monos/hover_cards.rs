@@ -289,6 +289,7 @@ impl Monos {
             )
             .side(Side::Right)
             .gap(8.)
+            .solid(rail_color())
             .width(260.)
             .max_height(440.)
             .track(self.mono_preview.surface.clone())
@@ -535,6 +536,7 @@ impl Monos {
             )
             .side(Side::Left)
             .gap(8.)
+            .solid(rail_color())
             .width(280.)
             .track(self.news.summary.surface.clone())
             .child(

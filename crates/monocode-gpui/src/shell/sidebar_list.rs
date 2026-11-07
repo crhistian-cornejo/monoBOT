@@ -812,6 +812,7 @@ impl Shell {
                 .role(Role::Tab)
                 .aria_label(label)
                 .aria_selected(on)
+                .tooltip(chrome_tip(label, None))
                 .min_w_0()
                 .flex()
                 .items_center()

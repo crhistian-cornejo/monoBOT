@@ -14,6 +14,8 @@ mod files;
 mod filters;
 mod floating;
 pub(crate) use floating::is_floating_window;
+mod group_call;
+mod group_dialog;
 mod groups;
 mod host;
 mod hover_cards;
@@ -67,6 +69,14 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+
+fn can_dispatch(message: &Message, busy: bool) -> bool {
+    message.error.is_none()
+        && (!busy
+            || (!message.internal
+                && monocode_core::mono::agents::message_sender(&message.text).is_none()))
+}
+
 pub(crate) struct Changed;
 pub(crate) struct TabOpened(pub String);
 pub(crate) struct ShowDetails(pub String);
@@ -125,6 +135,8 @@ pub(crate) struct Monos {
     fields: HashMap<String, Entity<Input>>,
     memory_edit: Option<String>,
     memory_adding: bool,
+    /// The group's Members tab is listing who can still join.
+    members_adding: bool,
     memory_pending: HashSet<String>,
     field_blurs: HashSet<gpui::EntityId>,
     file_versions: HashMap<String, (String, String)>,
@@ -161,6 +173,8 @@ pub(crate) struct Monos {
     sync: sync::SyncState,
     /// Groups' seats, rounds and members' posts.
     groups: groups::Groups,
+    /// The open group's local voice call, if its Call tab was opened.
+    call: Option<group_call::CallState>,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
     /// The open bot's subagent runs, read from its chat until it changes.
@@ -173,6 +187,12 @@ pub(crate) struct Monos {
         Entity<crate::project_settings::BackgroundDialog>,
         Subscription,
         gpui::Point<gpui::Pixels>,
+    )>,
+    /// The open group editor, and the window it was opened in.
+    group_dialog: Option<(
+        Entity<group_dialog::GroupDialog>,
+        Subscription,
+        gpui::Size<gpui::Pixels>,
     )>,
     backgrounds: HashMap<String, Entity<crate::project_background::ProjectBackground>>,
     drag: Option<(String, gpui::Point<gpui::Pixels>, Option<String>)>,
@@ -397,6 +417,7 @@ impl Monos {
             fields: HashMap::new(),
             memory_edit: None,
             memory_adding: false,
+            members_adding: false,
             memory_pending: HashSet::new(),
             field_blurs: HashSet::new(),
             file_versions: HashMap::new(),
@@ -429,10 +450,12 @@ impl Monos {
             bot_settings: Default::default(),
             sync: Default::default(),
             groups: Default::default(),
+            call: None,
             running: HashMap::new(),
             active_run: None,
             completion_work: HashSet::new(),
             background: None,
+            group_dialog: None,
             backgrounds: HashMap::new(),
             drag: None,
             rail_bounds: HashMap::new(),
@@ -1110,12 +1133,16 @@ impl Monos {
             return;
         };
         let busy = view.read(cx).busy;
+        // A message whose send failed keeps its Retry/Discard card, but it
+        // must not hold back the ones queued behind it (the desktop dequeues
+        // a message once its turn takes it, so a mid-turn failure never
+        // requeues there either).
         let Some(message) = self
             .roster
             .get(id)
-            .and_then(|m| m.outbox.iter().find(|message| !busy || !message.internal))
+            .and_then(|m| m.outbox.iter().find(|message| can_dispatch(message, busy)))
             .cloned()
-            .filter(|m| m.error.is_none() && self.persisted_messages.contains(&m.id))
+            .filter(|m| self.persisted_messages.contains(&m.id))
         else {
             return;
         };
@@ -1147,21 +1174,43 @@ impl Monos {
             mono.seen_rows = row_count;
         }
         if finished {
+            let (mut ok, mut status) = self.chats[id].read(cx).external_outcome(cx);
+            if ok
+                && self.chats[id].read(cx).notification_was_cancelled()
+                && self.inflight.get(id).is_some_and(|message| {
+                    monocode_core::mono::agents::message_sender(&message.text).is_some()
+                })
+            {
+                ok = false;
+                status = "Agent request was stopped. Retry the message.".into();
+            }
             if let Some(sent) = self.inflight.get(id).map(|m| m.id.clone()) {
-                self.agent_answered(id, &sent, cx);
-                self.bot_turn_news(id, cx);
+                if ok && !self.agent_answered(id, &sent, cx) {
+                    ok = false;
+                    status =
+                        "Could not find the agent request in the conversation. Retry the message."
+                            .into();
+                }
+                if ok {
+                    self.bot_turn_news(id, cx);
+                }
             }
             if let Some(mut sent) = self.inflight.remove(id) {
-                let (ok, status) = self.chats[id].read(cx).external_outcome(cx);
                 if !ok && !status.starts_with("Stopped") {
+                    let old_id = sent.id.clone();
+                    let mut retry_id = None;
                     if let Some(mono) = self.roster.get_mut(id) {
                         if let Some(queued) = mono.outbox.iter_mut().find(|m| m.id == sent.id) {
                             queued.error = Some(status);
                         } else {
                             sent.id = mono::new_id();
+                            retry_id = Some(sent.id.clone());
                             sent.error = Some(status);
                             mono.outbox.insert(0, sent);
                         }
+                    }
+                    if let Some(retry_id) = retry_id {
+                        self.agent_calls.retry_route(&old_id, &retry_id);
                     }
                     self.save(cx);
                     self.configure_chat(id, cx);
@@ -1192,6 +1241,7 @@ impl Monos {
         }
         let mut overview = false;
         if self.active.as_deref() != Some(id) {
+            self.call_hang_up(cx);
             self.save_open_file(cx);
             self.pause_changes(cx);
             self.route = None;
@@ -1200,6 +1250,7 @@ impl Monos {
             self.files = None;
             self.activity_turn = None;
             self.memory_adding = false;
+            self.members_adding = false;
             self.memory_edit = None;
             self.settings = None;
             // A bot opens on what a person checks first: the Principal on
@@ -1273,6 +1324,7 @@ impl Monos {
         }
     }
     pub(crate) fn close(&mut self, cx: &mut Context<Self>) {
+        self.call_hang_up(cx);
         self.save_open_file(cx);
         self.pause_changes(cx);
         self.hide_html(cx);
@@ -1282,6 +1334,9 @@ impl Monos {
             self.picker = None;
             self.save(cx);
         }
+    }
+    pub(crate) fn close_group_call(&mut self, cx: &mut Context<Self>) {
+        self.call_hang_up(cx);
     }
     pub(crate) fn dismiss_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.picker.take().is_some() || self.menu.take().is_some() {
@@ -1421,6 +1476,9 @@ impl Monos {
         .when(has && section == agents::Section::Bots, |d| {
             d.child(self.new_bot_button(cx))
         })
+        .when(has && section == agents::Section::Groups, |d| {
+            d.child(self.new_group_button(cx))
+        })
         .when(has && section == agents::Section::Coding, |d| {
             d.child(
                 icon_button("new-mono", "New mono", "plus")
@@ -1453,6 +1511,9 @@ impl Monos {
             )
             .when(!has && section == agents::Section::Bots, |d| {
                 d.child(self.new_bot_row(cx))
+            })
+            .when(!has && section == agents::Section::Groups, |d| {
+                d.child(self.new_group_row(cx))
             })
             .when(
                 !has && section == agents::Section::Coding && project.is_some(),
@@ -1589,7 +1650,15 @@ impl Monos {
                                 .when(principal, |d| {
                                     d.child(
                                         div()
+                                            .id(SharedString::from(format!(
+                                                "orchestrator-pill-{}",
+                                                mono.id
+                                            )))
                                             .debug_selector(|| "mono-rail-orchestrator".into())
+                                            .tooltip(chrome_tip(
+                                                "Your main bot: it coordinates the others",
+                                                None,
+                                            ))
                                             .flex_shrink_0()
                                             .px_1()
                                             .text_size(px(10.))
@@ -1715,6 +1784,7 @@ impl Monos {
             .when(self.current().is_none(), |d| {
                 d.children(self.options_surface(cx))
                     .children(self.background_modal())
+                    .children(self.group_dialog_modal(cx))
             })
             .into_any_element()
     }
@@ -1769,6 +1839,7 @@ impl Monos {
                         .debug_selector(|| "close-mono-tab-button".into())
                         .role(Role::Button)
                         .aria_label("Close Mono tab")
+                        .tooltip(chrome_tip("Close Mono tab", Some("Pane: Close")))
                         .absolute()
                         .right_1()
                         .top(px(10.))
@@ -1887,6 +1958,7 @@ impl gpui::Render for Monos {
             .children(self.picker_surface(cx))
             .children(self.options_surface(cx))
             .children(self.background_modal())
+            .children(self.group_dialog_modal(cx))
             .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, _| {
                 if let Some((_, start, over)) = &mut this.drag
                     && (event.position - *start).magnitude() > 5.

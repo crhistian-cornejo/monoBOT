@@ -44,7 +44,7 @@ pub(super) struct Seat {
     /// What the group asked it and it has not been sent yet, oldest first.
     queue: VecDeque<SeatAsk>,
     /// An ask on its way in, while the group's memory is read.
-    sending: bool,
+    sending: Option<String>,
 }
 
 struct SeatAsk {
@@ -73,6 +73,8 @@ pub(super) struct Groups {
     rounds: Vec<GroupRound>,
     /// Requests that could not reach their member.
     failed: HashSet<String>,
+    /// Requests cancelled while their group's memory is being read.
+    cancelled: HashSet<String>,
     /// Members' posts waiting for their group's chat to be free.
     posts: HashMap<String, VecDeque<(String, Vec<Row>)>>,
     posting: HashSet<String>,
@@ -202,7 +204,7 @@ impl Monos {
     }
 
     /// One member's part of a group's message, in its seat.
-    fn send_to_member(
+    pub(super) fn send_to_member(
         &mut self,
         group: &str,
         member: &str,
@@ -226,10 +228,92 @@ impl Monos {
         self.pump_seat(&key, cx);
     }
 
+    /// Calls skip a busy member instead of inserting speech into its turn.
+    pub(super) fn call_send_member(
+        &mut self,
+        group: &str,
+        member: &str,
+        text: String,
+        request: String,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let key = (group.to_owned(), member.to_owned());
+        if !self.ensure_seat(&key, cx) {
+            return Err("The member or group no longer exists".into());
+        }
+        let seat = self.groups.seats.get_mut(&key).expect("seat was created");
+        if seat.sending.is_some()
+            || !seat.queue.is_empty()
+            || seat
+                .view
+                .as_ref()
+                .is_some_and(|view| view.read(cx).mono_call_blocked(cx))
+        {
+            return Err("The member is busy".into());
+        }
+        seat.queue.push_back(SeatAsk {
+            request,
+            text,
+            quick: false,
+        });
+        self.pump_seat(&key, cx);
+        Ok(())
+    }
+
+    pub(super) fn call_request_failed(&self, request: &str) -> bool {
+        self.groups.failed.contains(request)
+    }
+
+    #[cfg(test)]
+    pub(super) fn call_test_queued(&self, group: &str, member: &str, request: &str) -> bool {
+        self.groups
+            .seats
+            .get(&(group.to_owned(), member.to_owned()))
+            .is_some_and(|seat| seat.queue.iter().any(|ask| ask.request == request))
+    }
+
+    /// Cancels only this call request, not another turn sharing the seat.
+    pub(super) fn cancel_call_seat(
+        &mut self,
+        group: &str,
+        member: &str,
+        request: &str,
+        cx: &mut Context<Self>,
+    ) {
+        let key = (group.to_owned(), member.to_owned());
+        let Some(seat) = self.groups.seats.get_mut(&key) else {
+            return;
+        };
+        let queued = seat.queue.len();
+        seat.queue.retain(|ask| ask.request != request);
+        if seat.queue.len() != queued {
+            return;
+        }
+        if seat.sending.as_deref() == Some(request) {
+            self.groups.cancelled.insert(request.to_owned());
+            return;
+        }
+        let Some(view) = seat.view.clone() else {
+            return;
+        };
+        let current = {
+            let view = view.read(cx);
+            view.busy
+                && native::blocks(view.mono_rows(cx))
+                    .iter()
+                    .rev()
+                    .find(|block| block.is_user())
+                    .is_some_and(|block| block.app_request_id.as_deref() == Some(request))
+        };
+        if current {
+            view.update(cx, |view, cx| view.mono_stop(cx));
+        }
+    }
+
     /// A member's seat in a group (`ensureGroupSeat`): its own conversation
     /// there, made the first time it is asked, with the model, settings and
     /// permissions of its chat. False when the group or member is gone.
-    fn ensure_seat(&mut self, key: &(String, String), cx: &mut Context<Self>) -> bool {
+    pub(super) fn ensure_seat(&mut self, key: &(String, String), cx: &mut Context<Self>) -> bool {
         if self.groups.seats.contains_key(key) {
             return true;
         }
@@ -244,7 +328,7 @@ impl Monos {
             Seat {
                 view: None,
                 queue: VecDeque::new(),
-                sending: false,
+                sending: None,
             },
         );
         let own = group.seats.get(&member.id).copied();
@@ -365,6 +449,12 @@ impl Monos {
             .push(cx.subscribe(&view, move |this, _, _: &SessionChanged, cx| {
                 this.seat_changed(&source, cx)
             }));
+        let transcript = view.read(cx).transcript.clone();
+        let source = key.clone();
+        self.observations
+            .push(cx.observe(&transcript, move |this, _, cx| {
+                this.call_seat_changed(&source, cx);
+            }));
         if let Some(seat) = self.groups.seats.get_mut(&key) {
             seat.view = Some(view);
         }
@@ -382,6 +472,7 @@ impl Monos {
     }
 
     fn seat_changed(&mut self, key: &(String, String), cx: &mut Context<Self>) {
+        self.call_seat_changed(key, cx);
         let idle = self
             .groups
             .seats
@@ -402,7 +493,7 @@ impl Monos {
         let Some(view) = seat.view.clone() else {
             return;
         };
-        if seat.sending || seat.queue.is_empty() {
+        if seat.sending.is_some() || seat.queue.is_empty() {
             return;
         }
         if !view.read(cx).ready_for_external(cx) {
@@ -415,7 +506,7 @@ impl Monos {
         let Some(ask) = seat.queue.pop_front() else {
             return;
         };
-        seat.sending = true;
+        seat.sending = Some(ask.request.clone());
         let root = self.root.clone();
         let group = key.0.clone();
         let memory = cx.background_executor().spawn(async move {
@@ -439,12 +530,19 @@ impl Monos {
         memory: String,
         cx: &mut Context<Self>,
     ) {
+        if self.groups.cancelled.remove(&ask.request) {
+            if let Some(seat) = self.groups.seats.get_mut(&key) {
+                seat.sending = None;
+            }
+            self.pump_seat(&key, cx);
+            return;
+        }
         let led = self.led_group(&key.0);
         let Some(seat) = self.groups.seats.get_mut(&key) else {
             self.groups.failed.insert(ask.request);
             return;
         };
-        seat.sending = false;
+        seat.sending = None;
         let Some(view) = seat.view.clone() else {
             return;
         };
@@ -503,7 +601,7 @@ impl Monos {
 
     /// Each loaded seat's conversation as the desktop's blocks, and whether
     /// it is answering now.
-    fn seat_blocks(&self, cx: &App) -> HashMap<(String, String), (Vec<Block>, bool)> {
+    pub(super) fn seat_blocks(&self, cx: &App) -> HashMap<(String, String), (Vec<Block>, bool)> {
         self.groups
             .seats
             .iter()
@@ -520,6 +618,7 @@ impl Monos {
         if !self.roster.monos.iter().any(Mono::is_group) {
             return;
         }
+        self.call_progress(cx);
         let seats = self.seat_blocks(cx);
         let now = now_ms();
         self.post_replies(&seats, now, cx);
@@ -972,7 +1071,7 @@ impl Monos {
             .seats
             .get(&(mono.id.clone(), member.clone()))
             .is_some_and(|seat| {
-                seat.sending
+                seat.sending.is_some()
                     || !seat.queue.is_empty()
                     || seat.view.as_ref().is_some_and(|view| view.read(cx).busy)
             });

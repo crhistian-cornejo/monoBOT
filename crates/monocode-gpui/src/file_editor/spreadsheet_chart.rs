@@ -20,6 +20,8 @@ use crate::theme::{background_base, content};
 
 const FONT: f32 = 10.;
 const PAD: f32 = 8.;
+/// Width of the strip the rotated axis title takes.
+const SIDE_TITLE_W: f32 = 14.;
 /// Width of one character at the chart's text size, for fitting labels.
 const CHAR_WIDTH: f32 = 5.6;
 /// Office's accent hues, in the order a chart without colours takes them.
@@ -92,6 +94,9 @@ pub(super) struct Scene {
     pub height: f32,
     pub shapes: Vec<Shape>,
     pub labels: Vec<Label>,
+    /// The rotated axis title as SVG markup and where it sits
+    /// (left, top, width, height).
+    pub side_title: Option<(String, f32, f32, f32, f32)>,
 }
 
 /// `#rrggbb` as a number.
@@ -161,6 +166,7 @@ struct Frame {
 struct Builder {
     shapes: Vec<Shape>,
     labels: Vec<Label>,
+    side_title: Option<(String, f32, f32, f32, f32)>,
 }
 
 impl Builder {
@@ -376,6 +382,7 @@ pub(super) fn build(chart: &SheetChart) -> Scene {
         height,
         shapes: b.shapes,
         labels: b.labels,
+        side_title: b.side_title,
     }
 }
 
@@ -455,7 +462,6 @@ fn categories(b: &mut Builder, chart: &SheetChart, width: f32, top: f32, bottom:
     } else {
         (chart.y_title.as_deref(), chart.x_title.as_deref())
     };
-    // The vertical axis' title sits above it: there is no room to turn text.
     let side_title = if horizontal {
         category_title
     } else {
@@ -463,21 +469,51 @@ fn categories(b: &mut Builder, chart: &SheetChart, width: f32, top: f32, bottom:
     };
     let frame = Frame {
         left: PAD
+            + if side_title.is_some() {
+                SIDE_TITLE_W
+            } else {
+                0.
+            }
             + if horizontal {
                 category_width
             } else {
                 label_width
             },
         right: width - PAD - 4.,
-        top: top + 4. + if side_title.is_some() { 12. } else { 0. },
+        top: top + 4.,
         bottom: bottom - 16. - if chart.x_title.is_some() { 14. } else { 0. },
     };
     if frame.right <= frame.left || frame.bottom <= frame.top {
         return;
     }
-    if let Some(title) = side_title {
-        b.label(PAD, top + 8., title, Anchor::Start, 0.7);
-    }
+    // The vertical axis' title reads bottom-up beside it, as the desktop's
+    // rotated label; a flat title would sit above the axis instead.
+    b.side_title = side_title.map(|title| {
+        let (w, h) = (SIDE_TITLE_W, frame.bottom - frame.top);
+        let (x, y) = (w / 2., h / 2.);
+        let ink: gpui::Rgba = Ink::Content(0.7).color().into();
+        let (r, g, b) = (
+            (ink.r * 255.).round() as u8,
+            (ink.g * 255.).round() as u8,
+            (ink.b * 255.).round() as u8,
+        );
+        let title = title
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;");
+        (
+            format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 {w} {h}'>\
+                 <text x='{x}' y='{y}' fill='#{r:02x}{g:02x}{b:02x}' font-size='9' \
+                 font-family='sans-serif' text-anchor='middle' dominant-baseline='middle' \
+                 transform='rotate(-90 {x} {y})'>{title}</text></svg>",
+            ),
+            0.,
+            frame.top,
+            w,
+            h,
+        )
+    });
     let span = if horizontal {
         frame.bottom - frame.top
     } else {
@@ -827,6 +863,17 @@ pub(super) fn element(scene: &Arc<Scene>) -> AnyElement {
             text = text.font_weight(FontWeight::SEMIBOLD);
         }
         surface = surface.child(text.child(label.text.clone()));
+    }
+    if let Some((markup, left, top, w, h)) = &scene.side_title {
+        surface = surface.child(
+            div()
+                .absolute()
+                .left(px(*left))
+                .top(px(*top))
+                .w(px(*w))
+                .h(px(*h))
+                .child(gpui::svg().data(markup.as_bytes()).size_full()),
+        );
     }
     surface.into_any_element()
 }

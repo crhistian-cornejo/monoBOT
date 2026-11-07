@@ -153,6 +153,7 @@ export function PersonalRail({
             {principal ? (
               <span
                 title="Your main bot: it coordinates the others"
+                data-rail-tip="Your main bot: it coordinates the others"
                 className="shrink-0 rounded bg-accent/10 px-1 text-[10px] font-medium leading-4 text-accent"
               >
                 Orchestrator
@@ -167,6 +168,7 @@ export function PersonalRail({
             <span
               aria-label="Unread news"
               title="Unread news"
+              data-rail-tip="Unread news"
               className="size-1.5 shrink-0 rounded-full bg-accent"
             />
           ) : null}

@@ -556,6 +556,7 @@ impl TranscriptView {
                 .side(Side::Top)
                 .align(Align::Start)
                 .gap(6.)
+                .solid(rail_color())
                 .width(CARD_WIDTH)
                 .padding(14.)
                 .allow_outside_press()

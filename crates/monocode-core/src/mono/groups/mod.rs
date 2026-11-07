@@ -10,6 +10,7 @@ pub mod activity;
 pub mod app;
 pub mod block;
 pub mod brief;
+pub mod call;
 pub mod group;
 pub mod learning;
 pub mod mentions;

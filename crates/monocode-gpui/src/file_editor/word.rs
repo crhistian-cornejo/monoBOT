@@ -39,6 +39,9 @@ pub(super) struct DocumentView {
     path: String,
     document: Arc<DocxDocument>,
     page: PageSetup,
+    /// Page splits from shaped text widths once the first render can
+    /// measure them; `estimate` fills in until then.
+    measured: bool,
     pages: Vec<Range<usize>>,
     list: ListState,
     pictures: Pictures,
@@ -136,21 +139,91 @@ fn image_height(width: f64, height: f64, room: f64) -> f64 {
     if w > room { h * room / w } else { h }
 }
 
+/// How tall a block is, in points, from shaped text widths rather than a
+/// character guess (`estimate`'s line count with real metrics).
+fn measured(block: &Block, width: f64, window: &mut Window) -> f64 {
+    match block {
+        Block::Paragraph(paragraph) => {
+            let size = paragraph_size(paragraph);
+            let indent = paragraph.indent.unwrap_or(0.)
+                + paragraph
+                    .list
+                    .as_ref()
+                    .map_or(0., |l| (l.level as f64 + 1.) * LIST_INDENT);
+            let room = (width - indent).max(size * 2.);
+            let label =
+                crate::visuals::dither::Label::sans(size as f32, content(1.), FontWeight::NORMAL);
+            let text: String = paragraph
+                .runs
+                .iter()
+                .filter(|run| run.image.is_none())
+                .map(|run| run.text.as_str())
+                .collect();
+            let lines: f64 = text
+                .split('\n')
+                .map(|line| {
+                    let width = label.measure(line, window) as f64;
+                    (width / room).ceil().max(1.)
+                })
+                .sum();
+            let pictures: f64 = paragraph
+                .runs
+                .iter()
+                .filter_map(|run| run.image.as_ref())
+                .map(|image| image_height(image.width, image.height, room))
+                .sum();
+            let text_height = if text.is_empty() && pictures > 0. {
+                0.
+            } else {
+                lines * size * 1.25
+            };
+            text_height + pictures + PARAGRAPH_GAP
+        }
+        Block::Table(table) => {
+            let total: f64 = table.columns.iter().sum::<f64>().max(1.);
+            table
+                .rows
+                .iter()
+                .map(|row| {
+                    row.cells
+                        .iter()
+                        .enumerate()
+                        .map(|(index, cell)| {
+                            let share = table.columns.get(index).copied().unwrap_or(total / 4.);
+                            let inner = (share * f64::from(cell.col_span.max(1)) - 8.).max(24.);
+                            cell.blocks
+                                .iter()
+                                .map(|b| measured(b, inner, window))
+                                .sum::<f64>()
+                                + 8.
+                        })
+                        .fold(0., f64::max)
+                })
+                .sum::<f64>()
+                + PARAGRAPH_GAP
+        }
+    }
+}
+
 /// Fill pages in order: a block that does not fit starts the next page, a
 /// page break before a paragraph does too.
-pub(super) fn paginate(document: &DocxDocument, page: &PageSetup) -> Vec<Range<usize>> {
+pub(super) fn paginate(
+    document: &DocxDocument,
+    page: &PageSetup,
+    mut height: impl FnMut(&Block, f64) -> f64,
+) -> Vec<Range<usize>> {
     let width = page.width - page.margin_left - page.margin_right;
     let chrome: f64 = document
         .header
         .iter()
         .chain(&document.footer)
-        .map(|block| estimate(block, width))
+        .map(|block| height(block, width))
         .sum();
     let room = (page.height - page.margin_top - page.margin_bottom - chrome).max(72.);
     let mut pages = Vec::new();
     let (mut start, mut used) = (0, 0.);
     for (index, block) in document.blocks.iter().enumerate() {
-        let height = estimate(block, width);
+        let height = height(block, width);
         let breaks = matches!(block, Block::Paragraph(p) if p.page_break_before);
         if index > start && (breaks || used + height > room) {
             pages.push(start..index);
@@ -169,7 +242,7 @@ fn align_of(align: Option<Align>) -> Align {
 impl DocumentView {
     pub(super) fn new(path: &str, document: DocxDocument, cx: &mut Context<Self>) -> Self {
         let page = document.page.unwrap_or(DEFAULT_PAGE);
-        let pages = paginate(&document, &page);
+        let pages = paginate(&document, &page, estimate);
         let document = Arc::new(document);
         let mut picture_of = HashMap::new();
         let mut sources = Vec::new();
@@ -199,6 +272,7 @@ impl DocumentView {
             list: ListState::new(pages.len(), ListAlignment::Top, px(900.)),
             document,
             page,
+            measured: false,
             pages,
             pictures,
             picture_of,
@@ -541,7 +615,17 @@ fn walk(blocks: &[Block], visit: &mut dyn FnMut(&Run)) {
 }
 
 impl gpui::Render for DocumentView {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if !self.measured {
+            self.measured = true;
+            let pages = paginate(&self.document, &self.page, |block, width| {
+                measured(block, width, window)
+            });
+            if pages != self.pages {
+                self.pages = pages;
+                self.list.reset(self.pages.len());
+            }
+        }
         let entity = cx.entity();
         let width = self.width.clone();
         let probe = canvas(
@@ -612,7 +696,7 @@ mod tests {
             blocks: (0..40).map(|_| text_block(&long)).collect(),
             ..DocxDocument::default()
         };
-        let pages = paginate(&document, &DEFAULT_PAGE);
+        let pages = paginate(&document, &DEFAULT_PAGE, estimate);
         assert!(pages.len() > 2, "{pages:?}");
         assert_eq!(pages.first().map(|r| r.start), Some(0));
         assert_eq!(pages.last().map(|r| r.end), Some(40));
@@ -623,13 +707,13 @@ mod tests {
             blocks: vec![text_block("uno"), text_block("dos")],
             ..DocxDocument::default()
         };
-        assert_eq!(paginate(&broken, &DEFAULT_PAGE).len(), 1);
+        assert_eq!(paginate(&broken, &DEFAULT_PAGE, estimate).len(), 1);
         if let Block::Paragraph(p) = &mut broken.blocks[1] {
             p.page_break_before = true;
         }
-        assert_eq!(paginate(&broken, &DEFAULT_PAGE), [0..1, 1..2]);
+        assert_eq!(paginate(&broken, &DEFAULT_PAGE, estimate), [0..1, 1..2]);
         assert_eq!(
-            paginate(&DocxDocument::default(), &DEFAULT_PAGE).first(),
+            paginate(&DocxDocument::default(), &DEFAULT_PAGE, estimate).first(),
             Some(&(0..0))
         );
     }

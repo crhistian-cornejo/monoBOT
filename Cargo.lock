@@ -3145,6 +3145,7 @@ name = "monobot-voice"
 version = "0.16.0"
 dependencies = [
  "bzip2 0.5.2",
+ "cpal",
  "monobot-dictation",
  "serde_json",
  "sherpa-onnx",

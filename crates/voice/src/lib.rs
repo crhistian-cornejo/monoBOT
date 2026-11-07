@@ -2,6 +2,10 @@
 //! Supertonic 3 through sherpa-onnx, in the language it was written in and in
 //! a voice of its own. Like dictation, everything runs on this machine.
 pub mod model;
+#[cfg(feature = "playback")]
+pub mod player;
+#[cfg(feature = "playback")]
+pub mod queue;
 mod wav;
 
 use std::collections::HashMap;

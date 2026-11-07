@@ -115,8 +115,11 @@ fn listens_then_puts_the_words_in_at_the_caret(cx: &mut TestAppContext) {
     dictation.read_with(cx, |dictation, _| {
         assert_eq!(dictation.levels[BARS - 1], 0.8);
         assert_eq!(dictation.partial(), "qué tal");
-        assert!(dictation.speaking);
+        assert!(dictation.speaking());
     });
+    fake.hear(Event::Speech(false));
+    cx.run_until_parked();
+    assert!(!dictation.read_with(cx, |dictation, _| dictation.speaking()));
 
     dictation.update(cx, |dictation, cx| dictation.toggle(cx));
     assert_eq!(phase(&dictation, cx), Phase::Finishing);
@@ -149,6 +152,26 @@ fn escape_drops_what_was_heard(cx: &mut TestAppContext) {
     assert_eq!(fake.calls(), ["start", "cancel 7"]);
     // Idle, Escape is the composer's again.
     assert!(!dictation.update(cx, |dictation, cx| dictation.escape(&escape, cx)));
+}
+
+#[gpui::test]
+fn cancelling_final_transcription_still_closes_the_microphone(cx: &mut TestAppContext) {
+    let fake = Fake::installed("must not arrive");
+    let (input, dictation) = dictation(&fake, "draft", cx);
+    dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+    cx.run_until_parked();
+    dictation.update(cx, |dictation, cx| {
+        dictation.toggle(cx);
+        assert_eq!(dictation.phase(), Phase::Finishing);
+        dictation.cancel_pending(cx);
+        assert_eq!(dictation.phase(), Phase::Idle);
+    });
+    cx.run_until_parked();
+    assert_eq!(
+        input.read_with(cx, |input, _| input.content.to_string()),
+        "draft"
+    );
+    assert_eq!(fake.calls(), ["start", "stop 7"]);
 }
 
 #[gpui::test]

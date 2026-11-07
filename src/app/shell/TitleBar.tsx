@@ -55,6 +55,8 @@ import {
 } from "../../features/monos/model/mono";
 import { IS_MAC, IS_WIN, MOD, SHIFT } from "../../platform/tauri/platform";
 import { useTrafficLightsVisible } from "../../platform/tauri/useTrafficLightsVisible";
+import { useKeybindingLabel } from "../../shared/hooks/useKeybindingLabel";
+import { useRailTooltip } from "./RailTooltip";
 import type { RecentProject } from "../../features/projects/model/recents";
 import {
   ExplorerMenu,
@@ -352,6 +354,7 @@ function TitleTabItem({
   itemRef?: (el: HTMLDivElement | null) => void;
 }) {
   const { headline, meta, tooltip } = tabCopy(tab);
+  const closeShortcut = useKeybindingLabel("Pane: Close", `${MOD}W`);
   const fileIcon = tab.files[0];
   const AppViewIcon = tab.appView ? APP_VIEW_ICONS[tab.appView] : null;
   const accessibleTooltip =
@@ -471,6 +474,8 @@ function TitleTabItem({
           type="button"
           title="Close Tab"
           aria-label={`Close ${headline}`}
+          data-rail-tip="Close Tab"
+          data-rail-tip-detail={closeShortcut}
           data-no-drag
           data-tauri-drag-region="false"
           onPointerDown={(event) => event.stopPropagation()}
@@ -501,6 +506,7 @@ function TabStripChevron({
       type="button"
       title={label}
       aria-label={label}
+      data-rail-tip={label}
       data-tauri-drag-region="false"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={onClick}
@@ -515,6 +521,9 @@ function TabStripChevron({
 
 export function IconButton({
   label,
+  shortcut,
+  tipDetail,
+  ariaLabel,
   active,
   accent,
   disabled,
@@ -523,6 +532,12 @@ export function IconButton({
   children,
 }: {
   label: string;
+  /** Displayed keys, e.g. "Ctrl+B"; joins the label in title and aria. */
+  shortcut?: string;
+  /** Tooltip line after the label; defaults to `shortcut`. */
+  tipDetail?: string;
+  /** Replaces `label` where the accessible name carries more. */
+  ariaLabel?: string;
   active?: boolean;
   accent?: boolean;
   disabled?: boolean;
@@ -530,11 +545,15 @@ export function IconButton({
   onOpenContextMenu?: (x: number, y: number) => void;
   children: ReactNode;
 }) {
+  const named = ariaLabel ?? label;
+  const titled = shortcut ? `${named} (${shortcut})` : named;
   return (
     <button
       type="button"
-      title={label}
-      aria-label={label}
+      title={titled}
+      aria-label={titled}
+      data-rail-tip={label}
+      data-rail-tip-detail={tipDetail ?? shortcut}
       aria-pressed={active || accent}
       aria-disabled={disabled}
       data-tauri-drag-region="false"
@@ -590,6 +609,7 @@ export function DevModeLabel() {
   return (
     <span
       title="Development build"
+      data-rail-tip="Development build"
       className="mr-1 min-w-0 truncate rounded-md bg-skill/15 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-skill"
     >
       Development
@@ -605,6 +625,7 @@ export function DevModeIcon() {
       title="Development build"
       aria-label="Development build"
       role="img"
+      data-rail-tip="Development build"
       className="grid size-6 shrink-0 place-items-center text-skill"
     >
       <Code className="size-3.5" strokeWidth={1.75} />
@@ -641,19 +662,24 @@ export function TabVisitNav({
   /** Back and forward walk the coding workspace's tabs; Personal has none. */
   history?: boolean;
 }) {
+  const back = useKeybindingLabel("Tab: Back", `${MOD}[`);
+  const forward = useKeybindingLabel("Tab: Forward", `${MOD}]`);
+  const sidebar = useKeybindingLabel("App: Toggle Sidebar", `${MOD}B`);
   return (
     <div className="flex shrink-0 items-center">
       {history ? (
         <>
           <IconButton
-            label={`Back (${MOD}[)`}
+            label="Back"
+            shortcut={back}
             disabled={!canGoBack}
             onClick={onGoBack}
           >
             <ChevronLeft className="size-3.5" strokeWidth={1.75} />
           </IconButton>
           <IconButton
-            label={`Forward (${MOD}])`}
+            label="Forward"
+            shortcut={forward}
             disabled={!canGoForward}
             onClick={onGoForward}
           >
@@ -664,6 +690,7 @@ export function TabVisitNav({
       {onTogglePanel ? (
         <IconButton
           label={panelLabel}
+          shortcut={sidebar}
           active={panelActive}
           onClick={onTogglePanel}
         >
@@ -688,13 +715,15 @@ export function MonoViewActions({
   onOpenSettings?: () => void;
   className?: string;
 }) {
+  const tip = useRailTooltip("bottom");
   return (
-    <div className={`flex items-center gap-1 ${className}`}>
+    <div {...tip.handlers} className={`flex items-center gap-1 ${className}`}>
       {onToggleOverview ? (
         <button
           type="button"
           aria-pressed={overviewOpen}
           title={overviewOpen ? "Hide overview" : "Show overview"}
+          data-rail-tip={overviewOpen ? "Hide overview" : "Show overview"}
           data-tauri-drag-region="false"
           onClick={onToggleOverview}
           className={`flex h-6 items-center gap-1.5 rounded-md px-2 text-[12px] ${
@@ -712,6 +741,7 @@ export function MonoViewActions({
           <Settings className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
+      {tip.tooltip}
     </div>
   );
 }
@@ -730,7 +760,8 @@ export function AppMenuButton({
   return (
     <span ref={ref} data-app-menu-button className={className}>
       <IconButton
-        label="Menu (Alt)"
+        label="Menu"
+        shortcut="Alt"
         onClick={() => {
           if (ref.current) openAppMenu(ref.current);
         }}
@@ -749,22 +780,27 @@ export function OverlayNav({
   onBack?: () => void;
   onToggleSidebar?: () => void;
 }) {
+  const tip = useRailTooltip("bottom");
+  const back = useKeybindingLabel("Tab: Back", `${MOD}[`);
+  const sidebar = useKeybindingLabel("App: Toggle Sidebar", `${MOD}B`);
   if (!onBack && !onToggleSidebar) return null;
   return (
-    <div className="flex shrink-0 items-center px-1.5">
+    <div {...tip.handlers} className="flex shrink-0 items-center px-1.5">
       {onBack ? (
-        <IconButton label={`Back (${MOD}[)`} onClick={onBack}>
+        <IconButton label="Back" shortcut={back} onClick={onBack}>
           <ChevronLeft className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
       {onToggleSidebar ? (
         <IconButton
-          label={`Toggle Sidebar (${MOD}B)`}
+          label="Toggle Sidebar"
+          shortcut={sidebar}
           onClick={onToggleSidebar}
         >
           <PanelLeft className="size-3.5" strokeWidth={1.75} />
         </IconButton>
       ) : null}
+      {tip.tooltip}
     </div>
   );
 }
@@ -867,6 +903,19 @@ function TitleBarComponent({
   const sortable = useAnimatedReorder(tabIds, onReorder, "x", externalTabDrop);
   const paneToTabDrop = useExternalTitleTabDrop();
   const lockOverscroll = useLockOverscroll<HTMLDivElement>();
+  const titleTip = useRailTooltip("bottom");
+  const sidebarShortcut = useKeybindingLabel("App: Toggle Sidebar", `${MOD}B`);
+  const sessionSidebarShortcut = useKeybindingLabel(
+    "App: Toggle Session Sidebar",
+    `${MOD}${SHIFT}B`,
+  );
+  const settingsShortcut = useKeybindingLabel("App: Settings", `${MOD},`);
+  const newTabShortcut = useKeybindingLabel("Tab: New", `${MOD}T`);
+  const closeTabShortcut = useKeybindingLabel("Pane: Close", `${MOD}W`);
+  const closeAllTabsShortcut = useKeybindingLabel(
+    "Tab: Close All",
+    `${MOD}${SHIFT}W`,
+  );
   const setTabStripRef = useCallback(
     (el: HTMLDivElement | null) => {
       tabStripRef.current = el;
@@ -970,7 +1019,7 @@ function TitleBarComponent({
           kind: "item",
           id: "close",
           label: "Close Tab",
-          shortcut: `${MOD}W`,
+          shortcut: closeTabShortcut ?? undefined,
           disabled: !titleTabClosable(contextTab, tabs.length),
         },
         { kind: "sep" },
@@ -998,7 +1047,7 @@ function TitleBarComponent({
                 kind: "item" as const,
                 id: "all",
                 label: "Close All Tabs",
-                shortcut: `${MOD}${SHIFT}W`,
+                shortcut: closeAllTabsShortcut ?? undefined,
                 disabled: !titleTabsCanCloseAll(tabs),
               },
             ]
@@ -1094,10 +1143,19 @@ function TitleBarComponent({
           // on the left.
           <div className="flex items-center pl-1.5 pr-3">
             <IconButton
-              label={
+              label="Toggle right sidebar"
+              ariaLabel={
                 changesDot
-                  ? `Toggle right sidebar (${MOD}${SHIFT}B, uncommitted changes)`
-                  : `Toggle right sidebar (${MOD}${SHIFT}B)`
+                  ? "Toggle right sidebar, uncommitted changes"
+                  : undefined
+              }
+              shortcut={sessionSidebarShortcut}
+              tipDetail={
+                changesDot
+                  ? [sessionSidebarShortcut, "Uncommitted changes"]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : undefined
               }
               active={rightPanelOpen && !rightPanelOff}
               disabled={rightPanelOff}
@@ -1140,7 +1198,11 @@ function TitleBarComponent({
               </IconButton>
             ) : null}
             {!projectRailOpen && !showCurrentProject && onOpenSettings ? (
-              <IconButton label={`Settings (${MOD},)`} onClick={onOpenSettings}>
+              <IconButton
+                label="Settings"
+                shortcut={settingsShortcut}
+                onClick={onOpenSettings}
+              >
                 <Settings className="size-3.5" strokeWidth={1.75} />
               </IconButton>
             ) : null}
@@ -1156,6 +1218,7 @@ function TitleBarComponent({
   return (
     <header
       data-inset-title-bar={inset || undefined}
+      {...titleTip.handlers}
       className={`flex h-10 shrink-0 select-none items-stretch${
         inset ? "" : " border-b border-stroke"
       }${compactRail && !mono && !inset ? " body-glass" : ""}`}
@@ -1178,7 +1241,8 @@ function TitleBarComponent({
             // Hovering the toggle peeks a collapsed sidebar out.
             <span data-sidebar-peek-trigger className="flex">
               <IconButton
-                label={`Toggle Sidebar (${MOD}B)`}
+                label="Toggle Sidebar"
+                shortcut={sidebarShortcut}
                 onClick={onToggleSessionSidebar}
               >
                 <PanelLeft className="size-3.5" strokeWidth={1.75} />
@@ -1221,7 +1285,8 @@ function TitleBarComponent({
           <div className="flex shrink-0 items-center px-1.5">
             <AppMenuButton />
             <IconButton
-              label={`Toggle Sidebar (${MOD}B)`}
+              label="Toggle Sidebar"
+              shortcut={sidebarShortcut}
               onClick={onToggleSidebar}
             >
               <PanelLeft className="size-3.5" strokeWidth={1.75} />
@@ -1240,7 +1305,8 @@ function TitleBarComponent({
           {/* The compact rail's nav already holds the menu. */}
           {compactRail ? null : <AppMenuButton />}
           <IconButton
-            label={`Toggle Session Sidebar (${MOD}${SHIFT}B)`}
+            label="Toggle Session Sidebar"
+            shortcut={sessionSidebarShortcut}
             onClick={onToggleSessionSidebar}
           >
             <DashboardSquare className="size-3.5" strokeWidth={1.75} />
@@ -1365,8 +1431,18 @@ function TitleBarComponent({
                 // Sized and plated like an inactive tab beside it.
                 <button
                   type="button"
-                  title={`New session (${MOD}T)`}
-                  aria-label={`New session (${MOD}T)`}
+                  title={
+                    newTabShortcut
+                      ? `New session (${newTabShortcut})`
+                      : "New session"
+                  }
+                  aria-label={
+                    newTabShortcut
+                      ? `New session (${newTabShortcut})`
+                      : "New session"
+                  }
+                  data-rail-tip="New session"
+                  data-rail-tip-detail={newTabShortcut}
                   data-tauri-drag-region="false"
                   onClick={onNewSession}
                   className="ml-0.5 grid size-7.5 shrink-0 cursor-default place-items-center rounded-md bg-content/4 text-content/50 opacity-65 hover:bg-content/7 hover:text-content hover:opacity-100 focus-visible:opacity-100"
@@ -1398,6 +1474,7 @@ function TitleBarComponent({
           onClose={() => setTabMenu(null)}
         />
       ) : null}
+      {titleTip.tooltip}
     </header>
   );
 }

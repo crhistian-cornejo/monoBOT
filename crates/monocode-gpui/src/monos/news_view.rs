@@ -78,11 +78,14 @@ impl Monos {
                 "When an agent waits for your approval, or a bot's habit has something to tell you, like a digest, a budget alert or a finished report, it shows up here.",
             );
         }
+        let scroll = self.news.scroll.clone();
         let mut list = div()
             .id("bot-news")
             .debug_selector(|| "bot-news".into())
             .size_full()
             .overflow_y_scroll()
+            .track_scroll(&scroll)
+            .on_scroll_wheel(cx.listener(|_, _, _, cx| cx.notify()))
             .px_2()
             .py_2()
             .flex()
@@ -227,6 +230,20 @@ impl Monos {
             let chat = item.mono_id.clone();
             let toggle = item.id.clone();
             let text = item.text.clone();
+            let note_id = item.id.clone();
+            let note_title = format!("{} · {}", item.bot_name, item.source);
+            let note_body = item.text.clone();
+            let note_saved = self
+                .news
+                .note_feedback
+                .get(&item.id)
+                .is_some_and(|result| result.is_ok());
+            let note_pending = self.news.note_pending.contains(&item.id);
+            let note_error = self
+                .news
+                .note_feedback
+                .get(&item.id)
+                .and_then(|result| result.as_ref().err().cloned());
             let group: SharedString = format!("news-item-{}", item.id).into();
             let mut body = div().w_full().min_w_0().flex().flex_col();
             for (ix, row) in crate::markdown_model::parse_full(&item.text)
@@ -421,10 +438,74 @@ impl Monos {
                                 .on_click(move |_, _, cx| {
                                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()))
                                 }),
-                        ),
+                        )
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("news-note-{}", item.id)))
+                                .role(Role::Button)
+                                .aria_label(if note_saved {
+                                    "Saved to Notes"
+                                } else if note_pending {
+                                    "Saving note…"
+                                } else {
+                                    "Save as note"
+                                })
+                                .size(px(24.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .rounded_md()
+                                .text_color(content(0.55))
+                                .opacity(0.)
+                                .group_hover(SharedString::from(format!("news-item-{}", item.id)), |s| {
+                                    s.opacity(1.)
+                                })
+                                .hover(|s| s.bg(content(0.08)))
+                                .when(note_pending, |d| d.opacity(0.4))
+                                .child(icon(
+                                    if note_saved { "check" } else { "response-note" },
+                                    14.,
+                                ))
+                                .on_click(cx.listener(move |this, _, _, cx| {
+                                    this.save_report_note(
+                                        &note_id,
+                                        note_title.clone(),
+                                        note_body.clone(),
+                                        cx,
+                                    )
+                                })),
+                        )
+                        .when_some(note_error, |d, error| {
+                            d.child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(rgb(0xf87171))
+                                    .child(format!("Could not save note. {error}")),
+                            )
+                        }),
                 )
         }));
-        list.children(self.news_summary_card(&feed.items, when, cx))
+        // The feed's last reports blur into the panel's bottom edge while
+        // more wait below (MoreBelow).
+        let more_below = scroll.max_offset().y + scroll.offset().y > px(24.);
+        div()
+            .size_full()
+            .relative()
+            .child(list.children(self.news_summary_card(&feed.items, when, cx)))
+            .child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .right_0()
+                    .bottom_0()
+                    .h(px(56.))
+                    .bg(gpui::linear_gradient(
+                        0.,
+                        gpui::linear_color_stop(background_base(), 0.),
+                        gpui::linear_color_stop(background_base().opacity(0.), 1.),
+                    ))
+                    .opacity(if more_below { 1. } else { 0. }),
+            )
             .into_any_element()
     }
 
@@ -462,6 +543,33 @@ impl Monos {
                     "needs-you" => ("Needs you", accent_color()),
                     "working" => ("Working", content(0.6)),
                     _ => ("Idle", content(0.4)),
+                };
+                // The connection itself: the answer once it came back, or
+                // that a live route still waits on this agent's reply.
+                let connection: Option<AnyElement> = match entry
+                    .reply
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|r| !r.is_empty())
+                {
+                    Some(reply) => Some(
+                        div()
+                            .text_size(px(12.))
+                            .line_height(px(18.))
+                            .italic()
+                            .text_color(content(0.5))
+                            .line_clamp(2)
+                            .child(format!("“{}”", reply))
+                            .into_any_element(),
+                    ),
+                    None if self.agent_calls.pending_delegation(&entry.id) => Some(
+                        div()
+                            .text_size(px(11.))
+                            .text_color(accent_color())
+                            .child("Awaiting reply…")
+                            .into_any_element(),
+                    ),
+                    None => None,
                 };
                 let id = bot.id.clone();
                 div()
@@ -519,7 +627,8 @@ impl Monos {
                                     .text_color(content(0.7))
                                     .line_clamp(2)
                                     .child(entry.message.clone()),
-                            ),
+                            )
+                            .children(connection),
                     )
                     .on_click(cx.listener(move |this, _, window, cx| this.open(&id, window, cx)))
             }))

@@ -41,6 +41,8 @@ pub(crate) struct VisualView {
     inline: Option<String>,
     /// When the visual first appeared, for its charts' entrances.
     motion: dither::Motion,
+    /// Cartesian charts' keyboard and legend state, keyed by node key.
+    charts: HashMap<String, charts::ChartFocus>,
 }
 impl EventEmitter<VisualChanged> for VisualView {}
 struct SliderDrag {
@@ -179,6 +181,7 @@ impl VisualView {
             scene_cache: HashMap::new(),
             inline: None,
             motion: dither::Motion(std::time::Instant::now()),
+            charts: HashMap::new(),
         };
         this.initialize();
         this
@@ -793,14 +796,30 @@ impl VisualView {
                 series,
                 labels,
                 height,
-            } => charts::chart(
-                *chart_type,
-                series.clone(),
-                labels.clone(),
-                *height,
-                self.motion,
-                format!("visual-chart-{key}").into(),
-            ),
+            } => {
+                let focus = self
+                    .charts
+                    .entry(key.clone())
+                    .or_insert_with(|| charts::ChartFocus {
+                        handle: cx.focus_handle(),
+                        active: None,
+                        spot: None,
+                    });
+                let (handle, active, spot) = (focus.handle.clone(), focus.active, focus.spot);
+                charts::chart(
+                    *chart_type,
+                    series.clone(),
+                    labels.clone(),
+                    *height,
+                    self.motion,
+                    format!("visual-chart-{key}").into(),
+                    key.clone(),
+                    handle,
+                    active,
+                    spot,
+                    cx,
+                )
+            }
             Node::Gauge {
                 label,
                 value,
@@ -1062,6 +1081,7 @@ impl Render for VisualView {
         self.tracks.retain(|key, _| self.active.contains(key));
         self.orbits.retain(|key, _| self.active.contains(key));
         self.scene_cache.retain(|key, _| self.active.contains(key));
+        self.charts.retain(|key, _| self.active.contains(key));
         let inline = self.inline.clone();
         // A visual in its own row is titled; placed in prose, it is captioned.
         let header = inline.is_none().then(|| {

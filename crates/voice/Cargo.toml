@@ -5,6 +5,9 @@ edition.workspace = true
 license.workspace = true
 description = "Local voices for MonoBOT's group calls: Supertonic 3 through sherpa-onnx, speaking Spanish and English on this machine."
 
+[features]
+playback = ["dep:cpal"]
+
 [dependencies]
 # The pinned download and its checksum check are dictation's.
 monobot-dictation = { path = "../dictation" }
@@ -15,3 +18,4 @@ bzip2 = "0.5"
 tar = "0.4"
 serde_json.workspace = true
 thiserror.workspace = true
+cpal = { version = "=0.17.3", optional = true }
