@@ -85,12 +85,22 @@ pub fn post_rows(post: &GroupMemberPost, text: &str, now: u64) -> Vec<Row> {
 }
 
 /// The rows of a message the user wrote to a group that went to its members
-/// rather than the lead: the request it went out as, then the message.
-pub fn ask_rows(request: &str, text: &str, now: u64) -> Vec<Row> {
+/// rather than the lead: the request it went out as, the message, and the
+/// files it carried, so the group's chat shows their chips too.
+pub fn ask_rows(request: &str, text: &str, files: &[std::path::PathBuf], now: u64) -> Vec<Row> {
     let mut transcript = crate::transcript::Transcript::default();
     transcript.begin("user");
     transcript.append(text);
     transcript.rows[0].sent_at = Some(now);
+    if !files.is_empty() {
+        // Sizes are left out: this runs on the UI thread.
+        transcript.rows.push(Row {
+            role: crate::transcript::attachments::ROLE.into(),
+            text: crate::transcript::attachments::from_paths(files).to_string(),
+            first: true,
+            sent_at: None,
+        });
+    }
     let mut rows = vec![Mark::GroupRequest(request.into()).row(Some(now))];
     rows.extend(transcript.rows);
     rows
@@ -592,7 +602,7 @@ mod tests {
         let post = group_member_post(&author, &reply, "p", 6)
             .group_member
             .unwrap();
-        let mut rows = ask_rows("group-direct-k", "@Documents resume", 5);
+        let mut rows = ask_rows("group-direct-k", "@Documents resume", &[], 5);
         rows.extend(post_rows(&post, "Listo", 6));
         assert_eq!(rows[0].role, MARK_ROLE);
         assert!(is_mark(&rows[0]) && !is_mark(&row("mono-system", "Done")));
@@ -611,8 +621,25 @@ mod tests {
     }
 
     #[test]
+    fn groups_keep_the_files_a_message_to_a_member_carried() {
+        let file = std::path::PathBuf::from("/Users/me/Downloads/recibo.pdf");
+        let rows = ask_rows("group-direct-k", "@Documents resume esto", &[file], 5);
+        let manifest = rows
+            .iter()
+            .find(|row| row.role == crate::transcript::attachments::ROLE)
+            .expect("the message keeps its attachment manifest");
+        assert_eq!(
+            crate::transcript::attachments::paths(manifest).unwrap(),
+            vec![std::path::PathBuf::from("/Users/me/Downloads/recibo.pdf")]
+        );
+        // The manifest is not a message of its own.
+        let read = blocks(&rows);
+        assert_eq!(read[0].text, "@Documents resume esto");
+    }
+
+    #[test]
     fn groups_read_a_seats_answer_from_its_native_rows() {
-        let mut rows = ask_rows("app-7-round-k-docs", "<group_message>", 5);
+        let mut rows = ask_rows("app-7-round-k-docs", "<group_message>", &[], 5);
         rows.extend([
             row("assistant", "Let me look"),
             row("tool", "{\"name\":\"Read\"}"),
@@ -638,7 +665,7 @@ mod tests {
         assert_eq!(replies.len(), 1);
         assert_eq!(replies[0].text, "The PDF says 3 m/s");
         // A seat that stopped on an error says so.
-        let mut failed = ask_rows("app-7-direct-x", "<group_message>", 5);
+        let mut failed = ask_rows("app-7-direct-x", "<group_message>", &[], 5);
         failed.extend([row("assistant", ""), row("error", "Unknown provider: x")]);
         let replies =
             finished_group_replies(&blocks(&failed), false, "7", 0, &DroppedRequests::default());

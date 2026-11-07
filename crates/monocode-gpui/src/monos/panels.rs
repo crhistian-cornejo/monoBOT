@@ -375,6 +375,10 @@ pub(super) fn search_bar(field: Entity<Input>) -> Div {
         .child(div().flex_1().min_w_0().child(field))
 }
 /// Whether `haystack` contains `query`, ignoring case and surrounding spaces.
+fn file_name(path: &str) -> &str {
+    path.rsplit(['/', '\\']).next().unwrap_or(path)
+}
+
 pub(super) fn matches_query(query: &str, haystack: &str) -> bool {
     haystack
         .to_lowercase()
@@ -1081,7 +1085,14 @@ impl Monos {
                 OverviewTab::Sessions => {
                     (tab, "Sub-agents", "message-multiple", mono.launches.len())
                 }
-                OverviewTab::Documents => (tab, "Documents", "file", mono.documents.len()),
+                OverviewTab::Documents => {
+                    let files: usize = self
+                        .document_folders(&mono.id, cx)
+                        .iter()
+                        .map(|f| f.files.len())
+                        .sum();
+                    (tab, "Documents", "file", mono.documents.len() + files)
+                }
                 OverviewTab::Habits => (tab, "Habits", "clock", self.habits.len()),
                 OverviewTab::Changes => (
                     tab,
@@ -1320,6 +1331,23 @@ impl Monos {
             .rev()
             .filter(|d| matches_query(&query, &format!("{} {}", d.title, d.summary)))
             .collect();
+        let all_folders = self.document_folders(&mono.id, cx);
+        let nothing = mono.documents.is_empty() && all_folders.is_empty();
+        let folders: Vec<_> = all_folders
+            .into_iter()
+            .filter_map(|mut folder| {
+                if !matches_query(&query, &folder.title) {
+                    folder
+                        .files
+                        .retain(|path| matches_query(&query, file_name(path)));
+                }
+                (!folder.files.is_empty()).then_some(folder)
+            })
+            .collect();
+        let folder_rows: Vec<AnyElement> = folders
+            .into_iter()
+            .map(|folder| self.document_folder(folder, cx))
+            .collect();
         let list = div()
             .id("mono-document-list")
             .flex_1()
@@ -1329,7 +1357,7 @@ impl Monos {
             .flex()
             .flex_col()
             .gap_1p5()
-            .when(mono.documents.is_empty(), |d| {
+            .when(nothing, |d| {
                 d.child(empty_state(
                     "file",
                     &format!(
@@ -1338,9 +1366,10 @@ impl Monos {
                     ),
                 ))
             })
-            .when(documents.is_empty() && !mono.documents.is_empty(), |d| {
+            .when(documents.is_empty() && folder_rows.is_empty() && !nothing, |d| {
                 d.child(empty_state("search-01", "No documents match this search."))
             })
+            .children(folder_rows)
             .children(documents.into_iter().map(|document| {
                 // MonoOverview's DocumentRow: laid out like a habit.
                 let id = document.id.clone();
@@ -1412,8 +1441,161 @@ impl Monos {
             .size_full()
             .flex()
             .flex_col()
-            .when(!mono.documents.is_empty(), |d| d.child(search_bar(filter)))
+            .when(!nothing, |d| d.child(search_bar(filter)))
             .child(list)
+            .into_any_element()
+    }
+    /// The files each request left in a Mono's chat, newest request first.
+    pub(super) fn document_folders(
+        &self,
+        id: &str,
+        cx: &App,
+    ) -> Vec<monocode_core::mono::folders::Folder> {
+        let Some(chat) = self.chats.get(id) else {
+            return Vec::new();
+        };
+        let rows = chat.read(cx).mono_rows(cx);
+        let key = (
+            id.to_owned(),
+            rows.len(),
+            rows.last().map_or(0, |row| row.text.len()),
+        );
+        if let Some((cached, folders)) = &*self.document_folders.borrow()
+            && *cached == key
+        {
+            return folders.clone();
+        }
+        let folders = monocode_core::mono::folders::folders(rows);
+        *self.document_folders.borrow_mut() = Some((key, folders.clone()));
+        folders
+    }
+    /// A request's files under its name, like a folder that opens in place.
+    fn document_folder(
+        &mut self,
+        folder: monocode_core::mono::folders::Folder,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open = !self.closed_folders.contains(&folder.id);
+        let id = folder.id.clone();
+        let count = folder.files.len();
+        let header = outlined(div().id(SharedString::from(format!("mono-folder-{id}"))))
+            .debug_selector({
+                let id = id.clone();
+                move || format!("mono-folder-{id}")
+            })
+            .role(Role::Button)
+            .aria_expanded(open)
+            .aria_label(format!("Folder {}", folder.title))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_2p5()
+            .flex_shrink_0()
+            .px(px(10.))
+            .py_2()
+            .cursor_pointer()
+            .child(
+                div()
+                    .size(px(28.))
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(crate::file_icons::file_type_icon("", true, open, 18.)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(12.))
+                            .line_height(px(20.))
+                            .text_color(content(0.85))
+                            .child(folder.title.clone()),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(11.))
+                            .line_height(px(16.))
+                            .text_color(content(0.4))
+                            .child(if count == 1 {
+                                "1 file".to_string()
+                            } else {
+                                format!("{count} files")
+                            }),
+                    ),
+            )
+            .child(
+                icon(
+                    if open {
+                        "chevron-down"
+                    } else {
+                        "chevron-right"
+                    },
+                    12.,
+                )
+                .text_color(content(0.4)),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                if !this.closed_folders.remove(&id) {
+                    this.closed_folders.insert(id.clone());
+                }
+                cx.notify();
+            }));
+        div()
+            .w_full()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(header)
+            .when(open, |d| {
+                d.children(folder.files.into_iter().enumerate().map(|(ix, path)| {
+                    let name = file_name(&path).to_owned();
+                    let pdf = std::path::Path::new(&name)
+                        .extension()
+                        .is_some_and(|e| e.eq_ignore_ascii_case("pdf"));
+                    let selector = format!("mono-folder-file-{}-{ix}", folder.id);
+                    div()
+                        .id(SharedString::from(selector.clone()))
+                        .debug_selector(move || selector.clone())
+                        .role(Role::Button)
+                        .aria_label(format!("Open {name}"))
+                        .ml(px(18.))
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .px(px(10.))
+                        .py(px(6.))
+                        .rounded_md()
+                        .cursor_pointer()
+                        .hover(|s| s.bg(content(0.06)))
+                        .child(crate::file_icons::file_type_icon(&name, false, false, 16.))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(content(0.8))
+                                .child(name.clone()),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            if pdf {
+                                this.open_paper(path.clone(), 0, None, name.clone(), cx);
+                            } else {
+                                cx.open_with_system(std::path::Path::new(&path));
+                            }
+                        }))
+                }))
+            })
             .into_any_element()
     }
     pub(super) fn page_header(&self, title: &str, cx: &mut Context<Self>) -> Div {
@@ -1597,7 +1779,72 @@ impl Monos {
             Route::NewHabit => self.habit_page(mono, None, window, cx),
         }
     }
+    /// A group's activity leads with what its members are doing: their work
+    /// happens in their own seats, where the group's chat cannot show it.
+    fn members_activity(&self, mono: &Mono, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let working = self.group_working(mono, cx);
+        if working.is_empty() {
+            return None;
+        }
+        Some(
+            div()
+                .flex_shrink_0()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .px_3()
+                .pt_2()
+                .pb_1()
+                .children(working.into_iter().map(|(member, state)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(avatar::avatar(
+                            &member.mascot,
+                            member.color,
+                            state,
+                            16.,
+                            false,
+                        ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_size(px(12.))
+                                .text_color(content(0.8))
+                                .child(member.label()),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(11.))
+                                .text_color(accent_color())
+                                .child(if state == "needs-you" {
+                                    "Needs you"
+                                } else {
+                                    "Working…"
+                                }),
+                        )
+                }))
+                .into_any_element(),
+        )
+    }
     fn activity_view(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
+        let Some(members) = self.members_activity(mono, cx) else {
+            return self.turn_activity_view(mono, cx);
+        };
+        let body = self.turn_activity_view(mono, cx);
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(members)
+            .child(div().flex_1().min_h_0().child(body))
+            .into_any_element()
+    }
+    fn turn_activity_view(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
         let Some(chat) = self.chat() else {
             return empty("Loading…");
         };

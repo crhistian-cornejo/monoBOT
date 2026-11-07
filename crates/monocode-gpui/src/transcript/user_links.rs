@@ -68,7 +68,7 @@ impl TranscriptView {
             text: text.clone(),
             highlights: markdown::mark_styles(
                 text,
-                vec![],
+                self.mention_styles(text),
                 self.search_match.as_ref().map_or("", |(_, q)| q.as_str()),
                 self.search_match
                     .as_ref()

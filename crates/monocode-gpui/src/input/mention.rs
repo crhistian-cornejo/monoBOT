@@ -106,6 +106,11 @@ impl Input {
                     && self.content.is_char_boundary(range.end)
                     // A leading `/command` owns byte 0.
                     && !(range.start == 0 && command.is_some())
+                    // An @Name is a person, not a file: no icon, just the accent.
+                    && !self
+                        .composer_people
+                        .iter()
+                        .any(|person| person.start == range.start)
             })
             .filter_map(|range| Some((range.start, MentionIcon::of(&self.content[range.clone()])?)))
             .collect();

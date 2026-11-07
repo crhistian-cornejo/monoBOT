@@ -226,6 +226,9 @@ pub struct Input {
     reversed: bool,
     marked: Option<Range<usize>>,
     composer_tokens: Vec<Range<usize>>,
+    /// The composer tokens that name a person (@Name): they keep the accent
+    /// and take no file icon, and their name may hold spaces.
+    composer_people: Vec<Range<usize>>,
     inline_commands: bool,
     selected_command: Option<Command>,
     lines: Vec<WrappedLine>,
@@ -279,6 +282,7 @@ impl Input {
             reversed: false,
             marked: None,
             composer_tokens: Vec::new(),
+            composer_people: Vec::new(),
             inline_commands: false,
             selected_command: None,
             lines: Vec::new(),
@@ -588,10 +592,12 @@ impl Input {
     pub(crate) fn highlight_composer_tokens(
         &mut self,
         ranges: Vec<Range<usize>>,
+        people: Vec<Range<usize>>,
         cx: &mut Context<Self>,
     ) {
-        if self.composer_tokens != ranges {
+        if self.composer_tokens != ranges || self.composer_people != people {
             self.composer_tokens = ranges;
+            self.composer_people = people;
             cx.notify();
         }
     }

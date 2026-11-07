@@ -14,7 +14,10 @@ use monocode_core::{
             Access, Block, GroupMono,
             app::{self as group_app, NOT_A_GROUP},
             brief::{Member, askable_members, group_lead},
-            group::{access_answer_text, answer_access_request, group_message, groups_of},
+            group::{
+                access_answer_text, answer_access_request, group_message, groups_of,
+                with_attached_files,
+            },
             learning::{self, LearnedMarks},
             mentions::Named,
             native::{self, AskResult, Mark},
@@ -50,6 +53,8 @@ pub(super) struct Seat {
 struct SeatAsk {
     request: String,
     text: String,
+    /// Files the user attached to the message, sent on to the member.
+    files: Vec<String>,
     quick: bool,
 }
 
@@ -130,8 +135,8 @@ impl Monos {
     }
 
     /// A message the user wrote in a group's chat (`directGroupAsk`): to one
-    /// member with @Name, or to every member before the lead. False when the
-    /// lead takes it as it is.
+    /// member with @Name, or to every member before the lead, with whatever
+    /// files it carried. False when the lead takes it as it is.
     pub(super) fn group_submitted(
         &mut self,
         source: &str,
@@ -139,9 +144,6 @@ impl Monos {
         attachments: &[PathBuf],
         cx: &mut Context<Self>,
     ) -> bool {
-        if !attachments.is_empty() {
-            return false;
-        }
         let (Some(led), Some(chat), Some(key)) = (
             self.led_group(source),
             self.chats.get(source).cloned(),
@@ -174,17 +176,30 @@ impl Monos {
                 user_request.clone()
             }
         };
-        let rows = native::ask_rows(&user_request, text.trim(), now);
+        let rows = native::ask_rows(&user_request, text.trim(), attachments, now);
         if !chat.update(cx, |chat, cx| chat.mono_append(rows, cx)) {
             return false;
         }
+        let files: Vec<String> = attachments
+            .iter()
+            .map(|path| path.to_string_lossy().into_owned())
+            .collect();
+        self.grant_attached_files(source, &files, cx);
         match route {
             GroupRoute::Direct {
                 member_id,
                 message,
                 member_request,
                 ..
-            } => self.send_to_member(source, &member_id, message, member_request, false, cx),
+            } => self.send_to_member(
+                source,
+                &member_id,
+                message,
+                member_request,
+                files,
+                false,
+                cx,
+            ),
             GroupRoute::Round { round, .. } => {
                 for ask in &round.asks {
                     self.send_to_member(
@@ -192,6 +207,7 @@ impl Monos {
                         &ask.member_id,
                         round.text.clone(),
                         ask.request.clone(),
+                        files.clone(),
                         round.quick,
                         cx,
                     );
@@ -203,6 +219,26 @@ impl Monos {
         true
     }
 
+    /// A file the user attached in the group's chat is one the members may
+    /// read: it joins the group's context files, so nobody has to ask.
+    fn grant_attached_files(&mut self, group: &str, files: &[String], cx: &mut Context<Self>) {
+        if files.is_empty() {
+            return;
+        }
+        let Some(current) = self.roster.get(group).and_then(|mono| mono.group.clone()) else {
+            return;
+        };
+        let next = with_attached_files(&current, files);
+        if next == current {
+            return;
+        }
+        if let Some(entry) = self.roster.get_mut(group) {
+            entry.group = Some(next);
+        }
+        self.save(cx);
+        self.configure_chat(group, cx);
+    }
+
     /// One member's part of a group's message, in its seat.
     pub(super) fn send_to_member(
         &mut self,
@@ -210,6 +246,7 @@ impl Monos {
         member: &str,
         text: String,
         request: String,
+        files: Vec<String>,
         quick: bool,
         cx: &mut Context<Self>,
     ) {
@@ -222,6 +259,7 @@ impl Monos {
             seat.queue.push_back(SeatAsk {
                 request,
                 text,
+                files,
                 quick,
             });
         }
@@ -254,6 +292,7 @@ impl Monos {
         seat.queue.push_back(SeatAsk {
             request,
             text,
+            files: Vec::new(),
             quick: false,
         });
         self.pump_seat(&key, cx);
@@ -473,6 +512,8 @@ impl Monos {
 
     fn seat_changed(&mut self, key: &(String, String), cx: &mut Context<Self>) {
         self.call_seat_changed(key, cx);
+        // The members and activity panels read the seat's state live.
+        cx.notify();
         let idle = self
             .groups
             .seats
@@ -591,12 +632,58 @@ impl Monos {
             sent_at: Some(now),
             internal: false,
             error: None,
-            attachments: Vec::new(),
+            attachments: ask.files.clone(),
         };
         if !view.update(cx, |view, cx| view.mono_dispatch(&message, cx)) {
             self.groups.failed.insert(ask.request);
         }
         self.check_groups(cx);
+    }
+
+    /// What a member is doing in a group right now, as its seat has it:
+    /// "working", "needs-you" or "idle". The lead answers in the group's own
+    /// chat, so it has no seat of its own.
+    pub(super) fn member_state(&self, group: &str, member: &str, cx: &App) -> &'static str {
+        let status = |view: &Entity<Conversation>| match view.read(cx).mono_status() {
+            "working" => Some("working"),
+            "needs-you" => Some("needs-you"),
+            _ => None,
+        };
+        if self.roster.get(member).is_some_and(Mono::is_principal) {
+            return self.chats.get(group).and_then(status).unwrap_or("idle");
+        }
+        let Some(seat) = self
+            .groups
+            .seats
+            .get(&(group.to_owned(), member.to_owned()))
+        else {
+            return "idle";
+        };
+        if let Some(state) = seat.view.as_ref().and_then(status) {
+            return state;
+        }
+        // An ask on its way in, or waiting its turn, is already its work.
+        if seat.sending.is_some() || !seat.queue.is_empty() {
+            "working"
+        } else {
+            "idle"
+        }
+    }
+
+    /// The members of a group that are not idle, with their state.
+    pub(super) fn group_working(&self, mono: &Mono, cx: &App) -> Vec<(Mono, &'static str)> {
+        let Some(group) = mono.group.as_ref() else {
+            return Vec::new();
+        };
+        group
+            .members
+            .iter()
+            .filter_map(|id| self.roster.get(id).cloned())
+            .filter_map(|member| {
+                let state = self.member_state(&mono.id, &member.id, cx);
+                (state != "idle").then_some((member, state))
+            })
+            .collect()
     }
 
     /// Each loaded seat's conversation as the desktop's blocks, and whether
@@ -1146,6 +1233,7 @@ impl Monos {
             &member,
             ask.message.clone(),
             ask.app_request_id.clone(),
+            Vec::new(),
             false,
             cx,
         );

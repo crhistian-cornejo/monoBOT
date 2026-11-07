@@ -1426,8 +1426,14 @@ impl Monos {
                 .unwrap_or_default()
         };
         let gid = mono.id.clone();
+        let states: HashMap<String, &'static str> = group
+            .members
+            .iter()
+            .map(|id| (id.clone(), self.member_state(&gid, id, cx)))
+            .collect();
         let row = |mono: &Mono, action: Option<AnyElement>| {
             let role = role_of(&mono.id);
+            let state = states.get(&mono.id).copied().unwrap_or("idle");
             div()
                 .id(SharedString::from(format!("group-member-{}", mono.id)))
                 .min_h(px(36.))
@@ -1436,7 +1442,13 @@ impl Monos {
                 .flex()
                 .items_center()
                 .gap_2()
-                .child(avatar::avatar(&mono.mascot, mono.color, "idle", 16., true))
+                .child(avatar::avatar(
+                    &mono.mascot,
+                    mono.color,
+                    state,
+                    16.,
+                    state == "idle",
+                ))
                 .child(
                     div()
                         .flex_1()
@@ -1452,8 +1464,16 @@ impl Monos {
                             div()
                                 .truncate()
                                 .text_size(px(11.))
-                                .text_color(content(0.5))
-                                .child(role),
+                                .text_color(if state == "idle" {
+                                    content(0.5)
+                                } else {
+                                    accent_color()
+                                })
+                                .child(match state {
+                                    "working" => "Working…".to_owned(),
+                                    "needs-you" => "Needs you".to_owned(),
+                                    _ => role,
+                                }),
                         ),
                 )
                 .children(action)

@@ -449,6 +449,29 @@ pub fn answer_access_request(group: &Group, request_id: &str, access: Access, no
     }
 }
 
+/// Files the user attached in the group's chat: the members may read them
+/// without asking, and their briefs list them as context files. Paths the
+/// group can already reach, links and unusable paths are left out.
+pub fn with_attached_files(group: &Group, paths: &[String]) -> Group {
+    let mut next = group.clone();
+    for path in paths {
+        let target = path.trim();
+        if target.is_empty()
+            || is_link(target)
+            || folder_problem(target, false).is_some()
+            || group_access_for(&next, target).is_some()
+        {
+            continue;
+        }
+        next.context.push(target.to_owned());
+        // The newest attachment matters most when the list is full.
+        while next.context.len() > GROUP_CONTEXT_MAX {
+            next.context.remove(0);
+        }
+    }
+    next
+}
+
 /// What the user's answer says, as the group chat reads it.
 pub fn access_answer_text(target: &str, access: Access) -> String {
     let what = if is_link(target) {
@@ -799,6 +822,36 @@ mod tests {
             Some(Access::Read)
         );
         assert_eq!(group_access_for(&answered, "https://site.test/other"), None);
+    }
+
+    #[test]
+    fn groups_may_read_the_files_the_user_attached_in_their_chat() {
+        let group = project();
+        let next = with_attached_files(
+            &group,
+            &[
+                "/Users/me/Downloads/Personal/recibo.pdf".into(),
+                // Already reachable, a link and a bare name add nothing.
+                "C:\\Users\\me\\brief.pdf".into(),
+                "https://site.test/a.pdf".into(),
+                "recibo.pdf".into(),
+            ],
+        );
+        assert_eq!(
+            group_access_for(&next, "/Users/me/Downloads/Personal/recibo.pdf"),
+            Some(Access::Read)
+        );
+        assert_eq!(
+            next.context.len(),
+            group.context.len() + 1,
+            "only the attached file outside the group's places joins its context"
+        );
+        assert!(group_places(&next).contains("/Users/me/Downloads/Personal/recibo.pdf"));
+        // Asking again changes nothing.
+        assert_eq!(
+            with_attached_files(&next, &["/Users/me/Downloads/Personal/recibo.pdf".into()]),
+            next
+        );
     }
 
     #[test]

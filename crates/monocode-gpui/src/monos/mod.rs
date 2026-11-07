@@ -165,6 +165,16 @@ pub(crate) struct Monos {
     visual_documents: HashMap<String, Entity<crate::visuals::VisualView>>,
     papers: HashMap<String, papers::PaperPage>,
     loading_papers: HashSet<String>,
+    /// The Documents tab's folders, read from the chat; kept while the chat's
+    /// rows stay as they were (mono id, row count, last row's length).
+    document_folders: std::cell::RefCell<
+        Option<(
+            (String, usize, usize),
+            Vec<monocode_core::mono::folders::Folder>,
+        )>,
+    >,
+    /// Folders the user closed in the Documents tab.
+    closed_folders: HashSet<String>,
     project_changes: changes::ProjectChanges,
     review: Option<Entity<crate::review::ReviewPane>>,
     activity: Option<(
@@ -457,6 +467,8 @@ impl Monos {
             visual_documents: HashMap::new(),
             papers: HashMap::new(),
             loading_papers: HashSet::new(),
+            document_folders: Default::default(),
+            closed_folders: HashSet::new(),
             project_changes: Default::default(),
             review: None,
             activity: None,

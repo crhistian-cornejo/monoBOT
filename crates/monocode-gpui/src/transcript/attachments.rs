@@ -285,31 +285,73 @@ impl TranscriptView {
                         .size(px(36.))
                         .into_any_element()
                 } else {
-                    div()
-                        .min_w_0()
-                        .flex()
-                        .items_center()
-                        .gap_1p5()
-                        .px_1()
-                        .py_1()
-                        .rounded_md()
-                        .bg(content(0.06))
-                        .child(crate::file_icons::file_type_icon(
-                            &file.name, false, false, 16.,
-                        ))
-                        .child(
-                            div()
-                                .max_w(px(140.))
-                                .truncate()
-                                .text_size(px(11.))
-                                .child(file.name.clone()),
-                        )
-                        .into_any_element()
+                    self.file_chip(file, key, ix).into_any_element()
                 }
             }))
             .into_any_element()
     }
 
+    /// A sent file opens where it reads best: a PDF beside the Mono's
+    /// documents, anything else in a file pane.
+    fn file_chip(&self, file: &Attachment, key: &str, ix: usize) -> AnyElement {
+        let open = file.path.clone().and_then(|path| {
+            let path = path.to_str()?.to_owned();
+            let name = file.name.to_string();
+            let pdf = file.mime.as_ref() == "application/pdf"
+                || std::path::Path::new(&name)
+                    .extension()
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("pdf"));
+            Some((path, name, pdf))
+        });
+        let chip = div()
+            .id(SharedString::from(format!("attachment-file-{key}-{ix}")))
+            .debug_selector(move || format!("transcript-file-{ix}"))
+            .min_w_0()
+            .flex()
+            .items_center()
+            .gap_1p5()
+            .px_1()
+            .py_1()
+            .rounded_md()
+            .bg(content(0.06))
+            .child(crate::file_icons::file_type_icon(
+                &file.name, false, false, 16.,
+            ))
+            .child(
+                div()
+                    .max_w(px(140.))
+                    .truncate()
+                    .text_size(px(11.))
+                    .child(file.name.clone()),
+            );
+        let Some((path, name, pdf)) = open else {
+            return chip.into_any_element();
+        };
+        chip.role(Role::Button)
+            .focusable()
+            .aria_label(format!("Open {name}"))
+            .cursor(gpui::CursorStyle::PointingHand)
+            .hover(|s| s.bg(content(0.12)))
+            .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                if pdf {
+                    window.dispatch_action(
+                        Box::new(crate::file_editor::OpenPaper {
+                            path: path.clone(),
+                            page: 0,
+                            passage: None,
+                            title: name.clone(),
+                        }),
+                        cx,
+                    );
+                } else {
+                    window
+                        .dispatch_action(Box::new(crate::file_editor::OpenPath(path.clone())), cx);
+                }
+            })
+            .into_any_element()
+    }
     /// A Mono chat's sent images, shown whole above the bubble like photos
     /// in a messaging app.
     pub(super) fn photo_row(

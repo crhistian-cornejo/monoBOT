@@ -706,6 +706,9 @@ pub(crate) struct TranscriptView {
     mono_groups: std::cell::RefCell<HashMap<usize, usize>>,
     /// The Mono's mascot, colour and name, which sign its turns.
     mono_look: Option<(String, u32, SharedString)>,
+    /// Who an @Name in a message can name, so a group's chat reads the name
+    /// in the accent instead of the raw `@`.
+    mention_people: Vec<crate::composer_completion::MentionPerson>,
     /// The turn whose actions show, and since when, as `.turn-actions-hover`.
     hovered_turn: Option<(usize, Instant)>,
     /// The prompt message whose copy action shows.
@@ -848,6 +851,39 @@ impl TranscriptView {
         self.list = ListState::new(self.rows.len() + 1, ListAlignment::Bottom, px(320.));
         self.list.set_follow_mode(FollowMode::Tail);
         self.scroll_bound = false;
+    }
+    /// The people the chat's @ menu can name, as the composer has them.
+    pub(crate) fn set_mention_people(
+        &mut self,
+        people: Vec<crate::composer_completion::MentionPerson>,
+        cx: &mut Context<Self>,
+    ) {
+        if self.mention_people != people {
+            self.mention_people = people;
+            cx.notify();
+        }
+    }
+    /// Each @Name in `text` in the accent. The colour alone keeps the text one
+    /// run, so wrapping, clamping, selection and measurement are untouched.
+    pub(super) fn mention_styles(
+        &self,
+        text: &str,
+    ) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> {
+        if self.mention_people.is_empty() {
+            return Vec::new();
+        }
+        monocode_core::mono::groups::mentions::mentions_in(text, &self.mention_people)
+            .into_iter()
+            .map(|mention| {
+                (
+                    mention.start..mention.end,
+                    gpui::HighlightStyle {
+                        color: Some(crate::theme::accent_color()),
+                        ..Default::default()
+                    },
+                )
+            })
+            .collect()
     }
     pub(crate) fn reveal_search(&mut self, row: usize, query: &str, cx: &mut Context<Self>) {
         if row < self.history_start {
@@ -2065,7 +2101,12 @@ impl TranscriptView {
                                     .when(!message.text.is_empty(), |d| d.mb_2())
                                     .child(body)
                             }))
-                            .when(!message.text.is_empty(), |d| d.child(message.text.clone())),
+                            .when(!message.text.is_empty(), |d| {
+                                d.child(
+                                    gpui::StyledText::new(message.text.clone())
+                                        .with_highlights(self.mention_styles(&message.text)),
+                                )
+                            }),
                     )
                     .when_some(message.error.clone(), |d, error| {
                         d.child(
@@ -2559,6 +2600,7 @@ impl TranscriptView {
             mono: false,
             mono_groups: Default::default(),
             mono_look: None,
+            mention_people: Vec::new(),
             hovered_turn: None,
             hovered_prompt: None,
             hovered_prompt_actions: None,
@@ -5445,7 +5487,7 @@ impl TranscriptView {
                                         let styled = gpui::StyledText::new(text.clone())
                                             .with_highlights(markdown::mark_styles(
                                                 &text,
-                                                vec![],
+                                                self.mention_styles(&text),
                                                 self.search_match
                                                     .as_ref()
                                                     .map_or("", |(_, q)| q.as_str()),
@@ -6930,6 +6972,36 @@ mod scroll_tests {
                 view.rebuild(1, cx);
             }).unwrap();
         }
+    }
+
+    #[gpui::test]
+    fn a_groups_chat_reads_an_at_name_in_the_accent(cx: &mut TestAppContext) {
+        let view = cx.new(|_| {
+            let mut view = TranscriptView::new();
+            view.mono_mode("cat", 0xe86b5f, "Team");
+            view
+        });
+        let person = |id: &str, name: &str| crate::composer_completion::MentionPerson {
+            id: id.into(),
+            name: name.into(),
+            mascot: "cat".into(),
+            color: 0xe86b5f,
+            note: None,
+        };
+        view.update(cx, |view, cx| {
+            assert!(view.mention_styles("@Documents Agent hola").is_empty());
+            view.set_mention_people(
+                vec![person("docs", "Documents Agent"), person("fin", "Finance")],
+                cx,
+            );
+            let text = "ok @Documents Agent de que trata esto?";
+            let styles = view.mention_styles(text);
+            assert_eq!(styles.len(), 1, "the name is one run, spaces and all");
+            assert_eq!(&text[styles[0].0.clone()], "@Documents Agent");
+            assert_eq!(styles[0].1.color, Some(crate::theme::accent_color()));
+            // Nobody named leaves the text alone.
+            assert!(view.mention_styles("escribe a ana@finance.com").is_empty());
+        });
     }
 
     #[gpui::test]

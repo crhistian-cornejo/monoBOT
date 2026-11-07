@@ -3114,6 +3114,7 @@ fn interrupting_a_call_cancels_only_its_queued_request(cx: &mut TestAppContext) 
             &member,
             "Other request".into(),
             "other".into(),
+            Vec::new(),
             false,
             cx,
         );
@@ -3691,6 +3692,155 @@ fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut Test
 }
 
 #[gpui::test]
+fn a_file_attached_to_a_group_message_goes_to_the_member_it_names(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::{Group, group::group_access_for, native};
+    let s = setup(cx);
+    let fixture = || {
+        locked(&s.store)
+            .unwrap()
+            .create("codex", "/missing/monobot-group-member")
+            .unwrap()
+            .id
+    };
+    let docs_chat = fixture();
+    let handle: gpui::AnyWindowHandle = s.window.into();
+    let docs = handle
+        .update(cx, |_, window, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.dismiss_settings(window, cx);
+                let root = m.root.clone();
+                let docs = m
+                    .roster
+                    .create_bot(&root, "documents", false)
+                    .unwrap()
+                    .id
+                    .clone();
+                let bot = m.roster.get_mut(&docs).unwrap();
+                bot.name = "Docs".into();
+                bot.session_id = Some(docs_chat);
+                let group = m.roster.get_mut(&s.id).unwrap();
+                group.kind = Some("group".into());
+                group.name = "Team".into();
+                group.group = Some(Group {
+                    members: vec![docs.clone()],
+                    ..Group::default()
+                });
+                // The lead's own turns stay queued: no provider starts.
+                m.chats[&s.id].update(cx, |chat, _| {
+                    chat.settings.usage_limit = Some(Default::default())
+                });
+                m.configure_chat(&s.id, cx);
+                docs
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let file = std::env::temp_dir().join("monobot-group-attachment.pdf");
+    std::fs::write(&file, b"%PDF-1.4\n").unwrap();
+    let chat = cx.update(|cx| s.manager.read(cx).chats[&s.id].clone());
+    chat.update(cx, |_, cx| {
+        cx.emit(crate::conversation::MonoSubmitted {
+            text: "@Docs ¿de qué trata esto?".into(),
+            attachments: vec![file.clone()],
+        })
+    });
+    cx.run_until_parked();
+
+    // The message went to Docs, not to the lead's outbox.
+    let seat = cx.update(|cx| {
+        s.manager
+            .read(cx)
+            .roster
+            .get(&s.id)
+            .unwrap()
+            .seats
+            .get(&docs)
+            .copied()
+    });
+    assert!(seat.is_some(), "Docs was asked in its own seat");
+    assert!(
+        cx.update(|cx| s.manager.read(cx).roster.get(&s.id).unwrap().outbox.clone())
+            .is_empty(),
+        "the lead did not take the message"
+    );
+    let rows = cx.update(|cx| chat.read(cx).mono_rows(cx).to_vec());
+    let blocks = native::blocks(&rows);
+    assert!(
+        blocks.iter().any(|b| b.is_user()
+            && b.text == "@Docs ¿de qué trata esto?"
+            && b.app_request_id
+                .as_deref()
+                .is_some_and(|r| r.starts_with("group-direct-"))),
+        "the group's chat shows the message as written"
+    );
+    let manifest = rows
+        .iter()
+        .find(|row| row.role == monocode_core::transcript::attachments::ROLE)
+        .expect("the chat keeps the file's chip");
+    assert_eq!(
+        monocode_core::transcript::attachments::paths(manifest).unwrap(),
+        vec![file.clone()]
+    );
+    // Docs may read what the user handed it, without asking for access.
+    let group = cx.update(|cx| {
+        s.manager
+            .read(cx)
+            .roster
+            .get(&s.id)
+            .unwrap()
+            .group
+            .clone()
+            .unwrap()
+    });
+    assert_eq!(
+        group_access_for(&group, &file.to_string_lossy()),
+        Some(monocode_core::mono::groups::Access::Read)
+    );
+    // A member with an ask in hand reads as working, so the members and
+    // activity panels can say so while its seat answers.
+    cx.update(|cx| {
+        s.manager.update(cx, |m, cx| {
+            assert_eq!(m.member_state(&s.id, &docs, cx), "idle");
+            m.send_to_member(
+                &s.id,
+                &docs,
+                "ping".into(),
+                "req-ping".into(),
+                Vec::new(),
+                false,
+                cx,
+            );
+            assert_eq!(m.member_state(&s.id, &docs, cx), "working");
+            let group = m.current().cloned().unwrap();
+            assert_eq!(m.group_working(&group, cx).len(), 1);
+        })
+    });
+    // Tapping the file in the chat opens it beside the group's documents.
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    // The chat settles its scroll over a few frames after its rows lay out.
+    let mut chip = None;
+    for _ in 0..8 {
+        visual.refresh().unwrap();
+        visual.run_until_parked();
+        let next = visual.debug_bounds("transcript-file-0");
+        if next.is_some() && next == chip {
+            break;
+        }
+        chip = next;
+    }
+    let chip = chip.expect("the attached file shows as a chip in the chat");
+    visual.simulate_click(chip.center(), Default::default());
+    visual.run_until_parked();
+    assert_eq!(
+        visual.update(|_, cx| s.manager.read(cx).route.clone()),
+        Some(Route::Paper(file.to_string_lossy().into_owned())),
+        "the PDF opens in the panel, not in a code pane"
+    );
+    let _ = std::fs::remove_file(&file);
+}
+
+#[gpui::test]
 fn the_group_speaks_with_the_principals_identity_in_its_transcript(cx: &mut TestAppContext) {
     use monocode_core::mono::groups::Group;
     let s = setup(cx);
@@ -3982,6 +4132,95 @@ fn a_cited_paper_opens_in_the_documents_panel_not_a_code_pane(cx: &mut TestAppCo
         assert_eq!(m.papers[&path].title, "A paper");
         assert_eq!(m.route, Some(Route::Paper(path.clone())));
     });
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[gpui::test]
+fn the_papers_a_mono_downloaded_wait_in_a_folder_of_their_request(cx: &mut TestAppContext) {
+    use monocode_core::{tool::ToolCall, transcript::Row};
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let dir = std::env::temp_dir().join(format!("monobot-paper-folder-{}", mono::new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("airGR and airGRteaching.pdf");
+    std::fs::write(&path, b"%PDF-1.4\n").unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    s.window
+        .update(visual, |_, w, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.open(&s.id, w, cx);
+                m.dismiss_settings(w, cx);
+            })
+        })
+        .unwrap();
+    let mut download = ToolCall::new("t1", "web.download");
+    download.input = r#"{"url":"https://example.com/airgr"}"#.into();
+    download.output =
+        serde_json::json!({ "path": path, "url": "https://x", "bytes": 9 }).to_string();
+    let row = |role: &str, text: String| Row {
+        role: role.into(),
+        text,
+        first: true,
+        sent_at: Some(1),
+    };
+    s.manager.update(visual, |m, cx| {
+        m.chats[&s.id].update(cx, |view, cx| {
+            view.transcript.update(cx, |t, cx| {
+                let start = t.source_rows().len();
+                t.patch(
+                    start,
+                    vec![
+                        row("user", "Paper de diseño hidrológico con R".into()),
+                        row("tool", serde_json::to_string(&download).unwrap()),
+                        row("assistant", format!("PDF en `{path}`.")),
+                    ],
+                    cx,
+                );
+            });
+        });
+        m.select_overview(OverviewTab::Documents, cx);
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let folder = s
+        .manager
+        .read_with(visual, |m, cx| m.document_folders(&s.id, cx));
+    assert_eq!(folder.len(), 1);
+    assert_eq!(folder[0].title, "Paper de diseño hidrológico con R");
+    // Debug selectors are looked up by `&'static str`.
+    let id = folder[0].id.clone();
+    let file: &'static str = format!("mono-folder-file-{id}-0").leak();
+    let folder: &'static str = format!("mono-folder-{id}").leak();
+    assert!(
+        visual.debug_bounds(folder).is_some(),
+        "the request has a folder"
+    );
+    let row = visual
+        .debug_bounds(file)
+        .expect("the folder lists the paper");
+    visual.simulate_click(row.center(), Default::default());
+    visual.run_until_parked();
+    assert_eq!(
+        s.manager.read_with(visual, |m, _| m.route.clone()),
+        Some(Route::Paper(path.clone()))
+    );
+    // Back from the paper finds it where it was.
+    visual.refresh().unwrap();
+    let back = visual.debug_bounds("mono-page-back").unwrap();
+    visual.simulate_click(back.center(), Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(s.manager.read_with(visual, |m, _| m.route.is_none()));
+    assert!(visual.debug_bounds(file).is_some());
+    // A folder closes and opens in place.
+    let header = visual.debug_bounds(folder).unwrap();
+    visual.simulate_click(header.center(), Default::default());
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds(file).is_none());
+    visual.simulate_click(header.center(), Default::default());
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds(file).is_some());
     let _ = std::fs::remove_dir_all(dir);
 }
 

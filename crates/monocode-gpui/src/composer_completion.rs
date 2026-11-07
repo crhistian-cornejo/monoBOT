@@ -16,6 +16,7 @@ use monocode_core::{
     skills::DiscoveredSkill,
 };
 use std::{
+    ops::Range,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -430,7 +431,7 @@ impl Completion {
             self.choices.clear();
             self.token = None;
             self.input.update(cx, |input, cx| {
-                input.highlight_composer_tokens(Vec::new(), cx)
+                input.highlight_composer_tokens(Vec::new(), Vec::new(), cx)
             });
             return;
         }
@@ -617,9 +618,25 @@ impl Completion {
         .detach();
     }
     fn highlight(&self, cx: &mut Context<Self>) {
-        let ranges = composer::highlight_ranges(&self.input.read(cx).content, &self.known);
-        self.input
-            .update(cx, |input, cx| input.highlight_composer_tokens(ranges, cx));
+        let text = self.input.read(cx).content.clone();
+        // A person's name may hold spaces, which the token pattern stops at,
+        // so the people a group names are matched on their own.
+        let people: Vec<Range<usize>> =
+            monocode_core::mono::groups::mentions::mentions_in(&text, &self.people)
+                .into_iter()
+                .map(|mention| mention.start..mention.end)
+                .collect();
+        let mut ranges = composer::highlight_ranges(&text, &self.known);
+        ranges.retain(|range| {
+            !people
+                .iter()
+                .any(|person| range.start < person.end && range.end > person.start)
+        });
+        ranges.extend(people.iter().cloned());
+        ranges.sort_by_key(|range| range.start);
+        self.input.update(cx, |input, cx| {
+            input.highlight_composer_tokens(ranges, people, cx)
+        });
     }
     fn rank(&mut self) {
         self.choices.clear();

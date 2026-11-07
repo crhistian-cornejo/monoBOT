@@ -189,11 +189,14 @@ impl Conversation {
         }
     }
     /// People that the composer's @ menu can name (e.g. group members and lead).
+    /// The transcript reads them too, so a sent @Name keeps the accent.
     pub(crate) fn set_mention_people(
         &mut self,
         people: Vec<crate::composer_completion::MentionPerson>,
         cx: &mut Context<Self>,
     ) {
+        self.transcript
+            .update(cx, |view, cx| view.set_mention_people(people.clone(), cx));
         self.completion
             .update(cx, |completion, cx| completion.set_people(people, cx));
     }
