@@ -45,7 +45,20 @@ struct Page {
     /// The markup the page shows, and the one it should show.
     shown: Option<Arc<str>>,
     wanted: Option<Arc<str>>,
+    failed: Option<Arc<str>>,
     frame: Option<Frame>,
+    visible: bool,
+}
+
+impl Page {
+    fn can_show(&self) -> bool {
+        self.visible
+            && self
+                .shown
+                .as_ref()
+                .zip(self.wanted.as_ref())
+                .is_some_and(|(shown, wanted)| Arc::ptr_eq(shown, wanted))
+    }
 }
 
 pub(super) struct Hosted {
@@ -76,28 +89,34 @@ impl Hosted {
                 top,
                 right - left,
                 bottom - top,
-                SWP_NOACTIVATE | SWP_SHOWWINDOW,
+                SWP_NOACTIVATE,
             );
             let _ = EnableWindow(self.clip, interactive);
         }
         let mut page = self.page.borrow_mut();
         page.wanted = Some(html.clone());
         page.frame = Some(frame);
-        sync(&mut page);
+        page.visible = true;
+        sync(&mut page, self.clip);
     }
 
     pub(super) fn hide(&self) {
-        unsafe {
-            let _ = SetWindowPos(
-                self.clip,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
-            );
-        }
+        self.page.borrow_mut().visible = false;
+        hide(self.clip);
+    }
+}
+
+fn hide(clip: HWND) {
+    unsafe {
+        let _ = SetWindowPos(
+            clip,
+            None,
+            0,
+            0,
+            0,
+            0,
+            SWP_HIDEWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+        );
     }
 }
 
@@ -111,23 +130,48 @@ impl Drop for Hosted {
 }
 
 /// Bring the controller up to the latest frame and markup, once it exists.
-fn sync(page: &mut Page) {
+fn sync(page: &mut Page, clip: HWND) {
     let (Some(controller), Some(web), Some(frame)) = (&page.controller, &page.web, page.frame)
     else {
         return;
     };
-    unsafe {
-        let _ = controller.SetBounds(frame.page);
-        let _ = controller.SetZoomFactor(frame.zoom);
+    if unsafe {
+        controller.SetBounds(frame.page).is_err() || controller.SetZoomFactor(frame.zoom).is_err()
+    } {
+        hide(clip);
+        return;
     }
-    if let Some(html) = &page.wanted
+    if let Some(html) = page.wanted.clone()
         && page
             .shown
             .as_ref()
-            .is_none_or(|shown| !Arc::ptr_eq(shown, html))
+            .is_none_or(|shown| !Arc::ptr_eq(shown, &html))
+        && page
+            .failed
+            .as_ref()
+            .is_none_or(|failed| !Arc::ptr_eq(failed, &html))
     {
-        let _ = unsafe { web.NavigateToString(&HSTRING::from(&**html)) };
-        page.shown = Some(html.clone());
+        if unsafe { web.NavigateToString(&HSTRING::from(&*html)) }.is_ok() {
+            page.shown = Some(html);
+            page.failed = None;
+        } else {
+            page.failed = Some(html);
+        }
+    }
+    if page.can_show() {
+        unsafe {
+            let _ = SetWindowPos(
+                clip,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
+        }
+    } else {
+        hide(clip);
     }
 }
 
@@ -210,7 +254,7 @@ fn create_controller(
             let mut page = page.borrow_mut();
             page.controller = Some(controller);
             page.web = Some(web);
-            sync(&mut page);
+            sync(&mut page, clip);
             Ok(())
         },
     ));
@@ -319,5 +363,24 @@ mod tests {
         assert!(!allowed("https://example.com"));
         assert!(!allowed("file:///C:/Windows/win.ini"));
         assert!(is_web("http://example.com") && !is_web("javascript:alert(1)"));
+    }
+
+    #[test]
+    fn the_clip_stays_hidden_until_the_current_page_can_be_shown() {
+        let first: Arc<str> = "<p>one</p>".into();
+        let next: Arc<str> = "<p>two</p>".into();
+        let mut page = Page {
+            wanted: Some(first.clone()),
+            visible: true,
+            ..Default::default()
+        };
+        assert!(!page.can_show());
+        page.shown = Some(first);
+        assert!(page.can_show());
+        page.wanted = Some(next);
+        assert!(!page.can_show());
+        page.visible = false;
+        page.shown = page.wanted.clone();
+        assert!(!page.can_show());
     }
 }

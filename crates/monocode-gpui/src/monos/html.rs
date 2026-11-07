@@ -119,6 +119,17 @@ fn escape(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
 }
+#[cfg(target_os = "windows")]
+pub(crate) fn focus_content(window: &Window) {
+    let Ok(handle) = HasWindowHandle::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = windows::Win32::Foundation::HWND(handle.hwnd.get() as _);
+    let _ = unsafe { windows::Win32::UI::Input::KeyboardAndMouse::SetFocus(Some(hwnd)) };
+}
 fn sandbox(body: &str) -> String {
     let color = |value: gpui::Hsla| {
         let value: gpui::Rgba = value.into();

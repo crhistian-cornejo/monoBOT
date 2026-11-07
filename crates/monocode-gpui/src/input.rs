@@ -1179,6 +1179,8 @@ impl Input {
         }
         #[cfg(target_os = "macos")]
         crate::traffic_lights::focus_content(w);
+        #[cfg(target_os = "windows")]
+        crate::monos::html::focus_content(w);
         if self.code_fold_down(e, cx) || self.code_scrollbar_down(e, w, cx) {
             return;
         }

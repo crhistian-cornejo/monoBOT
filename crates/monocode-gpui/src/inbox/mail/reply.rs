@@ -404,6 +404,8 @@ impl MailReply {
             }),
             cx.subscribe(&ask, |_, _, _: &input::Changed, cx| cx.notify()),
         ];
+        #[cfg(target_os = "windows")]
+        crate::monos::html::focus_content(window);
         window.focus(&text.focus_handle(cx), cx);
         let mut reply = Self {
             service,
@@ -443,6 +445,13 @@ impl MailReply {
             true
         } else {
             false
+        }
+    }
+
+    pub(super) fn set_opened(&mut self, opened: Opened, cx: &mut Context<Self>) {
+        if opened.id == self.message.id {
+            self.opened = Some(opened);
+            cx.notify();
         }
     }
 
@@ -541,15 +550,26 @@ impl MailReply {
                     .unwrap_or_default(),
             }
         });
+        let home = monocode_core::accounts::home()
+            .map(|home| home.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let accounts = crate::accounts::get(cx)
+            .map(|center| {
+                monocode_core::provider::Kind::ALL
+                    .into_iter()
+                    .map(|kind| (kind, center.read(cx).selected(kind, &home)))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
         let (tx, rx) = async_channel::unbounded::<model::ReplyProgress>();
         let task = cx.background_executor().spawn(async move {
             let text = match chosen {
                 Some(text) => text,
-                None => TextModel::automatic(
-                    model::text_harness()
-                        .ok_or("Connect an agent (Claude, Codex…) to write with AI.")?,
-                    Default::default(),
-                ),
+                None => {
+                    let kind = model::text_harness()
+                        .ok_or("Connect an agent (Claude, Codex…) to write with AI.")?;
+                    TextModel::automatic(kind, accounts.get(&kind).cloned().unwrap_or_default())
+                }
             };
             model::write_reply(text, prompt, cancel, |progress| {
                 let _ = tx.try_send(progress);
@@ -1003,6 +1023,7 @@ impl MailReply {
                 .child(div().px(px(10.)).pt(px(10.)).child(self.subject.clone()))
                 .child(
                     div()
+                        .debug_selector(|| "mail-reply-body".into())
                         .px(px(10.))
                         .py(px(8.))
                         .when(ai_wrote || gaps > 0, |d| d.pb(px(40.)))
@@ -1133,6 +1154,7 @@ impl MailReply {
             .gap(px(4.))
             .child(
                 div()
+                    .debug_selector(|| "mail-reply-ask".into())
                     .relative()
                     .h(px(28.))
                     .min_w(px(144.))
@@ -1231,6 +1253,7 @@ impl gpui::Render for MailReply {
         };
         div()
             .id("mail-reply")
+            .debug_selector(|| "mail-reply".into())
             .role(Role::Dialog)
             .aria_label(format!("Reply to {}", self.message.from))
             .track_focus(&self.focus)
@@ -1284,6 +1307,171 @@ mod tests {
         assert!((breathe(0.5) - 0.45).abs() < 1e-3);
         assert!((breathe(1.) - 1.).abs() < 1e-3);
         assert!(breathe(0.25) < 1. && breathe(0.25) > 0.45);
+    }
+
+    #[gpui::test]
+    fn reply_receives_the_full_message_when_it_opens_after_the_composer(cx: &mut TestAppContext) {
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": "a.inbox.1", "accountId": "a", "folder": "inbox", "from": "Ana",
+            "address": "ana@mina.pe", "subject": "Pozas", "preview": "Preview", "body": [],
+            "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
+        }))
+        .unwrap();
+        let (mailbox, cx) = cx.add_window_view(|_, cx| {
+            Mailbox::new(
+                std::env::temp_dir().join("monobot-native-reply-loading"),
+                false,
+                cx,
+            )
+        });
+        cx.update(|window, cx| {
+            mailbox.update(cx, |mailbox, cx| {
+                mailbox.accounts = Some(vec![AccountView {
+                    id: "a".into(),
+                    name: "Ana".into(),
+                    address: "ana@mina.pe".into(),
+                    provider: "gmail".into(),
+                }]);
+                mailbox.overview = Some(Overview {
+                    messages: vec![message.clone()],
+                    ..Default::default()
+                });
+                mailbox.selected = Some(message.id.clone());
+                mailbox.reader = Some(Reader::new(message.id.clone()));
+                mailbox.start_reply(window, cx);
+                mailbox.show_opened(
+                    Opened {
+                        id: message.id.clone(),
+                        html: "<p>The complete message</p>".into(),
+                        text: vec!["The complete message".into()],
+                        remote: vec![],
+                        images_allowed: false,
+                        attachments: vec![],
+                    },
+                    cx,
+                );
+                let reply = mailbox.reply.as_ref().unwrap().read(cx);
+                assert_eq!(
+                    model::mail_text(&message, reply.opened.as_ref()),
+                    "The complete message"
+                );
+            });
+        });
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    #[gpui::test]
+    fn html_reader_and_reply_fields_do_not_overlap(cx: &mut TestAppContext) {
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": "a.inbox.1", "accountId": "a", "folder": "inbox", "from": "Ana",
+            "address": "ana@mina.pe", "subject": "Pozas", "preview": "Preview", "body": [],
+            "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
+        }))
+        .unwrap();
+        let (mailbox, cx) = cx.add_window_view(|_, cx| {
+            Mailbox::new(
+                std::env::temp_dir().join("monobot-native-reply-layout"),
+                false,
+                cx,
+            )
+        });
+        cx.update(|window, cx| {
+            mailbox.update(cx, |mailbox, cx| {
+                mailbox.accounts = Some(vec![AccountView {
+                    id: "a".into(),
+                    name: "Ana".into(),
+                    address: "ana@mina.pe".into(),
+                    provider: "gmail".into(),
+                }]);
+                mailbox.overview = Some(Overview {
+                    messages: vec![message.clone()],
+                    ..Default::default()
+                });
+                mailbox.selected = Some(message.id.clone());
+                mailbox.reader = Some(Reader::new(message.id.clone()));
+                mailbox.show_opened(
+                    Opened {
+                        id: message.id.clone(),
+                        html: "<p>The complete message</p>".into(),
+                        text: vec!["The complete message".into()],
+                        remote: vec![],
+                        images_allowed: false,
+                        attachments: vec![],
+                    },
+                    cx,
+                );
+                mailbox.start_reply(window, cx);
+                cx.notify();
+            });
+        });
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let html = cx.debug_bounds("mail-html").unwrap();
+        let text = cx.debug_bounds("mail-text").unwrap();
+        let reply = cx.debug_bounds("mail-reply").unwrap();
+        assert!(html.size.height > px(0.));
+        assert_eq!(html, text);
+        assert!(
+            html.bottom() <= reply.top(),
+            "HTML: {html:?}, reply: {reply:?}"
+        );
+        let body = cx.debug_bounds("mail-reply-body").unwrap();
+        cx.simulate_click(body.center(), Default::default());
+        cx.simulate_input("Hola Ana");
+        mailbox.read_with(cx, |mailbox, cx| {
+            let reply = mailbox.reply.as_ref().unwrap().read(cx);
+            assert_eq!(reply.text.read(cx).content.as_ref(), "Hola Ana");
+        });
+        let ask = cx.debug_bounds("mail-reply-ask").unwrap();
+        cx.simulate_click(ask.center(), Default::default());
+        cx.simulate_input("Más breve");
+        mailbox.read_with(cx, |mailbox, cx| {
+            let reply = mailbox.reply.as_ref().unwrap().read(cx);
+            assert_eq!(reply.ask.read(cx).content.as_ref(), "Más breve");
+        });
+        let toggle = cx.debug_bounds("mail-toggle-text").unwrap();
+        cx.simulate_click(toggle.center(), Default::default());
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        assert!(cx.debug_bounds("mail-html").is_none());
+        assert!(cx.debug_bounds("mail-text").is_some());
+        let toggle = cx.debug_bounds("mail-toggle-text").unwrap();
+        cx.simulate_click(toggle.center(), Default::default());
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        assert!(cx.debug_bounds("mail-html").is_some());
+    }
+
+    #[gpui::test]
+    fn a_finished_ai_draft_becomes_editable(cx: &mut TestAppContext) {
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": "a.inbox.1", "accountId": "a", "folder": "inbox", "from": "Ana",
+            "address": "ana@mina.pe", "subject": "Pozas", "preview": "", "body": [],
+            "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
+        }))
+        .unwrap();
+        let service = model::Service::new(std::env::temp_dir().join("monobot-native-reply-ai"));
+        let (reply, cx) = cx.add_window_view(|window, cx| {
+            MailReply::new(service, message, None, None, None, window, cx)
+        });
+        cx.update(|window, cx| {
+            reply.update(cx, |reply, cx| {
+                reply.streamed = Some("Subject: Respuesta\n\nHola Ana".into());
+                reply.settling = Some((
+                    "Subject: Respuesta\n\nHola Ana".into(),
+                    (String::new(), "Re: Pozas".into()),
+                ));
+                reply.settle(window, cx);
+            });
+        });
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        cx.simulate_input("!");
+        reply.read_with(cx, |reply, cx| {
+            assert_eq!(reply.subject.read(cx).content.as_ref(), "Respuesta");
+            assert_eq!(reply.text.read(cx).content.as_ref(), "Hola Ana!");
+            assert!(reply.before.is_none());
+        });
     }
 
     #[gpui::test]

@@ -14,6 +14,8 @@ impl Mailbox {
         let priority = message.triage == model::Triage::Priority;
         let archived = message.folder == model::Folder::Archive;
         let starred = message.starred;
+        let has_html = reader.is_some_and(|r| r.html.is_some());
+        let plain_text = reader.is_some_and(|r| r.plain_text);
         let id = message.id.clone();
         let toolbar = div()
             .h(px(40.))
@@ -87,6 +89,26 @@ impl Mailbox {
                     move |this, _, _, cx| this.mark_interesting(address.clone(), !priority, cx)
                 })),
             )
+            .when(has_html, |d| {
+                d.child(
+                    text_button(
+                        "mail-toggle-text",
+                        if plain_text {
+                            "Show original"
+                        } else {
+                            "Plain text"
+                        },
+                        0.7,
+                    )
+                    .debug_selector(|| "mail-toggle-text".into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        if let Some(reader) = this.reader.as_mut() {
+                            reader.plain_text = !reader.plain_text;
+                            cx.notify();
+                        }
+                    })),
+                )
+            })
             .when(!held, |d| {
                 d.child(
                     text_button("mail-reply", "Reply (R)", 1.)
@@ -190,34 +212,43 @@ impl Mailbox {
                 opened: Some(opened),
                 html,
                 ..
-            }) => match html {
-                Some(html) if !covered => div()
-                    .size_full()
-                    .px(px(20.))
-                    .child(html.clone())
-                    .into_any_element(),
-                Some(_) => div().into_any_element(),
-                None => {
-                    let paragraphs = if opened.text.is_empty() {
-                        message.body.clone()
+            }) => {
+                let paragraphs = if opened.text.is_empty() {
+                    if message.body.is_empty() {
+                        vec![message.preview.clone()]
                     } else {
-                        opened.text.clone()
-                    };
-                    div()
-                        .id("mail-text")
+                        message.body.clone()
+                    }
+                } else {
+                    opened.text.clone()
+                };
+                let text = div()
+                    .id("mail-text")
+                    .debug_selector(|| "mail-text".into())
+                    .size_full()
+                    .overflow_y_scroll()
+                    .px(px(20.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.))
+                    .text_size(px(13.))
+                    .line_height(px(21.))
+                    .text_color(content(1.))
+                    .children(paragraphs.into_iter().map(|p| div().child(p)))
+                    .into_any_element();
+                match html {
+                    Some(html) if !covered && !plain_text => div()
+                        .id("mail-html")
+                        .debug_selector(|| "mail-html".into())
+                        .relative()
                         .size_full()
-                        .overflow_y_scroll()
-                        .px(px(20.))
-                        .flex()
-                        .flex_col()
-                        .gap(px(12.))
-                        .text_size(px(13.))
-                        .line_height(px(21.))
-                        .text_color(content(1.))
-                        .children(paragraphs.into_iter().map(|p| div().child(p)))
-                        .into_any_element()
+                        .child(text)
+                        .child(div().absolute().inset_0().px(px(20.)).child(html.clone()))
+                        .into_any_element(),
+                    Some(_) if covered => div().into_any_element(),
+                    _ => text,
                 }
-            },
+            }
             _ => div()
                 .px(px(20.))
                 .text_size(px(13.))
@@ -254,7 +285,14 @@ impl Mailbox {
                     .flex()
                     .flex_col()
                     .child(header)
-                    .child(div().mt(px(16.)).min_h_0().flex_1().child(body))
+                    .child(
+                        div()
+                            .mt(px(16.))
+                            .min_h_0()
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(body),
+                    )
                     .when_some(notice, |d, notice| {
                         d.child(div().px(px(20.)).mt(px(8.)).child(alert(notice)))
                     })

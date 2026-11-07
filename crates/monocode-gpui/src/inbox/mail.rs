@@ -52,6 +52,7 @@ struct Reader {
     /// Bumped when the message changes, so a load still running for the last one stops.
     run: u64,
     html: Option<Entity<Html>>,
+    plain_text: bool,
     /// The attachments' pictures, decoded once: (index, thumbnail).
     pictures: Vec<(usize, Arc<Image>)>,
     zoomed: Option<usize>,
@@ -68,6 +69,7 @@ impl Reader {
             loading_images: false,
             run: 0,
             html: None,
+            plain_text: false,
             pictures: Vec::new(),
             zoomed: None,
             notice: None,
@@ -577,7 +579,7 @@ impl Mailbox {
         let Some(reader) = self.reader.as_mut().filter(|r| r.id == opened.id) else {
             return;
         };
-        if !opened.html.is_empty() {
+        if cfg!(any(target_os = "macos", target_os = "windows")) && !opened.html.is_empty() {
             reader.html = Some(cx.new(|_| Html::mail(opened.html.clone())));
         }
         let previews: Vec<(usize, String)> = opened
@@ -586,6 +588,9 @@ impl Mailbox {
             .filter_map(|a| a.preview.clone().map(|p| (a.index, p)))
             .collect();
         let has_remote = !opened.remote.is_empty();
+        if let Some(reply) = self.reply.as_ref() {
+            reply.update(cx, |reply, cx| reply.set_opened(opened.clone(), cx));
+        }
         reader.opened = Some(opened);
         if !previews.is_empty() {
             let id = reader.id.clone();
