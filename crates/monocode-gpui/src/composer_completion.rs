@@ -1028,8 +1028,12 @@ impl Render for Completion {
                 .enumerate()
                 .map(|(ix, choice)| {
                     let (icon_path, icon_color) = choice.icon();
+                    let person = choice.person.as_ref().map(|p| p.name.clone());
                     div()
                         .id(("completion-row", ix))
+                        .when_some(person, |row, name| {
+                            row.debug_selector(move || format!("completion-person-{name}"))
+                        })
                         .role(Role::ListItem)
                         .aria_label(choice.label.clone())
                         .px_3()

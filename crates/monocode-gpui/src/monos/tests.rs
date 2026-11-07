@@ -3624,3 +3624,62 @@ fn activity_follows_the_latest_turn_and_lists_what_it_researched(cx: &mut TestAp
         "the latest turn's research shows without picking a message"
     );
 }
+
+#[gpui::test]
+fn typing_at_in_a_group_lists_its_members(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    cx.update(|cx| {
+        crate::input::bind(cx);
+        crate::composer_completion::bind(cx);
+        crate::popover::bind(cx);
+    });
+    let handle: gpui::AnyWindowHandle = s.window.into();
+    handle
+        .update(cx, |_, window, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.dismiss_settings(window, cx);
+                let root = m.root.clone();
+                let lead = m
+                    .roster
+                    .create_bot(&root, "principal", false)
+                    .unwrap()
+                    .id
+                    .clone();
+                let finance = m
+                    .roster
+                    .create_bot(&root, "finance", false)
+                    .unwrap()
+                    .id
+                    .clone();
+                m.roster.get_mut(&finance).unwrap().name = "Cash".into();
+                let group = m.roster.get_mut(&s.id).unwrap();
+                group.kind = Some("group".into());
+                group.name = "Team".into();
+                group.group = Some(Group {
+                    members: vec![lead, finance],
+                    ..Group::default()
+                });
+                m.configure_chat(&s.id, cx);
+                m.focus_active(window, cx);
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.simulate_input("@");
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(
+        visual.debug_bounds("composer-completion-list").is_some(),
+        "the @ menu opens"
+    );
+    assert!(visual.debug_bounds("completion-person-Cash").is_some());
+    visual.simulate_input("Ca");
+    visual.run_until_parked();
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+    let chat = visual.update(|_, cx| s.manager.read(cx).chats[&s.id].clone());
+    let text = visual.update(|_, cx| chat.read(cx).input.read(cx).content.clone());
+    assert_eq!(text, "@Cash ");
+}

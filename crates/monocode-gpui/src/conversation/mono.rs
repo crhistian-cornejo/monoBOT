@@ -1254,6 +1254,7 @@ impl Conversation {
                 }),
             )
             .child(self.composer_anchor.probe())
+            .child(self.completion.read(cx).composer_probe())
             .child(composer_surface(radius))
             .children(self.attachment_chips(cx))
             .child(
@@ -1272,7 +1273,9 @@ impl Conversation {
                             .min_w_0()
                             .self_center()
                             .px(px(6.))
-                            .child(self.input.clone()),
+                            // The completion wraps the field, as in Code's
+                            // composer, so @ lists the group and / its skills.
+                            .child(self.completion.clone()),
                     )
                     .children(meter)
                     .child(crate::dictation::mic(&self.dictation, cx))
