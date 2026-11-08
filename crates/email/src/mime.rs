@@ -28,6 +28,8 @@ pub struct Parsed {
     pub text: String,
     /// It has a `List-Unsubscribe`: a newsletter, a promotion, a notice sent to many.
     pub unsubscribe: bool,
+    /// Where to unsubscribe: the `https` link the sender named, else its `mailto`; and whether one request does it.
+    pub unsubscribe_link: Option<(String, bool)>,
     /// `Precedence: bulk | list | junk` or an automatic reply.
     pub bulk: bool,
     /// The receiving server says the sender failed SPF, DKIM or DMARC.
@@ -69,12 +71,44 @@ pub fn parse(header: &[u8], body: &[u8]) -> Parsed {
             0,
         ),
         unsubscribe: !field("list-unsubscribe").is_empty(),
+        unsubscribe_link: unsubscribe_link(
+            &field("list-unsubscribe"),
+            &field("list-unsubscribe-post"),
+        ),
         bulk: matches!(precedence.as_str(), "bulk" | "list" | "junk")
             || (!auto.is_empty() && auto != "no"),
         auth_failed: ["spf=fail", "dkim=fail", "dmarc=fail"]
             .iter()
             .any(|bad| auth.contains(bad)),
     }
+}
+
+/// The link of a `List-Unsubscribe` («<https://…>, <mailto:…>»): its `https` one first, else its `mailto`; and
+/// whether `List-Unsubscribe-Post` says one request does it. Anything else (plain `http`, a script) is not a link.
+pub fn unsubscribe_link(value: &str, post: &str) -> Option<(String, bool)> {
+    let links: Vec<&str> = value
+        .split(',')
+        .filter_map(|part| {
+            let part = part.trim();
+            part.strip_prefix('<')?.strip_suffix('>').map(str::trim)
+        })
+        .filter(|link| !link.chars().any(|c| c.is_whitespace() || c.is_control()))
+        .filter(|link| link.len() <= 2_000)
+        .collect();
+    let one_click = post
+        .to_ascii_lowercase()
+        .replace(' ', "")
+        .contains("list-unsubscribe=one-click");
+    if let Some(https) = links
+        .iter()
+        .find(|l| l.to_ascii_lowercase().starts_with("https://"))
+    {
+        return Some(((*https).to_owned(), one_click));
+    }
+    links
+        .iter()
+        .find(|l| l.to_ascii_lowercase().starts_with("mailto:"))
+        .map(|mailto| ((*mailto).to_owned(), false))
 }
 
 fn header_field(header: &str, name: &str) -> String {
@@ -904,5 +938,25 @@ From: a@b.test
     fn a_subject_with_accents_is_encoded_for_a_draft() {
         assert_eq!(encode_word("Re: hola"), "Re: hola");
         assert_eq!(decode_words(&encode_word("Re: sábado")), "Re: sábado");
+    }
+
+    #[test]
+    fn the_unsubscribe_link_prefers_https_and_knows_one_press() {
+        assert_eq!(
+            unsubscribe_link(
+                "<mailto:u@list.test?subject=stop>, <https://list.test/u?x=1>",
+                "List-Unsubscribe=One-Click"
+            ),
+            Some(("https://list.test/u?x=1".into(), true))
+        );
+        assert_eq!(
+            unsubscribe_link("<mailto:u@list.test>", ""),
+            Some(("mailto:u@list.test".into(), false))
+        );
+        assert_eq!(
+            unsubscribe_link("<http://list.test/u>, <javascript:x>", ""),
+            None
+        );
+        assert_eq!(unsubscribe_link("https://no-brackets.test", ""), None);
     }
 }

@@ -17,6 +17,10 @@ impl Mailbox {
         let has_html = reader.is_some_and(|r| r.html.is_some());
         let plain_text = reader.is_some_and(|r| r.plain_text);
         let id = message.id.clone();
+        let snoozed = self
+            .snoozed
+            .get(&message.id)
+            .is_some_and(|until| *until > model::now_ms());
         let toolbar = div()
             .h(px(40.))
             .flex_shrink_0()
@@ -109,6 +113,35 @@ impl Mailbox {
                     })),
                 )
             })
+            .when(message.unsubscribe.is_some() && !held, |d| {
+                d.child(
+                    text_button("mail-unsubscribe", "Unsubscribe", 0.7)
+                        .debug_selector(|| "mail-unsubscribe".into())
+                        .on_click(cx.listener({
+                            let id = id.clone();
+                            move |this, _, window, cx| this.unsubscribe(id.clone(), window, cx)
+                        })),
+                )
+            })
+            .when(message.folder == model::Folder::Inbox, |d| {
+                if snoozed {
+                    d.child(
+                        text_button("mail-wake", "Unsnooze", 0.7).on_click(cx.listener({
+                            let id = id.clone();
+                            move |this, _, _, cx| this.snooze(id.clone(), None, cx)
+                        })),
+                    )
+                } else {
+                    d.child(
+                        text_button("mail-snooze", "Snooze", 0.7)
+                            .debug_selector(|| "mail-snooze".into())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.snooze_menu = !this.snooze_menu;
+                                cx.notify();
+                            })),
+                    )
+                }
+            })
             .when(!held, |d| {
                 d.child(text_button("mail-forward", "Forward (F)", 0.7).on_click(
                     cx.listener(|this, _, window, cx| this.start_compose(true, window, cx)),
@@ -154,6 +187,10 @@ impl Mailbox {
                         model::full_time(message.at)
                     )),
             )
+            .when(!message.labels.is_empty(), |d| {
+                d.child(div().mt(px(6.)).child(organize::label_chips(&message.labels)))
+            })
+            .children(self.thread_view(&message, cx))
             .when(held, |d| {
                 d.child(
                     div()
@@ -281,6 +318,9 @@ impl Mailbox {
             .flex()
             .flex_col()
             .child(toolbar)
+            .when(self.snooze_menu && !snoozed, |d| {
+                d.child(self.snooze_menu_view(&id, cx))
+            })
             .child(
                 div()
                     .min_h_0()

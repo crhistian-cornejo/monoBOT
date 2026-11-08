@@ -171,6 +171,9 @@ impl Mailbox {
                         ),
                 )
             })
+            .when(!accounts.is_empty(), |d| {
+                d.child(self.rules_view(window, cx)).child(self.activity_view())
+            })
             .child(self.form.clone())
             .into_any_element()
     }

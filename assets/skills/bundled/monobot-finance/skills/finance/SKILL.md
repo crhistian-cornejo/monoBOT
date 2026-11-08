@@ -64,6 +64,14 @@ Go one step at a time and keep each message short. Offer choices as buttons with
 7. Offer a habit for the review with `app chat.card {"type":"habit",...}` (daily or weekdays, once), and run the
    first review now (section 1) from the start of the current month.
 
+## 0b·2. Mail that comes to you by itself
+
+Once the senders are confirmed, offer the user a rule (they make it; you cannot): in Inbox › Email › Accounts ›
+Rules, «From contains» the confirmed senders, label «Finanzas» and «Hand it to» you. Each new bank or wallet mail
+then arrives in your chat with its id: read it with `mail.read`, log the movement and say it in one line. When a
+movement needs an answer (a dispute, a question to the bank), propose it with `mail.propose`: the user sends it from
+the card.
+
 ## 0c. Adding another mailbox («agrega el correo de mi pareja», «también revisa ana@…»)
 
 1. Ask whose it is in one line if the user did not say. Keep the person's name: rows from that mailbox get it in

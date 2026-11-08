@@ -25,12 +25,16 @@ mod smtp;
 #[cfg(test)]
 mod testkit;
 pub mod triage;
+pub mod unsubscribe;
 mod watch;
 
 pub use account::{Account, MAX_ACCOUNTS, valid_address};
 pub use model::{
     AccountView, Action, Attachment, BoxTotal, Folder, Message, Opened, Overview, Triage,
+    Unsubscribe,
 };
 pub use search::Found;
-pub use service::{MAX_RECIPIENTS, Mail, Outgoing, Person, Recipients, parse_people, view_of};
+pub use service::{
+    MAX_RECIPIENTS, Mail, Outgoing, Person, Recipients, parse_people, thread_of, view_of,
+};
 pub use watch::{Heard, Interesting, Listener};

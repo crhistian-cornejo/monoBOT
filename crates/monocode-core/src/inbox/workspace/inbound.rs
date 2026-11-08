@@ -113,6 +113,8 @@ fn cached(origin: &str, remote: Remote, raw: &[u8]) -> Cached {
             auth_failed: parsed.auth_failed
                 || remote.auth_failed
                 || !parsed.from_address.eq_ignore_ascii_case(&remote.from),
+            thread: monobot_email::thread_of(&account_id(&remote.to), None, &parsed.subject),
+            unsubscribe: None,
         },
         message_id: parsed.message_id,
         remote,

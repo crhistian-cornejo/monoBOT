@@ -35,6 +35,13 @@ impl Monos {
                 service.ack_deliveries(&completed)?;
                 deliveries.retain(|delivery| !completed.contains(&delivery.id));
             }
+            // The user's mail rules: labels, stars and archives on the server, and the
+            // messages they hand to an agent. Each message is handled once.
+            let mail = monocode_core::inbox::mail::Service::new(service.data_dir.clone());
+            if mail.rules_need_watch() {
+                mail.watch_all();
+                deliveries.extend(mail.run_rules()?);
+            }
             Ok::<_, String>(deliveries)
         });
         cx.spawn(async move |this, cx| {

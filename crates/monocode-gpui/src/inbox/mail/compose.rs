@@ -120,6 +120,15 @@ impl MailCompose {
         ))
     }
 
+    /// Fills in who it goes to, the subject and the text.
+    pub(crate) fn prefill(&mut self, to: &str, subject: &str, text: &str, cx: &mut Context<Self>) {
+        for (input, value) in [(&self.to, to), (&self.subject, subject), (&self.text, text)] {
+            let value = value.to_owned();
+            input.update(cx, |input, cx| input.set_text(value, cx));
+        }
+        cx.notify();
+    }
+
     pub(crate) fn busy(&self) -> bool {
         self.busy
     }

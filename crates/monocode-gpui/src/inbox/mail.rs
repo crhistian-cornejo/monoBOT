@@ -6,8 +6,10 @@ mod accounts;
 mod art;
 mod compose;
 pub(crate) mod connect;
+mod organize;
 mod reader;
 mod reply;
+mod rules_view;
 
 use crate::{
     input::{self, Input},
@@ -114,6 +116,16 @@ pub(crate) struct Mailbox {
     reply: Option<Entity<MailReply>>,
     /// A new message or a forward being written, in place of the reader.
     compose: Option<Entity<compose::MailCompose>>,
+    /// Messages snoozed on this computer, and when each comes back.
+    snoozed: model::Snoozed,
+    /// The reader's row of snooze choices is open.
+    snooze_menu: bool,
+    /// The user's mail rules, the form for a new one, and the last problem saving one.
+    rules: Vec<model::Rule>,
+    rule_form: Option<rules_view::RuleForm>,
+    rule_error: Option<String>,
+    /// What the agents did with the mail lately.
+    activity: Vec<model::activity::Entry>,
     form: Entity<connect::ConnectForm>,
     /// Which agents read each account, and the bots it can be kept for.
     access: model::Access,
@@ -309,6 +321,12 @@ impl Mailbox {
             opened: VecDeque::new(),
             reply: None,
             compose: None,
+            snoozed: model::Snoozed::new(),
+            snooze_menu: false,
+            rules: Vec::new(),
+            rule_form: None,
+            rule_error: None,
+            activity: Vec::new(),
             form,
             access: model::Access::new(),
             agents: Vec::new(),
@@ -406,6 +424,9 @@ impl Mailbox {
                 })
                 .collect::<Vec<_>>();
             let access = service.access();
+            let snoozed = service.snoozed();
+            let rules = service.rules();
+            let activity = service.activity(40);
             let agents = store
                 .and_then(|store| {
                     let db = crate::runtime::locked(&store).ok()?;
@@ -413,13 +434,23 @@ impl Mailbox {
                 })
                 .map(|roster| connect::agents_of(&roster))
                 .unwrap_or_default();
-            (accounts, last, photos, access, agents)
+            (
+                accounts,
+                last,
+                photos,
+                access,
+                agents,
+                (snoozed, rules, activity),
+            )
         });
         cx.spawn(async move |this, cx| {
-            let (accounts, last, photos, access, agents) = task.await;
+            let (accounts, last, photos, access, agents, (snoozed, rules, activity)) = task.await;
             let _ = this.update(cx, |this, cx| {
                 let empty = accounts.is_empty();
                 this.access = access;
+                this.snoozed = snoozed;
+                this.rules = rules;
+                this.activity = activity;
                 this.form
                     .update(cx, |form, cx| form.set_agents(agents.clone(), cx));
                 this.agents = agents;
@@ -502,11 +533,13 @@ impl Mailbox {
     }
 
     fn shown(&self, cx: &App) -> Vec<&Message> {
-        model::visible_messages(
+        model::visible_now(
             self.messages(),
             self.view,
             self.account_id.as_deref(),
             &self.search.read(cx).content,
+            &self.snoozed,
+            model::now_ms(),
         )
     }
 
@@ -1063,7 +1096,17 @@ impl Mailbox {
                     .py(px(6.))
                     .overflow_x_scroll()
                     .children(model::VIEWS.into_iter().map(|(view, label)| {
-                        let count = model::unread_count(messages, view);
+                        let count = if view == model::View::Snoozed {
+                            let now = model::now_ms();
+                            messages
+                                .iter()
+                                .filter(|m| {
+                                    self.snoozed.get(&m.id).is_some_and(|until| *until > now)
+                                })
+                                .count()
+                        } else {
+                            model::unread_count(messages, view)
+                        };
                         let active = self.view == view;
                         div()
                             .id(SharedString::from(format!("mail-view-{}", view.id())))
@@ -1338,7 +1381,11 @@ impl Mailbox {
                 .into_any_element(),
             ]
         } else {
-            model::by_day(&shown, now)
+            let threads = model::by_thread(&shown);
+            let heads: Vec<&Message> = threads.iter().map(|(m, _)| *m).collect();
+            let counts: HashMap<String, usize> =
+                threads.iter().map(|(m, n)| (m.id.clone(), *n)).collect();
+            model::by_day(&heads, now)
                 .into_iter()
                 .map(|(day, messages)| {
                     div()
@@ -1353,7 +1400,10 @@ impl Mailbox {
                                 .text_color(content(0.45))
                                 .child(day),
                         )
-                        .children(messages.into_iter().map(|m| self.row(m, now, cx)))
+                        .children(messages.into_iter().map(|m| {
+                            let count = counts.get(&m.id).copied().unwrap_or(1);
+                            self.row(m, count, now, cx)
+                        }))
                         .into_any_element()
                 })
                 .collect()
@@ -1436,7 +1486,7 @@ impl Mailbox {
             .into_any_element()
     }
 
-    fn row(&self, message: &Message, now: i64, cx: &mut Context<Self>) -> AnyElement {
+    fn row(&self, message: &Message, count: usize, now: i64, cx: &mut Context<Self>) -> AnyElement {
         let id = message.id.clone();
         let hover_id = message.id.clone();
         let active = self.selected.as_ref() == Some(&message.id);
@@ -1486,6 +1536,15 @@ impl Mailbox {
                             .when(!unread, |d| d.text_color(content(0.75)))
                             .child(message.from.clone()),
                     )
+                    .when(count > 1, |d| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(10.))
+                                .text_color(content(0.5))
+                                .child(count.to_string()),
+                        )
+                    })
                     .when(message.starred, |d| {
                         d.child(icon("star-filled", 12.).text_color(accent_color()))
                     })
@@ -1494,7 +1553,12 @@ impl Mailbox {
                             .flex_shrink_0()
                             .text_size(px(11.))
                             .text_color(content(0.4))
-                            .child(model::row_time(message.at, now)),
+                            .child(match self.snoozed.get(&message.id) {
+                                Some(until) if *until > now => {
+                                    format!("until {}", model::row_time(*until, now))
+                                }
+                                _ => model::row_time(message.at, now),
+                            }),
                     ),
             )
             .child(
@@ -1515,6 +1579,9 @@ impl Mailbox {
                     .text_color(content(0.45))
                     .child(message.preview.clone()),
             )
+            .when(!message.labels.is_empty(), |d| {
+                d.child(organize::label_chips(&message.labels))
+            })
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 if *hovering {
                     this.prefetch_soon(hover_id.clone(), cx);
@@ -1850,6 +1917,105 @@ mod tests {
             cx.notify();
         });
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn a_rule_is_made_with_clicks_and_hands_bank_mail_to_an_agent(cx: &mut TestAppContext) {
+        let (mailbox, cx) = mailbox(cx, "rules");
+        let dir = mailbox.read_with(cx, |m, _| m.service.data_dir.clone());
+        let _ = std::fs::remove_dir_all(dir.join("mail"));
+        mailbox.update(cx, |mailbox, cx| {
+            mailbox.started = true;
+            mailbox.accounts = Some(vec![AccountView {
+                id: "a".into(),
+                name: "Ana".into(),
+                address: "ana@gmail.com".into(),
+                provider: "gmail".into(),
+            }]);
+            mailbox.overview = Some(Overview::default());
+            mailbox.agents = vec![connect::Agent {
+                id: "fin".into(),
+                label: "Finance".into(),
+            }];
+            mailbox.settings_open = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let add = cx.debug_bounds("mail-rule-add").expect("Add rule");
+        cx.simulate_click(add.center(), Modifiers::default());
+        cx.run_until_parked();
+        mailbox.update(cx, |mailbox, cx| {
+            let form = mailbox.rule_form.as_ref().unwrap();
+            let (from, label) = (form.from.clone(), form.label.clone());
+            from.update(cx, |i, cx| i.set_text("bcp, yape".into(), cx));
+            label.update(cx, |i, cx| i.set_text("Finanzas".into(), cx));
+        });
+        cx.refresh().unwrap();
+        let finance = cx
+            .debug_bounds("mail-rule-agent-fin")
+            .expect("the Finance choice");
+        cx.simulate_click(finance.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let save = cx.debug_bounds("mail-rule-save").expect("Save rule");
+        cx.simulate_click(save.center(), Modifiers::default());
+        cx.run_until_parked();
+        let rules = model::Service::new(&dir).rules();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].from, "bcp, yape");
+        assert_eq!(rules[0].label, "Finanzas");
+        assert_eq!(rules[0].agent, "fin");
+        mailbox.read_with(cx, |mailbox, _| {
+            assert!(mailbox.rule_form.is_none());
+            assert_eq!(mailbox.rules.len(), 1);
+        });
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[gpui::test]
+    fn a_snoozed_message_leaves_the_inbox_for_the_snoozed_view(cx: &mut TestAppContext) {
+        let (mailbox, cx) = mailbox(cx, "snooze");
+        let dir = mailbox.read_with(cx, |m, _| m.service.data_dir.clone());
+        let _ = std::fs::remove_dir_all(dir.join("mail"));
+        mailbox.update(cx, |mailbox, cx| {
+            mailbox.started = true;
+            mailbox.accounts = Some(vec![AccountView {
+                id: "a".into(),
+                name: "Ana".into(),
+                address: "ana@gmail.com".into(),
+                provider: "gmail".into(),
+            }]);
+            mailbox.overview = Some(Overview {
+                messages: vec![message("a.inbox.1", 60_000, false)],
+                ..Default::default()
+            });
+            mailbox.selected = Some("a.inbox.1".into());
+            mailbox.reader = Some(Reader::new("a.inbox.1".into()));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let snooze = cx.debug_bounds("mail-snooze").expect("Snooze");
+        cx.simulate_click(snooze.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let later = cx.debug_bounds("mail-snooze-later").expect("In 3 hours");
+        cx.simulate_click(later.center(), Modifiers::default());
+        cx.run_until_parked();
+        mailbox.update(cx, |mailbox, cx| {
+            assert!(mailbox.snoozed.contains_key("a.inbox.1"));
+            assert!(mailbox.selected.is_none());
+            assert!(mailbox.shown(cx).is_empty());
+            mailbox.change_view(model::View::Snoozed, cx);
+            assert_eq!(mailbox.shown(cx).len(), 1);
+        });
+        assert!(
+            model::Service::new(&dir)
+                .snoozed()
+                .contains_key("a.inbox.1")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[gpui::test]

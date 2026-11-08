@@ -192,6 +192,29 @@ fn parse_id(id: &str) -> Option<(String, Folder, u64)> {
 }
 
 /// A message of the server as the page shows it, and what is kept to act on it.
+/// The conversation a message belongs to: Gmail's thread; else, on its account, its subject without the «Re:»,
+/// «Fwd:» and «RV:» a reply or a forward put in front.
+pub fn thread_of(account: &str, gmail_thread: Option<u64>, subject: &str) -> String {
+    if let Some(thread) = gmail_thread {
+        return format!("g{thread}");
+    }
+    let mut rest = subject.trim();
+    loop {
+        let lower = rest.to_lowercase();
+        let Some(prefix) = ["re:", "fwd:", "fw:", "rv:", "aw:", "res:"]
+            .iter()
+            .find(|p| lower.starts_with(*p))
+        else {
+            break;
+        };
+        rest = rest[prefix.len()..].trim_start();
+    }
+    if rest.is_empty() {
+        return String::new();
+    }
+    format!("{account}:{}", rest.to_lowercase())
+}
+
 pub(crate) fn message_from(
     account: &Account,
     folder: Folder,
@@ -235,6 +258,11 @@ pub(crate) fn message_from(
         labels: raw.labels.clone(),
         reason,
         auth_failed: parsed.auth_failed,
+        thread: thread_of(&account.id, raw.gmail_thread, &parsed.subject),
+        unsubscribe: parsed
+            .unsubscribe_link
+            .clone()
+            .map(|(link, one_click)| crate::model::Unsubscribe { link, one_click }),
     };
     let entry = Entry {
         account_id: account.id.clone(),
@@ -869,6 +897,60 @@ impl Mail {
         }
         imap.logout();
         self.touch(id, action);
+        Ok(())
+    }
+
+    /// Puts Gmail's label `label` on a message (`on`) or takes it off. Only Gmail has labels.
+    pub fn label(
+        &self,
+        accounts: &[Account],
+        id: &str,
+        label: &str,
+        on: bool,
+    ) -> Result<(), String> {
+        let label = label.trim();
+        if label.is_empty()
+            || label.chars().count() > 80
+            || label.chars().any(char::is_control)
+            || label.starts_with('\\')
+        {
+            return Err("Write a label of up to 80 characters.".into());
+        }
+        let (account_id, folder, uid) = parse_id(id).ok_or("No reconozco ese correo.")?;
+        let account = accounts
+            .iter()
+            .find(|a| a.id == account_id)
+            .ok_or("Esa cuenta ya no está conectada.")?;
+        if !account.is_gmail() {
+            return Err("Only Gmail has labels.".into());
+        }
+        let password = secrets::get(&account.address)?;
+        let mut imap = connect(&self.open, account, &password)?;
+        let mailbox = match folder {
+            Folder::Inbox => "INBOX".to_string(),
+            _ => {
+                let boxes = boxes_of(&imap.mailboxes()?);
+                match folder {
+                    Folder::Sent => boxes.sent,
+                    Folder::Drafts => boxes.drafts,
+                    _ => boxes.archive,
+                }
+                .ok_or("That mailbox was not found.")?
+            }
+        };
+        imap.select(&mailbox, true)?;
+        imap.label(uid, label, on)?;
+        imap.logout();
+        let mut last = self.last.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(message) = last
+            .as_mut()
+            .and_then(|o| o.messages.iter_mut().find(|m| m.id == id))
+        {
+            message.labels.retain(|l| l != label);
+            if on {
+                message.labels.push(label.to_owned());
+            }
+        }
         Ok(())
     }
 
@@ -2199,6 +2281,8 @@ mod tests {
             labels: vec![],
             reason: None,
             auth_failed: false,
+            thread: String::new(),
+            unsubscribe: None,
         };
         *mail.last.lock().unwrap() = Some(Overview {
             messages: vec![message],

@@ -77,8 +77,29 @@ fn valid_address(address: &str) -> bool {
 }
 
 /// Runs a `mail.*` app action for the Mono `reader` (None: an agent with no identity, which
-/// reads only the accounts open to every agent).
+/// reads only the accounts open to every agent), and keeps a line of it in the activity log.
 pub fn agent_action(
+    service: &Service,
+    action: &str,
+    input: &Value,
+    reader: Option<&str>,
+    access: &Access,
+) -> Result<Value, String> {
+    let result = run(service, action, input, reader, access);
+    super::activity::record(
+        &service.data_dir,
+        &super::activity::Entry {
+            at: now_ms(),
+            agent: reader.unwrap_or_default().to_owned(),
+            action: action.to_owned(),
+            about: super::activity::about(action, input),
+            ok: result.is_ok(),
+        },
+    );
+    result
+}
+
+fn run(
     service: &Service,
     action: &str,
     input: &Value,
@@ -498,7 +519,7 @@ mod tests {
         };
         assert_eq!(
             run("mail.list", json!({"view": "spam"})).unwrap_err(),
-            "view must be one of: inbox, priority, starred, held, sent, drafts, archive"
+            "view must be one of: inbox, priority, starred, held, sent, drafts, archive, snoozed"
         );
         assert!(run("mail.list", json!({"limit": 51})).is_err());
         assert!(run("mail.search", json!({"query": "x", "oldestFirst": "yes"})).is_err());

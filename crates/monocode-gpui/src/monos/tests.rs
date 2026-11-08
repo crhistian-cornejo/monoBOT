@@ -2343,6 +2343,10 @@ fn mono_hover_card_survives_the_gap_but_closes_on_sidebar_scroll_and_blur(cx: &m
             });
         })
         .unwrap();
+    s.manager.update(cx, |m, cx| {
+        m.settings = None;
+        cx.notify();
+    });
     let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
     visual.run_until_parked();
     visual.refresh().unwrap();

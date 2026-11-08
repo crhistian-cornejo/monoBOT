@@ -94,6 +94,22 @@ Esto funciona igual en macOS y Windows, sin Cloudflare.
   La primera vez se importa el `monocode.mail.private` de la app de escritorio
   antigua.
 
+## Gmail sin dominio: lo que se adaptó de Mailflare
+
+Todo esto funciona con un Gmail normal (IMAP + contraseña de aplicación), sin
+Cloudflare ni dominio, en macOS y Windows:
+
+| Mailflare | En MonoBOT |
+| --- | --- |
+| Redactar y responder | **New message (C)** y **Forward (F)** en la pestaña Email (`inbox/mail/compose.rs`). Sale por SMTP con la misma contraseña de aplicación; Gmail guarda su copia en Enviados. *Save as draft* lo deja en Borradores del servidor. Un reenvío lleva el texto, no los adjuntos. |
+| El agente redacta respuestas | `mail.propose`: el agente propone una respuesta o un correo nuevo y aparece como tarjeta en su chat, con remitente, destinatarios y asunto. Solo el usuario pulsa *Send*, *Save as draft* o *Discard* (`monos/mail_card.rs`). |
+| Reglas de enrutado | **Rules** en Inbox › Email › Cuentas (`mail/rules.json`). Por remitente o palabras del asunto, solo correo nuevo: etiqueta de Gmail (`X-GM-LABELS`), estrella, leído, archivar o pasárselo a un agente. Lo pasado a un agente entra en su chat por la misma cola que el correo de Cloudflare. Un correo retenido como posible estafa nunca se pasa a un agente, y un agente solo recibe correo de cuentas que puede leer. |
+| Registro de auditoría | **Agent activity** en la misma página (`mail/activity.jsonl`): quién listó, buscó, leyó, redactó o propuso, sobre qué, y si funcionó. Nunca guarda el texto del correo. |
+| Conversaciones | La lista agrupa por hilo (`X-GM-THRID` en Gmail; asunto sin «Re:/Fwd:» en otros) y el lector muestra los demás mensajes del hilo. |
+| Etiquetas | Las etiquetas propias de Gmail se ven en la lista y en el lector. |
+| Darse de baja | Botón **Unsubscribe** cuando el correo trae `List-Unsubscribe`: una petición si admite `One-Click` (RFC 8058), si no abre la página o prepara el correo al `mailto`. Nunca en correo retenido, y nunca hacia `localhost` ni la red local. |
+| Posponer | **Snooze** (3 horas, mañana 8:00, lunes 8:00). Es local: el correo sale de las vistas hasta su hora y espera en la vista **Snoozed**. |
+
 ## Configuración en MonoBOT
 
 Abre **Inbox → Agenda**. Allí están los ajustes del espacio de correo:

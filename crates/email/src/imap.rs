@@ -317,9 +317,9 @@ impl Imap {
 
     /// What a list reading asks of each message: flags, date, the headers the rules read and the first bytes of the text.
     fn list_items(gmail: bool) -> String {
-        let labels = if gmail { " X-GM-LABELS" } else { "" };
+        let labels = if gmail { " X-GM-LABELS X-GM-THRID" } else { "" };
         format!(
-            "(UID FLAGS INTERNALDATE{labels} BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING LIST-UNSUBSCRIBE PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)"
+            "(UID FLAGS INTERNALDATE{labels} BODY.PEEK[HEADER.FIELDS (FROM TO CC REPLY-TO SUBJECT MESSAGE-ID CONTENT-TYPE CONTENT-TRANSFER-ENCODING LIST-UNSUBSCRIBE LIST-UNSUBSCRIBE-POST PRECEDENCE AUTO-SUBMITTED AUTHENTICATION-RESULTS)] BODY.PEEK[TEXT]<0.{TEXT_BYTES}>)"
         )
     }
 
@@ -429,6 +429,17 @@ impl Imap {
         self.command(&format!(
             "UID STORE {uid} {}FLAGS.SILENT ({flag})",
             if on { "+" } else { "-" }
+        ))
+        .map(|_| ())
+    }
+
+    /// Adds Gmail's label `label` to a message of the open mailbox (`on`), or takes it off. Gmail makes the label
+    /// when it does not exist yet.
+    pub fn label(&mut self, uid: u64, label: &str, on: bool) -> Result<(), String> {
+        self.command(&format!(
+            "UID STORE {uid} {}X-GM-LABELS.SILENT ({})",
+            if on { "+" } else { "-" },
+            quote(label)
         ))
         .map(|_| ())
     }
@@ -793,7 +804,7 @@ mod tests {
             ("LOGIN \"ana@ejemplo.test\" \"abcd efgh\"", vec![]),
             ("EXAMINE \"INBOX\"", b"* 2 EXISTS\r\n".to_vec()),
             (
-                "FETCH 1:2 (UID FLAGS INTERNALDATE X-GM-LABELS BODY.PEEK[HEADER.FIELDS",
+                "FETCH 1:2 (UID FLAGS INTERNALDATE X-GM-LABELS X-GM-THRID BODY.PEEK[HEADER.FIELDS",
                 fetch,
             ),
         ]);

@@ -6,14 +6,17 @@
 //! Nothing here sends by itself: `send` runs only when the user presses Send. The pure half
 //! (views, days, the reply's prompt and subject) follows `src/features/mail/model/mail.ts`.
 //! Every function that reaches a server blocks: callers run it off the UI thread.
+pub mod activity;
 mod agent;
+mod rules;
 pub use agent::{agent_action, take_card, take_dialog, ConnectRequest, ACTIONS as AGENT_ACTIONS};
 pub use monobot_email::inspect::{Level, Risk};
 pub use monobot_email::{
     parse_people, Account, AccountView, Action, Attachment, Folder, Message, Opened, Outgoing,
-    Overview, Person, Recipients, Triage, MAX_ACCOUNTS, MAX_RECIPIENTS,
+    Overview, Person, Recipients, Triage, Unsubscribe, MAX_ACCOUNTS, MAX_RECIPIENTS,
 };
 use monobot_email::{Heard, Mail};
+pub use rules::{Rule, MAX_RULES};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -477,6 +480,78 @@ impl Service {
         mail().draft_new(&self.load().accounts, account_id, out, now_ms())
     }
 
+    fn snoozed_path(&self) -> PathBuf {
+        self.data_dir.join("mail").join("snoozed.json")
+    }
+
+    /// The snoozed messages and when each comes back; ended snoozes are dropped.
+    pub fn snoozed(&self) -> Snoozed {
+        let now = now_ms();
+        fs::read_to_string(self.snoozed_path())
+            .ok()
+            .and_then(|text| serde_json::from_str::<Snoozed>(&text).ok())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(_, until)| *until > now)
+            .collect()
+    }
+
+    /// Hides `id` from the inbox until `until` (Unix milliseconds); `None` wakes it now.
+    /// Nothing changes on the server.
+    pub fn snooze(&self, id: &str, until: Option<i64>) -> Result<Snoozed, String> {
+        let mut snoozed = self.snoozed();
+        match until {
+            Some(until) if until > now_ms() => {
+                snoozed.insert(id.to_owned(), until);
+            }
+            Some(_) => return Err("Pick a time in the future.".into()),
+            None => {
+                snoozed.remove(id);
+            }
+        }
+        fs::create_dir_all(self.data_dir.join("mail")).map_err(|e| e.to_string())?;
+        let text = serde_json::to_string(&snoozed).map_err(|e| e.to_string())?;
+        fs::write(self.snoozed_path(), text).map_err(|e| e.to_string())?;
+        Ok(snoozed)
+    }
+
+    /// Puts Gmail's label `label` on a message, or takes it off.
+    pub fn label(&self, id: &str, label: &str, on: bool) -> Result<(), String> {
+        mail().label(&self.load().accounts, id, label, on)
+    }
+
+    /// Stops a list's mail as its sender offers: one request when it says one does it, else
+    /// the page or the message the user finishes. Only the user's press calls this.
+    pub fn unsubscribe(&self, id: &str) -> Result<Unsubscribed, String> {
+        let message = mail()
+            .last()
+            .and_then(|o| o.messages.into_iter().find(|m| m.id == id))
+            .ok_or("Refresh the inbox and try again.")?;
+        if message.triage == Triage::Held {
+            return Err(
+                "This message is held back as a possible scam: its links are not followed.".into(),
+            );
+        }
+        let link = message
+            .unsubscribe
+            .ok_or("This message doesn't say how to unsubscribe.")?;
+        if link.link.to_lowercase().starts_with("mailto:") {
+            let (address, subject) =
+                mailto_parts(&link.link).ok_or("Its unsubscribe address is not valid.")?;
+            return Ok(Unsubscribed::WriteTo(address, subject));
+        }
+        if link.one_click {
+            monobot_email::unsubscribe::one_click(&link.link)?;
+            return Ok(Unsubscribed::Done);
+        }
+        Ok(Unsubscribed::OpenPage(link.link))
+    }
+
+    /// What the agents did with the mail, newest first.
+    pub fn activity(&self, limit: usize) -> Vec<activity::Entry> {
+        activity::recent(&self.data_dir, limit)
+    }
+
     /// A picture on the web the message names, which the user chose to load, as a data URL.
     pub fn image(&self, id: &str, url: &str) -> Result<String, String> {
         mail().image(id, url)
@@ -693,9 +768,10 @@ pub enum View {
     Sent,
     Drafts,
     Archive,
+    Snoozed,
 }
 
-pub const VIEWS: [(View, &str); 7] = [
+pub const VIEWS: [(View, &str); 8] = [
     (View::Inbox, "Inbox"),
     (View::Priority, "Priority"),
     (View::Starred, "Starred"),
@@ -703,6 +779,7 @@ pub const VIEWS: [(View, &str); 7] = [
     (View::Sent, "Sent"),
     (View::Drafts, "Drafts"),
     (View::Archive, "Archive"),
+    (View::Snoozed, "Snoozed"),
 ];
 
 impl View {
@@ -715,6 +792,7 @@ impl View {
             View::Sent => "sent",
             View::Drafts => "drafts",
             View::Archive => "archive",
+            View::Snoozed => "snoozed",
         }
     }
     pub fn parse(id: &str) -> Option<Self> {
@@ -734,6 +812,8 @@ pub fn in_view(message: &Message, view: View) -> bool {
         View::Sent => message.folder == Folder::Sent,
         View::Drafts => message.folder == Folder::Drafts,
         View::Archive => message.folder == Folder::Archive,
+        // Which inbox messages are snoozed is the app's own record (`visible_now`).
+        View::Snoozed => message.folder == Folder::Inbox,
     }
 }
 
@@ -764,6 +844,122 @@ pub fn visible_messages<'a>(
         .collect();
     shown.sort_by_key(|message| std::cmp::Reverse(message.at));
     shown
+}
+
+/// Message id → the time it comes back, in Unix milliseconds.
+pub type Snoozed = HashMap<String, i64>;
+
+/// `visible_messages`, with the snoozed ones out of every view until their time, and alone
+/// in Snoozed (soonest first there).
+pub fn visible_now<'a>(
+    messages: &'a [Message],
+    view: View,
+    account_id: Option<&str>,
+    query: &str,
+    snoozed: &Snoozed,
+    now: i64,
+) -> Vec<&'a Message> {
+    let asleep = |m: &Message| snoozed.get(&m.id).is_some_and(|until| *until > now);
+    let mut shown: Vec<&Message> = visible_messages(messages, view, account_id, query)
+        .into_iter()
+        .filter(|m| asleep(m) == (view == View::Snoozed))
+        .collect();
+    if view == View::Snoozed {
+        shown.sort_by_key(|m| snoozed.get(&m.id).copied().unwrap_or_default());
+    }
+    shown
+}
+
+/// The newest message of each conversation in `shown` (already newest first), with how many
+/// of its messages `shown` holds.
+pub fn by_thread<'a>(shown: &[&'a Message]) -> Vec<(&'a Message, usize)> {
+    let mut threads: Vec<(&Message, usize)> = Vec::new();
+    for message in shown {
+        if !message.thread.is_empty() {
+            if let Some(entry) = threads.iter_mut().find(|(m, _)| m.thread == message.thread) {
+                entry.1 += 1;
+                continue;
+            }
+        }
+        threads.push((message, 1));
+    }
+    threads
+}
+
+/// The other messages of `message`'s conversation in the reading, oldest first.
+pub fn thread_of<'a>(messages: &'a [Message], message: &Message) -> Vec<&'a Message> {
+    if message.thread.is_empty() {
+        return Vec::new();
+    }
+    let mut others: Vec<&Message> = messages
+        .iter()
+        .filter(|m| m.thread == message.thread && m.id != message.id)
+        .collect();
+    others.sort_by_key(|m| m.at);
+    others
+}
+
+/// When a snooze ends: in three hours, tomorrow at 8, or next Monday at 8, local time.
+pub fn snooze_until(choice: &str, now: i64) -> Option<i64> {
+    use chrono::{Datelike, Duration, Local, TimeZone};
+    let local = Local.timestamp_millis_opt(now).single()?;
+    let at_eight = |days: i64| {
+        let day = local.date_naive() + Duration::days(days);
+        Local
+            .from_local_datetime(&day.and_hms_opt(8, 0, 0)?)
+            .earliest()
+            .map(|t| t.timestamp_millis())
+    };
+    match choice {
+        "later" => Some(now + 3 * 3_600_000),
+        "tomorrow" => at_eight(1),
+        "week" => at_eight(7 - local.weekday().num_days_from_monday() as i64),
+        _ => None,
+    }
+}
+
+/// What an unsubscribe press does: done with one request, a page to open, or a message to send.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Unsubscribed {
+    Done,
+    OpenPage(String),
+    /// The address and the subject the sender's `mailto` asks for.
+    WriteTo(String, String),
+}
+
+/// The `mailto:` of a `List-Unsubscribe`: its address and the subject it asks for.
+pub fn mailto_parts(link: &str) -> Option<(String, String)> {
+    let rest = link
+        .strip_prefix("mailto:")
+        .or_else(|| link.strip_prefix("MAILTO:"))?;
+    let (address, query) = rest.split_once('?').unwrap_or((rest, ""));
+    let decode = |text: &str| {
+        let bytes = text.as_bytes();
+        let mut out = Vec::new();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'%' && i + 2 < bytes.len() {
+                if let Ok(byte) = u8::from_str_radix(&text[i + 1..i + 3], 16) {
+                    out.push(byte);
+                    i += 3;
+                    continue;
+                }
+            }
+            out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+            i += 1;
+        }
+        String::from_utf8_lossy(&out).into_owned()
+    };
+    let address = decode(address);
+    if !monobot_email::valid_address(&address) {
+        return None;
+    }
+    let subject = query
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("subject="))
+        .map(decode)
+        .unwrap_or_else(|| "unsubscribe".into());
+    Some((address, subject))
 }
 
 pub fn unread_count(messages: &[Message], view: View) -> usize {
@@ -1698,6 +1894,8 @@ mod tests {
             labels: vec![],
             reason: None,
             auth_failed: false,
+            thread: String::new(),
+            unsubscribe: None,
         }
     }
 
@@ -1937,6 +2135,60 @@ mod tests {
         assert_eq!(organisation_domain("nobody"), None);
         assert_eq!(person_label("Ana", "ana@x.test"), "Ana");
         assert_eq!(person_label(" ANA@x.test ", "ana@x.test"), "ana@x.test");
+    }
+
+    #[test]
+    fn snoozed_mail_leaves_every_view_until_its_time_and_threads_show_once() {
+        let mut a = message("a.inbox.1");
+        a.thread = "g1".into();
+        a.at = 10;
+        let mut b = message("a.inbox.2");
+        b.thread = "g1".into();
+        b.at = 20;
+        let mut c = message("a.inbox.3");
+        c.at = 30;
+        let all = vec![a, b, c];
+        let mut snoozed = Snoozed::new();
+        snoozed.insert("a.inbox.3".into(), 100);
+        let ids = |list: Vec<&Message>| list.iter().map(|m| m.id.clone()).collect::<Vec<_>>();
+        assert_eq!(
+            ids(visible_now(&all, View::Inbox, None, "", &snoozed, 50)),
+            ["a.inbox.2", "a.inbox.1"]
+        );
+        assert_eq!(
+            ids(visible_now(&all, View::Snoozed, None, "", &snoozed, 50)),
+            ["a.inbox.3"]
+        );
+        assert_eq!(
+            visible_now(&all, View::Inbox, None, "", &snoozed, 200).len(),
+            3
+        );
+        let shown = visible_now(&all, View::Inbox, None, "", &snoozed, 200);
+        let threads = by_thread(&shown);
+        assert_eq!(threads.len(), 2);
+        assert_eq!((threads[1].0.id.as_str(), threads[1].1), ("a.inbox.2", 2));
+        assert_eq!(ids(thread_of(&all, &all[1])), ["a.inbox.1"]);
+        assert!(thread_of(&all, &all[2]).is_empty());
+        let now = 1_792_231_200_000;
+        assert_eq!(snooze_until("later", now), Some(now + 3 * 3_600_000));
+        assert!(snooze_until("tomorrow", now).unwrap() > now);
+        assert!(snooze_until("week", now).unwrap() > snooze_until("tomorrow", now).unwrap() - 1);
+        assert_eq!(snooze_until("never", now), None);
+        assert_eq!(
+            mailto_parts("mailto:stop%40list.test?subject=Unsubscribe%20me"),
+            Some(("stop@list.test".into(), "Unsubscribe me".into()))
+        );
+        assert_eq!(mailto_parts("mailto:not-an-address"), None);
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::new(dir.path());
+        assert!(service.snooze("x", Some(1)).is_err());
+        let later = now_ms() + 60_000;
+        assert_eq!(
+            service.snooze("x", Some(later)).unwrap().get("x"),
+            Some(&later)
+        );
+        assert_eq!(service.snoozed().len(), 1);
+        assert!(service.snooze("x", None).unwrap().is_empty());
     }
 
     #[test]

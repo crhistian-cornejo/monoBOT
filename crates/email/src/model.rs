@@ -66,6 +66,22 @@ pub struct Message {
     /// The sender failed SPF, DKIM or DMARC: a fact the core hands to Decider to weigh, never a rule of its own.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub auth_failed: bool,
+    /// The conversation it belongs to: Gmail's thread, else its account and subject without «Re:» or «Fwd:».
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub thread: String,
+    /// Where its sender says to unsubscribe (`List-Unsubscribe`), when it says.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unsubscribe: Option<Unsubscribe>,
+}
+
+/// How to stop a list's mail: an `https` page or a `mailto` address the sender named, and whether a single
+/// request does it with nothing else asked (`List-Unsubscribe-Post: List-Unsubscribe=One-Click`, RFC 8058).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Unsubscribe {
+    pub link: String,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub one_click: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -186,6 +202,8 @@ mod tests {
             labels: vec![],
             reason: None,
             auth_failed: false,
+            thread: String::new(),
+            unsubscribe: None,
         };
         let json = serde_json::to_value(&message).unwrap();
         assert_eq!(json["accountId"], "a");
