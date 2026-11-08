@@ -45,9 +45,7 @@ impl Monos {
                 };
                 let view = cx.new(|cx| PdfView::new(path.clone(), bytes, cx));
                 let events = cx.subscribe(&view, |this, _, event: &PdfEvent, cx| {
-                    if let Some(id) = this.active.clone() {
-                        this.enqueue(&id, event.0.clone(), Vec::new(), false, cx);
-                    }
+                    this.quote_in_chat(event.0.clone(), cx)
                 });
                 view.update(cx, |view, cx| view.focus_passage(page, passage, cx));
                 this.papers.insert(
@@ -62,6 +60,27 @@ impl Monos {
             });
         })
         .detach();
+    }
+
+    /// "Add to chat" from a paper waits in the composer as a quote chip
+    /// that names the file and page; the user sends it with their question.
+    fn quote_in_chat(&mut self, quote: String, cx: &mut Context<Self>) {
+        let Some(chat) = self
+            .active
+            .as_ref()
+            .and_then(|id| self.chats.get(id))
+            .cloned()
+        else {
+            return;
+        };
+        let Some(window) = self.parent_window else {
+            return;
+        };
+        cx.defer(move |cx| {
+            let _ = window.update(cx, |_, window, cx| {
+                chat.update(cx, |chat, cx| chat.mono_quote(&quote, window, cx))
+            });
+        });
     }
 
     pub(super) fn paper_page(&self, path: &str, cx: &mut Context<Self>) -> AnyElement {

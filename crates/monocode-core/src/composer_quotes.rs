@@ -91,6 +91,19 @@ pub fn chip_source(text: &str) -> Option<String> {
     Some(link.replace(&source, "").into_owned())
 }
 
+/// The file and 1-based page a quote from a PDF names in its source line
+/// (`— name, p. 3 (/path/to/file.pdf)`).
+pub fn paper_reference(text: &str) -> Option<(String, usize)> {
+    let source = split_source(text).source?;
+    let inner = source.strip_suffix(')')?;
+    let open = inner.rfind(" (")?;
+    let path = inner[open + 2..].trim();
+    let page = inner[..open].rsplit_once(", p. ")?.1.trim().parse().ok()?;
+    path.to_ascii_lowercase()
+        .ends_with(".pdf")
+        .then(|| (path.to_owned(), page))
+}
+
 /// Adds a quote unless the same words are already waiting. Returns the new list.
 pub fn add(quotes: &[Quote], text: &str, id: &str) -> Vec<Quote> {
     let value = normalize(text).trim().to_owned();
@@ -127,6 +140,44 @@ pub fn with_quotes(message: &str, quotes: &[Quote]) -> String {
     } else {
         format!("{quoted}\n\n{message}")
     }
+}
+
+/// A sent message read back as [`with_quotes`] wrote it: the quotes it
+/// opens with, unquoted, and what was typed after them. A message that does
+/// not open with a quote comes back whole, with no quotes.
+pub fn split_sent(message: &str) -> (Vec<String>, String) {
+    let message = normalize(message);
+    let lines: Vec<&str> = message.split('\n').collect();
+    let mut quotes = Vec::new();
+    let mut at = 0;
+    loop {
+        while lines.get(at).is_some_and(|line| line.trim().is_empty()) {
+            at += 1;
+        }
+        let start = at;
+        while lines.get(at).is_some_and(|line| line.starts_with('>')) {
+            at += 1;
+        }
+        if at == start {
+            break;
+        }
+        let quote = lines[start..at]
+            .iter()
+            .map(|line| {
+                let line = &line[1..];
+                line.strip_prefix(' ').unwrap_or(line)
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        quotes.push(quote.trim().to_owned());
+    }
+    if quotes.is_empty() {
+        return (Vec::new(), message);
+    }
+    (
+        quotes,
+        lines[at.min(lines.len())..].join("\n").trim().to_owned(),
+    )
 }
 
 /// The quotes waiting in each session's composer, by session id. Kept apart from
@@ -225,6 +276,22 @@ mod tests {
     }
 
     #[test]
+    fn a_quote_from_a_pdf_names_its_file_and_page() {
+        let quote =
+            "Words.\n\n— airGR and teaching, p. 3 (/Users/a/Research/airGR and teaching.pdf)";
+        assert_eq!(
+            paper_reference(quote),
+            Some(("/Users/a/Research/airGR and teaching.pdf".into(), 3))
+        );
+        assert_eq!(
+            chip_source(quote).as_deref(),
+            Some("airGR and teaching, p. 3")
+        );
+        assert_eq!(paper_reference(FROM_PAPER), None, "a link is not a file");
+        assert_eq!(paper_reference("plain"), None);
+    }
+
+    #[test]
     fn adds_each_quote_once() {
         let one = add(&[], " words ", "a");
         assert_eq!(one, [quote("a", "words")]);
@@ -241,6 +308,27 @@ mod tests {
                 &[quote("a", "First\nquote"), quote("b", "Second")]
             ),
             "> First\n> quote\n\n> Second\n\n¿Qué método usa?"
+        );
+    }
+
+    #[test]
+    fn reads_a_sent_message_back_into_its_quotes_and_what_was_typed() {
+        let quotes = [quote("a", FROM_PAPER), quote("b", "Second\nline")];
+        let sent = with_quotes("¿Qué método usa?", &quotes);
+        assert_eq!(
+            split_sent(&sent),
+            (
+                vec![FROM_PAPER.to_owned(), "Second\nline".to_owned()],
+                "¿Qué método usa?".to_owned()
+            )
+        );
+        assert_eq!(
+            split_sent(&with_quotes("", &quotes[..1])),
+            (vec![FROM_PAPER.to_owned()], String::new())
+        );
+        assert_eq!(
+            split_sent("hola\n> no es una cita al inicio"),
+            (Vec::new(), "hola\n> no es una cita al inicio".to_owned())
         );
     }
 

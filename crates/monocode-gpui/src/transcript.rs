@@ -130,6 +130,9 @@ struct Message {
     /// The turn this message belongs to, as `Body::Actions` numbers it.
     turn: usize,
     attachments: Arc<[attachments::Attachment]>,
+    /// The quotes a Mono chat's message opened with ("Add to chat"), shown
+    /// as compact chips above its text.
+    quotes: Arc<[String]>,
     /// A user message's displayed chunks and attachments, which its cached
     /// bubble width depends on.
     prompt_fingerprint: u64,
@@ -2044,6 +2047,8 @@ impl TranscriptView {
         let attachments = attachments::Attachment::from_paths(&message.attachments);
         let attachment_body = (!attachments.is_empty())
             .then(|| self.attachment_row(&attachments, &format!("pending-{}", message.id), cx));
+        let (quotes, shown) = monocode_core::composer_quotes::split_sent(&message.text);
+        let quote_body = (!quotes.is_empty()).then(|| self.quote_row(&quotes, usize::MAX - ix));
         div()
             .id(SharedString::from(format!("mono-pending-{}", message.id)))
             .debug_selector(|| "mono-pending-message".into())
@@ -2096,16 +2101,19 @@ impl TranscriptView {
                                 .left_0()
                                 .size_full(),
                             )
-                            .children(attachment_body.map(|body| {
+                            .children(quote_body.map(|body| {
                                 div()
-                                    .when(!message.text.is_empty(), |d| d.mb_2())
+                                    .when(!shown.is_empty() || attachment_body.is_some(), |d| {
+                                        d.mb_2()
+                                    })
                                     .child(body)
                             }))
-                            .when(!message.text.is_empty(), |d| {
-                                d.child(
-                                    gpui::StyledText::new(message.text.clone())
-                                        .with_highlights(self.mention_styles(&message.text)),
-                                )
+                            .children(attachment_body.map(|body| {
+                                div().when(!shown.is_empty(), |d| d.mb_2()).child(body)
+                            }))
+                            .when(!shown.is_empty(), |d| {
+                                let styles = self.mention_styles(&shown);
+                                d.child(gpui::StyledText::new(shown).with_highlights(styles))
                             }),
                     )
                     .when_some(message.error.clone(), |d, error| {
@@ -3406,6 +3414,17 @@ impl TranscriptView {
             } else {
                 (None, Arc::default())
             };
+            let (display_text, quotes): (_, Arc<[String]>) = if role == "user" && self.mono {
+                let shown = display_text.as_deref().unwrap_or(&text);
+                let (quotes, rest) = monocode_core::composer_quotes::split_sent(shown);
+                if quotes.is_empty() {
+                    (display_text, Arc::default())
+                } else {
+                    (Some(rest), quotes.into())
+                }
+            } else {
+                (display_text, Arc::default())
+            };
             let old = previous.remove(&at).filter(|p| p.role == role);
             let mut user_link = None;
             let (mut parser, mut markdown_blocks) = old
@@ -3802,6 +3821,12 @@ impl TranscriptView {
                         .map(|row| row.text.clone())
                         .collect()
                 };
+                // Quotes alone still need a bubble to hold their chips.
+                let text_rows = if text_rows.is_empty() && !quotes.is_empty() {
+                    vec![String::new()]
+                } else {
+                    text_rows
+                };
                 if role == "user" {
                     user_link = text_rows.iter().enumerate().find_map(|(chunk, text)| {
                         parse_user_message_link(text).map(|link| (chunk, Arc::new(link)))
@@ -3879,6 +3904,7 @@ impl TranscriptView {
                 parser,
                 markdown_blocks,
                 user_link,
+                quotes,
                 // Only a settled turn folds its work under the receipt line.
                 // While it streams, the newest reply is the answer so far but
                 // still follows open tool rows, so it keeps prose's 12px gap
@@ -4899,6 +4925,7 @@ impl TranscriptView {
         let nested_phase = row.in_phase();
         let thought_header = matches!(row.body, Body::Reasoning);
         let attachments = message.attachments.clone();
+        let quotes = message.quotes.clone();
         // A Mono's chat shows sent images above the bubble, like photos in a
         // messaging app; only other files stay inside it.
         let (photos, bubble_files) = if user && first && self.mono {
@@ -4910,6 +4937,8 @@ impl TranscriptView {
             .then(|| self.photo_row(&photos, &format!("sent-{message_start}"), cx));
         let attachment_body = (user && first && !bubble_files.is_empty())
             .then(|| self.attachment_row(&bubble_files, &format!("sent-{message_start}"), cx));
+        let quote_body =
+            (user && first && !quotes.is_empty()).then(|| self.quote_row(&quotes, message_start));
         let step_opacity = self
             .motions
             .get(&row.key)
@@ -5376,6 +5405,7 @@ impl TranscriptView {
                     && first
                     && last
                     && attachments.is_empty()
+                    && quotes.is_empty()
                     && is_emoji_only(&text) =>
             {
                 // In a Mono's chat a few emoji stand alone: no bubble or actions.
@@ -5459,6 +5489,11 @@ impl TranscriptView {
                                 .size_full(),
                             )
                     })
+                    .children(quote_body.map(|body| {
+                        div()
+                            .when(!text.is_empty() || attachment_body.is_some(), |d| d.mb_2())
+                            .child(body)
+                    }))
                     .children(
                         attachment_body
                             .map(|body| div().when(!text.is_empty(), |d| d.mb_2()).child(body)),

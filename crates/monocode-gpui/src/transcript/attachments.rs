@@ -352,6 +352,86 @@ impl TranscriptView {
             })
             .into_any_element()
     }
+    /// The quotes a message opened with, compact like the composer's chips:
+    /// the start of the words and where they are from. One from a PDF opens
+    /// it at that page with the words highlighted.
+    pub(super) fn quote_row(&self, quotes: &[String], message_start: usize) -> AnyElement {
+        use monocode_core::composer_quotes as q;
+        div()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .children(quotes.iter().enumerate().map(|(ix, quote)| {
+                let label = q::chip_label(quote, q::CHIP_LABEL_MAX);
+                let source = q::chip_source(quote);
+                let paper = q::paper_reference(quote);
+                let body = q::split_source(quote).body;
+                let chip = div()
+                    .id(SharedString::from(format!(
+                        "sent-quote-{message_start}-{ix}"
+                    )))
+                    .debug_selector(move || format!("sent-quote-{ix}"))
+                    .aria_label(format!("Quote: {body}"))
+                    .min_w_0()
+                    .max_w(px(320.))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .rounded_md()
+                    .bg(content(0.06))
+                    .py_1()
+                    .px(px(6.))
+                    .child(icon("text-quote", 14.).text_color(content(0.55)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap(px(2.))
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .line_height(px(14.))
+                                    .text_color(content(0.8))
+                                    .child(label),
+                            )
+                            .children(source.map(|source| {
+                                div()
+                                    .truncate()
+                                    .text_size(px(10.))
+                                    .line_height(px(12.))
+                                    .text_color(crate::theme::accent_color())
+                                    .child(source)
+                            })),
+                    );
+                let Some((path, page)) = paper else {
+                    return chip.into_any_element();
+                };
+                let title = std::path::Path::new(&path)
+                    .file_stem()
+                    .map_or_else(|| path.clone(), |s| s.to_string_lossy().into_owned());
+                chip.role(Role::Button)
+                    .cursor(gpui::CursorStyle::PointingHand)
+                    .hover(|s| s.bg(content(0.12)))
+                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(move |_, window, cx| {
+                        cx.stop_propagation();
+                        window.dispatch_action(
+                            Box::new(crate::file_editor::OpenPaper {
+                                path: path.clone(),
+                                page,
+                                passage: Some(body.clone()),
+                                title: title.clone(),
+                            }),
+                            cx,
+                        );
+                    })
+                    .into_any_element()
+            }))
+            .into_any_element()
+    }
     /// A Mono chat's sent images, shown whole above the bubble like photos
     /// in a messaging app.
     pub(super) fn photo_row(
@@ -529,5 +609,50 @@ mod tests {
         assert!(!cx.update(|window, _| window.has_image_atlas_entry(&image)));
         assert!(!cx.update(|_, cx| source.is_asset_cached(cx)));
         let _ = std::fs::remove_file(path);
+    }
+    #[gpui::test]
+    fn a_mono_message_shows_its_quotes_as_chips(cx: &mut TestAppContext) {
+        use gpui::{AppContext as _, Bounds, WindowBounds, WindowOptions, point, size};
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let text = "> The reported result preserves the complete data.\n>\n> — study, p. 2 (/tmp/study.pdf)\n\nWhat does this mean?";
+        let window = cx.update(|cx| {
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                        point(px(0.), px(0.)),
+                        size(px(900.), px(700.)),
+                    ))),
+                    ..Default::default()
+                },
+                |_, cx| {
+                    cx.new(|cx| {
+                        let mut view = super::TranscriptView::new();
+                        view.mono_mode("cat", 0xe86b5f, "MonoCat");
+                        view.patch(
+                            0,
+                            vec![super::Row {
+                                role: "user".into(),
+                                text: text.into(),
+                                first: true,
+                                sent_at: None,
+                            }],
+                            cx,
+                        );
+                        view
+                    })
+                },
+            )
+            .unwrap()
+        });
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        window
+            .update(visual, |view, _, _| {
+                let message = view.messages.iter().find(|m| m.role == "user").unwrap();
+                assert_eq!(message.quotes.len(), 1);
+            })
+            .unwrap();
+        assert!(visual.debug_bounds("sent-quote-0").is_some());
+        assert!(visual.debug_bounds("sent-quote-1").is_none());
     }
 }

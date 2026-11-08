@@ -124,7 +124,7 @@ impl TranscriptView {
         {
             return Some(*width);
         }
-        let width = if message.attachments.is_empty() {
+        let width = if message.attachments.is_empty() && message.quotes.is_empty() {
             prompt_bubble_width(
                 self.rows[message.display_start..]
                     .iter()
@@ -309,7 +309,7 @@ fn retention(
     if motions.contains_key(&row.key)
         || messages
             .get(row.message)
-            .is_none_or(|message| !message.attachments.is_empty())
+            .is_none_or(|message| !message.attachments.is_empty() || !message.quotes.is_empty())
     {
         return None;
     }

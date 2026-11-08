@@ -35,6 +35,14 @@ pub(crate) struct PdfView {
     selection_rects: Vec<[f32; 4]>,
     selected_spans: Option<RangeInclusive<usize>>,
     drag_anchor: Option<usize>,
+    /// Where the press began: a selection starts only once the pointer
+    /// moves, so a plain click selects nothing.
+    drag_origin: Option<Point<Pixels>>,
+    scroll: gpui::ScrollHandle,
+    /// Wheel travel pushed past the page's top or bottom edge, toward the
+    /// page before (negative) or after (positive).
+    edge_scroll: f32,
+    last_flip: Option<std::time::Instant>,
     viewport_size: Rc<Cell<(f32, f32)>>,
     /// 1.0 fits the whole page in the view; larger scrolls.
     zoom: f32,
@@ -98,6 +106,10 @@ impl PdfView {
             selection_rects: Vec::new(),
             selected_spans: None,
             drag_anchor: None,
+            drag_origin: None,
+            scroll: gpui::ScrollHandle::new(),
+            edge_scroll: 0.0,
+            last_flip: None,
             viewport_size: Rc::new(Cell::new((0.0, 0.0))),
             zoom: 1.0,
             pinch: 0.0,
@@ -212,11 +224,60 @@ impl PdfView {
         if truncated {
             clean.push_str(" [selection truncated]");
         }
+        // The source line composer_quotes reads: the chip shows the file and
+        // page; the path in parentheses lets the agent open it.
+        let name = std::path::Path::new(&self.path)
+            .file_stem()
+            .map_or_else(|| self.path.clone(), |s| s.to_string_lossy().into_owned());
         Some(format!(
-            "{clean}\n\n- {} (page {})",
-            self.path,
-            self.page + 1
+            "{clean}\n\n— {name}, p. {} ({})",
+            self.page + 1,
+            self.path
         ))
+    }
+
+    /// A wheel past the page's top or bottom turns the page, as a reader
+    /// scrolls through a document.
+    fn wheel(&mut self, dy: f32, cx: &mut Context<Self>) {
+        const FLIP_TRAVEL: f32 = 80.0;
+        if dy == 0.0 || self.pages < 2 {
+            return;
+        }
+        // A flick's momentum must not run through several pages.
+        if self
+            .last_flip
+            .is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(450))
+        {
+            self.edge_scroll = 0.0;
+            return;
+        }
+        let offset = self.scroll.offset().y.as_f32();
+        let max = self.scroll.max_offset().y.as_f32();
+        let at_top = offset >= -1.0;
+        let at_bottom = -offset >= max - 1.0;
+        let down = dy < 0.0;
+        let pushing = if down {
+            at_bottom && self.page + 1 < self.pages
+        } else {
+            at_top && self.page > 0
+        };
+        if !pushing || (self.edge_scroll != 0.0 && (self.edge_scroll > 0.0) != down) {
+            self.edge_scroll = 0.0;
+            if !pushing {
+                return;
+            }
+        }
+        self.edge_scroll -= dy;
+        if self.edge_scroll.abs() < FLIP_TRAVEL {
+            return;
+        }
+        self.edge_scroll = 0.0;
+        self.last_flip = Some(std::time::Instant::now());
+        let x = self.scroll.offset().x;
+        self.navigate(down, cx);
+        // The next page starts at its top, the previous one at its end.
+        let y = if down { 0.0 } else { -max };
+        self.scroll.set_offset(gpui::point(x, px(y)));
     }
 
     pub(crate) fn focus_passage(
@@ -649,6 +710,41 @@ impl PdfView {
         cx.notify();
     }
 
+    /// A press only anchors a selection; a click without a drag selects
+    /// nothing.
+    fn press(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        self.drag_anchor = None;
+        self.drag_origin = None;
+        self.selected_spans = None;
+        self.selection_rects.clear();
+        if let Some((nx, ny)) = self.normalized_page_point(position)
+            && let Some(idx) = self.span_at_point(nx, ny)
+        {
+            self.drag_anchor = Some(idx);
+            self.drag_origin = Some(position);
+        }
+        cx.notify();
+    }
+
+    fn drag_to(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if let Some(anchor) = self.drag_anchor
+            && self.drag_origin.is_some_and(|origin| {
+                let d = position - origin;
+                d.x.as_f32().hypot(d.y.as_f32()) >= 4.0
+            })
+            && let Some((nx, ny)) = self.normalized_page_point(position)
+            && let Some(head) = self.span_at_point(nx, ny)
+        {
+            self.select_span_range(anchor, head, cx);
+        }
+    }
+
+    fn release(&mut self, cx: &mut Context<Self>) {
+        self.drag_anchor = None;
+        self.drag_origin = None;
+        cx.notify();
+    }
+
     fn navigate(&mut self, next: bool, cx: &mut Context<Self>) {
         let page = if next {
             (self.page + 1).min(self.pages.saturating_sub(1))
@@ -662,6 +758,7 @@ impl PdfView {
             self.selection_rects.clear();
             self.selected_spans = None;
             self.drag_anchor = None;
+            self.drag_origin = None;
             self.refresh_page_search_rects(cx);
             self.update_text(cx);
             self.render_page(cx);
@@ -882,7 +979,7 @@ impl Render for PdfView {
                             )
                         })
                     })
-                    .when(has_quote, |d| {
+                    .when(has_quote && self.drag_anchor.is_none(), |d| {
                         d.child(
                             div()
                                 .id("pdf-add-to-chat")
@@ -945,10 +1042,12 @@ impl Render for PdfView {
                             let focus_rects = self.focus_rects.clone();
                             let search_rects = self.search_rects.clone();
                             let selection_rects = self.selection_rects.clone();
+                            // Only what the user selected by hand asks to be added,
+                            // once the press ends; a cited passage keeps the toolbar's.
                             let floating_anchor = self
                                 .selection_rects
                                 .first()
-                                .or_else(|| self.focus_rects.first())
+                                .filter(|_| self.drag_anchor.is_none())
                                 .copied();
                             d.child(
                                 div()
@@ -956,15 +1055,18 @@ impl Render for PdfView {
                                     .absolute()
                                     .size_full()
                                     .overflow_scroll()
+                                    .track_scroll(&self.scroll)
                                     .on_scroll_wheel(cx.listener(
                                         |this, event: &gpui::ScrollWheelEvent, window, cx| {
+                                            let dy = event.delta.pixel_delta(px(16.)).y.as_f32();
                                             if event.modifiers.secondary() {
-                                                let dy = event.delta.pixel_delta(px(16.)).y.as_f32();
                                                 if dy != 0.0 {
                                                     this.step_zoom(dy > 0.0, cx);
                                                 }
                                                 window.prevent_default();
                                                 cx.stop_propagation();
+                                            } else {
+                                                this.wheel(dy, cx);
                                             }
                                         },
                                     ))
@@ -994,37 +1096,20 @@ impl Render for PdfView {
                                     .on_mouse_down(
                                         MouseButton::Left,
                                         cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                                            if let Some((nx, ny)) =
-                                                this.normalized_page_point(event.position)
-                                            {
-                                                if let Some(idx) = this.span_at_point(nx, ny) {
-                                                    this.drag_anchor = Some(idx);
-                                                    this.select_span_range(idx, idx, cx);
-                                                } else {
-                                                    this.drag_anchor = None;
-                                                    this.selected_spans = None;
-                                                    this.selection_rects.clear();
-                                                    cx.notify();
-                                                }
-                                            }
+                                            this.press(event.position, cx);
                                         }),
                                     )
                                     .on_mouse_move(cx.listener(
                                         |this, event: &MouseMoveEvent, _, cx| {
-                                            if event.pressed_button == Some(MouseButton::Left)
-                                                && let Some(anchor) = this.drag_anchor
-                                                && let Some((nx, ny)) =
-                                                    this.normalized_page_point(event.position)
-                                                && let Some(head) = this.span_at_point(nx, ny)
-                                            {
-                                                this.select_span_range(anchor, head, cx);
+                                            if event.pressed_button == Some(MouseButton::Left) {
+                                                this.drag_to(event.position, cx);
                                             }
                                         },
                                     ))
                                     .on_mouse_up(
                                         MouseButton::Left,
-                                        cx.listener(|this, _: &MouseUpEvent, _, _| {
-                                            this.drag_anchor = None;
+                                        cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                                            this.release(cx);
                                         }),
                                     )
                                     .child(bounds_probe)
@@ -1988,7 +2073,11 @@ mod tests {
                 assert!(view.pending_focus.is_none());
                 let input = view.text_input.read(cx);
                 assert_eq!(&input.content[input.selection_range()], quote);
-                assert!(view.selected_quote(cx).unwrap().contains("(page 2)"));
+                assert!(
+                    view.selected_quote(cx)
+                        .unwrap()
+                        .ends_with("\n\n— paper, p. 2 (paper.pdf)")
+                );
             })
             .unwrap();
     }
@@ -2018,14 +2107,18 @@ mod tests {
                 assert!(!view.focus_rects.is_empty());
                 let cited_quote = view.selected_quote(cx).unwrap();
                 assert!(cited_quote.contains(quote));
-                assert!(cited_quote.contains("- study.pdf (page 2)"));
+                assert!(cited_quote.ends_with("— study, p. 2 (study.pdf)"));
 
                 // Interactive span selection on the visual page also produces a chat quote
                 view.select_span_range(1, 3, cx);
                 assert!(!view.selection_rects.is_empty());
                 let manual_quote = view.selected_quote(cx).unwrap();
                 assert!(manual_quote.contains("The reported result"));
-                assert!(manual_quote.contains("- study.pdf (page 2)"));
+                assert_eq!(
+                    monocode_core::composer_quotes::chip_source(&manual_quote).as_deref(),
+                    Some("study, p. 2"),
+                    "the chip names the file and page, not the path"
+                );
 
                 // Search finds matches across pages and highlights them on the page
                 view.search_input.update(cx, |input, cx| {
@@ -2035,6 +2128,64 @@ mod tests {
                 assert_eq!(view.search_matches.len(), 1);
                 assert_eq!(view.page, 1);
                 assert!(!view.search_rects.is_empty());
+            })
+            .unwrap();
+    }
+    #[gpui::test]
+    fn click_selects_nothing_drag_selects_and_wheel_turns_pages(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|cx| PdfView::new("study.pdf".into(), two_page_text_pdf(), cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |view, _, cx| {
+                view.pages = 2;
+                view.page = 0;
+                view.spans = page_spans(&view.bytes, 0);
+                assert!(!view.spans.is_empty());
+                let (w, h) = (600.0, 800.0);
+                view.page_bounds.set(Some(Bounds::new(
+                    gpui::point(px(0.0), px(0.0)),
+                    gpui::size(px(w), px(h)),
+                )));
+                let at = |rect: [f32; 4]| {
+                    gpui::point(
+                        px((rect[0] + rect[2] / 2.0) * w),
+                        px((rect[1] + rect[3] / 2.0) * h),
+                    )
+                };
+                let first = at(view.spans[0].rect);
+                let last = at(view.spans.last().unwrap().rect);
+
+                view.press(first, cx);
+                view.drag_to(first + gpui::point(px(1.0), px(1.0)), cx);
+                view.release(cx);
+                assert!(view.selection_rects.is_empty(), "a click selects nothing");
+                assert!(view.selected_quote(cx).is_none());
+
+                view.press(first, cx);
+                view.drag_to(last + gpui::point(px(0.0), px(5.0)), cx);
+                assert!(!view.selection_rects.is_empty(), "a drag selects text");
+                assert!(view.drag_anchor.is_some(), "Add to chat waits for release");
+                view.release(cx);
+                assert!(view.drag_anchor.is_none());
+                let quote = view.selected_quote(cx).unwrap();
+                assert!(quote.ends_with("— study, p. 1 (study.pdf)"));
+
+                view.wheel(-30.0, cx);
+                assert_eq!(view.page, 0, "a short push past the end does not turn");
+                view.wheel(-60.0, cx);
+                assert_eq!(view.page, 1, "scrolling past the end turns the page");
+                assert!(view.selection_rects.is_empty());
+                view.wheel(200.0, cx);
+                assert_eq!(view.page, 1, "momentum right after a turn is ignored");
+                view.last_flip = None;
+                view.wheel(-200.0, cx);
+                assert_eq!(view.page, 1, "no page past the last one");
+                view.wheel(100.0, cx);
+                assert_eq!(view.page, 0, "scrolling past the top goes back");
             })
             .unwrap();
     }
