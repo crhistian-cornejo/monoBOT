@@ -4,6 +4,7 @@
 //! (`monocode_core::inbox::mail`), so a mailbox connected there shows here.
 mod accounts;
 mod art;
+pub(crate) mod connect;
 mod reader;
 mod reply;
 
@@ -110,7 +111,14 @@ pub(crate) struct Mailbox {
     reader: Option<Reader>,
     opened: VecDeque<Opened>,
     reply: Option<Entity<MailReply>>,
-    form: accounts::Form,
+    form: Entity<connect::ConnectForm>,
+    /// Which agents read each account, and the bots it can be kept for.
+    access: model::Access,
+    agents: Vec<connect::Agent>,
+    /// The account whose «Who can read it» row is open.
+    readers_open: Option<String>,
+    /// Where the bots are listed, for «Who can read it».
+    store: Option<crate::runtime::Database>,
     /// The photos the user chose in the desktop app for their accounts.
     photos: HashMap<String, Arc<Image>>,
     hover: Option<Task<()>>,
@@ -243,12 +251,19 @@ impl Mailbox {
             input.set_font_size(12.);
             input
         });
-        let form = accounts::Form::new(cx);
-        let mut subscriptions = vec![cx.subscribe(&search, |this, _, _: &input::Changed, cx| {
-            this.prefetch_ahead(cx);
-            cx.notify();
-        })];
-        subscriptions.extend(form.subscriptions(cx));
+        let form =
+            cx.new(|cx| connect::ConnectForm::new(model::Service::new(data_dir.clone()), cx));
+        let subscriptions = vec![
+            cx.subscribe(&search, |this, _, _: &input::Changed, cx| {
+                this.prefetch_ahead(cx);
+                cx.notify();
+            }),
+            cx.subscribe(&form, |this, _, event: &connect::ConnectEvent, cx| {
+                if let connect::ConnectEvent::Connected(_) = event {
+                    this.load_accounts(cx);
+                }
+            }),
+        ];
         // New mail, or a change made elsewhere: read again.
         let changes = model::subscribe();
         cx.spawn(async move |this, cx| {
@@ -291,6 +306,10 @@ impl Mailbox {
             opened: VecDeque::new(),
             reply: None,
             form,
+            access: model::Access::new(),
+            agents: Vec::new(),
+            readers_open: None,
+            store: None,
             photos: HashMap::new(),
             hover: None,
             prefetched: Vec::new(),
@@ -335,7 +354,7 @@ impl Mailbox {
             return true;
         }
         if self.settings_open {
-            if !self.form.busy {
+            if !self.form.read(cx).busy() {
                 self.settings_open = false;
                 cx.notify();
             }
@@ -348,8 +367,14 @@ impl Mailbox {
         false
     }
 
+    /// Where the bots are listed, for choosing which of them read each account.
+    pub(crate) fn set_store(&mut self, store: crate::runtime::Database) {
+        self.store = Some(store);
+    }
+
     fn load_accounts(&mut self, cx: &mut Context<Self>) {
         let service = self.service.clone();
+        let store = self.store.clone();
         let task = cx.background_executor().spawn(async move {
             let accounts = service.accounts();
             let last = if accounts.is_empty() {
@@ -367,12 +392,24 @@ impl Mailbox {
                     Some((account.address.to_lowercase(), png))
                 })
                 .collect::<Vec<_>>();
-            (accounts, last, photos)
+            let access = service.access();
+            let agents = store
+                .and_then(|store| {
+                    let db = crate::runtime::locked(&store).ok()?;
+                    monocode_core::mono::Roster::load(&db).ok()
+                })
+                .map(|roster| connect::agents_of(&roster))
+                .unwrap_or_default();
+            (accounts, last, photos, access, agents)
         });
         cx.spawn(async move |this, cx| {
-            let (accounts, last, photos) = task.await;
+            let (accounts, last, photos, access, agents) = task.await;
             let _ = this.update(cx, |this, cx| {
                 let empty = accounts.is_empty();
+                this.access = access;
+                this.form
+                    .update(cx, |form, cx| form.set_agents(agents.clone(), cx));
+                this.agents = agents;
                 this.photos = photos
                     .into_iter()
                     .map(|(address, png)| (address, png_image(png)))
@@ -1512,7 +1549,7 @@ impl Mailbox {
                     .inset_0()
                     .child(crate::modal::scrim("mail-accounts-scrim"))
                     .on_click(cx.listener(|this, _, _, cx| {
-                        if !this.form.busy {
+                        if !this.form.read(cx).busy() {
                             this.settings_open = false;
                             cx.notify();
                         }
@@ -1552,7 +1589,7 @@ impl Mailbox {
                             .child(
                                 tool("mail-accounts-close", "Close", "close", content(0.5))
                                     .on_click(cx.listener(|this, _, _, cx| {
-                                        if !this.form.busy {
+                                        if !this.form.read(cx).busy() {
                                             this.settings_open = false;
                                             cx.notify();
                                         }
@@ -1738,6 +1775,56 @@ mod tests {
             cx.notify();
         });
         cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn the_user_chooses_which_agents_read_a_connected_account(cx: &mut TestAppContext) {
+        let (mailbox, cx) = mailbox(cx, "readers");
+        let dir = mailbox.read_with(cx, |m, _| m.service.data_dir.clone());
+        std::fs::create_dir_all(dir.join("mail")).unwrap();
+        std::fs::write(
+            dir.join("mail/accounts.json"),
+            r#"{"accounts":[{"id":"a","name":"Ana","address":"ana@gmail.com","provider":"gmail","host":"imap.gmail.com","port":993}],"interesting":[]}"#,
+        )
+        .unwrap();
+        mailbox.update(cx, |mailbox, cx| {
+            mailbox.started = true;
+            mailbox.accounts = Some(vec![AccountView {
+                id: "a".into(),
+                name: "Ana".into(),
+                address: "ana@gmail.com".into(),
+                provider: "gmail".into(),
+            }]);
+            mailbox.overview = Some(Overview::default());
+            mailbox.agents = vec![connect::Agent {
+                id: "fin".into(),
+                label: "Finance".into(),
+            }];
+            mailbox.settings_open = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let toggle = cx.debug_bounds("mail-readers-a").expect("who reads it");
+        cx.simulate_click(toggle.center(), Modifiers::default());
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        let finance = cx
+            .debug_bounds("mail-readers-pick-a-fin")
+            .expect("the Finance pill");
+        cx.simulate_click(finance.center(), Modifiers::default());
+        cx.run_until_parked();
+        mailbox.read_with(cx, |mailbox, _| {
+            assert_eq!(
+                model::readers_of(&mailbox.access, "ana@gmail.com").unwrap(),
+                &["fin"]
+            );
+        });
+        assert_eq!(
+            model::readers_of(&model::Service::new(&dir).access(), "ana@gmail.com").unwrap(),
+            &["fin"]
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[gpui::test]

@@ -299,8 +299,43 @@ pub fn agent_action(
     }
 }
 
+/// What an agent asked to connect: the app shows its own dialog with it filled in, and the
+/// owner of the mailbox types the app password there.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ConnectRequest {
+    pub address: String,
+    /// `gmail`, `icloud` or `imap`.
+    pub provider: String,
+    /// The name to show for the account («Ana, pareja»); may be empty.
+    pub name: String,
+    /// Every agent may read it; otherwise only the agent that asked.
+    pub shared: bool,
+}
+
+const DIALOG: &str = "dialog";
+
+/// The dialog a `mail.connect` answer asks the app to show, taken out of the answer (the
+/// agent never sees it). None: nothing to show.
+pub fn take_dialog(answer: &mut Value) -> Option<ConnectRequest> {
+    let dialog = answer.as_object_mut()?.remove(DIALOG)?;
+    let text = |key: &str| {
+        dialog
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned()
+    };
+    Some(ConnectRequest {
+        address: text("address"),
+        provider: text("provider"),
+        name: text("name"),
+        shared: dialog.get("shared").and_then(Value::as_bool) == Some(true),
+    })
+}
+
 /// Asks the user to connect another mail account. The password never passes through the
-/// chat: the user types it in the Email tab's own form.
+/// chat: the app opens its own dialog (`take_dialog`), where the owner types it, and it goes
+/// straight to the system's store of secrets.
 fn connect(
     service: &Service,
     input: &Value,
@@ -316,8 +351,8 @@ fn connect(
     if !["gmail", "icloud", "imap"].contains(&provider.as_str()) {
         return Err("provider must be one of: gmail, icloud, imap".into());
     }
-    optional(input, "name", 80)?;
-    flag(input, "shared")?;
+    let name = optional(input, "name", 80)?.unwrap_or_default();
+    let shared = flag(input, "shared")?;
     if let Some(connected) = service
         .accounts()
         .into_iter()
@@ -336,8 +371,11 @@ fn connect(
         }));
     }
     Ok(json!({
-        "opened": false,
-        "note": "The app could not show the dialog. Tell the user to connect it in the Inbox, Email tab.",
+        "opened": true,
+        "account": address,
+        "readers": if shared { "every agent" } else { "you alone, unless the user chooses otherwise in the dialog" },
+        "note": "MonoBOT opened its own dialog with the address filled in. The mailbox's owner types the app password there (Gmail: 2-Step Verification on, then an app password from myaccount.google.com/apppasswords); it goes to the system's keychain and you never see it. Never ask for it in the chat. The user can also choose there which agents read it. When the user says it is connected, check it with mail.search and its account; if they closed the dialog, call mail.connect again.",
+        DIALOG: {"address": address, "provider": provider, "name": name, "shared": shared},
     }))
 }
 
@@ -382,7 +420,7 @@ mod tests {
     #[test]
     fn asking_to_connect_a_known_account_says_who_reads_it() {
         let (_dir, service) = service();
-        let open = agent_action(
+        let mut open = agent_action(
             &service,
             "mail.connect",
             &json!({"address": "ANA@gmail.com"}),
@@ -405,15 +443,28 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("kept for another agent"));
-        let new = agent_action(
+        let mut new = agent_action(
             &service,
             "mail.connect",
-            &json!({"address": "luis@empresa.pe"}),
+            &json!({"address": "luis@empresa.pe", "name": "Luis, pareja"}),
             Some("finance"),
             &kept,
         )
         .unwrap();
-        assert_eq!(new["opened"], false);
+        assert_eq!(new["opened"], true);
+        assert!(new["note"].as_str().unwrap().contains("Never ask for it"));
+        assert_eq!(
+            take_dialog(&mut new),
+            Some(ConnectRequest {
+                address: "luis@empresa.pe".into(),
+                provider: "imap".into(),
+                name: "Luis, pareja".into(),
+                shared: false,
+            })
+        );
+        // The agent's answer no longer carries it, and a known account opens nothing.
+        assert!(new.get("dialog").is_none());
+        assert_eq!(take_dialog(&mut open), None);
     }
 
     #[test]

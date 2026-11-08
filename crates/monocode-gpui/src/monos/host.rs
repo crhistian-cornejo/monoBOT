@@ -3,7 +3,7 @@ use super::*;
 use monocode_core::mono::{Document, Launch, bridge::Call, files, memory};
 use monocode_core::{app_access as app, session_groups::Groups, time::now_ms};
 use serde_json::{Value, json};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 enum Effect {
     Card(Value),
     None,
@@ -15,6 +15,8 @@ enum Effect {
         Option<(i64, crate::pane_layout::Edge)>,
     ),
     Groups(String, Groups),
+    /// A bot's `mail.connect`: the app's own dialog, over its data folder.
+    MailConnect(Box<(PathBuf, monocode_core::inbox::mail::ConnectRequest)>),
 }
 fn text(v: &Value, key: &str, max: usize) -> Result<String, String> {
     v.get(key)
@@ -116,6 +118,10 @@ impl Monos {
                         Effect::Card(value) => {
                             this.hold_card(call.session, &mono_id, value);
                             this.save(cx);
+                        }
+                        Effect::MailConnect(asked) => {
+                            let (data_dir, request) = *asked;
+                            this.open_mail_connect(&mono_id, data_dir, request, window, cx);
                         }
                         Effect::Groups(project, groups) => {
                             let _ = this.owner.update(cx, |owner, cx| {
@@ -789,19 +795,15 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                             .data_dir()
                             .map(Path::to_path_buf)
                             .unwrap_or_else(mail::desktop_data_dir);
-                        let access =
-                            monocode_core::desktop_preferences::DesktopPreferences::load(&data_dir)
-                                .json(mail::ACCESS_KEY)
-                                .map(|value| mail::parse_access(&value))
-                                .unwrap_or_default();
-                        let value = mail::agent_action(
-                            &mail::Service::new(data_dir),
-                            &action,
-                            &input,
-                            Some(&reader),
-                            &access,
-                        )?;
-                        Ok((value, Effect::None))
+                        // Who reads each account, as the user chose it.
+                        let access = mail::Service::new(data_dir.clone()).access();
+                        let service = mail::Service::new(data_dir.clone());
+                        let mut value =
+                            mail::agent_action(&service, &action, &input, Some(&reader), &access)?;
+                        let effect = mail::take_dialog(&mut value)
+                            .map(|request| Effect::MailConnect(Box::new((data_dir, request))))
+                            .unwrap_or(Effect::None);
+                        Ok((value, effect))
                     },
                     cx,
                 );

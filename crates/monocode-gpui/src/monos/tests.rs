@@ -5254,3 +5254,57 @@ fn how_workstreams_work_reopens_the_tour_without_touching_the_seen_flag(cx: &mut
     assert_eq!(tour(visual), None);
     assert!(seen(visual), "a replay never resets the seen flag");
 }
+
+#[gpui::test]
+fn a_bots_mail_connect_opens_the_apps_dialog_and_the_user_picks_who_reads(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    s.manager.update(cx, |m, _| {
+        let mono = m.roster.monos.iter_mut().find(|m| m.id == s.id).unwrap();
+        mono.kind = Some("bot".into());
+        mono.name = "Finance".into();
+    });
+    let answer = call(
+        &s,
+        "connect-ana",
+        "mail.connect",
+        json!({"address":"ana@gmail.com","name":"Ana, pareja"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    assert_eq!(answer["opened"], true);
+    assert!(
+        answer.get("dialog").is_none(),
+        "the agent never sees the dialog"
+    );
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.simulate_resize(gpui::size(px(1000.), px(760.)));
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("mail-connect-dialog").is_some());
+    let form = s
+        .manager
+        .read_with(visual, |m, _| m.mail_connect.as_ref().unwrap().1.clone());
+    // Kept for the bot that asked, until the user opens it to every agent.
+    form.read_with(visual, |form, _| {
+        assert_eq!(
+            *form.readers(),
+            crate::inbox::mail::connect::Readers::Only(vec![s.id.clone()])
+        )
+    });
+    let all = visual
+        .debug_bounds("mail-connect-readers-all")
+        .expect("the readers row");
+    visual.simulate_click(all.center(), Default::default());
+    visual.run_until_parked();
+    form.read_with(visual, |form, _| {
+        assert_eq!(*form.readers(), crate::inbox::mail::connect::Readers::All)
+    });
+    visual.refresh().unwrap();
+    let cancel = visual.debug_bounds("mail-connect-cancel").unwrap();
+    visual.simulate_click(cancel.center(), Default::default());
+    visual.run_until_parked();
+    s.manager
+        .read_with(visual, |m, _| assert!(m.mail_connect.is_none()));
+}
