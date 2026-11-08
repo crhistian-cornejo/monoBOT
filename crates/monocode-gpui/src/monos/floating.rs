@@ -77,9 +77,12 @@ fn status_fill(state: &str, color: u32) -> gpui::Hsla {
 }
 impl Floating {
     fn select(&mut self, id: String, window: &mut Window, cx: &mut Context<Self>) {
-        self.selected = id.clone();
+        let previous = std::mem::replace(&mut self.selected, id.clone());
         self.focused = None;
         self.owner.update(cx, |owner, cx| {
+            if previous != id {
+                owner.reset_find(Some(&previous), cx);
+            }
             owner.ensure_chat(&id, cx);
             // The workspace may now show, or stop deferring to, this chat.
             cx.notify();

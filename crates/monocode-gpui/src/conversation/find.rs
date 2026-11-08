@@ -1,7 +1,9 @@
-//! TranscriptFind: "Find in conversation" over the chat. Cmd/Ctrl+F opens
-//! it, Enter, F3 and Cmd/Ctrl+G step through the matches (with Shift to go
-//! back), and Esc closes it. Matching is `monocode_core::transcript::find`;
-//! the transcript scrolls to and marks each match as a search hit does.
+//! TranscriptFind: "Find in conversation" over the chat, in project
+//! sessions and in agent and group chats alike. Cmd/Ctrl+F opens it, Enter,
+//! Down, F3 and Cmd/Ctrl+G step through the matches (Shift+Enter, Up and
+//! the Shift variants go back), and Esc closes it. Matching is
+//! `monocode_core::transcript::find`; the transcript scrolls to and marks
+//! each match as a search hit does.
 use super::*;
 use crate::input::{self, Input};
 use gpui::{App, KeyBinding, Subscription, Task, actions};
@@ -101,6 +103,16 @@ impl Conversation {
         true
     }
 
+    /// Drops the bar and its highlights without moving focus, as when the
+    /// Agents zone or a floating panel moves to another chat.
+    pub(crate) fn reset_find(&mut self, cx: &mut Context<Self>) {
+        if self.find.bar.take().is_none() {
+            return;
+        }
+        self.transcript.update(cx, |view, cx| view.clear_search(cx));
+        cx.notify();
+    }
+
     fn find_changed(&mut self, cx: &mut Context<Self>) {
         let Some(bar) = self.find.bar.as_mut() else {
             return;
@@ -191,6 +203,13 @@ impl Conversation {
             .update(cx, |view, cx| view.reveal_search(row, &query, cx));
     }
 
+    /// The open bar's matches and the active one, for tests elsewhere.
+    #[cfg(test)]
+    pub(crate) fn find_matches(&self) -> Option<(Vec<usize>, usize)> {
+        let bar = self.find.bar.as_ref()?;
+        Some((bar.matches.clone(), bar.active))
+    }
+
     /// The bar at the top right of the chat.
     pub(super) fn find_bar(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let bar = self.find.bar.as_ref()?;
@@ -229,10 +248,27 @@ impl Conversation {
             div()
                 .absolute()
                 .top(px(8.))
+                .left(px(12.))
                 .right(px(12.))
+                .flex()
+                .justify_end()
                 .key_context("TranscriptFind")
                 .on_action(cx.listener(|this, _: &Close, window, cx| {
                     this.close_find(window, cx);
+                }))
+                // The field is one line: Shift+Enter and the arrows step
+                // through the matches instead of moving its caret.
+                .capture_action(cx.listener(|this, _: &input::Newline, _, cx| {
+                    this.step_find(-1, cx);
+                    cx.stop_propagation();
+                }))
+                .capture_action(cx.listener(|this, _: &input::Up, _, cx| {
+                    this.step_find(-1, cx);
+                    cx.stop_propagation();
+                }))
+                .capture_action(cx.listener(|this, _: &input::Down, _, cx| {
+                    this.step_find(1, cx);
+                    cx.stop_propagation();
                 }))
                 .child(
                     div()
@@ -240,7 +276,9 @@ impl Conversation {
                         .debug_selector(|| "transcript-find".to_owned())
                         .role(Role::Search)
                         .aria_label("Find in conversation")
+                        // Shrinks in a narrow pane or the floating panel.
                         .w(px(360.))
+                        .max_w_full()
                         .flex()
                         .items_center()
                         .gap_1()

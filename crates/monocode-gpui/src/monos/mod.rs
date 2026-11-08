@@ -1435,6 +1435,7 @@ impl Monos {
         }
         let mut overview = false;
         if self.active.as_deref() != Some(id) {
+            self.reset_find(self.active.as_deref(), cx);
             self.call_hang_up(cx);
             self.save_open_file(cx);
             self.pause_changes(cx);
@@ -1508,6 +1509,13 @@ impl Monos {
             self.changed(cx);
         }
     }
+    /// Closes the find bar of the chat being left, so the next agent or
+    /// group opens without the last one's search.
+    pub(crate) fn reset_find(&self, id: Option<&str>, cx: &mut Context<Self>) {
+        if let Some(chat) = id.and_then(|id| self.chats.get(id)) {
+            chat.update(cx, |chat, cx| chat.reset_find(cx));
+        }
+    }
     pub(crate) fn focus_active(&self, window: &mut Window, cx: &mut Context<Self>) {
         if self.settings.is_none()
             && let Some(chat) = self.chat()
@@ -1522,7 +1530,8 @@ impl Monos {
         self.save_open_file(cx);
         self.pause_changes(cx);
         self.hide_html(cx);
-        if self.active.take().is_some() {
+        if let Some(id) = self.active.take() {
+            self.reset_find(Some(&id), cx);
             self.details.update(cx, |details, cx| details.reset(cx));
             self.settings = None;
             self.picker = None;
@@ -1697,6 +1706,7 @@ impl Monos {
         .when(has && section == agents::Section::Groups, |d| {
             d.child(self.new_group_button(cx))
         })
+        .when(workstreams, |d| d.child(self.workstream_help_button(cx)))
         .when(has && workstreams, |d| {
             d.child(self.new_workstream_button(cx))
         })

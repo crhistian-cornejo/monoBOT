@@ -4736,3 +4736,288 @@ fn a_workstream_shows_its_agents_prs_and_shared_files(cx: &mut TestAppContext) {
     click(visual, "workstream-files-refresh");
     assert!(visual.debug_bounds("workstream-file-2").is_some());
 }
+
+fn bind_find(cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        crate::input::bind(cx);
+        crate::popover::bind(cx);
+        crate::conversation::find::bind(cx);
+        cx.set_reduce_motion(true);
+    });
+}
+
+fn find_key() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-f"
+    } else {
+        "ctrl-f"
+    }
+}
+
+/// Four turns in the chat, three of them about the parser.
+fn fill_find_chat(chat: &Entity<Conversation>, cx: &mut impl gpui::AppContext) {
+    let row = |role: &str, text: &str| monocode_core::transcript::Row {
+        role: role.into(),
+        text: text.into(),
+        first: true,
+        sent_at: None,
+    };
+    chat.update(cx, |chat, cx| {
+        chat.summary.has_messages = true;
+        chat.transcript.update(cx, |view, cx| {
+            view.patch(
+                0,
+                vec![
+                    row("user", "Where is the parser?"),
+                    row("assistant", "The parser lives in src/parse.rs."),
+                    row("user", "Thanks"),
+                    row("assistant", "The PARSER is tested too."),
+                ],
+                cx,
+            )
+        });
+    });
+}
+
+/// Opens the bar with Cmd/Ctrl+F from the chat's composer and searches.
+fn find_parser(
+    visual: &mut gpui::VisualTestContext,
+    chat: &Entity<Conversation>,
+) -> Option<(Vec<usize>, usize)> {
+    visual.update(|window, cx| window.focus(&chat.read(cx).input.focus_handle(cx), cx));
+    visual.run_until_parked();
+    visual.simulate_keystrokes(find_key());
+    visual.run_until_parked();
+    assert!(
+        visual.debug_bounds("transcript-find").is_some(),
+        "Cmd/Ctrl+F opens the bar"
+    );
+    visual.simulate_input("parser");
+    visual
+        .executor()
+        .advance_clock(std::time::Duration::from_millis(400));
+    visual.run_until_parked();
+    chat.read_with(visual, |chat, _| chat.find_matches())
+}
+
+fn find_active(visual: &mut gpui::VisualTestContext, chat: &Entity<Conversation>) -> usize {
+    chat.read_with(visual, |chat, _| chat.find_matches().unwrap().1)
+}
+
+#[gpui::test]
+fn find_in_an_agents_chat_steps_with_keys_and_escape_clears_it(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    bind_find(cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    let bot = visual.update(|window, cx| {
+        s.manager.update(cx, |m, cx| {
+            m.create_bot("assistant", false, window, cx);
+            m.dismiss_settings(window, cx);
+            m.active.clone().unwrap()
+        })
+    });
+    visual.run_until_parked();
+    let chat = visual.update(|_, cx| {
+        let m = s.manager.read(cx);
+        assert!(m.current().unwrap().is_bot());
+        assert_eq!(m.current().unwrap().id, bot);
+        m.chat().unwrap()
+    });
+    fill_find_chat(&chat, visual);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert_eq!(find_parser(visual, &chat), Some((vec![0, 1, 3], 0)));
+    visual.simulate_keystrokes("enter");
+    assert_eq!(find_active(visual, &chat), 1);
+    visual.simulate_keystrokes("shift-enter");
+    assert_eq!(find_active(visual, &chat), 0);
+    // Back past the first wraps to the last; the arrows step too.
+    visual.simulate_keystrokes("up");
+    assert_eq!(find_active(visual, &chat), 2);
+    visual.simulate_keystrokes("down");
+    assert_eq!(find_active(visual, &chat), 0);
+    let next = visual.debug_bounds("transcript-find-next").unwrap();
+    visual.simulate_click(next.center(), Default::default());
+    assert_eq!(find_active(visual, &chat), 1);
+    visual.run_until_parked();
+    chat.read_with(visual, |chat, cx| {
+        assert_eq!(chat.transcript.read(cx).search_highlight(), Some("parser"));
+    });
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("transcript-find").is_none());
+    visual.update(|window, cx| {
+        let chat = chat.read(cx);
+        assert!(chat.find_matches().is_none());
+        assert!(chat.transcript.read(cx).search_highlight().is_none());
+        assert!(chat.input.focus_handle(cx).is_focused(window));
+    });
+}
+
+#[gpui::test]
+fn find_in_a_group_chat_and_switching_agents_resets_it(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    bind_find(cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    let (bot, group) = visual.update(|window, cx| {
+        s.manager.update(cx, |m, cx| {
+            let root = m.root.clone();
+            let bot = m
+                .roster
+                .create_bot(&root, "assistant", false)
+                .unwrap()
+                .id
+                .clone();
+            let group = m
+                .roster
+                .create_group(
+                    &root,
+                    "Launch crew",
+                    monocode_core::mono::groups::Group {
+                        members: vec![bot.clone()],
+                        ..Default::default()
+                    },
+                    None,
+                )
+                .id
+                .clone();
+            m.open(&group, window, cx);
+            (bot, group)
+        })
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let chat = visual.update(|_, cx| {
+        let m = s.manager.read(cx);
+        assert!(m.current().unwrap().is_group());
+        m.chat().unwrap()
+    });
+    fill_find_chat(&chat, visual);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert_eq!(find_parser(visual, &chat), Some((vec![0, 1, 3], 0)));
+    visual.simulate_keystrokes("enter");
+    visual.simulate_keystrokes("enter");
+    assert_eq!(find_active(visual, &chat), 2);
+    visual.simulate_keystrokes("shift-enter");
+    assert_eq!(find_active(visual, &chat), 1);
+    // Moving to another agent closes the group's search, and coming back
+    // finds it closed.
+    visual.update(|window, cx| s.manager.update(cx, |m, cx| m.open(&bot, window, cx)));
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("transcript-find").is_none());
+    chat.read_with(visual, |chat, cx| {
+        assert!(chat.find_matches().is_none());
+        assert!(chat.transcript.read(cx).search_highlight().is_none());
+    });
+    visual.update(|window, cx| s.manager.update(cx, |m, cx| m.open(&group, window, cx)));
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("transcript-find").is_none());
+    // Cmd/Ctrl+F opens it afresh; Esc closes it again.
+    assert_eq!(find_parser(visual, &chat), Some((vec![0, 1, 3], 0)));
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("transcript-find").is_none());
+}
+
+#[gpui::test]
+fn find_works_in_a_floating_agent_panel(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    bind_find(cx);
+    let bot = cx.update(|cx| {
+        s.manager.update(cx, |m, cx| {
+            let id = m.create_floating(cx).unwrap();
+            m.open_floating(id.clone(), cx);
+            id
+        })
+    });
+    cx.run_until_parked();
+    let (panel, chat) = cx.update(|cx| {
+        let m = s.manager.read(cx);
+        assert!(m.floating_shows(&bot, cx));
+        (m.floating[0], m.chats[&bot].clone())
+    });
+    cx.update(|cx| fill_find_chat(&chat, cx));
+    let visual = &mut gpui::VisualTestContext::from_window(panel, cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert_eq!(find_parser(visual, &chat), Some((vec![0, 1, 3], 0)));
+    let bar = visual.debug_bounds("transcript-find").unwrap();
+    let width = visual.update(|window, _| window.bounds().size.width);
+    assert!(bar.right() <= width, "the bar fits the panel");
+    visual.simulate_keystrokes("down");
+    assert_eq!(find_active(visual, &chat), 1);
+    // Esc closes the bar, not the panel.
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("transcript-find").is_none());
+    cx.update(|cx| assert!(s.manager.read(cx).floating_shows(&bot, cx)));
+}
+
+#[gpui::test]
+fn how_workstreams_work_reopens_the_tour_without_touching_the_seen_flag(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    show_rail(&s, cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let tour = |visual: &mut gpui::VisualTestContext| {
+        s.manager.read_with(visual, |m, cx| {
+            m.workstreams
+                .intro
+                .as_ref()
+                .map(|(view, _, _)| (view.read(cx).step, view.read(cx).replay))
+        })
+    };
+    let seen = |visual: &mut gpui::VisualTestContext| {
+        s.manager
+            .read_with(visual, |m, _| m.roster.workstream_intro_seen)
+    };
+
+    // Before any workstream, the "?" beside the header opens the tour.
+    click(visual, "workstream-help");
+    assert_eq!(tour(visual), Some((0, true)));
+    click(visual, "workstream-intro-next");
+    click(visual, "workstream-intro-next");
+    click(visual, "workstream-intro-back");
+    assert_eq!(tour(visual), Some((1, true)));
+    click(visual, "workstream-intro-next");
+    click(visual, "workstream-intro-next");
+    assert_eq!(tour(visual), Some((workstreams::STEPS.len() - 1, true)));
+    // Its last step's button is Done: it closes, starting nothing.
+    click(visual, "workstream-intro-next");
+    assert_eq!(tour(visual), None);
+    assert!(visual.debug_bounds("workstream-intro").is_none());
+    assert!(visual.debug_bounds("new-workstream-dialog").is_none());
+    assert!(!seen(visual), "a replay leaves the first-run tour to come");
+
+    // Skip, the corner close and Escape close it as well.
+    for close in ["workstream-intro-skip", "workstream-intro-close"] {
+        click(visual, "workstream-help");
+        click(visual, "workstream-intro-next");
+        click(visual, close);
+        assert_eq!(tour(visual), None, "{close}");
+    }
+    click(visual, "workstream-help");
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    assert_eq!(tour(visual), None);
+    assert!(!seen(visual));
+
+    // The first-run tour still shows before the first workstream, and
+    // afterwards the "?" keeps opening it.
+    click(visual, "new-workstream");
+    assert_eq!(tour(visual), Some((0, false)));
+    click(visual, "workstream-intro-skip");
+    assert!(seen(visual));
+    click(visual, "workstream-help");
+    assert_eq!(tour(visual), Some((0, true)));
+    click(visual, "workstream-intro-skip");
+    assert_eq!(tour(visual), None);
+    assert!(seen(visual), "a replay never resets the seen flag");
+}

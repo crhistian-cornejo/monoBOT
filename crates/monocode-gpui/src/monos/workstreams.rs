@@ -152,8 +152,8 @@ pub(super) const STEPS: [Step; 4] = [
     },
     Step {
         title: "Review what comes back",
-        body: "Follow each agent in Agents, read plans and notes in Files, and review the work in PRs. Agents run on this computer and stop when you quit MonoBOT. A workstream uses far more tokens than one session, so keep it for large work.",
-        diagram: || fan("Workstream", ["Agents", "Files", "PRs"]),
+        body: "Follow each agent in Agents, read plans and notes in Files, and review the work in Pull requests. Agents run on this computer and stop when you quit MonoBOT. A workstream uses far more tokens than one session, so keep it for large work.",
+        diagram: || fan("Workstream", ["Agents", "Files", "Pull requests"]),
     },
 ];
 
@@ -162,9 +162,13 @@ pub(super) enum IntroEvent {
     Close,
 }
 
-/// WorkstreamIntro: the four-step tour shown once before the first workstream.
+/// WorkstreamIntro: the four-step tour shown once before the first
+/// workstream, and again whenever the rail's "How workstreams work" asks.
 pub(super) struct WorkstreamIntro {
     pub(super) step: usize,
+    /// Reopened from the rail: it ends on Done rather than starting one,
+    /// and leaves the seen flag alone.
+    pub(super) replay: bool,
     focus: FocusHandle,
 }
 impl EventEmitter<IntroEvent> for WorkstreamIntro {}
@@ -174,9 +178,10 @@ impl Focusable for WorkstreamIntro {
     }
 }
 impl WorkstreamIntro {
-    fn new(cx: &mut Context<Self>) -> Self {
+    fn new(replay: bool, cx: &mut Context<Self>) -> Self {
         Self {
             step: 0,
+            replay,
             focus: cx.focus_handle(),
         }
     }
@@ -185,9 +190,18 @@ impl Render for WorkstreamIntro {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let step = &STEPS[self.step];
         let last = self.step + 1 == STEPS.len();
+        let finish = if !last {
+            "Next"
+        } else if self.replay {
+            "Done"
+        } else {
+            "Start a workstream"
+        };
         div()
             .id("workstream-intro")
             .debug_selector(|| "workstream-intro".into())
+            .role(Role::Dialog)
+            .aria_label(step.title)
             .key_context("WorkstreamIntro")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|_, event: &KeyDownEvent, _, cx| {
@@ -196,6 +210,7 @@ impl Render for WorkstreamIntro {
                     cx.stop_propagation();
                 }
             }))
+            .relative()
             .size_full()
             .flex()
             .flex_col()
@@ -212,6 +227,14 @@ impl Render for WorkstreamIntro {
                     .bg(content(0.03))
                     .px(px(20.))
                     .child((step.diagram)()),
+            )
+            // The modal's corner close, over the illustration.
+            .child(
+                div().absolute().top(px(12.)).right(px(12.)).child(
+                    icon_button("workstream-intro-close", "Close", "close")
+                        .debug_selector(|| "workstream-intro-close".into())
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(IntroEvent::Close))),
+                ),
             )
             .child(
                 div()
@@ -285,19 +308,18 @@ impl Render for WorkstreamIntro {
                         )
                     })
                     .child(
-                        modal::primary_button(
-                            "workstream-intro-next",
-                            if last { "Start a workstream" } else { "Next" },
-                        )
-                        .debug_selector(|| "workstream-intro-next".into())
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            if last {
-                                cx.emit(IntroEvent::Start);
-                            } else {
-                                this.step += 1;
-                                cx.notify();
-                            }
-                        })),
+                        modal::primary_button("workstream-intro-next", finish)
+                            .debug_selector(|| "workstream-intro-next".into())
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                if last && this.replay {
+                                    cx.emit(IntroEvent::Close);
+                                } else if last {
+                                    cx.emit(IntroEvent::Start);
+                                } else {
+                                    this.step += 1;
+                                    cx.notify();
+                                }
+                            })),
                     ),
             )
     }
@@ -755,19 +777,43 @@ impl Monos {
             self.open_workstream_dialog(window, cx);
             return;
         }
-        let view = cx.new(WorkstreamIntro::new);
-        let events = cx.subscribe_in(&view, window, |this, _, event: &IntroEvent, window, cx| {
-            // Seen once it shows, whether started or skipped.
-            this.roster.workstream_intro_seen = true;
-            this.save(cx);
-            this.workstreams.intro = None;
-            if matches!(event, IntroEvent::Start) {
-                this.open_workstream_dialog(window, cx);
-            }
-            cx.notify();
-        });
+        self.show_workstream_intro(false, window, cx);
+    }
+
+    /// The rail's "How workstreams work": the same tour, any time, ending on
+    /// Done and without touching whether the first-run tour was seen.
+    pub(super) fn workstream_tour(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.workstreams.intro.is_some() || self.workstreams.dialog.is_some() {
+            return;
+        }
+        self.show_workstream_intro(true, window, cx);
+    }
+
+    fn show_workstream_intro(&mut self, replay: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let view = cx.new(|cx| WorkstreamIntro::new(replay, cx));
+        let events = cx.subscribe_in(
+            &view,
+            window,
+            move |this, _, event: &IntroEvent, window, cx| {
+                this.close_workstream_intro(replay, cx);
+                if matches!(event, IntroEvent::Start) {
+                    this.open_workstream_dialog(window, cx);
+                }
+            },
+        );
         window.focus(&view.focus_handle(cx), cx);
         self.workstreams.intro = Some((view, events, window.viewport_size()));
+        cx.notify();
+    }
+
+    /// The first-run tour is seen once it shows, whether started or
+    /// skipped; a replay leaves that as it was.
+    fn close_workstream_intro(&mut self, replay: bool, cx: &mut Context<Self>) {
+        if !replay {
+            self.roster.workstream_intro_seen = true;
+            self.save(cx);
+        }
+        self.workstreams.intro = None;
         cx.notify();
     }
 
@@ -855,6 +901,7 @@ impl Monos {
     pub(crate) fn workstream_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if let Some((view, _, size)) = &self.workstreams.intro {
             let weak = cx.weak_entity();
+            let replay = view.read(cx).replay;
             return Some(self.centered_dialog(
                 "workstream-intro-modal",
                 *size,
@@ -862,12 +909,7 @@ impl Monos {
                 None,
                 view.clone().into_any_element(),
                 move |_, cx| {
-                    let _ = weak.update(cx, |this, cx| {
-                        this.roster.workstream_intro_seen = true;
-                        this.save(cx);
-                        this.workstreams.intro = None;
-                        cx.notify();
-                    });
+                    let _ = weak.update(cx, |this, cx| this.close_workstream_intro(replay, cx));
                 },
             ));
         }
@@ -883,6 +925,15 @@ impl Monos {
                 let _ = weak.update(cx, |view, cx| view.close(cx));
             },
         ))
+    }
+
+    /// The Workstreams label's "?": the tour again.
+    pub(super) fn workstream_help_button(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        icon_button("workstream-help", "How workstreams work", "help-circle")
+            .debug_selector(|| "workstream-help".into())
+            .size(px(20.))
+            .on_click(cx.listener(|this, _, w, cx| this.workstream_tour(w, cx)))
+            .into_any_element()
     }
 
     /// The Workstreams label's "+".

@@ -43,6 +43,7 @@ impl AssetSource for Assets {
    "circle-x"=>include_bytes!("../assets/hugeicons/circle-x.svg"),
    "loader-03"=>include_bytes!("../assets/hugeicons/loader-03.svg"),
    "alert-circle"=>include_bytes!("../assets/hugeicons/alert-circle.svg"),
+   "help-circle"=>include_bytes!("../assets/hugeicons/help-circle.svg"),
    "circle-dashed-hi"=>include_bytes!("../assets/hugeicons/circle-dashed-hi.svg"),
    "chart-square"=>include_bytes!("../assets/hugeicons/chart-square.svg"),
    "command-btw"=>include_bytes!("../assets/hugeicons/command-btw.svg"),

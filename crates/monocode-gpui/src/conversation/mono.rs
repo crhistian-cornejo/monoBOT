@@ -657,7 +657,8 @@ impl Conversation {
                 )
                 .into_any_element()
         };
-        self.attachment_drop_target("mono-chat", cx)
+        let root = self.attachment_drop_target("mono-chat", cx);
+        self.find_actions(root, cx)
             .capture_action(cx.listener(|this, _: &input::Paste, _, cx| {
                 if this.paste_attachments(cx) {
                     cx.stop_propagation();
@@ -783,6 +784,8 @@ impl Conversation {
                             .wrap(composer, card, &focus, window, cx)
                     }),
             )
+            // Over the chat's top right, as in a project session.
+            .children(self.find_bar(cx))
             .into_any_element()
     }
 

@@ -907,6 +907,11 @@ impl TranscriptView {
     }
     /// Drops the mark a revealed search left, when "Find in conversation"
     /// closes or its query is cleared.
+    /// The query a search hit is marked with, if any.
+    #[cfg(test)]
+    pub(crate) fn search_highlight(&self) -> Option<&str> {
+        self.search_match.as_ref().map(|(_, query)| query.as_str())
+    }
     pub(crate) fn clear_search(&mut self, cx: &mut Context<Self>) {
         if self.search_match.take().is_some() || self.history_search.take().is_some() {
             cx.notify();
