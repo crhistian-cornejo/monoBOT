@@ -23,7 +23,7 @@ bun run check               # tests de scripts + fmt + clippy -D warnings
 node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev <filtro>
 ```
 
-Antes de hacer commit: `cargo fmt --manifest-path crates/monocode-gpui/Cargo.toml --all` y los tests de lo que tocaste con `node scripts/native-cargo.mjs test … <filtro>`. Para el móvil, `pnpm exec tsc --noEmit` y `pnpm lint` dentro de `mobile/`.
+Antes de hacer commit: `cargo fmt --manifest-path crates/monocode-gpui/Cargo.toml --all` y los tests de lo que tocaste con `node scripts/native-cargo.mjs test … <filtro>`. Para el móvil, `pnpm exec tsc --noEmit` y `pnpm lint` dentro de `mobile/`. Para el host, `pnpm --dir host test` (incluye `tsc --noEmit`).
 
 ## Código
 

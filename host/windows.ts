@@ -69,7 +69,7 @@ export async function protectWindowsDirectory(
   directory: string,
 ): Promise<void> {
   await runPowerShell(
-    `${aclScript}\nProtect-MonoCodeDirectory ${psQuote(directory)}`,
+    `${aclScript}\nProtect-MonoBOTDirectory ${psQuote(directory)}`,
   );
 }
 

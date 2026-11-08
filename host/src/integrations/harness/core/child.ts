@@ -1,10 +1,14 @@
-import { invoke as tauriInvoke } from "@tauri-apps/api/core";
-import { listen as tauriListen, type UnlistenFn } from "@tauri-apps/api/event";
-import { DROID_ACP_ARGS } from "../providers/droid/droidProtocol";
 import {
-  runtimeProviderBinaryPath,
-  type ConfigurableBinaryProvider,
-} from "../../../features/providers/model/providerBinaryPaths";
+  invoke as unavailableInvoke,
+  listen as unavailableListen,
+  type UnlistenFn,
+} from "../../../platform/host/invoke";
+import { DROID_ACP_ARGS } from "../providers/droid/droidProtocol";
+import type { HarnessId } from "../../../features/sessions/model/session";
+
+/** Provider CLIs are found by the host's resolver; the desktop's per-provider
+ * binary overrides do not exist here. */
+type ConfigurableBinaryProvider = HarnessId;
 
 /** Process I/O is supplied by the desktop or a headless host. Provider
  * protocols never need to know which process owns their children. */
@@ -88,14 +92,16 @@ function invoke<T>(
 ): Promise<T> {
   return backend
     ? backend.invoke<T>(command, args)
-    : tauriInvoke<T>(command, args);
+    : unavailableInvoke<T>(command, args);
 }
 
 function listen<T>(
   event: string,
   handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
-  return backend ? backend.listen(event, handler) : tauriListen(event, handler);
+  return backend
+    ? backend.listen(event, handler)
+    : unavailableListen(event, handler);
 }
 
 type LinePayload = { sessionId: string; line: string };
@@ -296,17 +302,6 @@ export async function acquireHarnessBridge(): Promise<() => void> {
   }
 }
 
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => {
-    users = 0;
-    if (teardownTimer) {
-      clearTimeout(teardownTimer);
-      teardownTimer = undefined;
-    }
-    teardownBridge();
-  });
-}
-
 export function watchChild(
   sessionId: string,
   onLine: LineHandler,
@@ -363,9 +358,7 @@ export async function spawnChild(
   livePid.delete(sessionId);
   pendingExit.delete(sessionId);
   ownedChildren.add(sessionId);
-  const binaryPath = binaryProvider
-    ? runtimeProviderBinaryPath(binaryProvider)
-    : undefined;
+  const binaryPath = binaryProvider ? null : undefined;
   const pid = await invoke<number>("harness_spawn", {
     sessionId,
     command,
@@ -419,10 +412,7 @@ async function resolveHarnessBinary(
   provider: ConfigurableBinaryProvider,
   binaryPath?: string | null,
 ): Promise<ResolvedHarnessBinary> {
-  const configuredPath =
-    binaryPath === undefined
-      ? runtimeProviderBinaryPath(provider)
-      : binaryPath?.trim();
+  const configuredPath = binaryPath?.trim();
   if (configuredPath) {
     return invoke("harness_resolve_configured", {
       provider,
@@ -597,7 +587,7 @@ export async function updateHarnessCli(
   await invoke("harness_update", {
     command: resolved.path,
     binaryProvider: provider,
-    binaryPath: runtimeProviderBinaryPath(provider),
+    binaryPath: null,
   });
 }
 
@@ -610,7 +600,7 @@ export function execChild(
 ): Promise<string> {
   const binaryPath =
     binaryPathOverride === undefined && binaryProvider
-      ? runtimeProviderBinaryPath(binaryProvider)
+      ? null
       : binaryPathOverride;
   return invoke("harness_exec", {
     command,

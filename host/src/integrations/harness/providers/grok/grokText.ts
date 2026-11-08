@@ -297,7 +297,7 @@ async function deleteTextSession(session: LiveText): Promise<void> {
     session.cwd,
     "grok",
   ).catch((error) =>
-    console.debug("[monocode] Grok text session cleanup", error),
+    console.debug("[MonoBOT] Grok text session cleanup", error),
   );
 }
 

@@ -92,6 +92,8 @@ On Windows, the launcher is `%USERPROFILE%\.monocode-host\bin\monocode-host.cmd`
 
 `pnpm --dir host package` builds a self-contained package for the current Windows/Mac/Linux architecture in `host/build/host-packages/`. `pnpm --dir host package -- --all` builds all six archives, using pinned official Node binaries and checksums. Archives contain the host bundle, runtime, launcher, and licenses. `host/package.mjs` pins the runtime version. Cross-packaging Windows on Unix requires `zip` and `unzip`; native Windows packaging uses PowerShell.
 
+`host/build.mjs` bundles `host/cli.ts` with esbuild into one minified, tree-shaken `host/build/host/monocode-host.mjs` with an external sourcemap. Third-party license comments, when the bundle has any, go to `monocode-host.mjs.LEGAL.txt`, which packages ship as `THIRD-PARTY-NOTICES.txt`. `host/build/host/meta.json` lists every source the bundle reaches. `host/src` holds only the provider adapters and session model the host reaches. It is no longer a copy of desktop code, so delete a file there once the bundle stops reaching it. On the host, desktop-only commands reject through `host/src/platform/host/invoke.ts`.
+
 The release workflow publishes `monocode-host-{darwin,linux}-{arm64,x64}.tar.gz`, `monocode-host-win32-{arm64,x64}.zip`, and their `.sha256` files alongside the desktop release. SSH setup downloads from the exact desktop version's GitHub release, then installs under `~/.monocode-host/runtime`.
 
 **Unreleased development builds:** automatic first-time installation and **Update Host** require host archives published for the desktop version. Release builds from v0.5.0 onward include the matching archives; an unreleased checkout may not have them. Until the matching release is available, use the manual development connection above. A missing archive produces an explicit error in Settings. No fallback to an arbitrary latest release or unverified download is used. Connecting does not automatically upgrade a running host. When an SSH host lacks Explorer or Changes, Settings → Connections offers **Update Host**. This downloads and verifies the matching package, restarts the host service, and reconnects using the existing device credential. The restart interrupts active agent turns; sessions and history remain on the host. URL connections must be updated on the host manually.
@@ -108,7 +110,8 @@ The headless host runs the reused TypeScript adapters with a Node process backen
 
 ```sh
 pnpm --dir host install
-pnpm --dir host test        # build, vitest and the runtime download tests
+pnpm --dir host typecheck   # tsc --noEmit over the host, its sources and tests
+pnpm --dir host test        # typecheck, build, vitest and the runtime download tests
 bun run check               # desktop: fmt, clippy and script tests
 ```
 

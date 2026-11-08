@@ -35,7 +35,7 @@ export function refreshCursorCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("cursor", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] cursor catalog", error);
+      console.debug("[MonoBOT] cursor catalog", error);
       reportCatalogError("cursor", error);
     })
     .finally(() => {
@@ -46,12 +46,12 @@ export function refreshCursorCatalog(): Promise<void> {
 
 export async function discoverCursorModels(workingDirectory?: string): Promise<AgentModel[]> {
   const fromAcp = await discoverViaAcp(workingDirectory).catch((error: unknown) => {
-    console.debug("[monocode] cursor ACP catalog failed", error);
+    console.debug("[MonoBOT] cursor ACP catalog failed", error);
     return [];
   });
   if (fromAcp.length > 0) return fromAcp;
   return discoverViaCli(workingDirectory).catch((error: unknown) => {
-    console.debug("[monocode] cursor CLI catalog failed", error);
+    console.debug("[MonoBOT] cursor CLI catalog failed", error);
     return [];
   });
 }

@@ -18,7 +18,7 @@ export function refreshFxCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("fx", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] fx catalog", error);
+      console.debug("[MonoBOT] fx catalog", error);
       reportCatalogError("fx", error);
     })
     .finally(() => {

@@ -1,11 +1,17 @@
 import { dropContextWindow, type ContextUsage } from "./contextUsage";
 import type { UserQuestionPrompt } from "./userQuestion";
-import type { HandoffComposerCard } from "./handoff";
-import type { InboxComposerCard } from "../../inbox/model/githubTasks";
-import type { InboxAskContext } from "../../inbox/model/inboxAsk";
-import type { NoteCardMeta, NoteComposerCard } from "../../notes";
-import type { OrchestrationProposal } from "../../orchestration/model/orchestrationPlan";
-import type { LinkedWorkItemUpdateCard } from "../../inbox/model/linkedWorkItemActivity";
+import type {
+  ArtifactCard,
+  HandoffComposerCard,
+  InboxAskContext,
+  InboxComposerCard,
+  LinkedWorkItemUpdateCard,
+  MonoCard,
+  NoteCardMeta,
+  NoteComposerCard,
+  OrchestrationProposal,
+  VisualDocument,
+} from "./desktopMetadata";
 import {
   defaultSessionChoice,
   firstEnabledHarness,
@@ -419,9 +425,9 @@ export type Block = {
   btwThreads?: BtwThread[];
   noteCard?: NoteCardMeta;
   /** Saved artifacts attached to this turn; their bodies live outside chat. */
-  artifactCards?: import("../../artifacts/artifacts").ArtifactCard[];
+  artifactCards?: ArtifactCard[];
   /** Visuals the agent published this turn; replies place them by id. */
-  visuals?: import("../../visuals/model/visual").VisualDocument[];
+  visuals?: VisualDocument[];
   /** Exact CI repair instructions and evidence supplied with this user turn. */
   ciContext?: string;
   /** Mid-turn interjection chrome; system blocks only. Body lives in text. */
@@ -437,7 +443,7 @@ export type Block = {
   /** A group member's answer, posted in the group's chat under its name. */
   groupMember?: GroupMemberPost;
   /** A card a Mono put in its chat; see `features/monos/model/monoCards`. */
-  monoCard?: import("../../monos/model/monoCards").MonoCard;
+  monoCard?: MonoCard;
   /**
    * The emoji a Mono answered this user message with. Drawn from its reply
    * when the chat renders; see `features/monos/model/monoReaction`.

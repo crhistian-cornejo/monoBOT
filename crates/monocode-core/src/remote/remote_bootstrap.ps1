@@ -7,7 +7,7 @@ $forceUpgrade = $env:MONOCODE_HOST_FORCE_UPGRADE -eq '1'
 $hostPort = if ($env:MONOCODE_HOST_PORT) { [int] $env:MONOCODE_HOST_PORT } else { 3774 }
 @@ACL@@
 
-function Download-MonoCode([string] $Url, [string] $Destination) {
+function Download-MonoBOT([string] $Url, [string] $Destination) {
   Add-Type -AssemblyName System.Net.Http
   [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
   $handler = New-Object Net.Http.HttpClientHandler
@@ -35,7 +35,7 @@ function Download-MonoCode([string] $Url, [string] $Destination) {
 }
 
 New-Item -ItemType Directory -Force -Path $base | Out-Null
-Protect-MonoCodeDirectory $base
+Protect-MonoBOTDirectory $base
 $lock = $null
 $temporary = $null
 try {
@@ -65,8 +65,8 @@ try {
     $archive = Join-Path $temporary $filename
     $checksum = Join-Path $temporary 'checksum'
     try {
-      Download-MonoCode "$release/$filename" $archive
-      Download-MonoCode "$release/$filename.sha256" $checksum
+      Download-MonoBOT "$release/$filename" $archive
+      Download-MonoBOT "$release/$filename.sha256" $checksum
     } catch { throw "The Windows host package for version $version could not be downloaded. Install a release with host packages. $($_.Exception.Message)" }
     $expected = ((Get-Content -LiteralPath $checksum -Raw).Trim() -split '\s+')[0]
     if ($expected -notmatch '^[a-fA-F0-9]{64}$') { throw 'Invalid host package checksum.' }

@@ -13,10 +13,12 @@ import {
   pathKey,
   resolveWorkspacePath,
 } from "../../../shared/lib/paths";
-import { INTERRUPT_MESSAGE } from "./inFlight";
 import type { Block, ToolPreview } from "./session";
 import { allModels } from "./models";
 import { monoCodeWorkSummary } from "./monocodeToolCall";
+
+/** The system notice older desktops wrote for a turn cut short by quitting. */
+const INTERRUPT_MESSAGE = "Turn interrupted when MonoBOT quit.";
 
 export type ToolCallState = "pending" | "accepted" | "rejected";
 

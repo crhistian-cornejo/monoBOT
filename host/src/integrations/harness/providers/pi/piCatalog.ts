@@ -32,7 +32,7 @@ function refreshCatalog(flavor: PiFlavor): Promise<void> {
       if (models.length > 0) setHarnessModels(flavor.id, models);
     })
     .catch((error: unknown) => {
-      console.debug(`[monocode] ${flavor.id} catalog`, error);
+      console.debug(`[MonoBOT] ${flavor.id} catalog`, error);
       reportCatalogError(flavor.id, error);
     })
     .finally(() => {

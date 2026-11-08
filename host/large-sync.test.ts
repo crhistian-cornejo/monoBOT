@@ -8,49 +8,51 @@ import { HostStore } from "./store";
 import { createHostServer } from "./server";
 import type { SendTurnInput } from "./src/integrations/harness/core/types";
 import type { HostSession } from "./src/features/connections/model/protocol";
-import { loadRemoteSession } from "./src/features/connections/model/connections";
+import {
+  loadRemoteSession as loadWith,
+  type HostRequest,
+} from "./testing/desktopClient";
 
-// The desktop's native client (src-tauri/src/remote.rs) rejects responses over
-// 16 MiB. This routes the real renderer sync code through the real host server
-// with the same cap and the same strict JSON rules.
+// The desktop's native client (crates/monocode-core/src/remote.rs) rejects
+// responses over 16 MiB. This routes its sync algorithm through the real host
+// server with the same cap and the same strict JSON rules.
 const DESKTOP_LIMIT = 16 * 1024 * 1024;
 const LONE_SURROGATE =
   /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
-const desktop = vi.hoisted(() => ({
+const desktop = {
   url: "",
   token: "",
   environmentId: "",
   methods: [] as string[],
   largest: 0,
-}));
-vi.mock("@tauri-apps/api/core", () => ({
-  invoke: async (
-    _command: string,
-    input: { method: string; params: unknown },
-  ) => {
-    desktop.methods.push(input.method);
-    const response = await fetch(desktop.url, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${desktop.token}` },
-      body: JSON.stringify({
-        version: 1,
-        environmentId: desktop.environmentId,
-        method: input.method,
-        params: input.params,
-      }),
-    });
-    const bytes = Buffer.from(await response.arrayBuffer());
-    desktop.largest = Math.max(desktop.largest, bytes.length);
-    if (bytes.length > DESKTOP_LIMIT) throw "Host response is too large";
-    const text = bytes.toString("utf8");
-    const value = JSON.parse(text) as { result?: unknown; error?: string };
-    if (value.error) throw `Host rejected request: ${value.error}`;
-    const data = (value.result as { data?: unknown })?.data;
-    if (typeof data === "string" && LONE_SURROGATE.test(data))
-      throw "Invalid host response";
-    return value.result;
-  },
-}));
+};
+const request: HostRequest = async <T>(method: string, params: unknown) => {
+  desktop.methods.push(method);
+  const response = await fetch(desktop.url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${desktop.token}` },
+    body: JSON.stringify({
+      version: 1,
+      environmentId: desktop.environmentId,
+      method,
+      params,
+    }),
+  });
+  const bytes = Buffer.from(await response.arrayBuffer());
+  desktop.largest = Math.max(desktop.largest, bytes.length);
+  if (bytes.length > DESKTOP_LIMIT) throw new Error("Host response is too large");
+  const value = JSON.parse(bytes.toString("utf8")) as {
+    result?: unknown;
+    error?: string;
+  };
+  if (value.error) throw new Error(`Host rejected request: ${value.error}`);
+  const data = (value.result as { data?: unknown })?.data;
+  if (typeof data === "string" && LONE_SURROGATE.test(data))
+    throw new Error("Invalid host response");
+  return value.result as T;
+};
+const loadRemoteSession = (sessionId: string, known?: HostSession) =>
+  loadWith(request, sessionId, known);
 
 // Each test moves tens of megabytes through a real server.
 const LARGE = 60_000;
@@ -161,7 +163,7 @@ it(
       DESKTOP_LIMIT * 2,
     );
 
-    const reopened = await loadRemoteSession("machine", s.sessionId);
+    const reopened = await loadRemoteSession(s.sessionId);
     expect(reopened).toEqual(visible(full));
     expect(
       desktop.methods.filter((m) => m === "sessions.syncChunk").length,
@@ -183,7 +185,7 @@ it(
     await vi.waitFor(() =>
       expect(s.store.session(s.sessionId).status).toBe("idle"),
     );
-    const updated = await loadRemoteSession("machine", s.sessionId, reopened);
+    const updated = await loadRemoteSession(s.sessionId, reopened);
     expect(updated).toEqual(visible(s.store.session(s.sessionId)));
     expect(updated.session.blocks.at(-1)?.text).toBe("Summary");
     expect(desktop.methods).toEqual(["sessions.sync"]);
@@ -196,7 +198,7 @@ it(
   "streams a changed block larger than 16 MiB as a bounded delta",
   async () => {
     const s = await setup();
-    const base = await loadRemoteSession("machine", s.sessionId);
+    const base = await loadRemoteSession(s.sessionId);
     const current = s.store.session(s.sessionId);
     s.store.transaction(() =>
       s.store.save(
@@ -214,7 +216,7 @@ it(
       ),
     );
     desktop.methods = [];
-    const next = await loadRemoteSession("machine", s.sessionId, base);
+    const next = await loadRemoteSession(s.sessionId, base);
     expect(next).toEqual(visible(s.store.session(s.sessionId)));
     expect(desktop.methods[0]).toBe("sessions.sync");
     expect(desktop.methods).toContain("sessions.syncChunk");

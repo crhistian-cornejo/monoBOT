@@ -240,7 +240,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
       emit({ type: "session.ended", code });
     },
     (line) => {
-      console.debug("[monocode] hermes stderr", line);
+      console.debug("[MonoBOT] hermes stderr", line);
       const message = hermesStderrAuthError(line);
       if (message) {
         emit({

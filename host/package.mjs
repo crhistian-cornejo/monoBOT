@@ -113,8 +113,15 @@ for (const target of targets) {
       `${stem}/LICENSE`,
     ]);
   await copyFile("build/host/monocode-host.mjs", join(folder, "host.mjs"));
+  // esbuild writes third-party license comments here, only when there are any.
+  await copyFile(
+    "build/host/monocode-host.mjs.LEGAL.txt",
+    join(folder, "THIRD-PARTY-NOTICES.txt"),
+  ).catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+  });
   await copyFile("provider-guard.mjs", join(folder, "provider-guard.mjs"));
-  await copyFile("../LICENSE", join(folder, "MONOCODE-LICENSE"));
+  await copyFile("../LICENSE", join(folder, "MONOBOT-LICENSE"));
   await writeFile(
     join(folder, "version.json"),
     JSON.stringify({ version, nodeVersion, target }),

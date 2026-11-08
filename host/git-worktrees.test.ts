@@ -85,7 +85,7 @@ it.each([false, true])("applies generated worktree names only to retained sessio
     const logged = vi.spyOn(console, "debug").mockImplementation(() => {});
     try {
       finishBranch("remote-naming");
-      await vi.waitFor(() => expect(logged).toHaveBeenCalledWith("[monocode] remote worktree branch", expect.any(Error)));
+      await vi.waitFor(() => expect(logged).toHaveBeenCalledWith("[MonoBOT] remote worktree branch", expect.any(Error)));
       expect((await hostWorktrees(cwd)).worktrees.find((item) => item.path === tree.path)?.branch).toBe("mc/12345678");
     } finally { logged.mockRestore(); }
     return;

@@ -21,7 +21,7 @@ import {
   titleFromPrompt,
   type Session,
 } from "./src/features/sessions/model/session";
-import { namedWorktreeBranch } from "./src/features/source-control/model/worktrees";
+import { namedWorktreeBranch } from "./src/features/source-control/model/worktreeBranch";
 import {
   isRemoteProvider,
   type HostCommand,
@@ -740,7 +740,7 @@ export class HostEngine {
           if (live) live.value = saved;
         })
         .catch((error) =>
-          console.debug("[monocode] remote session title", error),
+          console.debug("[MonoBOT] remote session title", error),
         );
     }
     const temporary = value.autoWorktreeBranch;
@@ -770,7 +770,7 @@ export class HostEngine {
           if (live) live.value = saved;
         })
         .catch((error) =>
-          console.debug("[monocode] remote worktree branch", error),
+          console.debug("[MonoBOT] remote worktree branch", error),
         );
     }
   }

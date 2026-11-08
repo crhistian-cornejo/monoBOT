@@ -76,7 +76,7 @@ async function install(badChecksum: boolean) {
     badChecksum ? "bad.downloads" : "downloads",
   );
   const overrides = `
-function Download-MonoCode([string] $Url, [string] $Destination) {
+function Download-MonoBOT([string] $Url, [string] $Destination) {
   $source = if ($Url.EndsWith('.sha256')) { ${psQuote(checksum)} } else { ${psQuote(archive)} }
   Copy-Item -LiteralPath $source -Destination $Destination
   Add-Content -LiteralPath ${psQuote(downloads)} -Value 'download'
@@ -84,7 +84,7 @@ function Download-MonoCode([string] $Url, [string] $Destination) {
 ${
   windows
     ? ""
-    : `function Protect-MonoCodeDirectory([string] $Path) { }
+    : `function Protect-MonoBOTDirectory([string] $Path) { }
 function Expand-Archive([string] $LiteralPath, [string] $DestinationPath) {
   Microsoft.PowerShell.Archive\\Expand-Archive -LiteralPath $LiteralPath -DestinationPath $DestinationPath
   & chmod +x (Join-Path $DestinationPath 'node.exe')
