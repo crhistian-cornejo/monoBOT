@@ -153,6 +153,7 @@ impl AssetSource for Assets {
    // Settings: its rail, rows and page actions (SettingsRail.tsx, SettingsView.tsx).
    "internet"=>include_bytes!("../assets/hugeicons/internet.svg"),
    "palette"=>include_bytes!("../assets/hugeicons/palette.svg"),
+   "image-01"=>include_bytes!("../assets/hugeicons/image-01.svg"),
    "keyboard"=>include_bytes!("../assets/hugeicons/keyboard.svg"),
    "message-square"=>include_bytes!("../assets/hugeicons/message-square.svg"),
    "bot"=>include_bytes!("../assets/hugeicons/bot.svg"),

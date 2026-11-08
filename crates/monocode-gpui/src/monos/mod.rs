@@ -14,6 +14,7 @@ mod files;
 mod filters;
 mod floating;
 pub(crate) use floating::is_floating_window;
+mod gallery;
 mod group_call;
 mod group_dialog;
 mod groups;
@@ -207,6 +208,9 @@ pub(crate) struct Monos {
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
     /// The open bot's subagent runs, read from its chat until it changes.
     subagent_runs: Option<(agents::RunsKey, Vec<agents::SubagentRun>)>,
+    /// The image bot's gallery, read from its chat, by the chat's size.
+    gallery_items: Option<(agents::RunsKey, Vec<monocode_core::images::gallery::Item>)>,
+    gallery_filter: monocode_core::images::gallery::Filter,
     running: HashMap<i64, RunningHabit>,
     active_run: Option<i64>,
     completion_work: HashSet<(String, u64)>,
@@ -495,6 +499,8 @@ impl Monos {
             rail_ids: Vec::new(),
             roles_menu: None,
             subagent_runs: None,
+            gallery_items: None,
+            gallery_filter: Default::default(),
             agent_calls: Default::default(),
             news: Default::default(),
             bot_settings: Default::default(),
@@ -953,6 +959,14 @@ impl Monos {
                     &view,
                     move |this, _, event: &crate::conversation::GroupAccessAnswer, cx| {
                         this.answer_access(&source, &event.request, event.access, cx)
+                    },
+                ));
+                this.observations.push(cx.subscribe(
+                    &view,
+                    |this, _, _: &crate::conversation::MonoPresetsChanged, cx| {
+                        if this.overview_tab == OverviewTab::Styles {
+                            cx.notify();
+                        }
                     },
                 ));
                 let source = id.clone();

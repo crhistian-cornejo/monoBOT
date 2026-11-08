@@ -718,6 +718,8 @@ pub(crate) struct TranscriptView {
     /// Who an @Name in a message can name, so a group's chat reads the name
     /// in the accent instead of the raw `@`.
     mention_people: Vec<crate::composer_completion::MentionPerson>,
+    /// An image bot's chat: its `/screenprint`-style words read as links.
+    image_presets: bool,
     /// The turn whose actions show, and since when, as `.turn-actions-hover`.
     hovered_turn: Option<(usize, Instant)>,
     /// The prompt message whose copy action shows.
@@ -883,27 +885,57 @@ impl TranscriptView {
             cx.notify();
         }
     }
-    /// Each @Name in `text` in the accent. The colour alone keeps the text one
-    /// run, so wrapping, clamping, selection and measurement are untouched.
+    /// An image bot's chat draws its preset words (`/screenprint`) as links.
+    pub(crate) fn set_image_presets(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.image_presets != on {
+            self.image_presets = on;
+            cx.notify();
+        }
+    }
+    /// Each @Name in `text` in the accent, and in an image bot's chat each
+    /// preset word (`/screenprint`, `/story`) as a link: accent, medium and
+    /// on a faint accent wash. Colour, weight and wash keep the text one run,
+    /// so wrapping, clamping, selection and measurement are untouched.
     pub(super) fn mention_styles(
         &self,
         text: &str,
     ) -> Vec<(std::ops::Range<usize>, gpui::HighlightStyle)> {
-        if self.mention_people.is_empty() {
-            return Vec::new();
+        let mut styles: Vec<_> = if self.mention_people.is_empty() {
+            Vec::new()
+        } else {
+            monocode_core::mono::groups::mentions::mentions_in(text, &self.mention_people)
+                .into_iter()
+                .map(|mention| {
+                    (
+                        mention.start..mention.end,
+                        gpui::HighlightStyle {
+                            color: Some(crate::theme::accent_color()),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .collect()
+        };
+        if self.image_presets {
+            let accent = crate::theme::accent_color();
+            styles.extend(
+                monocode_core::images::styles::preset_ranges(text)
+                    .into_iter()
+                    .map(|range| {
+                        (
+                            range,
+                            gpui::HighlightStyle {
+                                color: Some(accent),
+                                font_weight: Some(gpui::FontWeight::MEDIUM),
+                                background_color: Some(accent.opacity(0.12)),
+                                ..Default::default()
+                            },
+                        )
+                    }),
+            );
+            styles.sort_by_key(|(range, _)| range.start);
         }
-        monocode_core::mono::groups::mentions::mentions_in(text, &self.mention_people)
-            .into_iter()
-            .map(|mention| {
-                (
-                    mention.start..mention.end,
-                    gpui::HighlightStyle {
-                        color: Some(crate::theme::accent_color()),
-                        ..Default::default()
-                    },
-                )
-            })
-            .collect()
+        styles
     }
     /// Drops the mark a revealed search left, when "Find in conversation"
     /// closes or its query is cleared.
@@ -2611,6 +2643,7 @@ impl TranscriptView {
             mono_groups: Default::default(),
             mono_look: None,
             mention_people: Vec::new(),
+            image_presets: false,
             hovered_turn: None,
             hovered_prompt: None,
             hovered_prompt_actions: None,
@@ -7086,6 +7119,28 @@ mod scroll_tests {
             assert_eq!(styles[0].1.color, Some(crate::theme::accent_color()));
             // Nobody named leaves the text alone.
             assert!(view.mention_styles("escribe a ana@finance.com").is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn an_image_bots_chat_reads_its_preset_words_as_links(cx: &mut TestAppContext) {
+        let view = cx.new(|_| {
+            let mut view = TranscriptView::new();
+            view.mono_mode("cat", 0xe86b5f, "Images");
+            view
+        });
+        let text = "/screenprint /story Messi dribbling, ver /plan";
+        view.update(cx, |view, cx| {
+            // Any other chat leaves slash words alone.
+            assert!(view.mention_styles(text).is_empty());
+            view.set_image_presets(true, cx);
+            let styles = view.mention_styles(text);
+            let words: Vec<&str> = styles.iter().map(|(r, _)| &text[r.clone()]).collect();
+            assert_eq!(words, ["/screenprint", "/story"]);
+            let accent = crate::theme::accent_color();
+            assert_eq!(styles[0].1.color, Some(accent));
+            assert_eq!(styles[0].1.background_color, Some(accent.opacity(0.12)));
+            assert_eq!(styles[0].1.font_weight, Some(gpui::FontWeight::MEDIUM));
         });
     }
 

@@ -43,7 +43,7 @@ agents.list {}; agents.message {to,message,wait?}; agents.wait {waitId}: the use
 group.members {}; group.ask {member,message,wait?}; group.access {target,reason,group?}: a group and its members only
 name.update {name}: the name the rail, the tab and the chat show
 web.read {url,query?,maxChars?}: a page's text; web.download {url,name?}: keeps a file from the web in Documents/MonoBOT
-images.generate {prompt,count?,aspect?,source?}: pictures through Gemini's Nano Banana; frames show in your chat at once and the pictures replace them
+images.generate {prompt,count?,aspect?,style?,source?}: pictures through Gemini's Nano Banana; style is a preset look id; frames show in your chat at once and the pictures replace them
 chat.card {type:"pr",repo?,number,note?} / {type:"session",sessionId,note?} / {type:"choices",options:[text]} / {type:"habit",name,instructions,schedule}
 mail.list {view?,query?,unread?,limit?}: the user's email from the accounts they connected in the Inbox's Email tab: id, sender, subject, date, unread, a preview
 mail.read {id,maxChars?}: one message's text and the names of its attachments

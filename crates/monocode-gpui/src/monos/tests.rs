@@ -5310,6 +5310,120 @@ fn a_bots_mail_connect_opens_the_apps_dialog_and_the_user_picks_who_reads(cx: &m
 }
 
 #[gpui::test]
+fn the_images_bot_keeps_a_gallery_and_picks_looks_into_its_draft(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let card = serde_json::json!({
+        "type": "images",
+        "id": "job-1",
+        "prompt": "Vintage editorial illustration of a fox. Cobalt background.",
+        "count": 2,
+        "aspect": "4:5",
+        "style": "screenprint",
+        "status": "done",
+        "startedAt": monocode_core::time::now_ms(),
+        "images": [
+            {"path": "/missing/a.png", "name": "a.png", "mimeType": "image/png", "size": 1},
+            {"path": "/missing/b.png", "name": "b.png", "mimeType": "image/png", "size": 1}
+        ],
+    });
+    s.manager.update(cx, |m, cx| {
+        let mono = m.roster.get_mut(&s.id).unwrap();
+        mono.kind = Some("bot".into());
+        mono.bot_role = Some("images".into());
+        m.settings = None;
+        m.configure_chat(&s.id, cx);
+        m.chats[&s.id].update(cx, |chat, cx| {
+            let row = |role: &str, text: String| monocode_core::transcript::Row {
+                role: role.into(),
+                text,
+                first: true,
+                sent_at: None,
+            };
+            assert!(chat.mono_append(
+                vec![
+                    row("user", "a fox, screenprint".into()),
+                    row("mono-card", card.to_string()),
+                ],
+                cx
+            ));
+        });
+        cx.notify();
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    s.manager.update(visual, |m, _| {
+        let mono = m.roster.get(&s.id).unwrap();
+        assert!(
+            panels::overview_tabs(mono)
+                == [
+                    OverviewTab::Gallery,
+                    OverviewTab::Styles,
+                    OverviewTab::Subagents,
+                    OverviewTab::Documents,
+                    OverviewTab::Habits,
+                ]
+        );
+        assert!(m.shown_overview_tab(mono) == OverviewTab::Gallery);
+    });
+    assert!(visual.debug_bounds("image-gallery").is_some());
+    assert!(visual.debug_bounds("gallery-tile").is_some());
+    assert!(visual.debug_bounds("gallery-portrait").is_some());
+    // Only shapes it has are offered as filters.
+    assert!(visual.debug_bounds("gallery-landscape").is_none());
+    let items = s.manager.update(visual, |m, _| {
+        m.gallery_items
+            .as_ref()
+            .map(|(_, items)| items.clone())
+            .unwrap_or_default()
+    });
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0].style_name(), Some("Screenprint poster"));
+
+    // A look and a format picked in Styles go into the draft as slash words.
+    let tab = visual.debug_bounds("mono-overview-Styles").unwrap();
+    visual.simulate_click(tab.center(), Default::default());
+    visual.run_until_parked();
+    assert!(
+        s.manager
+            .read_with(visual, |m, _| m.overview_tab == OverviewTab::Styles)
+    );
+    let photoreal = visual.debug_bounds("image-style-photoreal").unwrap();
+    visual.simulate_click(photoreal.center(), Default::default());
+    visual.run_until_parked();
+    let first = visual.update(|_, cx| {
+        s.manager.read(cx).chats[&s.id]
+            .read(cx)
+            .mono_draft_words(cx)
+    });
+    assert_eq!(first, ["photoreal"], "first click");
+    let story = visual.debug_bounds("image-format-story").unwrap();
+    visual.simulate_click(story.center(), Default::default());
+    visual.run_until_parked();
+    let words = visual.update(|_, cx| {
+        s.manager.read(cx).chats[&s.id]
+            .read(cx)
+            .mono_draft_words(cx)
+    });
+    assert_eq!(words, ["photoreal", "story"]);
+    // The composer says what each one does, quietly.
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("mono-preset-hint").is_some());
+    // Picking another look switches it.
+    visual.refresh().unwrap();
+    let cinematic = visual.debug_bounds("image-style-cinematic").unwrap();
+    visual.simulate_click(cinematic.center(), Default::default());
+    visual.run_until_parked();
+    let words = visual.update(|_, cx| {
+        s.manager.read(cx).chats[&s.id]
+            .read(cx)
+            .mono_draft_words(cx)
+    });
+    assert_eq!(words, ["cinematic", "story"]);
+}
+
+#[gpui::test]
 fn a_bots_proposed_mail_waits_as_a_card_for_the_users_send(cx: &mut TestAppContext) {
     let s = setup(cx);
     let data_dir = locked(&s.store)

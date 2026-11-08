@@ -125,11 +125,7 @@ impl Monos {
 
 /// The frames' width over height for a "16:9"-style aspect (frameRatio).
 fn frame_ratio(aspect: Option<&str>) -> f32 {
-    aspect
-        .and_then(|aspect| aspect.split_once(':'))
-        .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
-        .filter(|(w, h)| *w > 0. && *h > 0.)
-        .map_or(1., |(w, h)| w / h)
+    images::styles::ratio(aspect)
 }
 
 /// CSS ease-in-out, near enough for a breathing cell.
@@ -211,6 +207,18 @@ pub(super) fn render(
                         .child("Nano Banana"),
                 )
                 .child("·")
+                .when_some(
+                    job.style.as_deref().and_then(images::styles::style),
+                    |d, style| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_color(content(0.6))
+                                .child(style.name),
+                        )
+                        .child("·")
+                    },
+                )
                 .child(
                     div()
                         .id("image-job-note")

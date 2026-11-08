@@ -25,6 +25,21 @@ or ask a Mono directly. See [session visuals](visuals.md) and the
 
 ## Monos
 
+Each kind of agent has its own side panel. The **Images** bot opens on
+**Gallery**, which shows every picture in its chat, newest first, in a masonry
+wall that keeps each picture's shape. You can filter it by portrait, landscape
+or square. Hovering a picture shows its brief, style, format and date, along
+with three actions: change it in the chat (it attaches the picture as the
+source), reuse its style, or reveal the file. Clicking it opens it full screen.
+**Styles** lists the preset formats (Square 1:1, Portrait 4:5, Story 9:16,
+Poster 2:3, Classic 3:2, Standard 4:3, Landscape 16:9, Ultrawide 21:9) and 16
+looks (`/screenprint`, `/anime`, `/watercolor`…). Picking one puts its slash
+word at the start of the draft, replacing any other of the same kind. The
+bot's slash menu offers the same words, and `images.generate` takes the style
+id and adds its art direction to the brief. The gallery is read from the chat
+itself, so it needs no store of its own. Sub-agents, Documents and Habits come
+after the gallery and styles.
+
 A Mono's **Overview** tab brings together its current activity, a contribution
 calendar, today's work, upcoming habits and new documents. **Sub-agents** lists
 the sessions it launched, with their model, provider, checkout and state. Monos

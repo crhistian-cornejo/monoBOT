@@ -29,6 +29,10 @@ pub(super) enum OverviewTab {
     Prs,
     /// A workstream's shared folder: plan, notes and findings.
     Files,
+    /// An image bot's pictures, newest first.
+    Gallery,
+    /// An image bot's preset looks and formats.
+    Styles,
 }
 /// MonoOverview's tab sets, in the order they show. A personal bot works in
 /// no project: no sessions to list and no code changes, but the subagents it
@@ -43,11 +47,18 @@ pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
         &[Sessions, Prs, Files]
     } else if mono.is_principal() {
         &[News, Habits, Documents, Bots]
+    } else if makes_images(mono) {
+        // Its pictures first; Habits stays last for images made on a schedule.
+        &[Gallery, Styles, Subagents, Documents, Habits]
     } else if mono.is_bot() {
         &[Habits, Documents, Subagents]
     } else {
         &[Overview, Sessions, Documents, Habits, Changes]
     }
+}
+/// The Images bot, whose panel is its gallery and styles.
+pub(super) fn makes_images(mono: &Mono) -> bool {
+    mono.is_bot() && mono.bot_role.as_deref() == Some("images")
 }
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SettingsSection {
@@ -1245,6 +1256,8 @@ impl Monos {
                 OverviewTab::Call => (tab, "Call", "mic-01", 0),
                 OverviewTab::Prs => (tab, "PRs", "git-pull-request", self.open_pr_count(mono)),
                 OverviewTab::Files => (tab, "Files", "folder-01", 0),
+                OverviewTab::Gallery => (tab, "Gallery", "image-01", 0),
+                OverviewTab::Styles => (tab, "Styles", "palette", 0),
                 OverviewTab::Activity => (tab, "Activity", "list-bullet", 0),
             })
             .collect();
@@ -1281,6 +1294,8 @@ impl Monos {
                     OverviewTab::Call => "mono-overview-Call",
                     OverviewTab::Prs => "mono-overview-Prs",
                     OverviewTab::Files => "mono-overview-Files",
+                    OverviewTab::Gallery => "mono-overview-Gallery",
+                    OverviewTab::Styles => "mono-overview-Styles",
                     OverviewTab::Activity => unreachable!(),
                 };
                 crate::project_tabs::tab_button(
@@ -1347,6 +1362,8 @@ impl Monos {
             OverviewTab::Call => self.call_panel(mono, cx),
             OverviewTab::Prs => self.workstream_prs(mono, cx),
             OverviewTab::Files => self.workstream_files(mono, cx),
+            OverviewTab::Gallery => self.gallery_view(mono, cx),
+            OverviewTab::Styles => self.styles_view(mono, cx),
             OverviewTab::Activity => self.activity_view(mono, cx),
         };
         div()

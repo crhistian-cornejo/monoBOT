@@ -15,6 +15,9 @@
 //!
 //! The turn itself is behind [`ImageTurnRunner`], which the app implements on
 //! top of its Antigravity provider.
+pub mod gallery;
+pub mod styles;
+
 use crate::time::now_ms;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -26,7 +29,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Takes a single request may ask for.
 pub const MAX_TAKES: usize = 4;
-pub const ASPECTS: [&str; 8] = ["1:1", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9"];
+pub const ASPECTS: [&str; 10] = [
+    "1:1", "4:5", "5:4", "3:2", "2:3", "4:3", "3:4", "16:9", "9:16", "21:9",
+];
 const MAX_PROMPT_CHARS: usize = 8_000;
 /// Folder under the app's data directory that keeps the pictures.
 pub const GENERATED_IMAGE_DIR: &str = "generated-images";
@@ -53,6 +58,9 @@ pub struct ImageRequest {
     /// An image to edit, by absolute path.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
+    /// A preset look's id ([`styles::STYLES`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
 }
 
 fn absolute_path_re() -> &'static Regex {
@@ -109,12 +117,37 @@ pub fn parse_request(input: &Value) -> Result<ImageRequest, String> {
             number as usize
         }
     };
-    let aspect = input.get("aspect").map(js_string);
+    // A named format ("portrait", "/story") stands for its ratio.
+    let aspect = input.get("aspect").map(js_string).or_else(|| {
+        input
+            .get("format")
+            .map(js_string)
+            .map(|id| styles::format(&id).map_or(id, |format| format.aspect.to_owned()))
+    });
     if let Some(aspect) = &aspect {
         if !ASPECTS.contains(&aspect.as_str()) {
             return Err(format!("aspect must be one of {}", ASPECTS.join(", ")));
         }
     }
+    let style = match input.get("style").map(js_string) {
+        None => None,
+        Some(id) if id.trim().is_empty() => None,
+        Some(id) => Some(
+            styles::style(&id)
+                .ok_or_else(|| {
+                    format!(
+                        "style must be one of {}",
+                        styles::STYLES
+                            .iter()
+                            .map(|style| style.id)
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                })?
+                .id
+                .to_owned(),
+        ),
+    };
     let source = input.get("source").map(js_string);
     if let Some(source) = &source {
         if !absolute_path_re().is_match(source) {
@@ -126,6 +159,7 @@ pub fn parse_request(input: &Value) -> Result<ImageRequest, String> {
         count,
         aspect: aspect.filter(|value| !value.is_empty()),
         source: source.filter(|value| !value.is_empty()),
+        style,
     })
 }
 
@@ -189,6 +223,12 @@ pub fn turn_text(request: &ImageRequest) -> String {
     )];
     if let Some(aspect) = &request.aspect {
         parts.push(format!("Aspect ratio: {aspect}."));
+    }
+    if let Some(style) = request.style.as_deref().and_then(styles::style) {
+        parts.push(format!(
+            "Style: render it as {}. Keep this look across every take.",
+            style.direction
+        ));
     }
     if let Some(source) = &request.source {
         parts.push(format!(
@@ -299,6 +339,9 @@ pub struct ImageJob {
     /// "16:9" and the like; the frames take its shape. Square when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub aspect: Option<String>,
+    /// The preset look it was made in, by id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
     pub status: JobStatus,
     /// Unix milliseconds.
     pub started_at: u64,
@@ -315,6 +358,7 @@ impl ImageJob {
             prompt: request.prompt.clone(),
             count: request.count,
             aspect: request.aspect.clone(),
+            style: request.style.clone(),
             status: JobStatus::Generating,
             started_at: now_ms(),
             images: Vec::new(),
@@ -695,7 +739,8 @@ mod tests {
                 prompt: "a fox".into(),
                 count: 1,
                 aspect: None,
-                source: None
+                source: None,
+                style: None,
             }
         );
         let full = parse_request(&json!({
@@ -730,12 +775,46 @@ mod tests {
         assert!(err(json!({ "prompt": "x", "count": "many" })).contains("count"));
         assert_eq!(
             err(json!({ "prompt": "x", "aspect": "5:1" })),
-            "aspect must be one of 1:1, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, 21:9"
+            "aspect must be one of 1:1, 4:5, 5:4, 3:2, 2:3, 4:3, 3:4, 16:9, 9:16, 21:9"
         );
         assert_eq!(
             err(json!({ "prompt": "x", "source": "a.png" })),
             "source must be the absolute path of an image"
         );
+    }
+
+    #[test]
+    fn takes_a_preset_style_and_a_named_format() {
+        let request = parse_request(&json!({
+            "prompt": "a fox", "style": "/Screenprint", "format": "portrait"
+        }))
+        .unwrap();
+        assert_eq!(request.style.as_deref(), Some("screenprint"));
+        assert_eq!(request.aspect.as_deref(), Some("4:5"));
+        // An explicit aspect wins over the format.
+        let both =
+            parse_request(&json!({ "prompt": "x", "aspect": "16:9", "format": "story" })).unwrap();
+        assert_eq!(both.aspect.as_deref(), Some("16:9"));
+        assert!(parse_request(&json!({ "prompt": "x", "format": "huge" }))
+            .unwrap_err()
+            .starts_with("aspect must be one of"));
+        assert!(
+            parse_request(&json!({ "prompt": "x", "style": "vaporwave" }))
+                .unwrap_err()
+                .starts_with("style must be one of photoreal, cinematic")
+        );
+        assert_eq!(
+            parse_request(&json!({ "prompt": "x", "style": " " }))
+                .unwrap()
+                .style,
+            None
+        );
+        // The brief carries the look, and the job remembers it.
+        let text = turn_text(&request);
+        assert!(text.contains("Aspect ratio: 4:5."));
+        assert!(text.contains("Style: render it as a vintage screenprint poster"));
+        let job = ImageJob::start("j", &request);
+        assert_eq!(serde_json::to_value(&job).unwrap()["style"], "screenprint");
     }
 
     #[test]

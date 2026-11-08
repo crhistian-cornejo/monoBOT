@@ -136,7 +136,7 @@ Primero la lógica de todo y luego la interfaz. La app Tauri ya no está en el r
 | 6 Grupos | En un agente | En un agente |
 | 7 Correo | Hecha | Hecha |
 | 8 Teléfono (Poki) | Hecha: instalación, servicio y estado del conector | Hecha: Ajustes › MCP y tutorial; falta probar con un iPhone real |
-| 9 Archivos y documentos | Lectores de xlsx, docx, pptx y PDF en core; imágenes (`images.generate`) conectadas | Visores de hoja, Word, diapositivas y PDF hechos; quedan los detalles de la fase 9 |
+| 9 Archivos y documentos | Lectores de xlsx, docx, pptx y PDF en core; imágenes (`images.generate`, con estilos y formatos predefinidos) conectadas; el bot Images tiene su propio panel con Galería y Estilos | Visores de hoja, Word, diapositivas y PDF hechos; quedan los detalles de la fase 9 |
 | 10 Dictado | En un agente | En un agente |
 | 11 Workstreams | Hecho: `Mono.workstream`, el brief del orquestador y su chat en su checkout | Hecho: recorrido, «New workstream», sección del rail y pestañas Agents, PRs y Files |
 | 12 Producción | Firma de actualizaciones propia, bucket de releases y host remoto en CI | Faltan secretos de GitHub, firma de Apple e instalador probado en Windows |

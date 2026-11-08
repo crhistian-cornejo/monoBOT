@@ -52,6 +52,7 @@ pub(crate) use mobile::{
     Waiting as MobileWaiting, mobile_access_modes, usage_state as mobile_usage_state,
 };
 pub(crate) use mono::GroupAccessAnswer;
+pub(crate) use mono::PresetsChanged as MonoPresetsChanged;
 pub(crate) use mono::QueueChanged as MonoQueueChanged;
 pub(crate) use mono::Submitted as MonoSubmitted;
 use monocode_core::{
@@ -546,6 +547,7 @@ impl Conversation {
                 this.draft_has_value = has_value;
                 cx.notify();
             }
+            this.mono_sync_presets(cx);
             this.open_typed_btw(cx);
         });
         input.update(cx, |input, _| input.set_alternate_submit(true));

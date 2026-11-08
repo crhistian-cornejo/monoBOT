@@ -61,9 +61,14 @@ struct Choice {
     file: bool,
     server: Option<monocode_core::mcp::McpConnection>,
     person: Option<MentionPerson>,
+    /// An image style or format preset, drawn with its own glyph.
+    preset: Option<&'static str>,
 }
 impl Choice {
     fn icon(&self) -> (&'static str, gpui::Hsla) {
+        if let Some(glyph) = self.preset {
+            return (glyph, accent_color());
+        }
         if let Some(command) = self.builtin.and_then(input::Command::from_name) {
             return (command.icon(), command.color());
         }
@@ -112,6 +117,8 @@ pub(crate) struct Completion {
     packs: Vec<String>,
     known: std::collections::HashSet<String>,
     people: Vec<MentionPerson>,
+    /// The image bot's styles and formats, offered as `/{id}`.
+    image_presets: bool,
     files: Vec<ProjectFile>,
     /// `@name` → `@relative/path` for file names unique in the project; the
     /// picker writes the short label and sending expands it back.
@@ -131,6 +138,15 @@ pub(crate) struct Completion {
     _observe: Subscription,
 }
 impl EventEmitter<ModePicked> for Completion {}
+/// `/{id}` for every image style and format.
+fn image_preset_tokens() -> impl Iterator<Item = String> {
+    use monocode_core::images::styles::{FORMATS, STYLES};
+    STYLES
+        .iter()
+        .map(|style| style.id)
+        .chain(FORMATS.iter().map(|format| format.id))
+        .map(|id| format!("/{id}"))
+}
 /// Composer.tsx's `buildMentionIndex`: a name is a label only when it is
 /// unique and needs no quoting.
 fn short_mentions(files: &[ProjectFile]) -> std::collections::HashMap<String, String> {
@@ -194,6 +210,7 @@ impl Completion {
             .into_iter()
             .collect(),
             people: Vec::new(),
+            image_presets: false,
             files: Vec::new(),
             short_mentions: Default::default(),
             choices: Vec::new(),
@@ -263,6 +280,12 @@ impl Completion {
         .map(str::to_owned)
         .into_iter()
         .chain(self.people.iter().map(|p| format!("@{}", p.name)))
+        .chain(
+            self.image_presets
+                .then(image_preset_tokens)
+                .into_iter()
+                .flatten(),
+        )
         .collect();
         self.loaded = None;
         self.loading = false;
@@ -277,6 +300,27 @@ impl Completion {
         self.people = people;
         for person in &self.people {
             self.known.insert(format!("@{}", person.name));
+        }
+        self.highlight(cx);
+        self.rank();
+        cx.notify();
+    }
+    pub(crate) fn image_presets(&self) -> bool {
+        self.image_presets
+    }
+    /// Offers the image bot's preset styles and formats in the slash menu
+    /// and keeps them highlighted in the text.
+    pub(crate) fn set_image_presets(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.image_presets == on {
+            return;
+        }
+        self.image_presets = on;
+        for token in image_preset_tokens() {
+            if on {
+                self.known.insert(token);
+            } else {
+                self.known.remove(&token);
+            }
         }
         self.highlight(cx);
         self.rank();
@@ -674,6 +718,7 @@ impl Completion {
                     file: false,
                     server: Some(server),
                     person: None,
+                    preset: None,
                 })
                 .collect();
         } else if token.trigger == Trigger::Mention {
@@ -692,6 +737,7 @@ impl Completion {
                     file: false,
                     server: None,
                     person: Some(person.clone()),
+                    preset: None,
                 }));
             }
             choices.extend(
@@ -706,6 +752,7 @@ impl Completion {
                         file: true,
                         server: None,
                         person: None,
+                        preset: None,
                     }),
             );
             let query = token
@@ -743,6 +790,7 @@ impl Completion {
                 file: false,
                 server: None,
                 person: None,
+                preset: None,
             }));
             self.choices = choices;
         } else {
@@ -826,8 +874,59 @@ impl Completion {
                             file: false,
                             server: None,
                             person: None,
+                            preset: None,
                         },
                     ));
+                }
+            }
+            if self.image_presets {
+                use monocode_core::images::styles::{FORMATS, STYLES};
+                let presets = STYLES
+                    .iter()
+                    .map(|style| {
+                        (
+                            style.id,
+                            style.name,
+                            format!("Style · {}", style.blurb),
+                            "palette",
+                        )
+                    })
+                    .chain(FORMATS.iter().map(|format| {
+                        (
+                            format.id,
+                            format.name,
+                            format!("Format {} · {}", format.aspect, format.use_for),
+                            "image-01",
+                        )
+                    }));
+                for (order, (id, label, detail, glyph)) in presets.enumerate() {
+                    if self.has_user_command(id) {
+                        continue;
+                    }
+                    if let Some(score) =
+                        composer::score(&token.query, &format!("{id} {label} {detail}"))
+                    {
+                        // In the bare menu the looks come first, in catalogue order.
+                        let priority = if token.query.is_empty() {
+                            200 - order as i64
+                        } else {
+                            90
+                        };
+                        choices.push((
+                            score + priority,
+                            Choice {
+                                label: label.into(),
+                                detail,
+                                insertion: format!("/{id}"),
+                                builtin: None,
+                                mode: None,
+                                file: false,
+                                server: None,
+                                person: None,
+                                preset: Some(glyph),
+                            },
+                        ));
+                    }
                 }
             }
             for command in &self.native_commands {
@@ -867,6 +966,7 @@ impl Completion {
                             file: false,
                             server: None,
                             person: None,
+                            preset: None,
                         },
                     ));
                 }
@@ -906,6 +1006,7 @@ impl Completion {
                             file: false,
                             server: None,
                             person: None,
+                            preset: None,
                         },
                     ));
                 }

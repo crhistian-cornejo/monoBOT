@@ -14,7 +14,13 @@ pub(super) struct ChatState {
     pub(super) models: Option<(Entity<ModelList>, Vec<Subscription>)>,
     /// The setting pills' anchors, by `ComposerMenu::Setting` index.
     pub(super) setting_anchors: Vec<AnchorSlot>,
+    /// The image looks and formats the draft names, to redraw their hint and
+    /// the Styles panel only when they change.
+    pub(super) presets: Vec<String>,
 }
+/// The draft's image looks or formats changed.
+pub(crate) struct PresetsChanged;
+impl EventEmitter<PresetsChanged> for Conversation {}
 pub(crate) struct Submitted {
     pub text: String,
     pub attachments: Vec<PathBuf>,
@@ -78,6 +84,48 @@ impl Conversation {
         }
         let id = format!("quote-{}", monocode_core::mono::new_id());
         self.quotes = monocode_core::composer_quotes::add(&self.quotes, text, &id);
+        window.focus(&self.input.focus_handle(cx), cx);
+        cx.notify();
+    }
+    /// A style or format picked in the image bot's panel: its `/{id}` goes at
+    /// the start of the draft, switching any other of its kind.
+    pub(crate) fn mono_pick_preset(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.input.read(cx).is_composing() {
+            return;
+        }
+        let Some(text) =
+            monocode_core::images::styles::with_preset(&self.input.read(cx).content, id)
+        else {
+            return;
+        };
+        self.input.update(cx, |input, cx| input.set_text(text, cx));
+        window.focus(&self.input.focus_handle(cx), cx);
+        cx.notify();
+    }
+    /// The draft's slash words, to show which preset is picked.
+    pub(crate) fn mono_draft_words(&self, cx: &App) -> Vec<String> {
+        self.input
+            .read(cx)
+            .content
+            .split_whitespace()
+            .filter_map(|word| word.strip_prefix('/'))
+            .map(str::to_ascii_lowercase)
+            .collect()
+    }
+    /// A gallery picture to change: attached to the draft, so the bot passes
+    /// it as the source.
+    pub(crate) fn mono_attach_picture(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.add_attachments(vec![path], cx);
         window.focus(&self.input.focus_handle(cx), cx);
         cx.notify();
     }
@@ -149,6 +197,20 @@ impl Conversation {
     ) {
         self.input
             .update(cx, |input, cx| input.mono_composer(&mono.label(), cx));
+        let images = mono.is_bot()
+            && monocode_core::mono::bot_tools::tools(
+                mono.bot_role.as_deref().unwrap_or("assistant"),
+                mono.bot_tools.as_ref(),
+            )
+            .access
+            .iter()
+            .any(|access| access == "images");
+        self.completion.update(cx, |completion, cx| {
+            completion.set_image_presets(images, cx)
+        });
+        self.transcript.update(cx, |transcript, cx| {
+            transcript.set_image_presets(images, cx)
+        });
         let (mascot, color, name) =
             speaker.unwrap_or_else(|| (mono.mascot.clone(), mono.color, mono.label()));
         self.transcript
@@ -1219,6 +1281,75 @@ impl Conversation {
         }
         pills
     }
+    pub(super) fn mono_sync_presets(&mut self, cx: &mut Context<Self>) {
+        if !self.completion.read(cx).image_presets() {
+            return;
+        }
+        let names: Vec<String> =
+            monocode_core::images::styles::picked(&self.input.read(cx).content)
+                .into_iter()
+                .map(|preset| preset.name)
+                .collect();
+        if self.mono_ui.presets != names {
+            self.mono_ui.presets = names;
+            cx.emit(PresetsChanged);
+            cx.notify();
+        }
+    }
+    /// The image bot's looks and formats named in the draft, each with what
+    /// it does in a few quiet words, so `/gouache` explains itself.
+    fn mono_preset_hint(&self, cx: &App) -> Option<AnyElement> {
+        if !self.completion.read(cx).image_presets() {
+            return None;
+        }
+        let picked = monocode_core::images::styles::picked(&self.input.read(cx).content);
+        if picked.is_empty() {
+            return None;
+        }
+        let label = picked
+            .iter()
+            .map(|preset| format!("{}: {}", preset.name, preset.note))
+            .collect::<Vec<_>>()
+            .join(". ");
+        Some(
+            div()
+                .id("mono-preset-hint")
+                .debug_selector(|| "mono-preset-hint".into())
+                .role(Role::Status)
+                .aria_label(label)
+                .flex()
+                .items_center()
+                .gap_3()
+                .min_w_0()
+                .overflow_hidden()
+                .px(px(12.))
+                .pt(px(7.))
+                .text_size(px(11.))
+                .line_height(px(14.))
+                .children(picked.into_iter().map(|preset| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap_1()
+                        .min_w_0()
+                        .child(icon(preset.glyph, 11.).text_color(accent_color().opacity(0.8)))
+                        .child(
+                            div()
+                                .flex_shrink_0()
+                                .text_color(content(0.6))
+                                .child(preset.name),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(content(0.38))
+                                .child(preset.note),
+                        )
+                }))
+                .into_any_element(),
+        )
+    }
     /// MonoComposer's box: one row with attach, emoji, the field, meter,
     /// dictation and send, as Tauri's compact composer. Square in the floating
     /// companion chat. The agent's model is configured in its Settings (⚙️).
@@ -1263,6 +1394,7 @@ impl Conversation {
             .child(self.completion.read(cx).composer_probe())
             .child(composer_surface(radius))
             .children(self.attachment_chips(cx))
+            .children(self.mono_preset_hint(cx))
             .child(
                 // Even padding centres send beside one line and keeps it at
                 // the bottom as the text grows.
