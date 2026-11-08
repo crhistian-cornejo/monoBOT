@@ -512,6 +512,8 @@ pub(crate) struct BackgroundDialog {
     effect_active: usize,
     effect_focus: FocusHandle,
     effect_trigger_focus: FocusHandle,
+    /// The layer the effect list paints on: above whatever hosts the dialog.
+    popup_priority: usize,
     _preview_events: Subscription,
 }
 impl EventEmitter<Event> for BackgroundDialog {}
@@ -542,12 +544,19 @@ impl BackgroundDialog {
             effect_active: 0,
             effect_focus: cx.focus_handle(),
             effect_trigger_focus: cx.focus_handle(),
+            popup_priority: 70,
             focus: cx.focus_handle(),
             sliders: [cx.focus_handle(), cx.focus_handle()],
             dragging: None,
             busy: false,
             error: None,
         }
+    }
+    /// For a host that paints the dialog itself on layer `host`: the effect
+    /// list must sit above it, or it opens hidden under the dialog.
+    pub(crate) fn above(mut self, host: usize) -> Self {
+        self.popup_priority = self.popup_priority.max(host + 10);
+        self
     }
     fn save(&mut self, cx: &mut Context<Self>) {
         self.background.normalize();
@@ -656,7 +665,7 @@ impl BackgroundDialog {
             .gap(4.)
             .align(Align::End)
             .padding(4.)
-            .priority(70)
+            .priority(self.popup_priority)
             .track(self.effect_region.clone())
             .on_dismiss(move |window, cx| {
                 let _ = weak.update(cx, |this, cx| this.close_effect(window, cx));

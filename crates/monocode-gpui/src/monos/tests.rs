@@ -5485,3 +5485,58 @@ fn a_bots_proposed_mail_waits_as_a_card_for_the_users_send(cx: &mut TestAppConte
     visual.run_until_parked();
     assert_eq!(card_of(visual)["state"], "discarded");
 }
+
+/// The Mono background dialog: its effect picker answers a click where it is
+/// painted, and its list opens above the dialog, so an option takes the click.
+#[gpui::test]
+fn the_background_effect_list_opens_above_the_mono_background_dialog(cx: &mut TestAppContext) {
+    cx.update(input::bind);
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let image = s.root.join("background.png");
+    std::fs::write(&image, b"").unwrap();
+    s.manager.update(cx, |m, _| {
+        let mono = m.roster.monos.iter_mut().find(|m| m.id == s.id).unwrap();
+        mono.background = Some(monocode_core::project_appearance::Background {
+            path: image.to_string_lossy().into_owned(),
+            ..Default::default()
+        });
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.simulate_resize(gpui::size(px(1200.), px(900.)));
+    s.window
+        .update(visual, |_, window, cx| {
+            s.manager
+                .update(cx, |m, cx| m.open_background(&s.id, window, cx))
+        })
+        .unwrap();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    visual.refresh().unwrap();
+    let trigger = visual
+        .debug_bounds("project-background-effect")
+        .expect("an image shows the effect picker");
+    visual.simulate_click(trigger.center(), Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let haze = visual
+        .debug_bounds("project-settings-Haze")
+        .expect("a click on the picker opens the effect list");
+    visual.simulate_click(haze.center(), Default::default());
+    visual.run_until_parked();
+    let effect = s.manager.read_with(visual, |m, _| {
+        m.roster
+            .get(&s.id)
+            .and_then(|mono| mono.background.as_ref())
+            .map(|background| background.effect)
+    });
+    assert_eq!(
+        effect,
+        Some(monocode_core::project_appearance::Effect::GradientBlur),
+        "a click on Haze reaches the option, not the dialog under it"
+    );
+    assert!(
+        s.manager.read_with(visual, |m, _| m.background.is_some()),
+        "choosing an effect keeps the dialog open"
+    );
+}

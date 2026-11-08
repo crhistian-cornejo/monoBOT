@@ -3127,7 +3127,7 @@ impl Monos {
         })
         .detach();
     }
-    fn open_background(&mut self, id: &str, window: &Window, cx: &mut Context<Self>) {
+    pub(super) fn open_background(&mut self, id: &str, window: &Window, cx: &mut Context<Self>) {
         let Some(mono) = self.roster.get(id).cloned() else {
             return;
         };
@@ -3143,6 +3143,7 @@ impl Monos {
                 },
                 cx,
             )
+            .above(BACKGROUND_LAYER)
         });
         let id = id.to_string();
         let events = cx.subscribe(
@@ -3165,15 +3166,34 @@ impl Monos {
         self.background = Some((view, events, at));
         cx.notify();
     }
-    pub(super) fn background_modal(&self) -> Option<AnyElement> {
-        let (view, _, at) = self.background.as_ref()?;
+    /// The background dialog, centred like the project's
+    /// (ProjectBackgroundDialog): a fixed point anchor left its clicks
+    /// landing below the controls it painted.
+    pub(super) fn background_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let (view, _, _) = self.background.as_ref()?;
+        let popup_region = view.read(cx).popup_region();
+        let weak = cx.weak_entity();
         Some(
-            popover("mono-background", Anchor::Point(*at))
-                .modal_surface(false)
-                .without_animation()
-                .priority(100)
-                .width(640.)
-                .child(view.clone())
+            div()
+                .absolute()
+                .size_full()
+                .child(crate::modal::scrim("mono-background-scrim"))
+                .child(
+                    popover("mono-background", Anchor::Center)
+                        .modal_surface(false)
+                        .without_animation()
+                        .width(640.)
+                        .gap(0.)
+                        .ignore(popup_region)
+                        .priority(BACKGROUND_LAYER)
+                        .on_dismiss(move |_, cx| {
+                            let _ = weak.update(cx, |this, cx| {
+                                this.background = None;
+                                cx.notify();
+                            });
+                        })
+                        .child(view.clone()),
+                )
                 .into_any_element(),
         )
     }
@@ -3207,3 +3227,6 @@ struct SubsessionChoice {
     efforts: Vec<(String, String)>,
     effort_label: SharedString,
 }
+
+/// The layer the Mono background dialog paints on.
+const BACKGROUND_LAYER: usize = 100;

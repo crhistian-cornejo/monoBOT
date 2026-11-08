@@ -2058,12 +2058,15 @@ impl Monos {
             // view paints them instead while it is open. The Monos section
             // paints them for the Workstreams below it: twice would break
             // their clicks.
-            .when(self.current().is_none() && !workstreams, |d| {
-                d.children(self.options_surface(cx))
-                    .children(self.background_modal())
-                    .children(self.group_dialog_modal(cx))
-                    .children(self.mail_connect_modal(cx))
-            })
+            .when(
+                self.current().is_none() && self.owns_modals(section, compact),
+                |d| {
+                    d.children(self.options_surface(cx))
+                        .children(self.background_modal(cx))
+                        .children(self.group_dialog_modal(cx))
+                        .children(self.mail_connect_modal(cx))
+                },
+            )
             .into_any_element()
     }
     pub(crate) fn title_tab(&self, id: &str, width: f32, cx: &Context<Self>) -> Option<AnyElement> {
@@ -2235,7 +2238,7 @@ impl gpui::Render for Monos {
             .children(self.settings_modal(&mono, window, cx))
             .children(self.picker_surface(cx))
             .children(self.options_surface(cx))
-            .children(self.background_modal())
+            .children(self.background_modal(cx))
             .children(self.group_dialog_modal(cx))
             .children(self.mail_connect_modal(cx))
             .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, _| {

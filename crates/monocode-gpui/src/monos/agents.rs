@@ -72,6 +72,26 @@ fn divider() -> gpui::Div {
 }
 
 impl Monos {
+    /// The one rail section that paints the Mono menus and dialogs while no
+    /// Mono is open: the Agents zone draws up to three sections, and a dialog
+    /// painted twice answers its clicks in the wrong place.
+    pub(super) fn owns_modals(&self, section: Section, compact: bool) -> bool {
+        let has = |section: Section| self.roster.monos.iter().any(|m| section.holds(m));
+        match section {
+            Section::Coding => true,
+            Section::Workstreams => false,
+            _ => {
+                let owner = if has(Section::Principal) {
+                    Section::Principal
+                } else if compact && !has(Section::Bots) {
+                    Section::Groups
+                } else {
+                    Section::Bots
+                };
+                section == owner
+            }
+        }
+    }
     /// The whole Agents zone, for the sidebar in either layout. Compact is
     /// the 48px rail: the Principal, the bots and the groups as mascots,
     /// each set apart, with nothing to make from there.
