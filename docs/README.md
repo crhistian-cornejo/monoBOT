@@ -32,7 +32,7 @@ things were, move it to `old/`.
 | [mail-workspace.md](in-progress/mail-workspace.md) | Mail, bot inboxes and agenda with Cloudflare and Mailflare; deployment checklist |
 | [workstreams.md](in-progress/workstreams.md) | Workstreams (beta): multi-day work run by an orchestrator |
 | [ivy-review.md](in-progress/ivy-review.md) | What to take from IVY: harness and agent gaps, Decider, live and group calls, dictation |
-| [notch.md](in-progress/notch.md) | Plan for a minimal macOS notch |
+| [notch.md](in-progress/notch.md) | The notch on macOS and Windows: what is built, checked and next |
 
 ## old/ — history
 

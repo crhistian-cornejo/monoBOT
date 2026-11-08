@@ -53,6 +53,7 @@ mod mobile;
 mod modal;
 mod model_welcome;
 mod monos;
+mod notch;
 mod notes;
 mod notifications;
 mod pane_layout;
@@ -494,7 +495,8 @@ fn main() {
             usage_footer::bind(cx);
             dictation::init(cx);
             cx.on_window_closed(|cx, _| {
-                if cx.windows().is_empty() {
+                // The notch alone does not keep the app open.
+                if notch::only_notches_left(cx) {
                     quit(cx)
                 }
             })

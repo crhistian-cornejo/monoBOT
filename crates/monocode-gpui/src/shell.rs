@@ -22,6 +22,7 @@ pub(crate) mod monos;
 mod new_chat_choice;
 #[cfg(test)]
 mod new_chat_choice_tests;
+mod notch;
 mod notifications;
 mod orchestration;
 mod picker_preferences;
@@ -686,6 +687,8 @@ pub(crate) struct Shell {
     notification_state: notifications::State,
     github_star: github_star::State,
     quick: crate::quick_composer::Controller,
+    /// The notch's window, fed from the sessions and calls.
+    notch: Option<crate::notch::Handle>,
     unseen_finished: HashSet<i64>,
     archiving: HashSet<i64>,
     archive_shortcut_held: bool,
@@ -910,6 +913,7 @@ impl Shell {
                     .update(cx, |this, cx| {
                         this.refresh_remote_projects(cx);
                         this.sync_keep_awake(cx);
+                        this.sync_notch(cx);
                     })
                     .is_err()
                 {
@@ -1084,6 +1088,7 @@ impl Shell {
             notification_state,
             github_star: Default::default(),
             quick: Default::default(),
+            notch: None,
             unseen_finished: HashSet::new(),
             archiving: HashSet::new(),
             archive_shortcut_held: false,
@@ -8969,6 +8974,7 @@ impl Render for Shell {
                     cx.notify();
                 }));
             self.start_native_notifications(cx);
+            self.start_notch(cx);
             self.check_github_star(false, cx);
             let shell = cx.entity().downgrade();
             window.on_window_should_close(cx, move |window, cx| {

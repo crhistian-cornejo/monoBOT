@@ -432,7 +432,7 @@ impl Monos {
         cx.notify();
     }
 
-    pub(super) fn call_hang_up(&mut self, cx: &mut Context<Self>) {
+    pub(crate) fn call_hang_up(&mut self, cx: &mut Context<Self>) {
         let Some(mut call) = self.call.take() else {
             return;
         };
@@ -1275,6 +1275,35 @@ impl Monos {
                 )
             })
             .into_any_element()
+    }
+
+    /// The live call as the notch says it: the group's name and what is
+    /// happening in it.
+    pub(crate) fn notch_call(&self) -> Option<(String, String)> {
+        let call = self.call.as_ref().filter(|call| call.live())?;
+        let group = self
+            .roster
+            .get(&call.group)
+            .map_or_else(|| "Group call".into(), Mono::label);
+        let name = |id: &String| {
+            call.members
+                .iter()
+                .find(|member| &member.id == id)
+                .map(|member| member.name.clone())
+        };
+        let status = match call.phase {
+            Phase::Listening if call.muted => "Muted".to_owned(),
+            Phase::Listening => "Your turn".to_owned(),
+            _ => match (
+                call.speaking.as_ref().and_then(name),
+                call.stream.as_ref().map(|stream| stream.name.clone()),
+            ) {
+                (Some(speaker), _) => format!("{speaker} is speaking"),
+                (None, Some(thinker)) => format!("{thinker} is thinking"),
+                _ => "The members are answering".to_owned(),
+            },
+        };
+        Some((group, status))
     }
 
     #[cfg(test)]

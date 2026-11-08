@@ -29,7 +29,7 @@ impl Shell {
     }
     /// The project and model a fresh show starts from: the last launch while
     /// its project is still open, else the current project's defaults.
-    fn quick_choice(&self, cx: &App) -> crate::quick_composer::Launch {
+    pub(super) fn quick_choice(&self, cx: &App) -> crate::quick_composer::Launch {
         let cwd = self.workspace.project.clone();
         let new = self.new_chat_choice(&cwd);
         let initial = crate::quick_composer::Launch::choice(
@@ -129,7 +129,7 @@ impl Shell {
             Err(e) => self.quick.error = Some(e.to_string()),
         }
     }
-    fn launch_quick_composer(
+    pub(super) fn launch_quick_composer(
         &mut self,
         launch: crate::quick_composer::Launch,
         _window: &mut Window,

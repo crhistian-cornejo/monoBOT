@@ -23,6 +23,7 @@ pub mod inbox;
 pub mod keep_awake;
 pub mod mobile;
 pub mod mono;
+pub mod notch;
 pub mod notes;
 pub mod office;
 pub mod poki;

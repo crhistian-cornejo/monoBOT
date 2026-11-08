@@ -8,16 +8,16 @@ const LIVE_AGENT_CAP: usize = 4;
 const AMBER: u32 = 0xfbbf24;
 const EMERALD: u32 = 0x34d399;
 
-struct LiveAgent {
-    id: i64,
+pub(super) struct LiveAgent {
+    pub(super) id: i64,
     cwd: String,
-    provider: String,
-    title: String,
-    activity: String,
-    started_at: Option<u64>,
+    pub(super) provider: String,
+    pub(super) title: String,
+    pub(super) activity: String,
+    pub(super) started_at: Option<u64>,
     duration_ms: Option<u64>,
-    needs_approval: bool,
-    done: bool,
+    pub(super) needs_approval: bool,
+    pub(super) done: bool,
 }
 
 /// liveAgents.ts's formatLiveElapsed.
@@ -52,7 +52,7 @@ fn next_label_change(ms: u64) -> u64 {
 }
 
 impl Shell {
-    fn live_agents(&self, cx: &App) -> Vec<LiveAgent> {
+    pub(super) fn live_agents(&self, cx: &App) -> Vec<LiveAgent> {
         let mut agents: Vec<_> = self
             .order
             .iter()

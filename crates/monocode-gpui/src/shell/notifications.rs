@@ -118,6 +118,7 @@ impl Shell {
     /// frames still produces exactly one completion. Render sync shares the set.
     pub(super) fn notification_session_changed(&mut self, id: i64, cx: &mut Context<Self>) {
         self.process_notification_inputs(cx);
+        self.sync_notch(cx);
         let Some(view) = self.sessions.get(&id) else {
             return;
         };
@@ -372,7 +373,7 @@ impl Shell {
         }));
     }
 
-    fn notification_chats(&self, cx: &App) -> Vec<Entity<Conversation>> {
+    pub(super) fn notification_chats(&self, cx: &App) -> Vec<Entity<Conversation>> {
         let mut views: Vec<_> = self.sessions.values().cloned().collect();
         if let Some(monos) = &self.monos {
             views.extend(monos.read(cx).all_notification_chats(cx));
@@ -719,7 +720,7 @@ impl Shell {
         .detach();
     }
 
-    fn open_notice_target(&mut self, target: Target, cx: &mut Context<Self>) {
+    pub(super) fn open_notice_target(&mut self, target: Target, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             let _ = this.update_in(cx, |this, window, cx| {
                 let id = match target {
