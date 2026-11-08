@@ -7,7 +7,7 @@
 //! (views, days, the reply's prompt and subject) follows `src/features/mail/model/mail.ts`.
 //! Every function that reaches a server blocks: callers run it off the UI thread.
 mod agent;
-pub use agent::{agent_action, ACTIONS as AGENT_ACTIONS};
+pub use agent::{agent_action, take_dialog, ConnectRequest, ACTIONS as AGENT_ACTIONS};
 pub use monobot_email::inspect::{Level, Risk};
 pub use monobot_email::{
     Account, AccountView, Action, Attachment, Folder, Message, Opened, Overview, Person,
@@ -81,6 +81,13 @@ struct Saved {
     accounts: Vec<Account>,
     /// Senders the user marked as interesting: their mail is priority.
     interesting: Vec<String>,
+    /// Which agents may read each account (`Access`): an address missing here is open to
+    /// every agent. Only the user changes it, in the Email tab or the connect dialog.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    readers: Access,
+    /// The desktop webview's `monocode.mail.private` was copied into `readers`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    readers_imported: bool,
 }
 
 /// What one account answered to a search.
@@ -192,6 +199,9 @@ impl Service {
 
     /// Connects an account: the server must accept the app password first, and only then
     /// is it kept in the system's store.
+    /// Connects an account: its server must take the password, which then goes to the
+    /// system's store of secrets (Keychain, Credential Manager), never to a file. `readers`:
+    /// the agents that may read it, `None` for every agent.
     pub fn add_account(
         &self,
         address: &str,
@@ -199,6 +209,7 @@ impl Service {
         name: &str,
         provider: &str,
         host: Option<&str>,
+        readers: Option<Vec<String>>,
     ) -> Result<(), String> {
         let account = Account::new(address, name, provider, host)?;
         let mut saved = self.load();
@@ -210,10 +221,50 @@ impl Service {
         }
         mail().add_account(&account, password)?;
         saved.accounts.push(account.clone());
+        self.import_readers(&mut saved);
+        keep_readers(&mut saved.readers, &account.address, readers);
         self.store(&saved)?;
         *lock(last_read()) = None;
         self.watch(account);
+        tell(false);
         Ok(())
+    }
+
+    /// Which agents may read each account.
+    pub fn access(&self) -> Access {
+        let mut saved = self.load();
+        self.import_readers(&mut saved);
+        saved.readers
+    }
+
+    /// Lets only `readers` read `address`, or every agent with `None`.
+    pub fn set_readers(&self, address: &str, readers: Option<Vec<String>>) -> Result<(), String> {
+        let mut saved = self.load();
+        if !saved
+            .accounts
+            .iter()
+            .any(|a| a.address.eq_ignore_ascii_case(address.trim()))
+        {
+            return Err("That account is not connected.".into());
+        }
+        self.import_readers(&mut saved);
+        keep_readers(&mut saved.readers, address, readers);
+        self.store(&saved)
+    }
+
+    /// The first time: what the desktop webview kept as `monocode.mail.private`.
+    fn import_readers(&self, saved: &mut Saved) {
+        if saved.readers_imported {
+            return;
+        }
+        saved.readers_imported = true;
+        let legacy = crate::desktop_preferences::DesktopPreferences::load(&self.data_dir)
+            .json(ACCESS_KEY)
+            .map(|value| parse_access(&value))
+            .unwrap_or_default();
+        for (address, ids) in legacy {
+            saved.readers.entry(address).or_insert(ids);
+        }
     }
 
     /// Forgets an account here (its password included). Nothing changes on its server.
@@ -223,6 +274,8 @@ impl Service {
             return Ok(());
         };
         let removed = saved.accounts.remove(at);
+        self.import_readers(&mut saved);
+        saved.readers.remove(&access_key(&removed.address));
         mail().remove_account(&removed);
         lock(watched()).remove(&removed.id);
         *lock(last_read()) = None;
@@ -1514,6 +1567,23 @@ pub fn readers_of<'a>(access: &'a Access, address: &str) -> Option<&'a Vec<Strin
     access.get(&access_key(address))
 }
 
+/// `readers` for `address` in `access`: `None`, or no id at all, opens it to every agent.
+fn keep_readers(access: &mut Access, address: &str, readers: Option<Vec<String>>) {
+    let mut ids: Vec<String> = readers
+        .unwrap_or_default()
+        .into_iter()
+        .map(|id| id.trim().to_owned())
+        .filter(|id| !id.is_empty())
+        .collect();
+    let mut seen = HashSet::new();
+    ids.retain(|id| seen.insert(id.clone()));
+    if ids.is_empty() {
+        access.remove(&access_key(address));
+    } else {
+        access.insert(access_key(address), ids);
+    }
+}
+
 pub fn parse_access(value: &Value) -> Access {
     let mut access = Access::new();
     let Some(entries) = value.as_object() else {
@@ -1823,6 +1893,47 @@ mod tests {
         assert_eq!(organisation_domain("nobody"), None);
         assert_eq!(person_label("Ana", "ana@x.test"), "Ana");
         assert_eq!(person_label(" ANA@x.test ", "ana@x.test"), "ana@x.test");
+    }
+
+    #[test]
+    fn who_reads_an_account_is_kept_with_the_accounts_and_never_its_password() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = Service::new(dir.path());
+        fs::create_dir_all(dir.path().join("mail")).unwrap();
+        fs::write(
+            dir.path().join("mail/accounts.json"),
+            r#"{"accounts":[{"id":"9b","name":"Ana","address":"Ana@gmail.com","provider":"gmail","host":"imap.gmail.com","port":993}],"interesting":[]}"#,
+        )
+        .unwrap();
+        assert!(service.access().is_empty());
+        service
+            .set_readers(
+                " ANA@gmail.com",
+                Some(vec!["finance".into(), " finance ".into(), "".into()]),
+            )
+            .unwrap();
+        assert_eq!(
+            readers_of(&service.access(), "ana@gmail.com").unwrap(),
+            &["finance"]
+        );
+        let text = fs::read_to_string(dir.path().join("mail/accounts.json")).unwrap();
+        assert!(text.contains("\"readers\""));
+        assert!(!text.to_lowercase().contains("password"));
+        // No reader at all opens it to every agent again.
+        service.set_readers("ana@gmail.com", Some(vec![])).unwrap();
+        assert!(service.access().is_empty());
+        service
+            .set_readers("ana@gmail.com", Some(vec!["finance".into()]))
+            .unwrap();
+        service.set_readers("ana@gmail.com", None).unwrap();
+        assert!(may_read(
+            &service.access(),
+            "ana@gmail.com",
+            Some("planner")
+        ));
+        assert!(service
+            .set_readers("luis@x.test", Some(vec!["finance".into()]))
+            .is_err());
     }
 
     #[test]

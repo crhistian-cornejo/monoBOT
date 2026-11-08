@@ -3,7 +3,7 @@
 mod avatar;
 mod diff;
 mod document;
-mod mail;
+pub(crate) mod mail;
 mod ui;
 mod workspace;
 pub(crate) use avatar::image as avatar_image;
@@ -200,6 +200,7 @@ impl Inbox {
         let mailbox = cx.new(|cx| {
             let mut mailbox = mail::Mailbox::new(data_dir.clone(), state.mail_auto_images, cx);
             mailbox.set_list_width(state.mail_list_width);
+            mailbox.set_store(store.clone());
             mailbox
         });
         let agenda = cx.new(|cx| workspace::Workspace::new(data_dir.clone(), store.clone(), cx));

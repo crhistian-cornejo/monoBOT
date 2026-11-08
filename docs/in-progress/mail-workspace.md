@@ -72,6 +72,28 @@ Email Sending Edit si va a enviar (requiere el plan Workers Paid). Después abre
 el dominio y genera la clave MCP (**Settings → API keys → Allow MCP access**).
 No ejecutes las migraciones de D1 a mano: `/setup` las aplica.
 
+## Cuentas IMAP, llavero y quién lee cada buzón
+
+Esto funciona igual en macOS y Windows, sin Cloudflare.
+
+- **Conectar:** en **Inbox → Email → Cuentas**, o desde el chat de un bot
+  (`mail.connect`). Los dos usan el mismo formulario (`inbox/mail/connect.rs`):
+  proveedor, dirección, contraseña de aplicación, nombre visible y **quién lo lee**.
+- **La contraseña:** el servidor IMAP tiene que aceptarla (`LOGIN` + `SELECT
+  INBOX`). Después se guarda en el llavero del sistema (Keychain en macOS,
+  Credential Manager en Windows) como `com.monocode.desktop` / `email-imap-<id>`.
+  El campo se vacía al pulsar Conectar. Nunca va a un archivo, al chat, al modelo
+  ni a la nube.
+- **Desde un bot:** `mail.connect` abre el diálogo de la app con la dirección y el
+  nombre que pidió el bot. Por defecto la cuenta queda solo para ese bot. El
+  agente nunca ve el diálogo ni la clave. Al conectarse, el bot recibe un aviso
+  interno con la dirección y quién la lee, y sigue con lo que hacía.
+- **Quién lo lee:** `mail/accounts.json` guarda `readers` (dirección → ids de
+  agentes); una dirección sin entrada la leen todos. Solo el usuario lo cambia:
+  en el diálogo o en cada cuenta de **Inbox → Email → Cuentas** («Read by…»).
+  La primera vez se importa el `monocode.mail.private` de la app de escritorio
+  antigua.
+
 ## Configuración en MonoBOT
 
 Abre **Inbox → Agenda**. Allí están los ajustes del espacio de correo:

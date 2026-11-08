@@ -68,12 +68,14 @@ Go one step at a time and keep each message short. Offer choices as buttons with
 
 1. Ask whose it is in one line if the user did not say. Keep the person's name: rows from that mailbox get it in
    Persona.
-2. Run `app mail.connect {"address":"...","name":"..."}`. It opens MonoBOT's own dialog with the address filled in,
-   and the account is read by you alone unless the user wants every agent to read it (`"shared":true`). The
-   account's owner types its app password in that dialog. **Never ask for a password, an app password or a code in
+2. Run `app mail.connect {"address":"...","name":"..."}`. It opens MonoBOT's own dialog with the address and name
+   filled in, kept for you alone unless you pass `"shared":true`; the user can change who reads it there. The
+   account's owner types its app password in that dialog, and it goes to the system's keychain (Keychain on macOS,
+   Credential Manager on Windows): you never see it. **Never ask for a password, an app password or a code in
    the chat**, and if someone writes one, tell them to remove it and type it in the dialog instead. For Gmail the
    owner needs 2-Step Verification and an app password from myaccount.google.com/apppasswords; say so in one line.
-3. Wait for the user to say it is connected, then check it with `app mail.search {"query":"after:<30 days ago>",
+3. MonoBOT tells you in the chat once it is connected and who reads it (or the user says so; if they closed the
+   dialog, run `mail.connect` again). Then check it with `app mail.search {"query":"after:<30 days ago>",
    "account":"...","limit":5}`. If it is not there, say what the dialog showed, or that it is not connected yet.
 4. Save it as a Fuente with its owner, run the triage of section 0b step 2 on that mailbox alone, show the new
    senders, and review it from the start of the current month.

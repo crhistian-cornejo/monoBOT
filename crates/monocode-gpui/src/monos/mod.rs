@@ -23,6 +23,7 @@ pub(crate) mod html;
 #[cfg(target_os = "windows")]
 mod html_windows;
 mod images;
+mod mail_connect;
 mod mail_workspace;
 mod memory_ui;
 mod mobile;
@@ -217,6 +218,13 @@ pub(crate) struct Monos {
     /// The open group editor, and the window it was opened in.
     group_dialog: Option<(
         Entity<group_dialog::GroupDialog>,
+        Subscription,
+        gpui::Size<gpui::Pixels>,
+    )>,
+    /// The dialog a bot opened with `mail.connect`: the bot, the form, and the window size.
+    mail_connect: Option<(
+        String,
+        Entity<crate::inbox::mail::connect::ConnectForm>,
         Subscription,
         gpui::Size<gpui::Pixels>,
     )>,
@@ -495,6 +503,7 @@ impl Monos {
             completion_work: HashSet::new(),
             background: None,
             group_dialog: None,
+            mail_connect: None,
             workstreams: Default::default(),
             backgrounds: HashMap::new(),
             drag: None,
@@ -2025,6 +2034,7 @@ impl Monos {
                 d.children(self.options_surface(cx))
                     .children(self.background_modal())
                     .children(self.group_dialog_modal(cx))
+                    .children(self.mail_connect_modal(cx))
             })
             .into_any_element()
     }
@@ -2199,6 +2209,7 @@ impl gpui::Render for Monos {
             .children(self.options_surface(cx))
             .children(self.background_modal())
             .children(self.group_dialog_modal(cx))
+            .children(self.mail_connect_modal(cx))
             .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, _| {
                 if let Some((_, start, over)) = &mut this.drag
                     && (event.position - *start).magnitude() > 5.
