@@ -343,6 +343,9 @@ pub(crate) fn button(
         .debug_selector(|| id.into())
         .role(Role::Button)
         .aria_label(face.label)
+        .when(!face.expanded, |d| {
+            d.tooltip(crate::theme::chrome_tip(face.label, None))
+        })
         .group(id)
         .cursor_pointer()
         .flex_shrink_0()

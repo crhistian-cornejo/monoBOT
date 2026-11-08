@@ -365,6 +365,7 @@ impl Conversation {
             .on_click(cx.listener(move |this, _, _, cx| this.run_git_action(current, cx)));
         let chevron = segment("git-action-menu")
             .aria_label("Git actions")
+            .tooltip(crate::theme::chrome_tip("Git actions", None))
             .aria_expanded(menu_open)
             .relative()
             .px(px(7.))

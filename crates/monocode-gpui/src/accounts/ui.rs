@@ -781,6 +781,7 @@ fn back_header(
                 .id(id)
                 .role(Role::Button)
                 .aria_label(label)
+                .tooltip(crate::theme::chrome_tip(label, None))
                 .size_6()
                 .rounded_md()
                 .flex()

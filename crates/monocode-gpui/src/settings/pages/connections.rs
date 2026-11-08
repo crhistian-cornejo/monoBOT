@@ -738,7 +738,7 @@ impl SettingsView {
                                 .child("Update Host").on_click(cx.listener(move |this, _, _, cx| this.begin_connection(Some(update_id.clone()), true, cx)))))
                             .child(secondary_button(SharedString::from(format!("reconnect-{id}")), "Reconnect", false, disabled)
                                 .child("Reconnect").on_click(cx.listener(move |this, _, _, cx| this.begin_connection(Some(reconnect_id.clone()), false, cx))))))
-                        .child(secondary_button(SharedString::from(format!("remove-machine-{id}")), format!("Remove {}", machine.name), true, disabled)
+                        .child(crate::settings::widgets::secondary_icon_button(SharedString::from(format!("remove-machine-{id}")), format!("Remove {}", machine.name), true, disabled)
                             .child(icon("trash", 16.)).on_click(cx.listener(move |this, _, _, cx| {
                                 if this.connections.busy || this.connections.revoking { return; }
                                 this.connections.error.clear(); this.connections.removing = Some(remove_id.clone()); cx.notify();

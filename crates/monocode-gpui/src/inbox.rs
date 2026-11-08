@@ -141,6 +141,17 @@ impl Focusable for Inbox {
 }
 
 impl Inbox {
+    /// Marks a provider connected, so tests reach the connected toolbar.
+    #[cfg(test)]
+    pub(crate) fn connect_for_test(&mut self, provider: &str, cx: &mut Context<Self>) {
+        self.snapshot
+            .connections
+            .entry(provider.into())
+            .or_default()
+            .connected = true;
+        self.state.source = provider.into();
+        cx.notify();
+    }
     fn copy_link(&mut self, url: String, cx: &mut Context<Self>) {
         if url.is_empty() {
             return;

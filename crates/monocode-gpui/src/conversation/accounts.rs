@@ -485,6 +485,7 @@ impl Conversation {
                     )
                     .w(px(24.))
                     .px_0()
+                    .tooltip(crate::theme::chrome_tip("Dismiss usage limit notice", None))
                     .child(
                         icon("close", 14.)
                             .text_color(content(0.55))

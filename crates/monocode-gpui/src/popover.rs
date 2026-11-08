@@ -795,7 +795,7 @@ pub(crate) enum MenuStyle {
     Recent,
 }
 impl MenuStyle {
-    fn padding(self) -> f32 {
+    pub(crate) fn padding(self) -> f32 {
         match self {
             Self::Group => 8.,
             Self::Composer => 6.,

@@ -103,6 +103,7 @@ pub(crate) fn tab_button(
         .role(Role::Tab)
         .aria_label(label.text)
         .aria_selected(selected)
+        .when(open < 0.5, |d| d.tooltip(chrome_tip(label.text, None)))
         .group(id)
         .cursor_pointer()
         .px(px(6. + 2. * open))

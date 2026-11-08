@@ -220,6 +220,7 @@ pub(super) fn bar_button(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
+        .tooltip(crate::theme::chrome_tip(label, None))
         .cursor_pointer()
         .size(px(24.))
         .flex_shrink_0()

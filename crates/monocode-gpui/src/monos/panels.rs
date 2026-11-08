@@ -829,6 +829,7 @@ impl LookEditor {
                                     .id("settings-custom-color")
                                     .role(Role::Button)
                                     .aria_label("Custom color")
+                                    .tooltip(crate::theme::chrome_tip("Custom color", None))
                                     .size(px(36.))
                                     .flex()
                                     .items_center()

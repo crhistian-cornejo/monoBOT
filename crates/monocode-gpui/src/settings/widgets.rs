@@ -142,6 +142,17 @@ pub(crate) fn secondary_button(
     })
 }
 
+/// A `secondary_button` that shows only an icon: its label becomes the tip.
+pub(crate) fn secondary_icon_button(
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    danger: bool,
+    disabled: bool,
+) -> Stateful<Div> {
+    let label = label.into();
+    secondary_button(id, label.clone(), danger, disabled).tooltip(chrome_tip(label, None))
+}
+
 fn button_base(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
     let label = label.into();
     div()
@@ -172,10 +183,12 @@ pub(super) fn icon_action(
     alpha: f32,
     disabled: bool,
 ) -> Stateful<Div> {
+    let label = label.into();
     div()
         .id(id)
         .role(Role::Button)
-        .aria_label(label.into())
+        .aria_label(label.clone())
+        .tooltip(chrome_tip(label, None))
         .group("settings-icon-action")
         .size(px(side))
         .flex_shrink_0()

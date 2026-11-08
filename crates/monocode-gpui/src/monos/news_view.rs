@@ -450,6 +450,16 @@ impl Monos {
                                 } else {
                                     "Save as note"
                                 })
+                                .tooltip(crate::theme::chrome_tip(
+                                    if note_saved {
+                                        "Saved to Notes"
+                                    } else if note_pending {
+                                        "Saving note…"
+                                    } else {
+                                        "Save as note"
+                                    },
+                                    None,
+                                ))
                                 .size(px(24.))
                                 .flex()
                                 .items_center()

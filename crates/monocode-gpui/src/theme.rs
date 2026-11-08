@@ -582,7 +582,9 @@ impl Render for LabelTooltip {
             cx.try_global::<crate::settings::Preferences>()
                 .and_then(|prefs| crate::settings::command_shortcut(prefs, command))
         });
+        let label = self.label.clone();
         div()
+            .debug_selector(|| "chrome-tooltip".into())
             .px_2()
             .py_1()
             .rounded_md()
@@ -596,7 +598,12 @@ impl Render for LabelTooltip {
             .items_center()
             .gap_1p5()
             .whitespace_nowrap()
-            .child(div().text_color(content(1.)).child(self.label.clone()))
+            .child(
+                div()
+                    .debug_selector(move || format!("tooltip:{label}"))
+                    .text_color(content(1.))
+                    .child(self.label.clone()),
+            )
             .when_some(keys, |d, keys| {
                 d.child(div().text_color(content(0.55)).child(keys))
             })
@@ -694,6 +701,7 @@ fn chrome_button(
 ) -> Stateful<Div> {
     div()
         .id(id)
+        .debug_selector(move || id.into())
         .role(Role::Button)
         .aria_label(label)
         .group("chrome-button")
