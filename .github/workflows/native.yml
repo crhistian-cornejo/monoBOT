@@ -10,6 +10,7 @@ on:
       - 'crates/monocode-gpui/**'
       - 'crates/mobile-link/**'
       - 'host/**'
+      - 'deploy/cloudflare-mail/**'
       - 'vendor/gpui-pre*/**'
       - 'xtask/**'
       - 'scripts/generators/**'
@@ -82,3 +83,20 @@ jobs:
           cache-dependency-path: host/pnpm-lock.yaml
       - run: pnpm --dir host install --frozen-lockfile
       - run: pnpm --dir host test
+
+  mail-worker:
+    name: Mail Worker (Rust → wasm)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: deploy/cloudflare-mail
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets -- -D warnings
+      - run: cargo clippy --locked --target wasm32-unknown-unknown -- -D warnings
+      - run: cargo test --locked
