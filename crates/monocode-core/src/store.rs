@@ -494,6 +494,26 @@ impl Store {
         let value = serde_json::to_string(summary).map_err(|e| e.to_string())?;
         self.save_setting(&format!("orchestration:{lead}"), &value)
     }
+    /// Every lead's saved control run, for resuming after a restart.
+    pub fn orchestration_runs(
+        &self,
+    ) -> Result<std::collections::HashMap<i64, crate::orchestration::control::Run>, String> {
+        Ok(self
+            .settings_with_prefix("orchestration-run:")?
+            .into_iter()
+            .filter_map(|(lead, value)| Some((lead, serde_json::from_str(&value).ok()?)))
+            .collect())
+    }
+    pub fn save_orchestration_run(
+        &self,
+        run: &crate::orchestration::control::Run,
+    ) -> Result<(), String> {
+        let value = serde_json::to_string(run).map_err(|e| e.to_string())?;
+        self.save_setting(
+            &crate::orchestration::control::setting_key(run.lead),
+            &value,
+        )
+    }
     /// `prefix<session id>` settings, by session id.
     fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(i64, String)>, String> {
         if self.shared.is_some() {
@@ -1047,7 +1067,7 @@ impl Store {
         tx.execute("DELETE FROM native_reminders WHERE session_id=?1", [id])
             .map_err(|e| e.to_string())?;
         tx.execute(
-            "DELETE FROM native_settings WHERE key IN (?1,?2,?3,?5,?6,?7,?8) OR key LIKE ?4",
+            "DELETE FROM native_settings WHERE key IN (?1,?2,?3,?5,?6,?7,?8,?9) OR key LIKE ?4",
             params![
                 format!("agent:{id}"),
                 format!("context:{id}"),
@@ -1056,7 +1076,8 @@ impl Store {
                 format!("started-by:{id}"),
                 format!("orchestration:{id}"),
                 format!("inbox-ask:{id}"),
-                format!("automation:{id}")
+                format!("automation:{id}"),
+                format!("orchestration-run:{id}")
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -1303,15 +1324,23 @@ mod tests {
             live: true,
         };
         store.save_orchestration_summary(lead, &summary).unwrap();
+        let run = crate::orchestration::control::Run {
+            lead,
+            status: crate::orchestration::control::RunStatus::Paused,
+            ..Default::default()
+        };
+        store.save_orchestration_run(&run).unwrap();
         drop(store);
         let mut store = Store::open(&path).unwrap();
         assert_eq!(store.started_links().unwrap()[&child], lead);
         assert_eq!(store.orchestration_summaries().unwrap()[&lead], summary);
+        assert_eq!(store.orchestration_runs().unwrap()[&lead], run);
         assert_eq!(summary.tasks[0].label(&summary, false), "Working");
         store.delete(child).unwrap();
         store.delete(lead).unwrap();
         assert!(store.started_links().unwrap().is_empty());
         assert!(store.orchestration_summaries().unwrap().is_empty());
+        assert!(store.orchestration_runs().unwrap().is_empty());
     }
     #[test]
     fn pins_links_groups_and_reminders_survive_restart_and_delete_clears_them() {
