@@ -3486,7 +3486,7 @@ impl Conversation {
 
 /// For profiling without clicking: with `MONOCODE_PERF_PROMPT=<text>`, the
 /// first chat created switches to Claude and sends that text once, a few
-/// seconds after launch. scripts/perf/frame-run.sh sets it. It only runs
+/// seconds after launch. `cargo xtask perf frame-run` sets it. It only runs
 /// while `MONOCODE_CLAUDE_BINARY` replaces `claude`, so it never reaches a
 /// real provider.
 fn perf_prompt(cx: &mut Context<Conversation>) {

@@ -12,9 +12,8 @@ feed build the native app.
 | `crates/monocode-core/` | Provider transports, persistence, accounts, Git/files, remote connections and shared services |
 | `crates/monocode-gpui/` | Native shell, composer, transcript, editor, settings and platform UI |
 | `Cargo.toml` (root) | Cargo workspace for every crate, profiles and dependency patches |
-| `scripts/dev-native.mjs` | Development build and manual restart runner (`bun run dev`) |
-| `scripts/build-native.mjs` | Optimized build and macOS packaging (`bun run build`) |
-| `scripts/native-editor/`, `scripts/native-settings/` | Generators for embedded JavaScript assets |
+| `xtask/` | `cargo xtask`: development runner with manual restart (`dev`), optimized build and macOS packaging (`build`), installers, update signing |
+| `scripts/generators/native-editor/`, `scripts/generators/native-settings/` | Generators for embedded JavaScript assets |
 | `vendor/gpui-pre*/` | Pinned framework and platform patches |
 
 `monocode-core` has no Tauri or GPUI dependency. Keep provider and storage
@@ -35,7 +34,7 @@ preserve the reader's position. Cancellation must remain responsive under load.
 
 The editor embeds generated analysis and formatting bundles. After changing their
 source services or dependencies, run `pnpm install` and `pnpm build` inside
-`scripts/native-editor/` (its sources live in that folder). Generated bundles and their license notices belong
+`scripts/generators/native-editor/` (its sources live in that folder). Generated bundles and their license notices belong
 in the repository.
 
 ## Framework patches

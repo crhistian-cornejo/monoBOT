@@ -11,10 +11,11 @@ on:
       - 'crates/mobile-link/**'
       - 'host/**'
       - 'vendor/gpui-pre*/**'
-      - 'scripts/*native*'
-      - 'scripts/native-editor/**'
-      - 'scripts/native-settings/**'
-      - 'package.json'
+      - 'xtask/**'
+      - 'scripts/generators/**'
+      - '.cargo/config.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
       - '.github/workflows/native.yml'
       - '.github/workflows/native-release.yml'
 
@@ -35,9 +36,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -46,7 +44,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y libdbus-1-dev pkg-config
-      - run: npm run test:scripts
+      # Build, packaging and release tooling (dev runner, bundles, packages,
+      # update signing, dependency guards).
+      - run: cargo test --locked -p xtask
       - run: cargo clippy --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core --all-targets --profile native-dev -- -D warnings
       - run: cargo test --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core --profile native-dev
 
@@ -58,10 +58,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: cargo fmt --manifest-path crates/monocode-gpui/Cargo.toml --all --check
-      - run: cargo clippy --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core -p monocode-gpui --all-targets --profile native-dev -- -D warnings
-      - run: cargo test --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core --profile native-dev
-      - run: cargo test --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-gpui --profile native-dev -- --test-threads=1
+      # fmt --check, clippy -D warnings (core, GPUI, xtask) and the xtask tests.
+      - run: cargo xtask check
+      - run: cargo xtask test
       - run: cargo build --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-gpui --profile native-dev
 
   host:

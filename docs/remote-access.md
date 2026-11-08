@@ -112,11 +112,11 @@ The headless host runs the reused TypeScript adapters with a Node process backen
 pnpm --dir host install
 pnpm --dir host typecheck   # tsc --noEmit over the host, its sources and tests
 pnpm --dir host test        # typecheck, build, vitest and the runtime download tests
-bun run check               # desktop: fmt, clippy and script tests
+cargo xtask check           # desktop: fmt, clippy and xtask tests
 ```
 
 Host tests use fake provider executables and temporary loopback servers. They do not contact paid models. They cover the Codex and Claude transports, Pi/OMP RPC, ACP providers, OpenCode HTTP and event streaming, cross-client reattachment, duplicate sends, approval races, interruption recovery, device revocation, path checks, and detached host lifecycle.
 
-For the real OpenSSH transport and native askpass smoke test on Linux/macOS, build with `pnpm --dir host package` and `cargo build -p monocode-gpui`, then run `python3 scripts/test-remote-ssh.py`. It uses a disposable loopback sshd, temporary keys and known-hosts file, and an isolated packaged host. It leaves personal SSH configuration, provider credentials, and OS services untouched.
+For the real OpenSSH transport and native askpass smoke test on Linux/macOS, build with `pnpm --dir host package` and `cargo build -p monocode-gpui`, then run `cargo xtask ssh-smoke`. It uses a disposable loopback sshd, temporary keys and known-hosts file, and an isolated packaged host. It leaves personal SSH configuration, provider credentials, and OS services untouched.
 
 Host CI runs on Windows, macOS, and Linux. Windows-specific tests cover ACL inheritance, Task Scheduler definitions, bootstrap parsing/installation, and provider child-process cleanup. They use temporary data and mocked task registration so normal test runs do not install or replace a real user's background task. Full SSH-to-Task-Scheduler setup must also be validated on a signed-in Windows host before a supported release.

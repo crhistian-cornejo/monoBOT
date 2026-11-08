@@ -75,5 +75,4 @@ keyring = { version = "3.6", default-features = false, features = ["linux-native
 libc = "0.2"
 
 [dev-dependencies]
-minisign = { version = "0.10", default-features = false }
 tempfile = "3"

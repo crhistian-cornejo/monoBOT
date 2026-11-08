@@ -696,12 +696,12 @@ mod tests {
         );
         assert!(newer.lock().unwrap().failure.is_none());
     }
-    // scripts/test-remote-ssh.py creates an isolated sshd, host and keypair.
+    // `cargo xtask ssh-smoke` creates an isolated sshd, host and keypair.
     // This test uses the production tunnel lifecycle and shell transport.
     #[test]
     #[ignore = "requires the isolated loopback SSH fixture"]
     fn loopback_transport_preserves_host_and_reconnects() {
-        let required = |key| std::env::var(key).expect("Run scripts/test-remote-ssh.py");
+        let required = |key| std::env::var(key).expect("Run cargo xtask ssh-smoke");
         let target = SshTarget {
             target: required("MONOCODE_TEST_SSH_TARGET"),
             port: Some(required("MONOCODE_TEST_SSH_PORT").parse().unwrap()),

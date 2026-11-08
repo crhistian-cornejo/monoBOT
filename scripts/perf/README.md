@@ -9,25 +9,29 @@ agent, no network, the same text at the same pace every run.
   `REPLAY_CHARS` change its length and pace. The test
   `provider::process_tests::perf_replay_streams_a_whole_claude_turn` keeps it in
   step with the parser.
-- `stream-profile.sh [binary] [seconds]` opens a separate Monocode window on
-  throwaway data with the replay as Claude, waits for you to send a message,
-  then profiles that window with Monocode Performance's `--profile`.
+- `cargo xtask perf stream-profile [binary] [seconds]` opens a separate
+  MonoBOT window on throwaway data with the replay as Claude, waits for you to
+  send a message, then profiles that window with Monocode Performance's
+  `--profile` (`MONOCODE_PROFILER` points at another profiler).
 
 ```sh
-scripts/perf/stream-profile.sh                                   # the installed app
-scripts/perf/stream-profile.sh target/release/monocode-gpui 30   # a local build
+cargo xtask perf stream-profile                                   # the installed app
+cargo xtask perf stream-profile target/release/monocode-gpui 30   # a local build
 ```
 
-- `frame-run.sh [binary] [seconds]` does the same hands-off:
+- `cargo xtask perf frame-run [binary] [seconds]` does the same hands-off:
   `MONOCODE_PERF_PROMPT` makes the first chat switch to the replayed Claude
   and send a message by itself, and `MONOCODE_FRAME_LOG` writes one line per
   second. It prints the log and its averages. `PROFILE=1` also samples stacks
-  over the same window.
+  over the same window. `MODE=scroll` scrolls a finished reply instead.
 
 ```sh
-scripts/perf/frame-run.sh target/release/monocode-gpui 20
-PROFILE=1 scripts/perf/frame-run.sh target/release/monocode-gpui 15
+cargo xtask perf frame-run target/release/monocode-gpui 20
+PROFILE=1 cargo xtask perf frame-run target/release/monocode-gpui 15
 ```
+
+The replay stays a Python script because the app runs it as its `claude`
+executable; the commands that drive it live in `xtask/src/perf.rs`.
 
 A frame log line reads:
 

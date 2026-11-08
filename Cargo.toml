@@ -8,6 +8,7 @@ members = [
   "crates/http",
   "crates/mobile-link",
   "crates/voice",
+  "xtask",
 ]
 exclude = [
   "vendor/gpui-pre",
@@ -52,3 +53,14 @@ opt-level = 1
 
 [profile.native-dev.package.monocode-gpui]
 opt-level = 1
+
+# xtask opens the update signing key with scrypt, which takes seconds per key
+# without optimizations.
+[profile.dev.package.scrypt]
+opt-level = 3
+
+[profile.dev.package.salsa20]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3

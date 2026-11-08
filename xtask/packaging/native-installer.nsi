@@ -11,6 +11,7 @@ VIProductVersion "@WINDOWS_VERSION@"
 VIAddVersionKey "ProductName" "MonoBOT Native"
 VIAddVersionKey "FileDescription" "MonoBOT Native preview installer"
 VIAddVersionKey "FileVersion" "@VERSION@"
+VIAddVersionKey "CompanyName" "@PUBLISHER@"
 !define MUI_ICON "@ICON@"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
@@ -54,6 +55,7 @@ Section "MonoBOT Native"
   WriteRegStr HKCU "Software\MonoBOT Native" "InstallDir" "$INSTDIR"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "DisplayName" "MonoBOT Native"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "DisplayVersion" "@VERSION@"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "Publisher" "@PUBLISHER@"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   CreateShortcut "$SMPROGRAMS\MonoBOT Native.lnk" "$INSTDIR\monocode-gpui.exe"
   CreateShortcut "$DESKTOP\MonoBOT Native.lnk" "$INSTDIR\monocode-gpui.exe"

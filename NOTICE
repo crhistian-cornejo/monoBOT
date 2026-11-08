@@ -58,7 +58,7 @@ notices are included alongside the assets in crates/monocode-gpui/assets.
 The native editor's analysis and formatting bundles reuse CodeMirror, Lezer,
 the Replit Svelte grammar and Prettier under their MIT licenses. Package versions and complete license notices are included in
 crates/monocode-gpui/assets/native-editor.LICENSE.txt. The bundle is generated
-from scripts/native-editor and the retained React editor language, syntax,
+from scripts/generators/native-editor and the retained React editor language, syntax,
 lint, typing and Git hunk implementations. Prettier dependency notices are
 included alongside the package licenses.
 

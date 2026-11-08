@@ -25,8 +25,9 @@ No extra API token fees or middleman servers — it talks directly to your local
 
 ## Prerequisites
 
-- [Rust](https://rustup.rs/) (stable)
-- [Bun](https://bun.sh/)
+- [Rust](https://rustup.rs/) (stable). The desktop app needs nothing else: its
+  build, packaging and release tooling is a Rust crate (`cargo xtask`).
+- [pnpm](https://pnpm.io/) and Node.js for the mobile app only.
 - macOS with Xcode (for macOS native builds and iOS simulator) or Linux / Windows with standard build tools.
 - At least one installed and authenticated agent CLI (e.g. `claude`, `codex`, `agy`).
 
@@ -34,19 +35,20 @@ No extra API token fees or middleman servers — it talks directly to your local
 
 ## Quick Start
 
-All scripts run via **Bun**:
-
 ### Desktop App (GPUI)
 
 ```bash
 # Launch native app in development mode
-bun run dev
+cargo xtask dev
 
 # Open directly into a specific project folder
-bun run dev -- --cwd /path/to/project
+cargo xtask dev --cwd /path/to/project
 
 # Build release bundle
-bun run build
+cargo xtask build
+
+# Every desktop command
+cargo xtask help
 ```
 
 > In development mode, press `r` + `Enter` in the terminal to rebuild and reload the application.
@@ -55,14 +57,14 @@ bun run build
 
 ```bash
 # Install mobile dependencies
-bun run mobile:install
+pnpm --dir mobile install
 
 # Start Metro bundler
-bun run mobile:dev
+pnpm --dir mobile start
 
 # Build native Rust transport and launch simulator
-bun run mobile:ios       # iOS Simulator
-bun run mobile:android   # Android Emulator
+pnpm --dir mobile ios       # iOS Simulator
+pnpm --dir mobile android   # Android Emulator
 ```
 
 ---
@@ -81,7 +83,8 @@ bun run mobile:android   # Android Emulator
 │   └── http/                # Shared HTTP and TLS certificate verification
 ├── mobile/                  # React Native / Expo mobile companion app
 ├── vendor/                  # Pinned and patched GPUI framework crates
-├── scripts/                 # Build, packaging, and developer automation scripts
+├── xtask/                   # `cargo xtask`: dev runner, builds, packaging, releases
+├── scripts/                 # JavaScript generators for embedded bundles, perf replay
 └── docs/native/             # Architecture, porting notes, and native guides
 ```
 
