@@ -296,3 +296,122 @@ fn subsessions_normalize_away_when_everything_is_inherited() {
     };
     assert_eq!(orphan.normalized(), None);
 }
+
+fn group_wearing(mascot: &str, color: u32) -> Mono {
+    Mono {
+        id: new_id(),
+        mascot: mascot.into(),
+        color,
+        kind: Some("group".into()),
+        group: Some(groups::Group::default()),
+        ..Default::default()
+    }
+}
+
+#[test]
+fn a_new_group_looks_random_and_unlike_every_other_group() {
+    use rand::SeedableRng;
+    let mut roster = Roster::default();
+    roster.monos.push(group_wearing(MASCOTS[0], COLORS_MONO[0]));
+    roster.monos.push(group_wearing(MASCOTS[3], COLORS_MONO[5]));
+    let mut seen = HashSet::new();
+    for seed in 0..64 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        let look = roster.next_group_look(&mut rng);
+        assert!(MASCOTS.contains(&look.0.as_str()));
+        assert!(COLORS_MONO.contains(&look.1));
+        assert!(
+            !roster
+                .monos
+                .iter()
+                .any(|m| m.is_group() && m.mascot == look.0 && m.color == look.1),
+            "{look:?} is already a group's look"
+        );
+        // While some are free, neither half is worn by another Mono.
+        assert!(!roster.monos.iter().any(|m| m.mascot == look.0));
+        assert!(!roster.monos.iter().any(|m| m.color == look.1));
+        seen.insert(look);
+    }
+    assert!(seen.len() > 8, "the look is chosen at random: {seen:?}");
+    let mut a = rand::rngs::StdRng::seed_from_u64(7);
+    let mut b = rand::rngs::StdRng::seed_from_u64(7);
+    assert_eq!(
+        roster.next_group_look(&mut a),
+        roster.next_group_look(&mut b),
+        "the same seed gives the same look"
+    );
+}
+
+#[test]
+fn groups_created_one_after_another_never_share_a_look() {
+    let root = tempfile::tempdir().unwrap();
+    let mut roster = Roster::default();
+    roster.create(Vec::new());
+    let total = MASCOTS.len() * COLORS_MONO.len();
+    for ix in 0..total {
+        roster.create_group(
+            root.path(),
+            &format!("Group {ix}"),
+            groups::Group::default(),
+            None,
+        );
+    }
+    let looks: HashSet<(String, u32)> = roster
+        .monos
+        .iter()
+        .filter(|m| m.is_group())
+        .map(|m| (m.mascot.clone(), m.color))
+        .collect();
+    assert_eq!(
+        looks.len(),
+        total,
+        "every pair is used once before any repeats"
+    );
+}
+
+#[test]
+fn group_looks_prefer_mascots_and_colors_no_mono_wears() {
+    use rand::SeedableRng;
+    let mut roster = Roster::default();
+    // Every mascot but the last and every color but the last are worn.
+    for (ix, mascot) in MASCOTS.iter().enumerate().take(MASCOTS.len() - 1) {
+        roster.monos.push(Mono {
+            id: new_id(),
+            mascot: (*mascot).into(),
+            color: COLORS_MONO[ix % (COLORS_MONO.len() - 1)],
+            ..Default::default()
+        });
+    }
+    let spare = (
+        MASCOTS[MASCOTS.len() - 1].to_string(),
+        COLORS_MONO[COLORS_MONO.len() - 1],
+    );
+    for seed in 0..16 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        assert_eq!(roster.next_group_look(&mut rng), spare);
+    }
+}
+
+#[test]
+fn group_looks_repeat_the_least_worn_once_every_pair_is_taken() {
+    use rand::SeedableRng;
+    let mut roster = Roster::default();
+    // Every pair is a group's, and all but one are worn twice.
+    let (spare_mascot, spare_color) = (MASCOTS[2], COLORS_MONO[6]);
+    for round in 0..2 {
+        for mascot in MASCOTS {
+            for color in COLORS_MONO {
+                if round == 0 || (mascot, color) != (spare_mascot, spare_color) {
+                    roster.monos.push(group_wearing(mascot, color));
+                }
+            }
+        }
+    }
+    for seed in 0..16 {
+        let mut rng = rand::rngs::StdRng::seed_from_u64(seed);
+        assert_eq!(
+            roster.next_group_look(&mut rng),
+            (spare_mascot.to_string(), spare_color)
+        );
+    }
+}

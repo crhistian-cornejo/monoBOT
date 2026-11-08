@@ -448,6 +448,9 @@ struct LookChanged {
 struct LookSubmitted;
 struct LookEditor {
     mono: Mono,
+    /// A group's members, lead first: shown in place of the mascot and
+    /// color pickers, since a group wears its members' looks.
+    members: Vec<crate::composer_completion::MentionPerson>,
     name: Entity<Input>,
     color: Entity<Input>,
     settings: bool,
@@ -459,9 +462,18 @@ struct LookEditor {
 impl EventEmitter<LookChanged> for LookEditor {}
 impl EventEmitter<LookSubmitted> for LookEditor {}
 impl LookEditor {
-    fn new(mono: Mono, cx: &mut Context<Self>) -> Self {
+    fn new(
+        mono: Mono,
+        members: Vec<crate::composer_completion::MentionPerson>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let label = if mono.is_group() {
+            "Group name"
+        } else {
+            "Mono name"
+        };
         let name = cx.new(|cx| {
-            let mut f = Input::field("Mono name", mono.label(), content(0.45), cx);
+            let mut f = Input::field(label, mono.label(), content(0.45), cx);
             f.set_text(mono.name.clone(), cx);
             f
         });
@@ -511,6 +523,7 @@ impl LookEditor {
         ];
         Self {
             mono,
+            members,
             name,
             color,
             settings: false,
@@ -553,21 +566,28 @@ impl gpui::Render for LookEditor {
                         .child(dot),
                 )
         };
+        let name = div()
+            .debug_selector(|| "mono-options-name".into())
+            .mb_2()
+            .px_2p5()
+            .py_1p5()
+            .rounded_lg()
+            .border_1()
+            .border_color(content(0.1))
+            .bg(content(0.05))
+            .text_size(px(13.))
+            .child(self.name.clone());
+        // A group wears its members' looks: its menu lists them instead.
+        if self.mono.is_group() {
+            return div()
+                .w_full()
+                .child(name)
+                .child(self.group_members())
+                .into_any_element();
+        }
         div()
             .w_full()
-            .child(
-                div()
-                    .debug_selector(|| "mono-options-name".into())
-                    .mb_2()
-                    .px_2p5()
-                    .py_1p5()
-                    .rounded_lg()
-                    .border_1()
-                    .border_color(content(0.1))
-                    .bg(content(0.05))
-                    .text_size(px(13.))
-                    .child(self.name.clone()),
-            )
+            .child(name)
             .child(
                 div()
                     .mb_2()
@@ -705,6 +725,82 @@ impl gpui::Render for LookEditor {
     }
 }
 impl LookEditor {
+    /// A group's members in its menu, lead first, each in its own mascot
+    /// and color: who the group is, where a Mono shows its look.
+    fn group_members(&self) -> AnyElement {
+        div()
+            .id("mono-options-members")
+            .debug_selector(|| "mono-options-members".into())
+            .role(Role::List)
+            .aria_label("Members")
+            .mb_2()
+            .px_1()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(
+                div()
+                    .px_1()
+                    .text_size(px(11.))
+                    .text_color(content(0.45))
+                    .child(format!("Members · {}", self.members.len())),
+            )
+            .child(if self.members.is_empty() {
+                div()
+                    .px_1()
+                    .text_size(px(12.))
+                    .text_color(content(0.55))
+                    .child("No members yet")
+                    .into_any_element()
+            } else {
+                div()
+                    .id("mono-options-members-list")
+                    .max_h(px(120.))
+                    .overflow_y_scroll()
+                    .flex()
+                    .flex_wrap()
+                    .gap_1()
+                    .children(self.members.iter().map(|member| {
+                        let id = member.id.clone();
+                        let tip = match &member.note {
+                            Some(note) => format!("{} · {note}", member.name),
+                            None => member.name.clone(),
+                        };
+                        div()
+                            .id(SharedString::from(format!("mono-options-member-{id}")))
+                            .debug_selector(move || format!("mono-options-member-{id}"))
+                            .role(Role::ListItem)
+                            .aria_label(SharedString::from(tip.clone()))
+                            .tooltip(text_tip(tip))
+                            .max_w(px(124.))
+                            .h(px(24.))
+                            .pl_1()
+                            .pr_2()
+                            .rounded_md()
+                            .bg(content(0.05))
+                            .flex()
+                            .items_center()
+                            .gap_1p5()
+                            .child(avatar::avatar(
+                                &member.mascot,
+                                member.color,
+                                "idle",
+                                16.,
+                                true,
+                            ))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .text_color(content(0.85))
+                                    .child(member.name.clone()),
+                            )
+                    }))
+                    .into_any_element()
+            })
+            .into_any_element()
+    }
     fn settings_controls(&self, cx: &mut Context<Self>) -> AnyElement {
         const COLOR_NAMES: [&str; 9] = [
             "Blue", "Coral", "Yellow", "Green", "Pink", "Purple", "Teal", "Orange", "Indigo",
@@ -884,7 +980,7 @@ impl Monos {
             return;
         };
         let editor = cx.new(|cx| {
-            let mut editor = LookEditor::new(mono, cx);
+            let mut editor = LookEditor::new(mono, Vec::new(), cx);
             editor.settings = true;
             editor
         });
@@ -2539,7 +2635,12 @@ impl Monos {
         let Some(mono) = self.roster.get(id).cloned() else {
             return;
         };
-        let editor = cx.new(|cx| LookEditor::new(mono.clone(), cx));
+        let members = if mono.is_group() {
+            self.group_mention_people(&mono)
+        } else {
+            Vec::new()
+        };
+        let editor = cx.new(|cx| LookEditor::new(mono.clone(), members, cx));
         let focus = editor.read(cx).name.focus_handle(cx);
         let changed = cx.subscribe(&editor, |this, _, event: &LookChanged, cx| {
             if let Some(mono) = this.roster.get_mut(&event.mono.id) {
@@ -2571,10 +2672,17 @@ impl Monos {
             MenuAction::new("background", "Background image")
                 .icon("image-add")
                 .into(),
-            MenuAction::new("delete", "Delete mono…")
-                .icon("trash")
-                .danger()
-                .into(),
+            MenuAction::new(
+                "delete",
+                if mono.is_group() {
+                    "Delete group…"
+                } else {
+                    "Delete mono…"
+                },
+            )
+            .icon("trash")
+            .danger()
+            .into(),
         ]);
         let menu = cx.new(|cx| {
             Menu::new("Mono options", items, window, cx)

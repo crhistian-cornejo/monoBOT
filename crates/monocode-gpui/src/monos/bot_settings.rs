@@ -89,7 +89,7 @@ fn flip(list: &mut Vec<String>, item: &str, on: bool) {
 }
 
 /// The path as the rail writes it: the home folder as `~`.
-fn pretty(path: &str) -> String {
+pub(super) fn pretty(path: &str) -> String {
     monocode_core::accounts::home()
         .and_then(|home| {
             let home = home.to_string_lossy().into_owned();
