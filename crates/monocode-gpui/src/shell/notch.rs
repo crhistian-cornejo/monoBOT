@@ -66,10 +66,14 @@ impl Shell {
         let Some(notch) = self.notch.clone() else {
             return;
         };
-        let activities = self
+        let mut activities: Vec<Activity> = self
             .live_agents(cx)
             .into_iter()
             .map(|agent| Activity {
+                steps: self
+                    .sessions
+                    .get(&agent.id)
+                    .and_then(|view| view.read(cx).transcript.read(cx).live_steps()),
                 id: agent.id,
                 provider: agent.provider,
                 title: agent.title,
@@ -77,8 +81,39 @@ impl Shell {
                 started_at: agent.started_at,
                 needs_you: agent.needs_approval,
                 done: agent.done,
+                agent: None,
             })
             .collect();
+        // The agents' own chats (Monos, their habits) work outside the
+        // sidebar; the notch shows them too, by the agent's name.
+        if let Some(monos) = &self.monos {
+            let monos = monos.read(cx);
+            for view in monos.all_notification_chats(cx) {
+                let chat = view.read(cx);
+                let id = chat.summary.id;
+                if !chat.responding() || activities.iter().any(|a| a.id == id) {
+                    continue;
+                }
+                let transcript = chat.transcript.read(cx);
+                let (tool, started_at, _) = transcript.live_turn(&chat.summary.cwd);
+                let needs_you = chat.needs_approval();
+                activities.push(Activity {
+                    id,
+                    provider: chat.summary.provider.clone(),
+                    title: chat.display_title().to_string(),
+                    step: if needs_you {
+                        "Need approval".into()
+                    } else {
+                        tool.unwrap_or_else(|| "Working".into())
+                    },
+                    started_at,
+                    needs_you,
+                    done: false,
+                    agent: monos.notification_mono(id).map(|mono| mono.label()),
+                    steps: transcript.live_steps(),
+                });
+            }
+        }
         let mut asks = Vec::new();
         for view in self.notification_chats(cx) {
             let chat = view.read(cx);
@@ -145,7 +180,12 @@ impl Shell {
     fn notch_event(&mut self, event: NotchEvent, cx: &mut Context<Self>) {
         use crate::notifications::delivery::Target;
         match event {
-            NotchEvent::OpenSession(id) => self.open_notice_target(Target::Session(id), cx),
+            NotchEvent::OpenSession(id) => {
+                // The notch is another app's neighbor: bring MonoBOT forward
+                // with the chat, as a notification's click does.
+                cx.activate(true);
+                self.open_notice_target(Target::Session(id), cx)
+            }
             NotchEvent::Decide {
                 session,
                 request,
@@ -159,6 +199,7 @@ impl Shell {
                 self.sync_notch(cx);
             }
             NotchEvent::NewChat => {
+                cx.activate(true);
                 cx.spawn(async move |this, cx| {
                     let _ =
                         this.update_in(cx, |this, window, cx| this.show_quick_composer(window, cx));
@@ -166,6 +207,7 @@ impl Shell {
                 .detach();
             }
             NotchEvent::Ask(prompt) => {
+                cx.activate(true);
                 cx.spawn(async move |this, cx| {
                     let _ = this.update_in(cx, |this, window, cx| {
                         let mut launch = this.quick_choice(cx);

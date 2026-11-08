@@ -87,6 +87,8 @@ fn working(id: i64) -> Activity {
         started_at: Some(0),
         needs_you: false,
         done: false,
+        agent: None,
+        steps: None,
     }
 }
 
@@ -102,7 +104,7 @@ fn approval() -> Ask {
 }
 
 #[gpui::test]
-fn the_quiet_notch_is_the_camera_and_work_grows_ears(cx: &mut TestAppContext) {
+fn the_quiet_notch_is_the_camera_and_work_grows_wings(cx: &mut TestAppContext) {
     let opened = open_notch(Look::default(), cx);
     let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
     leave(visual);
@@ -123,7 +125,7 @@ fn the_quiet_notch_is_the_camera_and_work_grows_ears(cx: &mut TestAppContext) {
     leave(visual);
     assert_eq!(
         size(opened.window, visual),
-        (186. + 2. * (model::EAR + SHOULDER), 37.)
+        (186. + 2. * (160. + SHOULDER), 37.)
     );
     // Under the pointer it swells a little, to say it opens.
     let notch = visual.debug_bounds("notch").unwrap();
@@ -131,7 +133,7 @@ fn the_quiet_notch_is_the_camera_and_work_grows_ears(cx: &mut TestAppContext) {
     visual.run_until_parked();
     assert_eq!(
         size(opened.window, visual),
-        (186. + 2. * (model::EAR + SHOULDER) + PEEK, 40.)
+        (186. + 2. * (160. + SHOULDER) + PEEK, 40.)
     );
 }
 
@@ -384,4 +386,30 @@ fn the_widgets_page_shows_hides_and_widens_each_widget(cx: &mut TestAppContext) 
         .unwrap();
     assert!(!look.edge);
     assert_eq!(look.width, "wide");
+}
+
+#[gpui::test]
+fn several_agents_spread_the_wings_with_the_leads_progress(cx: &mut TestAppContext) {
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let mut lead = working(1);
+    lead.steps = Some((2, 6));
+    let feed = Feed {
+        activities: vec![lead, working(2), working(3), working(4)],
+        ..Feed::default()
+    };
+    let rest = model::rest(&feed);
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.update_feed(feed, cx))
+        .unwrap();
+    leave(visual);
+    // Three faces and "+1" on the left; the lead's words and 2/6 on the right,
+    // the camera kept in the middle by the wider wing.
+    let (left, right) = rest.wings(true);
+    assert_eq!(rest.more(), 1);
+    assert_eq!(
+        size(opened.window, visual),
+        (186. + 2. * left.max(right) as f32 + 2. * SHOULDER, 37.)
+    );
 }

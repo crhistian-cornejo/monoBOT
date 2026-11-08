@@ -47,6 +47,10 @@ const CATALOG_HEIGHT: f32 = 26.;
 /// The content fades in after the shape starts to move.
 const FADE_DELAY: f32 = 0.04;
 const FADE: f32 = 0.12;
+/// The beat between widgets coming in.
+const STAGGER: f32 = 0.03;
+/// How far a new page rises as it fades in.
+const RISE: f32 = 6.;
 
 /// How the island springs: quicker than it settles, a little lively when it
 /// opens and calm when it folds.
@@ -203,6 +207,10 @@ pub(crate) struct Notch {
     placed: Option<Frame>,
     /// When the shown content last changed, for its fade.
     appeared: Option<(Shape, Tab, Instant)>,
+    /// What was drawn last, and what stays drawn while the island folds
+    /// away from it, fading out.
+    drawn: Option<(Shape, Tab, Frame)>,
+    leaving: Option<(Shape, Tab, Frame)>,
     /// Tests stand in for the screen.
     pub(crate) screen_override: Option<model::Screen>,
     /// The pointer's comings and goings where GPUI sees no hover.
@@ -329,6 +337,8 @@ impl Notch {
             motion: None,
             placed: None,
             appeared: None,
+            drawn: None,
+            leaving: None,
             screen_override: None,
             _pointer: None,
             responsive: None,
@@ -585,7 +595,8 @@ impl Notch {
         } else if self.notices.current().is_some() {
             Shape::Notice { lines: 2 }
         } else if self.rest.busy() {
-            Shape::Busy
+            let (left, right) = self.rest.wings(self.look.show_count);
+            Shape::Busy { left, right }
         } else {
             Shape::Quiet
         }
@@ -597,7 +608,7 @@ impl Notch {
         let display = self.screen(cx);
         let shape = self.shape();
         let mut frame = model::frame(&self.look, &display.screen, shape);
-        if self.hovered && matches!(shape, Shape::Quiet | Shape::Busy) {
+        if self.hovered && matches!(shape, Shape::Quiet | Shape::Busy { .. }) {
             frame.x -= PEEK / 2.;
             frame.width += PEEK;
             frame.height += 3.;
@@ -686,7 +697,8 @@ impl Notch {
     /// The content's opacity: it fades in just after the shape changes.
     fn fade(&mut self, shape: Shape, window: &mut Window, cx: &App) -> f32 {
         let now = Instant::now();
-        let changed = !matches!(self.appeared, Some((s, t, _)) if s == shape && t == self.tab);
+        let same = |s: Shape| std::mem::discriminant(&s) == std::mem::discriminant(&shape);
+        let changed = !matches!(self.appeared, Some((s, t, _)) if same(s) && t == self.tab);
         if changed {
             let first = self.appeared.is_none();
             self.appeared = Some((
@@ -706,10 +718,22 @@ impl Notch {
             .appeared
             .map_or(1., |(_, _, at)| now.duration_since(at).as_secs_f32());
         let opacity = ((since - FADE_DELAY) / FADE).clamp(0., 1.);
-        if opacity < 1. {
+        // The shelf's widgets come in one after another, a little later.
+        if since < FADE_DELAY + FADE + STAGGER * model::WIDGETS.len() as f32 {
             window.request_animation_frame();
         }
         opacity
+    }
+
+    /// A widget's opacity as the shelf comes in, the `index`th a beat later.
+    pub(crate) fn reveal(&self, index: usize, cx: &App) -> f32 {
+        if cx.reduce_motion() {
+            return 1.;
+        }
+        let since = self
+            .appeared
+            .map_or(1., |(_, _, at)| at.elapsed().as_secs_f32());
+        ((since - FADE_DELAY - STAGGER * index as f32) / FADE).clamp(0., 1.)
     }
 }
 
@@ -890,31 +914,84 @@ pub(crate) fn activity_mark(activity: &model::Activity, cx: &App) -> AnyElement 
 
 impl Notch {
     /// The ears beside the camera, or the bar where there is none.
+    /// The wings beside the camera, or the bar where there is none: on the
+    /// left the work mark and a face per session at work (and "+N"), on the
+    /// right who leads, what it does and how far along its list it is.
     fn ears(&self, camera: Option<model::Camera>, width: f32, cx: &App) -> AnyElement {
         let rest = &self.rest;
-        let count = if self.look.show_count {
-            rest.working.max(rest.asking)
-        } else {
-            0
-        };
+        let mut faces = div().flex().items_center();
+        for (at, provider) in rest.marks.iter().enumerate() {
+            faces = faces.child(
+                div()
+                    .when(at > 0, |face| face.ml(px(-4.)))
+                    .size(px(17.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(black(1.))
+                    .child(provider_glyph(provider, 13.)),
+            );
+        }
         let left = div()
             .flex()
             .items_center()
             .gap(px(6.))
             .child(work_mark("notch-working", rest.asking > 0, cx))
-            .when(count > 0, |left| {
+            .child(faces)
+            .when(self.look.show_count && rest.more() > 0, |left| {
                 left.child(
                     div()
-                        .text_size(px(11.5))
+                        .text_size(px(10.5))
                         .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(ink(0.9))
-                        .child(count.to_string()),
+                        .text_color(ink(0.6))
+                        .child(format!("+{}", rest.more())),
                 )
             });
-        let right = match (&rest.lead, rest.call) {
-            (_, true) => icon("mic-01", 12.).text_color(ink(0.9)).into_any_element(),
-            (Some(provider), _) => provider_glyph(provider, 13.),
-            _ => div().into_any_element(),
+        let right: AnyElement = match (&rest.lead_text, rest.lead_steps) {
+            (Some(text), steps) => {
+                let line = div()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .truncate()
+                            .text_size(px(11.))
+                            .text_color(ink(0.88))
+                            .child(text.clone()),
+                    )
+                    .children(steps.map(|(done, all)| {
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(10.5))
+                            .text_color(ink(0.5))
+                            .child(format!("{done}/{all}"))
+                    }));
+                div()
+                    .min_w_0()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(px(3.))
+                    .child(line)
+                    .children(steps.map(|(done, all)| {
+                        let share = done as f32 / all.max(1) as f32;
+                        div()
+                            .h(px(2.))
+                            .w_full()
+                            .bg(ink(0.12))
+                            .child(div().h_full().w(gpui::relative(share)).bg(accent_color()))
+                    }))
+                    .into_any_element()
+            }
+            (None, _) => match (&rest.lead, rest.call) {
+                (_, true) => icon("mic-01", 12.).text_color(ink(0.9)).into_any_element(),
+                (Some(provider), _) => provider_glyph(provider, 13.),
+                _ => div().into_any_element(),
+            },
         };
         match camera {
             Some(camera) => {
@@ -923,9 +1000,17 @@ impl Notch {
                     .size_full()
                     .flex()
                     .items_center()
-                    .child(div().w(px(ear)).pl(px(12.)).child(left))
-                    .child(div().w(px(camera.width)))
-                    .child(div().w(px(ear)).flex().justify_center().child(right))
+                    .child(div().w(px(ear)).pl(px(12.)).flex().child(left))
+                    .child(div().w(px(camera.width)).flex_shrink_0())
+                    .child(
+                        div()
+                            .w(px(ear))
+                            .min_w_0()
+                            .pl(px(10.))
+                            .pr(px(12.))
+                            .flex()
+                            .child(right),
+                    )
                     .into_any_element()
             }
             None => div()
@@ -933,8 +1018,11 @@ impl Notch {
                 .px(px(12.))
                 .flex()
                 .items_center()
-                .justify_between()
-                .when(rest.busy(), |bar| bar.child(left).child(right))
+                .gap(px(10.))
+                .when(rest.busy(), |bar| {
+                    bar.child(div().flex_shrink_0().child(left))
+                        .child(div().flex_1().min_w_0().flex().child(right))
+                })
                 .into_any_element(),
         }
     }
@@ -1097,12 +1185,18 @@ impl Notch {
     }
 
     /// What the island holds for `shape`, laid out at its resting size.
-    fn content(&mut self, shape: Shape, size: Frame, cx: &mut Context<Self>) -> AnyElement {
+    fn content(
+        &mut self,
+        shape: Shape,
+        tab: Tab,
+        size: Frame,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let camera = self.camera(cx);
         let top = camera.map_or(0., |camera| camera.height);
         match shape {
             Shape::Quiet => div().into_any_element(),
-            Shape::Busy => self.ears(camera, size.width, cx),
+            Shape::Busy { .. } => self.ears(camera, size.width, cx),
             Shape::Notice { .. } => {
                 let notice = self.notices.current().cloned();
                 let ears = self.ears(camera, size.width, cx);
@@ -1116,7 +1210,7 @@ impl Notch {
             }
             Shape::Open { .. } => {
                 let inner = size.width - 2. * model::PANEL_PAD;
-                let page = match self.tab {
+                let page = match tab {
                     Tab::Home => self.shelf_view(size.width, cx),
                     Tab::Agents => self.agents_page(inner, cx),
                     Tab::Chat => self.chat_page(cx),
@@ -1161,8 +1255,30 @@ impl Render for Notch {
         self.keep_responsive();
         let room = self.place(&display, target, window, cx);
         let shape = self.shape();
-        let opacity = self.fade(shape, window, cx);
-        let content = self.content(shape, target, cx);
+        // While the island folds, what it showed stays and fades out with
+        // the first half of the fold, instead of vanishing at once.
+        let folding = self.motion.is_some_and(|motion| {
+            motion.target.width * motion.target.height < motion.from.width * motion.from.height
+        });
+        if !folding {
+            self.leaving = None;
+        } else if self.leaving.is_none() {
+            self.leaving = self.drawn.filter(|(drawn, _, _)| *drawn != shape);
+        }
+        let (drawn_shape, drawn_tab, size, opacity, rise) = match self.leaving {
+            Some((old, tab, size)) => {
+                let span = (size.height - target.height).max(1.);
+                let folded = ((size.height - island.height) / span).clamp(0., 1.);
+                (old, tab, size, (1. - folded / 0.55).clamp(0., 1.), 0.)
+            }
+            None => {
+                let opacity = self.fade(shape, window, cx);
+                self.drawn = Some((shape, self.tab, target));
+                (shape, self.tab, target, opacity, (1. - opacity) * RISE)
+            }
+        };
+        let content = self.content(drawn_shape, drawn_tab, size, cx);
+        let target = size;
         let is_island = self.look.island();
         let shoulder = if is_island { 0. } else { SHOULDER };
         // The island in the window, and its content centered in it at the
@@ -1214,7 +1330,7 @@ impl Render for Notch {
                                 div()
                                     .absolute()
                                     .left(px((island.width - target.width) / 2.))
-                                    .top_0()
+                                    .top(px(rise))
                                     .w(px(target.width))
                                     .h(px(target.height))
                                     .opacity(opacity)

@@ -121,8 +121,16 @@ fn the_notch_wraps_the_camera_and_the_island_floats_under_the_bar() {
             height: 37.,
         }
     );
-    let busy = frame(&look, &screen, Shape::Busy);
-    assert_eq!((busy.width, busy.x), (186. + 2. * EAR, 662. - EAR));
+    let busy = frame(
+        &look,
+        &screen,
+        Shape::Busy {
+            left: 40,
+            right: 160,
+        },
+    );
+    // The wider wing sets both, so the camera stays in the middle.
+    assert_eq!((busy.width, busy.x), (186. + 2. * 160., 662. - 160.));
     let open = frame(&look, &screen, Shape::Open { body: 200 });
     assert_eq!(open.y, 0.);
     assert_eq!(open.height, 37. + PANEL_HEADER + 200. + PANEL_PAD);
@@ -150,7 +158,14 @@ fn without_a_camera_the_quiet_notch_is_a_handle_on_the_top_edge() {
     let rest = frame(&Look::default(), &screen, Shape::Quiet);
     assert_eq!((rest.width, rest.height), HANDLE);
     assert_eq!((rest.x, rest.y), (900., 0.));
-    let busy = frame(&Look::default(), &screen, Shape::Busy);
+    let busy = frame(
+        &Look::default(),
+        &screen,
+        Shape::Busy {
+            left: 40,
+            right: 36,
+        },
+    );
     assert_eq!(busy.height, BAR_HEIGHT);
 }
 
@@ -172,6 +187,8 @@ fn working(id: i64, provider: &str, started_at: u64) -> Activity {
         started_at: Some(started_at),
         needs_you: false,
         done: false,
+        agent: None,
+        steps: None,
     }
 }
 
@@ -311,4 +328,47 @@ fn the_panel_takes_the_chosen_width() {
             points
         );
     }
+}
+
+#[test]
+fn the_wings_show_who_works_and_what_the_lead_does() {
+    let mut first = working(1, "claude", 10);
+    first.steps = Some((2, 6));
+    let mut agent = working(2, "codex", 20);
+    agent.agent = Some("Finance".into());
+    let feed = Feed {
+        activities: vec![
+            agent,
+            first,
+            working(3, "codex", 30),
+            working(4, "codex", 40),
+        ],
+        ..Feed::default()
+    };
+    let at_rest = rest(&feed);
+    assert_eq!(
+        at_rest.marks,
+        ["claude", "codex", "codex"],
+        "longest running first"
+    );
+    assert_eq!(at_rest.more(), 1);
+    assert_eq!(at_rest.lead_text.as_deref(), Some("Claude Code · Reading files"));
+    assert_eq!(at_rest.lead_steps, Some((2, 6)));
+    let (left, right) = at_rest.wings(true);
+    assert_eq!(left, 14 + 3 * 18 + 22);
+    assert_eq!(right, 196);
+    assert_eq!(
+        at_rest.wings(false).0,
+        14 + 3 * 18,
+        "no +N without the count"
+    );
+    // An ask leads, and says so.
+    let asked = Feed {
+        asks: vec![ask(2, "r1")],
+        ..feed
+    };
+    assert_eq!(
+        rest(&asked).lead_text.as_deref(),
+        Some("Finance · Needs you")
+    );
 }

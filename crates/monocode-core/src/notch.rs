@@ -376,8 +376,9 @@ pub const PANEL_HEADER: f32 = 32.;
 pub enum Shape {
     /// Nothing to say.
     Quiet,
-    /// The count and the provider on the ears.
-    Busy,
+    /// Wings beside the camera, `left` and `right` points wide: who works
+    /// on the left, what the lead does on the right.
+    Busy { left: u32, right: u32 },
     /// A notice of `lines` lines under the camera.
     Notice { lines: u32 },
     /// The panel, `body` points tall under its header.
@@ -399,10 +400,14 @@ pub fn frame(look: &Look, screen: &Screen, shape: Shape) -> Frame {
             (false, Some(camera)) => (camera.width, camera.height),
             (false, None) => HANDLE,
         },
-        Shape::Busy => match (island, camera) {
-            (false, Some(camera)) => (camera.width + 2. * EAR, camera.height),
-            _ => (ISLAND_REST.0 + EAR, BAR_HEIGHT),
-        },
+        Shape::Busy { left, right } => {
+            let (left, right) = (left as f32, right as f32);
+            match (island, camera) {
+                // The wings stay even, so the camera stays in the middle.
+                (false, Some(camera)) => (camera.width + 2. * left.max(right), camera.height),
+                _ => ((left + right + 12.).max(ISLAND_REST.0), BAR_HEIGHT),
+            }
+        }
         Shape::Notice { lines } => (
             NOTICE_WIDTH.max(camera.map_or(0., |c| c.width + 2. * EAR)),
             top + 30. + 20. * lines.max(1) as f32,
@@ -456,6 +461,21 @@ pub struct Activity {
     pub started_at: Option<u64>,
     pub needs_you: bool,
     pub done: bool,
+    /// The agent's name, for a Mono's chat; none for a coding session.
+    pub agent: Option<String>,
+    /// Its task list: steps done and steps in all.
+    pub steps: Option<(u32, u32)>,
+}
+
+impl Activity {
+    /// Who it is: the agent's name, or its provider's.
+    pub fn who(&self) -> String {
+        self.agent.clone().unwrap_or_else(|| {
+            crate::provider::Kind::from_id(&self.provider)
+                .label()
+                .to_owned()
+        })
+    }
 }
 
 /// An approval or question waiting for the user.
@@ -526,38 +546,81 @@ pub struct Rest {
     pub working: usize,
     pub asking: usize,
     /// The provider of the session that leads (asking first, then the
-    /// longest running), for the right ear.
+    /// longest running).
     pub lead: Option<String>,
+    /// Who leads and what it does: "Claude · Reading files".
+    pub lead_text: Option<String>,
+    /// The lead's steps done and in all.
+    pub lead_steps: Option<(u32, u32)>,
+    /// The providers of the sessions at work, longest running first, as many
+    /// as the left wing shows.
+    pub marks: Vec<String>,
     pub call: bool,
 }
+
+/// How many sessions the left wing shows before "+N".
+pub const MARKS: usize = 3;
 
 impl Rest {
     pub fn busy(&self) -> bool {
         self.working > 0 || self.asking > 0 || self.call
     }
+
+    /// The working sessions the left wing leaves out.
+    pub fn more(&self) -> usize {
+        self.working.saturating_sub(self.marks.len())
+    }
+
+    /// The wings' widths: a mark per session (and "+N") on the left, the
+    /// lead's words and steps on the right.
+    pub fn wings(&self, show_count: bool) -> (u32, u32) {
+        let marks = self
+            .marks
+            .len()
+            .max(usize::from(self.asking > 0 || self.call));
+        let left = 14 + 18 * marks as u32 + if show_count && self.more() > 0 { 22 } else { 0 };
+        let right = match (&self.lead_text, self.lead_steps) {
+            (Some(_), Some(_)) => 196,
+            (Some(_), None) => 160,
+            _ => 36,
+        };
+        (left.max(36), right)
+    }
 }
 
 pub fn rest(feed: &Feed) -> Rest {
-    let working = feed
-        .activities
-        .iter()
-        .filter(|activity| !activity.done)
-        .count();
+    let mut working: Vec<&Activity> = feed.activities.iter().filter(|a| !a.done).collect();
+    working.sort_by_key(|activity| activity.started_at.unwrap_or(u64::MAX));
+    let lead_activity = feed
+        .asks
+        .first()
+        .and_then(|ask| working.iter().find(|a| a.id == ask.session).copied())
+        .or_else(|| working.first().copied());
     let lead = feed
         .asks
         .first()
         .map(|ask| ask.provider.clone())
-        .or_else(|| {
-            feed.activities
-                .iter()
-                .filter(|activity| !activity.done)
-                .min_by_key(|activity| activity.started_at.unwrap_or(u64::MAX))
-                .map(|activity| activity.provider.clone())
-        });
+        .or_else(|| lead_activity.map(|activity| activity.provider.clone()));
+    let lead_text = match (feed.asks.first(), lead_activity) {
+        (Some(_), Some(activity)) => Some(format!("{} · Needs you", activity.who())),
+        (Some(ask), None) => Some(format!("{} · Needs you", ask.title)),
+        (None, Some(activity)) => Some(format!("{} · {}", activity.who(), activity.step)),
+        (None, None) => feed
+            .call
+            .as_ref()
+            .map(|call| format!("{} · {}", call.group, call.status)),
+    };
     Rest {
-        working,
+        working: working.len(),
         asking: feed.asks.len(),
         lead,
+        lead_text,
+        lead_steps: lead_activity.and_then(|activity| activity.steps),
+        marks: working
+            .iter()
+            .take(MARKS)
+            .map(|activity| activity.provider.clone())
+            .collect(),
         call: feed.call.is_some(),
     }
 }

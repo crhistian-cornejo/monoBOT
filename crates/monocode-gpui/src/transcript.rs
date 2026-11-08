@@ -1081,6 +1081,40 @@ impl TranscriptView {
             .map(|info| info.duration_ms);
         (tool, self.source[prompt].sent_at, duration)
     }
+    /// The latest task list of the last turn, as steps done and steps in
+    /// all (cancelled ones left out); none when the agent made no list.
+    pub(crate) fn live_steps(&self) -> Option<(u32, u32)> {
+        use monocode_core::tool::{
+            ToolCall,
+            tasks::{Panel, TaskStatus},
+        };
+        let prompt = self.source.iter().rposition(|r| r.first && r.is_prompt())?;
+        let starts: Vec<usize> = (prompt + 1..self.source.len())
+            .filter(|&at| self.source[at].first && self.source[at].role == "tool")
+            .collect();
+        starts.into_iter().rev().find_map(|at| {
+            let end = (at + 1..self.source.len())
+                .find(|&i| self.source[i].first)
+                .unwrap_or(self.source.len());
+            let text: String = self.source[at..end]
+                .iter()
+                .map(|r| r.text.as_str())
+                .collect();
+            let Some(Panel::Tasks(list)) = serde_json::from_str::<ToolCall>(&text).ok()?.panel()
+            else {
+                return None;
+            };
+            let counted = list
+                .items
+                .iter()
+                .filter(|task| task.status != TaskStatus::Cancelled);
+            let total = counted.clone().count() as u32;
+            let done = counted
+                .filter(|task| task.status == TaskStatus::Completed)
+                .count() as u32;
+            (total > 0).then_some((done, total))
+        })
+    }
     /// Follow-ups delivered during a provider run share its original receipt.
     pub(crate) fn active_turn(&self) -> Option<usize> {
         let start = self.live_start.min(self.source.len());

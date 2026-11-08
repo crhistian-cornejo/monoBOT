@@ -75,7 +75,14 @@ impl Notch {
         for row in rows {
             let cells: Vec<AnyElement> = row
                 .into_iter()
-                .map(|index| self.cell(&shelf, index, width, cx))
+                .map(|index| {
+                    let reveal = self.reveal(index, cx);
+                    div()
+                        .opacity(reveal)
+                        .mt(px((1. - reveal) * 4.))
+                        .child(self.cell(&shelf, index, width, cx))
+                        .into_any_element()
+                })
                 .collect();
             column = column.child(div().flex().gap(px(model::CELL_GAP)).children(cells));
         }
