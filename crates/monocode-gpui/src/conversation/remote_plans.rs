@@ -28,48 +28,10 @@ impl Plan {
         }
     }
     pub(crate) fn title(&self) -> String {
-        self.text
-            .lines()
-            .find_map(|line| {
-                let line = line.trim();
-                if line.starts_with('#') {
-                    Some(line.trim_start_matches('#').trim().to_owned())
-                } else {
-                    None
-                }
-            })
-            .or_else(|| {
-                self.text
-                    .lines()
-                    .map(str::trim)
-                    .find(|line| !line.is_empty() && !line.starts_with("```") && *line != "---")
-                    .map(str::to_owned)
-            })
-            .unwrap_or_else(|| "Plan".into())
-            .chars()
-            .take(80)
-            .collect()
+        monocode_core::plan::title(&self.text)
     }
     pub(crate) fn summary(&self) -> String {
-        let title = self.title();
-        let text = self
-            .text
-            .lines()
-            .map(str::trim)
-            .filter(|line| {
-                !line.is_empty()
-                    && !line.starts_with('#')
-                    && !line.starts_with("```")
-                    && *line != title
-            })
-            .take(3)
-            .collect::<Vec<_>>()
-            .join(" ");
-        if text.chars().count() > 140 {
-            format!("{}…", text.chars().take(139).collect::<String>())
-        } else {
-            text
-        }
+        monocode_core::plan::summary(&self.text)
     }
     fn command(&self) -> Value {
         json!({"type":"send","intent":"build","planBlockId":self.id})
@@ -82,6 +44,8 @@ struct Reader {
     id: String,
     text: String,
     view: Entity<TranscriptView>,
+    /// A local plan, by its row in the transcript.
+    local: Option<usize>,
 }
 #[derive(Default)]
 pub(super) struct State {
@@ -139,6 +103,7 @@ impl Conversation {
                 id: id.into(),
                 text: text.into(),
                 view: cx.new(|cx| TranscriptView::document(text.into(), cx)),
+                local: None,
             });
             cx.notify();
             return;
@@ -176,23 +141,88 @@ impl Conversation {
         // attachments belong to the user's next message, not this approval.
         self.launch_prompt(plan.prompt(), cx);
     }
+    /// "Open" on a local plan card: the plan in the reader over the chat.
+    pub(super) fn open_local_plan(&mut self, at: usize, text: &str, cx: &mut Context<Self>) {
+        self.remote_plans.reader = Some(Reader {
+            id: format!("local-{at}"),
+            text: text.into(),
+            view: cx.new(|cx| TranscriptView::document(text.into(), cx)),
+            local: Some(at),
+        });
+        cx.notify();
+    }
+    fn local_plan_ready(&self, at: usize, cx: &gpui::App) -> Option<String> {
+        if self.is_remote() || self.busy || self.stopping {
+            return None;
+        }
+        let rows = self.transcript.read(cx).history_rows();
+        let plan = monocode_core::plan::row_at(rows, at)?;
+        (monocode_core::plan::status(rows, at, false) == monocode_core::plan::Status::Ready)
+            .then_some(plan.text)
+    }
+    /// "Build" on a local plan, here or with another model: the plan goes to
+    /// the provider as the approved source of truth, under a short message.
+    pub(super) fn build_local_plan(
+        &mut self,
+        at: usize,
+        target: Option<monocode_core::response::Target>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(text) = self.local_plan_ready(at, cx) else {
+            if self.busy || self.stopping {
+                self.status =
+                    "Wait for the current turn to finish before building this plan.".into();
+                cx.notify();
+            }
+            return;
+        };
+        if let Some(target) = target {
+            let Some(provider) = Kind::parse(&target.provider) else {
+                return;
+            };
+            if !self.apply_model_pick(&crate::pickers::ModelPicked(provider, target.model), cx) {
+                return;
+            }
+            self.settings.model_settings.extend(target.settings);
+            if let Some(effort) = target.effort {
+                self.set_effort_choice(&effort, cx);
+            }
+        }
+        self.remote_plans.reader = None;
+        let mut message = self.message(
+            monocode_core::plan::BUILD_MESSAGE.into(),
+            Vec::new(),
+            None,
+            cx,
+        );
+        message.prepared_prompt = Some(monocode_core::plan::build_prompt(&text));
+        self.launch_message(message, cx);
+        cx.notify();
+    }
     pub(super) fn remote_plan_reader(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let reader = self.remote_plans.reader.as_ref()?;
         let id = reader.id.clone();
-        let build = self.remote_plans.plans.get(&id).is_some_and(|plan| {
-            plan.can_build(
-                self.busy
-                    || self.stopping
-                    || !self.remote_state.online
-                    || self.remote_state.pending,
-            )
-        });
-        let title = self
-            .remote_plans
-            .plans
-            .get(&id)
-            .map(Plan::title)
-            .unwrap_or_else(|| "Plan".into());
+        let local = reader.local;
+        let build = match local {
+            Some(at) => self.local_plan_ready(at, cx).is_some(),
+            None => self.remote_plans.plans.get(&id).is_some_and(|plan| {
+                plan.can_build(
+                    self.busy
+                        || self.stopping
+                        || !self.remote_state.online
+                        || self.remote_state.pending,
+                )
+            }),
+        };
+        let title = match local {
+            Some(_) => monocode_core::plan::title(&reader.text),
+            None => self
+                .remote_plans
+                .plans
+                .get(&id)
+                .map(Plan::title)
+                .unwrap_or_else(|| "Plan".into()),
+        };
         let mut fill = pane_fill();
         fill.a = 1.;
         Some(
@@ -224,10 +254,10 @@ impl Conversation {
                             )
                             .child("Build")
                             .on_click(cx.listener(
-                                move |this, _, _, cx| {
-                                    if build {
-                                        this.remote_plan_request(&id, "", true, cx);
-                                    }
+                                move |this, _, _, cx| match (build, local) {
+                                    (false, _) => {}
+                                    (true, Some(at)) => this.build_local_plan(at, None, cx),
+                                    (true, None) => this.remote_plan_request(&id, "", true, cx),
                                 },
                             )),
                         )

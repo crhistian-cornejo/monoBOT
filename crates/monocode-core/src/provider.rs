@@ -96,6 +96,10 @@ pub enum Event {
     Text(String),
     Reasoning(String),
     Tool(ToolCall),
+    /// A structured plan the provider handed back (Codex's `plan` item).
+    Plan(String),
+    /// A picture the provider made during the turn, already on disk.
+    Image(crate::images::GeneratedImage),
     Status(String),
     /// What the turn still waits on after the provider yielded; empty clears it.
     Background(Vec<BackgroundTask>),
@@ -286,6 +290,9 @@ struct Protocol {
     begun: bool,
     done: bool,
     tools: HashMap<String, ToolCall>,
+    /// Codex plan and picture items already handed on; the turn's final
+    /// snapshot repeats them.
+    codex_items: std::collections::HashSet<String>,
     active_compaction: Option<String>,
     activities: tasks::Activities,
     /// Streaming tool id and its partial input JSON, by content block index.
@@ -326,6 +333,7 @@ impl Protocol {
             begun: false,
             done: false,
             tools: HashMap::new(),
+            codex_items: Default::default(),
             active_compaction: None,
             activities: tasks::Activities::default(),
             claude_tools: HashMap::new(),
@@ -1193,6 +1201,50 @@ impl Protocol {
     }
     fn codex_tool(&mut self, item: &Value, completed: bool, events: &mut Vec<Event>) {
         let name = item["type"].as_str().unwrap_or("");
+        if matches!(name, "plan" | "imageGeneration")
+            && completed
+            && !self
+                .codex_items
+                .insert(item["id"].as_str().unwrap_or_default().to_owned())
+        {
+            return;
+        }
+        if name == "plan" && completed {
+            if let Some(text) = item["text"]
+                .as_str()
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+            {
+                events.push(Event::Plan(text.to_owned()));
+            }
+            return;
+        }
+        if name == "imageGeneration" && completed {
+            // Codex returns the picture itself; keep it with the app's others.
+            if let Some(data) = item["result"]
+                .as_str()
+                .filter(|data| !data.trim().is_empty())
+            {
+                let alt = item["revisedPrompt"].as_str().map(str::to_owned);
+                let saved = crate::skills::bundled::data_dir()
+                    .ok_or_else(|| "No data folder for pictures".to_string())
+                    .and_then(|data_dir| {
+                        crate::images::save_base64(
+                            data,
+                            "generated-image",
+                            alt,
+                            &data_dir.join(crate::images::GENERATED_IMAGE_DIR),
+                        )
+                    });
+                match saved {
+                    Ok(image) => events.push(Event::Image(image)),
+                    Err(error) => events.push(Event::Status(format!(
+                        "Could not keep the picture: {error}"
+                    ))),
+                }
+            }
+            return;
+        }
         if name == "contextCompaction" {
             self.compaction(
                 item["id"].as_str(),
@@ -2127,6 +2179,27 @@ mod tests {
         assert!(claude.claude_usage_limit.is_none());
         let error = claude.frame(json!({"type":"result","is_error":true,"num_turns":1,"result":"Something else went wrong"}), &mut Vec::new()).unwrap_err();
         assert_eq!(error, "Something else went wrong");
+    }
+    #[test]
+    fn codex_plan_items_become_one_plan_event() {
+        let mut p = protocol(Kind::Codex);
+        let mut out = Vec::new();
+        let item = json!({"type":"plan","id":"plan-1","text":"# Plan\n- step"});
+        let events = p
+            .frame(
+                json!({"method":"item/completed","params":{"item":item}}),
+                &mut out,
+            )
+            .unwrap();
+        assert_eq!(events, vec![Event::Plan("# Plan\n- step".into())]);
+        // The turn's final snapshot repeats the item.
+        let events = p
+            .frame(
+                json!({"method":"turn/completed","params":{"turn":{"status":"completed","items":[item]}}}),
+                &mut out,
+            )
+            .unwrap();
+        assert_eq!(events, vec![Event::Done]);
     }
     #[test]
     fn codex_handshake_stream_snapshot_and_resume() {

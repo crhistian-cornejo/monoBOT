@@ -95,19 +95,21 @@ impl Conversation {
         cx: &mut Context<Self>,
     ) {
         let from = self.response_provider(turn, cx);
-        let label = if kind == TransferKind::Handoff {
-            "Hand this session to another agent"
-        } else {
-            "Send this turn to another agent"
+        let (label, note) = match kind {
+            TransferKind::Handoff => (
+                "Hand this session to another agent",
+                "Hand this session to another agent to continue the work.",
+            ),
+            TransferKind::SecondOpinion => (
+                "Send this turn to another agent",
+                "Send this turn to another agent to review the work.",
+            ),
+            TransferKind::Build => (
+                "Build this plan with another model or provider",
+                "Choose the model and provider that should build this plan.",
+            ),
         };
-        let mut items = vec![MenuItem::Note(
-            if kind == TransferKind::Handoff {
-                "Hand this session to another agent to continue the work."
-            } else {
-                "Send this turn to another agent to review the work."
-            }
-            .into(),
-        )];
+        let mut items = vec![MenuItem::Note(note.into())];
         if catalogs.is_none() {
             items.push(MenuItem::Note("Loading providers…".into()));
         }

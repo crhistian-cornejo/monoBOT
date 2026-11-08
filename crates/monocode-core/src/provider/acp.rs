@@ -1082,6 +1082,29 @@ impl Protocol {
                     }
                 }
                 presentation["cwd"] = json!(self.request.cwd);
+                // The edit's own before and after, for its diff preview.
+                let diffs: Vec<Value> = tool["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|item| item["type"] == "diff")
+                    .map(|item| {
+                        json!({
+                            "path": item["path"],
+                            "oldText": item["oldText"],
+                            "newText": item["newText"],
+                        })
+                    })
+                    .collect();
+                if !diffs.is_empty()
+                    && diffs
+                        .iter()
+                        .map(|diff| diff.to_string().len())
+                        .sum::<usize>()
+                        <= 256 * 1024
+                {
+                    presentation["diffs"] = json!(diffs);
+                }
                 call.display = Some(presentation);
                 let output = content_text(&tool["content"]);
                 if kind == "tool_call_content_chunk" {

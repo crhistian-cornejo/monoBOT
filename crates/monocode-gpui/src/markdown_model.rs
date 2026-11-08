@@ -69,6 +69,12 @@ pub(crate) enum Block {
         id: String,
         caption: String,
     },
+    /// A paragraph that is only an image, or only a link to a local image or
+    /// video: the media itself, with its alt text or link label.
+    Image {
+        src: String,
+        alt: String,
+    },
 }
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TopBlock {
@@ -495,7 +501,7 @@ fn blocks(events: &mut Events<'_>, until: Option<TagEnd>, depth: usize) -> Vec<B
             Event::End(end) if until == Some(end) => break,
             Event::Start(tag) if depth < 32 => match tag {
                 Tag::Paragraph => {
-                    if let Some(visual) = placed_visual(events) {
+                    if let Some(visual) = placed_visual(events).or_else(|| placed_image(events)) {
                         out.push(visual);
                         continue;
                     }
@@ -685,6 +691,43 @@ fn placed_visual(events: &mut Events<'_>) -> Option<Block> {
         caption = format!("{caption} {}", rest.trim()).trim().to_owned();
     }
     Some(Block::Visual { id, caption })
+}
+/// A paragraph that is only an image, or only a link to a local image or
+/// video, shows that media. Consumes the paragraph when it matches; leaves
+/// the events untouched otherwise.
+fn placed_image(events: &mut Events<'_>) -> Option<Block> {
+    use monocode_core::transcript::media;
+    let mut ahead = events.clone();
+    let (src, end) = match ahead.next()? {
+        Event::Start(Tag::Image { dest_url, .. }) if !dest_url.is_empty() => {
+            (dest_url.into_string(), TagEnd::Image)
+        }
+        Event::Start(Tag::Link { dest_url, .. })
+            if media::is_local(&dest_url) && media::kind_of(&dest_url).is_some() =>
+        {
+            (dest_url.into_string(), TagEnd::Link)
+        }
+        _ => return None,
+    };
+    let mut alt = String::new();
+    for event in ahead.by_ref() {
+        match event {
+            Event::End(tag) if tag == end => break,
+            Event::Text(text) | Event::Code(text) => alt.push_str(&text),
+            _ => {}
+        }
+    }
+    // Only space may follow it in the paragraph.
+    loop {
+        match ahead.next()? {
+            Event::End(TagEnd::Paragraph) => break,
+            Event::SoftBreak | Event::HardBreak => {}
+            Event::Text(text) if text.trim().is_empty() => {}
+            _ => return None,
+        }
+    }
+    *events = ahead;
+    Some(Block::Image { src, alt })
 }
 fn inlines(events: &mut Events<'_>, end: TagEnd) -> Vec<InlineRun> {
     let mut out = Vec::new();

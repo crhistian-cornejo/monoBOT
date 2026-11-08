@@ -39,11 +39,11 @@ Rutas: `T:` es Tauri (`src/…` o `src-tauri/src/…`), `G:` es
 
 | # | Hueco | Tauri | Nativa | Tamaño |
 | --- | --- | --- | --- | --- |
-| 2.1 | **No se puede buscar dentro del chat.** Tauri tiene la barra «Find in conversation» (Cmd+F/F3), con siguiente y anterior y un contador, que busca en texto, tools, planes e imágenes. | `T: sessions/ui/TranscriptFind.tsx`, `model/transcriptFind.ts` | No hay barra. `G: transcript.rs` (`reveal_search`) solo resalta lo que llega de la búsqueda global. | M |
-| 2.2 | **Falta la tarjeta del plan en sesiones locales.** Incluye «Open in pane», «Build this plan» y construir con otro modelo. Tampoco hay panel para editar un plan local (Preview/Source y Build). | `T: PlanPreview.tsx`, `model/plan.ts`, `SecondOpinionButton.tsx`, `files/ui/FilePane.tsx` (PlanFilePane) | El modo plan llega a los proveedores, pero `Body::` no tiene variante Plan. Solo existe `G: conversation/remote_plans.rs` para planes remotos. | M |
-| 2.3 | **Las imágenes de Markdown y los medios locales no se ven en las respuestas.** Ni `![](ruta\|url)` ni los enlaces a imagen o vídeo local. | `T: DocumentImage.tsx`, `LocalMedia.tsx`, `documentImageSources.ts` | `G: markdown_model.rs` solo pinta imágenes `visual:`. `G: notes/preview.rs` ya interpreta `Tag::Image` y se puede reutilizar. | M |
-| 2.4 | **Las imágenes que generan Codex y Antigravity no aparecen** en las sesiones normales. | `T: GeneratedImage.tsx`, `harness/core/apply.ts` (`image.generated`), `codexProtocol.ts`, `antigravityImages.ts` | Solo existe la tarjeta de `images.generate` del Mono (`G: monos/images.rs`). | M |
-| 2.5 | **Edit y Write no muestran su diff.** En Tauri, el chip de archivo abre el diff de esa edición sin depender de git. | `T: ToolDiffPreview.tsx` | `G: transcript/tools.rs` solo enlaza al archivo. | M |
+| 2.1 | ✅ **Hecho.** Barra «Find in conversation»: Cmd/Ctrl+F la abre, Enter, F3 y Cmd/Ctrl+G avanzan (con Shift retroceden), Esc la cierra, con contador. Busca en mensajes, tools, planes e imágenes generadas. En un Mono paginado solo cubre las páginas ya cargadas. | `T: sessions/ui/TranscriptFind.tsx`, `model/transcriptFind.ts` | `C: transcript/find.rs`, `G: conversation/find.rs` (reutiliza `reveal_search` para saltar y marcar). | M |
+| 2.2 | ✅ **Hecho** (la tarjeta). Fila `plan` en el transcript: la escriben `ExitPlanMode` de Claude y el ítem `plan` de Codex, y si no, la última respuesta de un turno de plan que parezca un plan. La tarjeta tiene Open (lector sobre el chat), Build (envía «Build approved plan» con el plan como fuente) y el menú «Build with another model», y pasa a Building…/Built. **Sigue faltando** editar el plan (Preview/Source) antes de construirlo. | `T: PlanPreview.tsx`, `model/plan.ts`, `SecondOpinionButton.tsx`, `files/ui/FilePane.tsx` (PlanFilePane) | `C: plan.rs`, `G: transcript/plans.rs`, `G: conversation/remote_plans.rs` (lector y Build compartidos con los planes remotos), `TransferKind::Build` en el menú de proveedores. | M |
+| 2.3 | ✅ **Hecho.** Un párrafo que es solo `![alt](ruta)`, o solo un enlace a una imagen o un vídeo local, muestra la imagen (se abre a pantalla completa) o una tarjeta que abre el vídeo en el reproductor de MonoBOT. Las rutas relativas se resuelven contra la carpeta de la sesión. Como en Tauri, las imágenes web no se descargan: se ve su texto alternativo. | `T: DocumentImage.tsx`, `LocalMedia.tsx`, `documentImageSources.ts` | `C: transcript/media.rs`, `G: markdown_model.rs` (`Block::Image`), `G: transcript/reply_media.rs`. | M |
+| 2.4 | ✅ **Hecho.** El `imageGeneration` de Codex se guarda en `generated-images` y Antigravity, cuando el turno usa `generate_image`, espera hasta dos minutos a que Gemini escriba las imágenes. Ambas quedan como fila `image` en el chat, con su prompt debajo. | `T: GeneratedImage.tsx`, `harness/core/apply.ts` (`image.generated`), `codexProtocol.ts`, `antigravityImages.ts` | `C: images.rs` (`save_base64`, `REPLY_ROLE`), `C: provider.rs` (`Event::Image`), `G: runtime.rs`, `G: transcript/reply_media.rs`. | M |
+| 2.5 | ✅ **Hecho.** Las filas Edit y Write tienen un desplegable con el diff de esa edición, sin git: `Edit`/`MultiEdit`/`Write` de Claude, `fileChange` de Codex y el contenido `diff` de ACP. En Tauri era un popover al pasar el ratón; aquí se abre bajo la fila. | `T: ToolDiffPreview.tsx` | `C: tool/edit_preview.rs`, `G: transcript/tools.rs`. | M |
 | 2.6 | **El medidor de contexto no tiene «Compact now».** En Tauri es un popover con esa acción. | `T: ContextMeter.tsx` | `G: conversation.rs:~3267` solo muestra un tooltip. `/compact` sí funciona. | S |
 | 2.7 | **Borrar una sesión no ofrece «Also delete the unused worktree».** | `T: DeleteSessionDialog.tsx` | `G: shell/project_removal.rs` (`confirm_delete_session`) es un aviso simple y nunca borra el worktree. | S |
 | 2.8 | **Falta «Commit these changes»** en la tarjeta de revisión. | `T: SessionReview.tsx` (`onCommit`) | `G: session_review.rs` solo tiene Review, Undo y Keep. | S |
@@ -149,9 +149,8 @@ acciones de `TabGroupMenu` y `collectWindowTransfer`.
    base de Workstreams. Primero el canal `control` y la reanudación, después la
    tarjeta editable y el aislamiento en worktrees.
 2. **Workstreams (1.6).** El core ya existe: falta la interfaz.
-3. **Lo que se ve en cada chat (2.1–2.5):** buscar en el chat, la tarjeta del
-   plan, las imágenes en las respuestas, las imágenes generadas y el diff de
-   cada edición.
+3. ~~**Lo que se ve en cada chat (2.1–2.5)**~~: hecho, salvo editar el plan
+   antes de construirlo (2.2).
 4. **Subagentes y extensiones de proveedores (3.1–3.3).** Sin esto se pierden
    los planes y los todos de Cursor y Grok, y la jerarquía de subagentes.
 5. **Reparar CI y checks (4.1–4.3).** Los tres van juntos y comparten modelo.

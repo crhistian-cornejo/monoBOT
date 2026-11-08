@@ -12,6 +12,26 @@ pub(crate) struct Attachment {
 }
 
 impl Attachment {
+    /// An image file the transcript shows that nobody attached: a picture a
+    /// provider made, or one a reply points at.
+    pub(super) fn image_file(path: PathBuf, name: impl Into<SharedString>) -> Self {
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(str::to_ascii_lowercase);
+        let mime = match extension.as_deref() {
+            Some("svg") => "image/svg+xml",
+            Some("bmp") => "image/bmp",
+            _ => monocode_core::composer::image_mime(&path).unwrap_or("image/png"),
+        };
+        Self {
+            name: name.into(),
+            path: Some(path),
+            mime: mime.into(),
+            image: true,
+            data: None,
+        }
+    }
     fn from_value(mut value: serde_json::Value) -> Self {
         let path = value["path"]
             .as_str()
@@ -137,6 +157,8 @@ pub(crate) struct Photo {
     whole: bool,
     /// The decoded sprite's pixel size, which gives a whole photo its shape.
     shape: Option<(u32, u32)>,
+    /// The file could not be read or is not an image.
+    failed: bool,
 }
 
 impl Photo {
@@ -182,6 +204,7 @@ impl Photo {
                 Err(_) => (None, None),
             };
             let _ = this.update(cx, |this, cx| {
+                this.failed = source.is_none();
                 this.shape = shape;
                 this.source = source;
                 cx.notify();
@@ -207,6 +230,7 @@ impl Photo {
             source: None,
             whole,
             shape: None,
+            failed: false,
         }
     }
 
@@ -238,6 +262,18 @@ impl Render for Photo {
                 .flex_shrink_0()
                 .rounded(px(16.))
                 .overflow_hidden();
+            if self.failed {
+                // A missing picture leaves a short note, not an empty frame.
+                return div()
+                    .flex()
+                    .items_center()
+                    .gap_1p5()
+                    .text_size(px(12.))
+                    .text_color(content(0.45))
+                    .child(icon("file", 14.))
+                    .child("Image not available")
+                    .into_any_element();
+            }
             return match &self.source {
                 Some(source) => frame
                     .child(
@@ -459,7 +495,7 @@ impl TranscriptView {
 
     /// An image that opens full screen. Its decoded sprite is cached by `key`
     /// and position, within a bound on how many and how large.
-    fn image_tile(
+    pub(super) fn image_tile(
         &mut self,
         file: &Attachment,
         key: &str,

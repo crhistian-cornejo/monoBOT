@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 pub enum TransferKind {
     Handoff,
     SecondOpinion,
+    /// Build a plan in this session with the chosen model or provider.
+    Build,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Target {
