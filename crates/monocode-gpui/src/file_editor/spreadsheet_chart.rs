@@ -941,11 +941,16 @@ mod tests {
             series(ChartKind::Column, "Sur", &[5., 15., 25.], None),
         ]));
         let texts = scene.texts();
-        for expected in [
-            "Ventas", "Ene", "Mar", "Mes", "Unidades", "Norte", "Sur", "0", "30",
-        ] {
+        for expected in ["Ventas", "Ene", "Mar", "Mes", "Norte", "Sur", "0", "30"] {
             assert!(texts.contains(&expected), "{expected} in {texts:?}");
         }
+        // The value axis' title reads bottom-up beside it, drawn as a rotated
+        // SVG strip rather than a flat label.
+        assert!(!texts.contains(&"Unidades"));
+        let (markup, left, _, width, _) = scene.side_title.as_ref().unwrap();
+        assert!(markup.contains(">Unidades</text>"), "{markup}");
+        assert!(markup.contains("rotate(-90"), "{markup}");
+        assert_eq!((*left, *width), (0., SIDE_TITLE_W));
         // Six columns plus the two legend swatches.
         let columns = rects(&scene)
             .into_iter()

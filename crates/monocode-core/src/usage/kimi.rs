@@ -9,19 +9,16 @@ const DEFAULT_CLIENT_ID: &str = "17e5f671-d194-4dfb-9706-5516cb48c098";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) fn fetch_for(_profile: &crate::accounts::Profile) -> Result<Snapshot, FetchError> {
-    let home = kimi_home().ok_or_else(|| {
-        FetchError::unavailable("Sign in with kimi login, then refresh usage.")
-    })?;
+    let home = kimi_home()
+        .ok_or_else(|| FetchError::unavailable("Sign in with kimi login, then refresh usage."))?;
 
     let (oauth_host, base_url, cred_file) = resolve_config_and_credentials(&home);
 
-    let cred_path = cred_file.ok_or_else(|| {
-        FetchError::unavailable("Sign in with kimi login, then refresh usage.")
-    })?;
+    let cred_path = cred_file
+        .ok_or_else(|| FetchError::unavailable("Sign in with kimi login, then refresh usage."))?;
 
-    let mut creds = read_credentials(&cred_path).ok_or_else(|| {
-        FetchError::unavailable("Sign in with kimi login, then refresh usage.")
-    })?;
+    let mut creds = read_credentials(&cred_path)
+        .ok_or_else(|| FetchError::unavailable("Sign in with kimi login, then refresh usage."))?;
 
     let now_secs = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -81,7 +78,13 @@ pub(super) fn fetch_for(_profile: &crate::accounts::Profile) -> Result<Snapshot,
     }
 
     // Attempt usage fetch
-    let usage_val = fetch_usages(&base_url, &oauth_host, &access_token, &refresh_token, &cred_path)?;
+    let usage_val = fetch_usages(
+        &base_url,
+        &oauth_host,
+        &access_token,
+        &refresh_token,
+        &cred_path,
+    )?;
     let identity = fetch_identity(&base_url, &access_token);
 
     parse_kimi_usage(&usage_val, identity)
@@ -111,7 +114,10 @@ fn resolve_config_and_credentials(home: &Path) -> (String, String, Option<PathBu
     if let Ok(content) = std::fs::read_to_string(&config_file) {
         if let Ok(table) = content.parse::<toml::Table>() {
             if let Some(providers) = table.get("providers").and_then(toml::Value::as_table) {
-                if let Some(managed) = providers.get("managed:kimi-code").and_then(toml::Value::as_table) {
+                if let Some(managed) = providers
+                    .get("managed:kimi-code")
+                    .and_then(toml::Value::as_table)
+                {
                     if let Some(url) = managed.get("base_url").and_then(toml::Value::as_str) {
                         base_url = url.trim_end_matches('/').to_string();
                     }
@@ -176,20 +182,17 @@ fn write_credentials(path: &Path, creds: &Value) {
 fn refresh_oauth_token(oauth_host: &str, refresh_token: &str) -> Result<Value, FetchError> {
     let url = format!("{}/api/oauth/token", oauth_host.trim_end_matches('/'));
     let agent = monobot_http::agent().timeout(HTTP_TIMEOUT).build();
-    let response = agent
-        .post(&url)
-        .send_form(&[
-            ("client_id", DEFAULT_CLIENT_ID),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-        ]);
+    let response = agent.post(&url).send_form(&[
+        ("client_id", DEFAULT_CLIENT_ID),
+        ("grant_type", "refresh_token"),
+        ("refresh_token", refresh_token),
+    ]);
 
     match response {
         Ok(resp) => {
             let body = resp.into_string().unwrap_or_default();
-            serde_json::from_str(&body).map_err(|_| {
-                FetchError::failed("Kimi token refresh returned invalid JSON.")
-            })
+            serde_json::from_str(&body)
+                .map_err(|_| FetchError::failed("Kimi token refresh returned invalid JSON."))
         }
         Err(ureq::Error::Status(401 | 403, _)) => Err(FetchError::unavailable(
             "Kimi sign-in expired. Run kimi login, then refresh.",
@@ -197,7 +200,9 @@ fn refresh_oauth_token(oauth_host: &str, refresh_token: &str) -> Result<Value, F
         Err(ureq::Error::Status(status, _)) => Err(FetchError::failed(format!(
             "Kimi token refresh failed (HTTP {status})."
         ))),
-        Err(e) => Err(FetchError::failed(format!("Could not reach Kimi OAuth: {e}"))),
+        Err(e) => Err(FetchError::failed(format!(
+            "Could not reach Kimi OAuth: {e}"
+        ))),
     }
 }
 
@@ -275,9 +280,8 @@ fn fetch_usages(
                     .call()
                 {
                     let body = resp.into_string().unwrap_or_default();
-                    return serde_json::from_str(&body).map_err(|_| {
-                        FetchError::failed("Kimi usage response was not JSON.")
-                    });
+                    return serde_json::from_str(&body)
+                        .map_err(|_| FetchError::failed("Kimi usage response was not JSON."));
                 }
             }
             Err(FetchError::failed(format!(
@@ -290,7 +294,9 @@ fn fetch_usages(
 
 fn fetch_identity(base_url: &str, access_token: &str) -> Option<crate::accounts::Identity> {
     let url = format!("{}/me", base_url.trim_end_matches('/'));
-    let agent = monobot_http::agent().timeout(Duration::from_secs(5)).build();
+    let agent = monobot_http::agent()
+        .timeout(Duration::from_secs(5))
+        .build();
     let res = agent
         .get(&url)
         .set("Authorization", &format!("Bearer {access_token}"))
@@ -309,7 +315,10 @@ fn fetch_identity(base_url: &str, access_token: &str) -> Option<crate::accounts:
     })
 }
 
-fn parse_kimi_usage(val: &Value, identity: Option<crate::accounts::Identity>) -> Result<Snapshot, FetchError> {
+fn parse_kimi_usage(
+    val: &Value,
+    identity: Option<crate::accounts::Identity>,
+) -> Result<Snapshot, FetchError> {
     let mut windows = Vec::new();
     let usages = val.get("usages").unwrap_or(val);
 
@@ -359,8 +368,14 @@ fn parse_kimi_usage(val: &Value, identity: Option<crate::accounts::Identity>) ->
                     _ => duration,
                 };
                 if minutes > 0 {
-                    let limit: f64 = item["detail"]["limit"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
-                    let remaining: f64 = item["detail"]["remaining"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0.0);
+                    let limit: f64 = item["detail"]["limit"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
+                    let remaining: f64 = item["detail"]["remaining"]
+                        .as_str()
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or(0.0);
                     let used_percent = if limit > 0.0 {
                         ((limit - remaining) / limit * 100.0).clamp(0.0, 100.0)
                     } else {
@@ -377,7 +392,8 @@ fn parse_kimi_usage(val: &Value, identity: Option<crate::accounts::Identity>) ->
         }
     }
 
-    let extra_usage_balance = val.get("boosterWallet")
+    let extra_usage_balance = val
+        .get("boosterWallet")
         .or_else(|| val.get("booster_wallet"))
         .or_else(|| val.get("extraUsage"))
         .and_then(|w| w.get("balanceCents").or_else(|| w.get("balance_cents")))
@@ -436,7 +452,10 @@ mod tests {
         let profile = crate::accounts::Profile::default();
         let res = fetch_for(&profile);
         println!("Live Kimi fetch result: {res:?}");
-        assert!(res.is_ok(), "Expected Kimi usage fetch to succeed, got: {res:?}");
+        assert!(
+            res.is_ok(),
+            "Expected Kimi usage fetch to succeed, got: {res:?}"
+        );
         let snapshot = res.unwrap();
         assert!(!snapshot.windows.is_empty(), "Expected at least one window");
         println!("Snapshot windows: {:?}", snapshot.windows);

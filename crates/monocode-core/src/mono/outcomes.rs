@@ -330,7 +330,11 @@ mod tests {
         let mut h = habit();
         // 4 real failures in a row
         for n in 1..4 {
-            record_outcome(&mut h, RunResult::failed(n, Some("network error".into())), 10 + n);
+            record_outcome(
+                &mut h,
+                RunResult::failed(n, Some("network error".into())),
+                10 + n,
+            );
         }
         assert_eq!(failed_in_a_row(&h), 3);
         assert!(h.enabled);

@@ -1,0 +1,16 @@
+{
+  // esbuild reads this too: "strict" makes the bundle start with "use strict"
+  // and "useDefineForClassFields" keeps class fields as the React app had them.
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": true
+  },
+  "include": ["*.ts", "src"]
+}

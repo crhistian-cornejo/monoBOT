@@ -309,7 +309,11 @@ impl Conversation {
                 let id = quote.id.clone();
                 let body = quotes::split_source(&quote.text).body;
                 let shown: String = body.chars().take(1_200).collect();
-                let shown = if shown.len() < body.len() { format!("{shown}…") } else { shown };
+                let shown = if shown.len() < body.len() {
+                    format!("{shown}…")
+                } else {
+                    shown
+                };
                 div()
                     .id(SharedString::from(format!("quote-chip-{}", quote.id)))
                     .tooltip(crate::theme::text_tip(shown))

@@ -117,6 +117,12 @@ Consequences for the client (the Rust side should implement all of these):
 
 ## Deploy
 
+Current deployment: `monobot-inbound-mail` runs at
+`https://monobot-inbound-mail.getecho.workers.dev` with `workers_dev = true`,
+because the account has no domain yet. Its `ALLOWED_RECIPIENTS` is a
+placeholder, so it accepts no mail until a domain is added and the route below
+is configured. See [mail workspace](../../docs/native/mail-workspace.md).
+
 Prerequisites: a Cloudflare account, a domain on Cloudflare DNS, Node 22+.
 Commands run from `deploy/cloudflare-mail`. No account id is stored in files;
 wrangler uses your login (or `CLOUDFLARE_ACCOUNT_ID`).

@@ -66,4 +66,4 @@ pnpm exec tsc --noEmit
 pnpm lint
 ```
 
-The desktop app at the repository root remains a separate pnpm project.
+The desktop app at the repository root is the Rust/GPUI app; it needs no JavaScript dependencies.

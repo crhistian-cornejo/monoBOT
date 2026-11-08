@@ -2196,8 +2196,8 @@ mod tests {
         let rects = merge_span_rects(&spans[located.start_item..=located.end_item]);
         assert!(!rects.is_empty());
         let [x, y, w, h] = rects[0];
-        assert!(x >= 0.0 && x < 1.0);
-        assert!(y >= 0.0 && y < 1.0);
+        assert!((0.0..1.0).contains(&x));
+        assert!((0.0..1.0).contains(&y));
         assert!(w > 0.02 && h > 0.01);
     }
 

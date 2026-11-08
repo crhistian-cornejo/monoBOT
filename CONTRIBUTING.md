@@ -4,64 +4,35 @@ MonoBOT is early and I’m the only maintainer, so small and focused lands much 
 
 Please don’t open PRs that add a new provider right now. The existing harnesses still need to agree on a few patterns, and a new adapter would copy whatever is there today. See [New providers](#new-providers).
 
-## PR policy during the GPUI preview
-
-The Rust + GPUI preview is developed on `main` alongside the production React/Tauri app. Development is focused on the native preview while the production app remains supported.
-
-- Bug fixes, security fixes, documentation improvements, and changes useful to both apps are still welcome on `main`.
-- Larger Tauri-specific features and refactors are temporarily deferred during the migration.
-- Target GPUI contributions at `main`. See [the native guide](docs/native/README.md) for setup and checks.
-
-Before starting a larger change, open an issue so we can agree on the scope and target branch and avoid duplicated work. Existing PRs will be reviewed individually.
-
 ## Get it running
 
-You need Node.js 20+, [pnpm](https://pnpm.io/installation) (`corepack enable` picks the pinned version), a current stable Rust toolchain, and at least one provider CLI installed and logged in. See [provider setup](docs/providers.md) for installation and login instructions.
-
-macOS, Linux, and Windows are supported targets. See [building from source](docs/building.md) for platform prerequisites and packaging commands.
+You need a current stable Rust toolchain, Node.js 22+, [Bun](https://bun.sh/) for the root scripts, and at least one provider CLI installed and logged in. See [provider setup](docs/providers.md) for installation and login instructions, and [building from source](docs/building.md) for platform prerequisites and packaging.
 
 ```bash
-pnpm install
-pnpm tauri dev
+bun run dev
 ```
+
+The mobile app is a separate pnpm project in `mobile/`; see its [README](mobile/README.md).
 
 ## Where things live
 
-- `src/app/` - application composition, startup behavior, window shell, and release/update UI
-- `src/features/` - product behavior grouped by feature, with UI, model, data access, hooks, and tests kept together
-- `src/integrations/harness/` - the provider-independent harness core and one folder per provider adapter
-- `src/platform/tauri/` - browser-to-Tauri adapters for filesystem, PTY, clipboard, and platform behavior
-- `src/shared/` - reusable UI, hooks, and small utilities that contain no feature behavior
-- `src-tauri/src/` - the Rust side: PTYs, filesystem and git, session storage, native window
+- `crates/monocode-core/` - everything without UI: provider transports, sessions and SQLite storage, Git and files, bots, mail, the mobile link. No GPUI dependency.
+- `crates/monocode-gpui/` - the desktop app: shell, composer, transcript, editor, settings and platform integration. All Rust crates share the root Cargo workspace and lockfile.
+- `crates/{mobile-link,email,http,dictation,voice,visual}/` - shared crates used by core and the app.
+- `mobile/` - the Expo companion app.
+- `host/` - the remote host installed over SSH ([remote access](docs/remote-access.md)).
+- `deploy/cloudflare-mail/` - the optional inbound mail Worker.
 
-`src/integrations/harness/` is the most useful place to start if you want to fix something real. Each folder under `providers/` has an adapter (`claudeAdapter.ts`) that implements the shared `HarnessAdapter` lifecycle from `core/registry.ts`, and a protocol module (`claudeProtocol.ts`) that translates the CLI’s output into MonoBOT’s own event types. The protocol modules are pure functions with unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed. That’s for the providers we already ship - please don’t add a new one yet.
-
-## Experimental GPUI work
-
-The production React/Tauri app continues to use the commands above. GPUI work
-lives in `crates/monocode-core` and `crates/monocode-gpui`, with an independent
-Cargo workspace and lockfile. Use `pnpm native:dev` to develop,
-`pnpm native:build` to package an optimized build, and
-`pnpm native:check` for its checks. Keep production UI behavior, dependencies,
-CI and release/update distribution intact while the native port is tested.
-See the [native guide](docs/native/README.md) and [architecture](docs/native/migration.md).
+`crates/monocode-core/src/provider/` is the most useful place to start if you want to fix something real. Each provider transport translates its CLI's protocol into MonoBOT's own events, and the parsers have unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed. That's for the providers we already ship - please don't add a new one yet.
 
 ## Before you push
 
 ```bash
-pnpm check
+bun run check
+bun run test
 ```
 
-That runs what CI runs: vitest, `tsc --noEmit`, `cargo fmt`, `cargo clippy`, and `cargo test`. If it’s green locally it should be green on GitHub. `pnpm check:web` and `pnpm check:rust` run the two halves separately when you only touched one side.
-
-For transcript layout and scrolling changes, also run the real-browser tests:
-
-```bash
-pnpm exec playwright install chromium webkit
-pnpm test:browser
-```
-
-These render the actual transcript and stylesheet in Chromium and WebKit, checking scroll geometry that the DOM-mocked unit tests cannot exercise. They start an isolated Vite server on port 1435 and need no provider or Tauri app.
+That runs what CI runs: the script tests, `cargo fmt`, strict `cargo clippy` and the core and GPUI tests. If it's green locally it should be green on GitHub. See [verification](docs/native/verification.md) for focused commands.
 
 ## New providers
 

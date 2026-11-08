@@ -1,7 +1,7 @@
 use super::*;
 use gpui::{
-    div, prelude::*, px, rgb, AnyElement, Div, Focusable, FontWeight, Role, SharedString, Stateful,
-    Window,
+    AnyElement, Div, Focusable, FontWeight, Role, SharedString, Stateful, Window, div, prelude::*,
+    px, rgb,
 };
 
 const LABEL: f32 = 0.7;

@@ -11,6 +11,9 @@ use gpui::{
 };
 use std::{cell::Cell, rc::Rc, time::Instant};
 
+/// Called with whether the pointer is over the element.
+type HoverHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Side {
     Top,
@@ -320,7 +323,7 @@ pub(crate) struct Popover {
     track: Vec<AnchorSlot>,
     ignore: Vec<AnchorSlot>,
     on_dismiss: Option<Dismiss>,
-    on_hover: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
+    on_hover: Option<HoverHandler>,
     consume_outside_press: bool,
     modal_classic: Option<bool>,
     animate: bool,
@@ -616,7 +619,7 @@ struct Placed {
     track: Vec<AnchorSlot>,
     ignore: Vec<AnchorSlot>,
     on_dismiss: Option<Dismiss>,
-    on_hover: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
+    on_hover: Option<HoverHandler>,
     consume_outside_press: bool,
 }
 impl IntoElement for Placed {

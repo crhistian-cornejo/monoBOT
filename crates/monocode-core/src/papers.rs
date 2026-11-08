@@ -8,14 +8,12 @@ use unicode_normalization::UnicodeNormalization;
 #[path = "papers_text.rs"]
 mod text;
 pub use text::{
-    Excerpt, Figure, OutlineEntry, PageSpan, PaperText, detect_doi, excerpt, extract_page_spans,
-    extract_pdf_text, figures, merge_span_rects, outline, section,
+    detect_doi, excerpt, extract_page_spans, extract_pdf_text, figures, merge_span_rects, outline,
+    section, Excerpt, Figure, OutlineEntry, PageSpan, PaperText,
 };
 #[path = "papers_store.rs"]
 mod store;
-pub use store::{
-    CitedPassage, Paper, PaperMeta, PaperStore, cache_dir, key_of, reference_key,
-};
+pub use store::{cache_dir, key_of, reference_key, CitedPassage, Paper, PaperMeta, PaperStore};
 #[path = "papers_catalog.rs"]
 mod catalog;
 pub use catalog::{find, find_input, resolve};
@@ -313,13 +311,11 @@ mod tests {
     fn declines_short_unrelated_and_unbounded_passages() {
         let items = ["Calibration of the GR4J model uses a Michel algorithm."];
         assert!(locate_in_items(&items, "the model").is_none());
-        assert!(
-            locate_in_items(
-                &items,
-                "Deep learning dominates benchmark leaderboards today."
-            )
-            .is_none()
-        );
+        assert!(locate_in_items(
+            &items,
+            "Deep learning dominates benchmark leaderboards today."
+        )
+        .is_none());
         assert!(locate_in_items(&items, &"x".repeat(MAX_PASSAGE_CHARS + 1)).is_none());
     }
 
@@ -356,11 +352,17 @@ mod tests {
         assert!(!store.record_cited(&pdf, "too short", Some(1)).unwrap());
         assert!(store.record_cited(&pdf, PASSAGE, None).unwrap());
         assert!(store.record_cited(&pdf, PASSAGE, Some(2)).unwrap());
-        assert!(!store.record_cited(&pdf, PASSAGE, Some(2)).unwrap(), "unchanged: no write");
+        assert!(
+            !store.record_cited(&pdf, PASSAGE, Some(2)).unwrap(),
+            "unchanged: no write"
+        );
         let cited = store.cited(&pdf).unwrap();
         assert_eq!(cited.len(), 1);
         assert_eq!(cited[0].number, Some(2));
-        assert!(store.cited(&store.pdf_path("10.1/other")).unwrap().is_empty());
+        assert!(store
+            .cited(&store.pdf_path("10.1/other"))
+            .unwrap()
+            .is_empty());
         assert_eq!(cited_label(Some(1), Some(3)), "citation 1, page 3");
         assert_eq!(cited_label(None, Some(3)), "page 3");
         assert_eq!(

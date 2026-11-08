@@ -106,19 +106,19 @@ fn header_fields(header: &str, name: &str) -> String {
 /// «Ana Pérez <ana@ejemplo.test>», «"Ana" <ana@…>» or a bare address, as (name, address).
 fn split_from(from: &str) -> (String, String) {
     let from = from.trim();
-    if let (Some(open), Some(close)) = (from.rfind('<'), from.rfind('>')) {
-        if open < close {
-            let address = from[open + 1..close].trim().to_lowercase();
-            let name = one_line(from[..open].trim().trim_matches('"'), 120);
-            return (
-                if name.is_empty() {
-                    address.clone()
-                } else {
-                    name
-                },
-                address,
-            );
-        }
+    if let (Some(open), Some(close)) = (from.rfind('<'), from.rfind('>'))
+        && open < close
+    {
+        let address = from[open + 1..close].trim().to_lowercase();
+        let name = one_line(from[..open].trim().trim_matches('"'), 120);
+        return (
+            if name.is_empty() {
+                address.clone()
+            } else {
+                name
+            },
+            address,
+        );
     }
     let address = from.to_lowercase();
     (address.clone(), address)
@@ -451,12 +451,12 @@ fn collect_leaves(head: &str, body: &[u8], depth: u8, out: &mut Vec<Leaf>) {
         .trim()
         .to_ascii_lowercase();
     if kind.starts_with("multipart/") {
-        if depth < MAX_DEPTH {
-            if let Some(boundary) = parameter(&content_type, "boundary") {
-                for part in parts_of(body, &boundary) {
-                    let (head, content) = split_head(part);
-                    collect_leaves(&unfold(head), content, depth + 1, out);
-                }
+        if depth < MAX_DEPTH
+            && let Some(boundary) = parameter(&content_type, "boundary")
+        {
+            for part in parts_of(body, &boundary) {
+                let (head, content) = split_head(part);
+                collect_leaves(&unfold(head), content, depth + 1, out);
             }
         }
         return;

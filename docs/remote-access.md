@@ -46,10 +46,10 @@ Use Node.js 24 or newer on the host. Install and sign in to the providers you wa
 From a checkout of this version of MonoBOT on the host:
 
 ```sh
-pnpm install
-pnpm host:build
-node build/host/monocode-host.mjs start
-node build/host/monocode-host.mjs pair --name "My laptop"
+pnpm --dir host install
+pnpm --dir host build
+node host/build/host/monocode-host.mjs start
+node host/build/host/monocode-host.mjs pair --name "My laptop"
 ```
 
 `start` launches the host independently of the terminal. `pair` prints a device ID and a device token; copy the token to the receiving desktop. Create a separate credential for each desktop. Tokens grant control of the host as its OS user, including provider execution and workspace reads.
@@ -84,13 +84,13 @@ SSH setup names each device credential after the desktop's computer name. Removi
 
 The machine must remain awake. Manual `start` launches a detached process. `service install` installs a user service; SSH setup runs it automatically. Only one host may own a data directory. Restart the host after changing its provider installation or PATH. Service installs preserve an already-running host, including one previously started manually.
 
-SSH-installed hosts have a launcher at `~/.monocode-host/bin/monocode-host`; use it in place of `node build/host/monocode-host.mjs` in management commands. Linux services are named `monocode-host.service`; macOS uses `com.monocode.host`. A service manager can restart a stopped process, so use `service uninstall` rather than `stop` to keep the host stopped.
+SSH-installed hosts have a launcher at `~/.monocode-host/bin/monocode-host`; use it in place of `node host/build/host/monocode-host.mjs` in management commands. Linux services are named `monocode-host.service`; macOS uses `com.monocode.host`. A service manager can restart a stopped process, so use `service uninstall` rather than `stop` to keep the host stopped.
 
 On Windows, the launcher is `%USERPROFILE%\.monocode-host\bin\monocode-host.cmd`. The scheduled task is named `MonoBOT Host-<user SID>`; `service uninstall` unregisters it and stops the host. Normal cancellation and shutdown stop the provider's process tree. A plain manual `start` is detached, but use `service install` for SSH-hosted Windows sessions so Task Scheduler owns the process independently of the SSH login.
 
 ## Release packaging
 
-`pnpm host:package` builds a self-contained package for the current Windows/Mac/Linux architecture. `pnpm host:package --all` builds all six archives, using pinned official Node binaries and checksums. Archives contain the host bundle, runtime, launcher, and licenses. `host/package.mjs` pins the runtime version. Cross-packaging Windows on Unix requires `zip` and `unzip`; native Windows packaging uses PowerShell.
+`pnpm --dir host package` builds a self-contained package for the current Windows/Mac/Linux architecture in `host/build/host-packages/`. `pnpm --dir host package -- --all` builds all six archives, using pinned official Node binaries and checksums. Archives contain the host bundle, runtime, launcher, and licenses. `host/package.mjs` pins the runtime version. Cross-packaging Windows on Unix requires `zip` and `unzip`; native Windows packaging uses PowerShell.
 
 The release workflow publishes `monocode-host-{darwin,linux}-{arm64,x64}.tar.gz`, `monocode-host-win32-{arm64,x64}.zip`, and their `.sha256` files alongside the desktop release. SSH setup downloads from the exact desktop version's GitHub release, then installs under `~/.monocode-host/runtime`.
 
@@ -107,16 +107,13 @@ The headless host runs the reused TypeScript adapters with a Node process backen
 ## Verify
 
 ```sh
-pnpm host:build
-pnpm test:host
-pnpm check:web
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test
+pnpm --dir host install
+pnpm --dir host test        # build, vitest and the runtime download tests
+bun run check               # desktop: fmt, clippy and script tests
 ```
 
-Host tests use fake provider executables and temporary loopback servers. They do not contact paid models. They cover the Codex and Claude transports, Pi/OMP RPC, ACP providers, OpenCode HTTP and event streaming, cross-client reattachment, duplicate sends, approval races, interruption recovery, device revocation, path checks, and detached host lifecycle. On Node 26, use `NODE_OPTIONS=--no-experimental-webstorage pnpm check:web` to avoid its experimental global storage interfering with the existing happy-dom tests.
+Host tests use fake provider executables and temporary loopback servers. They do not contact paid models. They cover the Codex and Claude transports, Pi/OMP RPC, ACP providers, OpenCode HTTP and event streaming, cross-client reattachment, duplicate sends, approval races, interruption recovery, device revocation, path checks, and detached host lifecycle.
 
-For the real OpenSSH transport and native askpass smoke test on Linux/macOS, build with `pnpm host:package` and `cargo build --bin monocode`, then run `python3 scripts/test-remote-ssh.py`. It uses a disposable loopback sshd, temporary keys and known-hosts file, and an isolated packaged host. It leaves personal SSH configuration, provider credentials, and OS services untouched.
+For the real OpenSSH transport and native askpass smoke test on Linux/macOS, build with `pnpm --dir host package` and `cargo build -p monocode-gpui`, then run `python3 scripts/test-remote-ssh.py`. It uses a disposable loopback sshd, temporary keys and known-hosts file, and an isolated packaged host. It leaves personal SSH configuration, provider credentials, and OS services untouched.
 
 Host CI runs on Windows, macOS, and Linux. Windows-specific tests cover ACL inheritance, Task Scheduler definitions, bootstrap parsing/installation, and provider child-process cleanup. They use temporary data and mocked task registration so normal test runs do not install or replace a real user's background task. Full SSH-to-Task-Scheduler setup must also be validated on a signed-in Windows host before a supported release.

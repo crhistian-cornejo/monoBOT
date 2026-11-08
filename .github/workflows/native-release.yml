@@ -40,23 +40,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       CARGO_BUILD_JOBS: 2
-      TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}
       R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/monocode-gpui
+          workspaces: . -> target
           key: native-release-${{ matrix.target }}
           cache-on-failure: true
       - name: Configure native channel and version
@@ -65,11 +63,11 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#native-v}"
           node --input-type=module -e 'import { previewVersion } from "./scripts/package-native.mjs"; previewVersion(process.argv[1]);' "$VERSION"
-          test -n "$TAURI_UPDATER_PUBKEY"
+          test -n "$MONOBOT_UPDATER_PUBKEY"
           test -n "$R2_PUBLIC_BASE_URL"
           echo "MONOCODE_NATIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "MONOCODE_NATIVE_UPDATER_ENDPOINT=${R2_PUBLIC_BASE_URL%/}/native-preview/latest.json" >> "$GITHUB_ENV"
-          echo "MONOCODE_NATIVE_UPDATER_PUBKEY=$TAURI_UPDATER_PUBKEY" >> "$GITHUB_ENV"
+          echo "MONOCODE_NATIVE_UPDATER_PUBKEY=$MONOBOT_UPDATER_PUBKEY" >> "$GITHUB_ENV"
       - name: Install native Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -112,7 +110,6 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN"
           security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
           echo "APPLE_API_KEY_PATH=$RUNNER_TEMP/native-notary.p8" >> "$GITHUB_ENV"
-      - run: pnpm install --frozen-lockfile
       - run: node --test scripts/native-release.test.mjs scripts/package-native.test.mjs
       - name: Test native update backend
         run: cargo test --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-core --profile native-dev app_update
@@ -158,7 +155,7 @@ jobs:
           APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
         run: |
           set -euo pipefail
-          BINARY="crates/monocode-gpui/target/${{ matrix.target }}/release/monocode-gpui"
+          BINARY="target/${{ matrix.target }}/release/monocode-gpui"
           if [ "$RUNNER_OS" = Windows ]; then BINARY="$BINARY.exe"; fi
           node scripts/package-native.mjs '${{ matrix.kind }}' "$BINARY" native-dist '${{ matrix.arch }}'
       - uses: actions/upload-artifact@v4
@@ -184,7 +181,7 @@ jobs:
     container: almalinux:10
     env:
       CARGO_BUILD_JOBS: 2
-      TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}
       R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
     steps:
       - run: dnf install -y git
@@ -206,14 +203,14 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME#native-v}"
           node --input-type=module -e 'import { previewVersion } from "./scripts/package-native.mjs"; previewVersion(process.argv[1]);' "$VERSION"
-          test -n "$TAURI_UPDATER_PUBKEY"
+          test -n "$MONOBOT_UPDATER_PUBKEY"
           test -n "$R2_PUBLIC_BASE_URL"
           echo "MONOCODE_NATIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "MONOCODE_NATIVE_UPDATER_ENDPOINT=${R2_PUBLIC_BASE_URL%/}/native-preview/latest.json" >> "$GITHUB_ENV"
-          echo "MONOCODE_NATIVE_UPDATER_PUBKEY=$TAURI_UPDATER_PUBKEY" >> "$GITHUB_ENV"
+          echo "MONOCODE_NATIVE_UPDATER_PUBKEY=$MONOBOT_UPDATER_PUBKEY" >> "$GITHUB_ENV"
       - run: cargo test --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-core --profile native-dev app_update
       - run: cargo build --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-gpui --release
-      - run: node scripts/package-native.mjs rpm crates/monocode-gpui/target/release/monocode-gpui native-dist x86_64
+      - run: node scripts/package-native.mjs rpm target/release/monocode-gpui native-dist x86_64
       - uses: actions/upload-artifact@v4
         with:
           name: native-linux-rpm
@@ -222,17 +219,55 @@ jobs:
             native-dist/*.rpm
           if-no-files-found: error
 
+  host:
+    name: Remote host packages (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: host/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: host/pnpm-lock.yaml
+      - run: pnpm --dir host install --frozen-lockfile
+      - run: pnpm --dir host test
+      - name: Cache pinned host runtimes
+        uses: actions/cache@v4
+        with:
+          path: host/build/host-runtime-cache
+          key: host-runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ runner.os == 'Linux' && 'all' || 'native' }}-${{ hashFiles('host/package.mjs') }}
+      - run: pnpm --dir host package -- --all
+        if: runner.os == 'Linux'
+      - run: pnpm --dir host package
+        if: runner.os != 'Linux'
+      - uses: actions/upload-artifact@v4
+        if: runner.os == 'Linux'
+        with:
+          name: host-packages
+          path: |
+            host/build/host-packages/*.tar.gz
+            host/build/host-packages/*.zip
+            host/build/host-packages/*.sha256
+          if-no-files-found: error
+
   publish:
     name: Publish native preview and its update feed
-    needs: [build, rpm]
+    needs: [build, rpm, host]
     runs-on: macos-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-      TAURI_UPDATER_PUBKEY: ${{ secrets.TAURI_UPDATER_PUBKEY }}
+      MONOBOT_UPDATER_PRIVATE_KEY: ${{ secrets.MONOBOT_UPDATER_PRIVATE_KEY }}
+      MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD }}
+      MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}
       R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -243,24 +278,26 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
       - uses: actions/download-artifact@v4
         with:
           pattern: native-*
           merge-multiple: true
           path: native-dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: host-packages
+          path: host-packages
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: crates/monocode-gpui
+          workspaces: . -> target
           key: native-publication-verifier
       - name: Sign all update packages and the native manifest
         run: |
+          cargo build --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-core --example sign_native_update --profile native-dev
           echo "MONOCODE_NATIVE_VERSION=${GITHUB_REF_NAME#native-v}" >> "$GITHUB_ENV"
           MONOCODE_NATIVE_VERSION="${GITHUB_REF_NAME#native-v}" node scripts/native-release.mjs native-dist
       - name: Verify the signed feed and all packages with the native client
@@ -283,6 +320,15 @@ jobs:
             aws s3 cp "native-dist/$file" "s3://${R2_BUCKET_NAME}/native-preview/${MONOCODE_NATIVE_VERSION}/$file" --cache-control 'public,max-age=31536000,immutable' --endpoint-url "$ENDPOINT"
             FILES+=("native-dist/$file")
           done < "$RUNNER_TEMP/native-files.txt"
+          HOST_ARCHIVES=(host-packages/*.tar.gz host-packages/*.zip)
+          if (( ${#HOST_ARCHIVES[@]} != 6 )); then
+            echo "Expected six host archives" >&2
+            exit 1
+          fi
+          for archive in "${HOST_ARCHIVES[@]}"; do
+            test -f "$archive.sha256" || { echo "Missing host checksum: $archive.sha256" >&2; exit 1; }
+            FILES+=("$archive" "$archive.sha256")
+          done
           gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
           # This is the only mutable feed written by the native release job.

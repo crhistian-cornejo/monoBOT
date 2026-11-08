@@ -1,5 +1,5 @@
 //! Bounded PDF text extraction and page-based excerpts for paper actions.
-use lopdf::{Document, LoadOptions, Object, ObjectId, content::Content};
+use lopdf::{content::Content, Document, LoadOptions, Object, ObjectId};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -752,12 +752,10 @@ mod tests {
         let found = excerpt(&paper, None, Some("hydrology rainfall"), 500).unwrap();
         assert!(found.text.contains("[page 1]"));
         assert!(!found.text.contains("[page 2]"));
-        assert!(
-            excerpt(&paper, None, Some("unmatched"), 500)
-                .unwrap()
-                .text
-                .is_empty()
-        );
+        assert!(excerpt(&paper, None, Some("unmatched"), 500)
+            .unwrap()
+            .text
+            .is_empty());
     }
 
     #[test]

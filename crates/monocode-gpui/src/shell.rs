@@ -94,6 +94,9 @@ use std::{
     },
 };
 
+/// The citation being pointed at, `(url, passage)`, and the task that clears it.
+type CitationPoint = ((String, Option<String>), gpui::Task<()>);
+
 actions!(
     workspace,
     [
@@ -800,7 +803,7 @@ pub(crate) struct Shell {
     pending_review: Option<(i64, crate::review::ReviewTab)>,
     pending_composer_focus: Option<i64>,
     /// A citation the pointer rests on, waiting to point its open paper there.
-    citation_point: Option<((String, Option<String>), gpui::Task<()>)>,
+    citation_point: Option<CitationPoint>,
     review_focused: bool,
     review_drag: bool,
     split_bounds: HashMap<i64, AnchorSlot>,
@@ -1251,12 +1254,13 @@ impl Shell {
                 cx.notify();
             }),
         );
-        this.observations.push(
-            cx.subscribe(&monos, |this, _, _: &crate::monos::HoverChanged, cx| {
+        this.observations.push(cx.subscribe(
+            &monos,
+            |this, _, _: &crate::monos::HoverChanged, cx| {
                 this.sidebar_frame.update(cx, |_, cx| cx.notify());
                 this.projects_frame.update(cx, |_, cx| cx.notify());
-            }),
-        );
+            },
+        ));
         this.watch_bot_sync(&monos, cx);
         this.observations.push(cx.subscribe(
             &monos,
@@ -2299,12 +2303,20 @@ impl Shell {
     }
     /// Resting on a citation points a paper already open beside the chat at
     /// the cited passage; passing over it quickly does nothing.
-    fn point_at_citation(&mut self, point: Option<(String, Option<String>)>, cx: &mut Context<Self>) {
+    fn point_at_citation(
+        &mut self,
+        point: Option<(String, Option<String>)>,
+        cx: &mut Context<Self>,
+    ) {
         let Some(target) = point else {
             self.citation_point = None;
             return;
         };
-        if self.citation_point.as_ref().is_some_and(|(at, _)| *at == target) {
+        if self
+            .citation_point
+            .as_ref()
+            .is_some_and(|(at, _)| *at == target)
+        {
             return;
         }
         let (url, passage) = target.clone();
@@ -2322,7 +2334,9 @@ impl Shell {
             };
             let _ = this.update(cx, |this, cx| {
                 if let Some(monos) = this.monos.clone()
-                    && monos.update(cx, |m, cx| m.point_open_paper(&path, page, passage.clone(), cx))
+                    && monos.update(cx, |m, cx| {
+                        m.point_open_paper(&path, page, passage.clone(), cx)
+                    })
                 {
                     return;
                 }
@@ -5477,10 +5491,19 @@ impl Shell {
         self.menu = None;
         let mut events = Vec::new();
         let (label, items, width, style) = self.menu_items(&target, &mut events, window, cx);
+        let picker = matches!(
+            target,
+            MenuTarget::CompactProjectPicker | MenuTarget::Header
+        );
         let menu = cx.new(|cx| {
-            Menu::new(label, items, window, cx)
+            let menu = Menu::new(label, items, window, cx)
                 .width(width)
-                .style(style)
+                .style(style);
+            if picker {
+                menu.height(crate::pickers::PROJECT_PICKER_HEIGHT)
+            } else {
+                menu
+            }
         });
         events.push(
             cx.subscribe_in(&menu, window, |this, _, event: &MenuEvent, window, cx| {
@@ -9083,8 +9106,8 @@ impl Render for Shell {
                     }
                 }),
             )
-            .on_action(cx.listener(
-                |this, event: &crate::file_editor::OpenPaperRecord, _, cx| {
+            .on_action(
+                cx.listener(|this, event: &crate::file_editor::OpenPaperRecord, _, cx| {
                     // Outside a Mono there is no panel for a paper's record.
                     if this.mono_active(cx)
                         && let Some(monos) = this.monos.clone()
@@ -9095,8 +9118,8 @@ impl Render for Shell {
                     } else {
                         cx.open_url(&event.url);
                     }
-                },
-            ))
+                }),
+            )
             .on_action(cx.listener(
                 |this, event: &crate::citation_card::PointAtCitation, _, cx| {
                     this.point_at_citation(event.0.clone(), cx)
@@ -12165,19 +12188,24 @@ mod tests {
         let transcript =
             root.read_with(cx, |s, cx| s.sessions[&active].read(cx).transcript.clone());
         let before = transcript.read_with(cx, |t, _| t.render_passes);
-        cx.update_window(window.into(), |_, w, cx| {
-            w.simulate_mouse_move(gpui::point(px(40.), px(133.)), cx)
-        })
-        .unwrap();
-        cx.run_until_parked();
-        assert_eq!(root.read_with(cx, |s, _| s.sidebar_hover), Some("Inbox"));
-        cx.update_window(window.into(), |_, w, cx| {
-            w.simulate_mouse_move(gpui::point(px(40.), px(166.)), cx)
-        })
-        .unwrap();
-        cx.run_until_parked();
-        assert_eq!(root.read_with(cx, |s, _| s.sidebar_hover), Some("Notes"));
-        assert_eq!(transcript.read_with(cx, |t, _| t.render_passes), before);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        // Find the rows by their selectors: which ones the sidebar lists
+        // (New, Inbox, Notes…) depends on the layout and preferences.
+        let inbox = visual.debug_bounds("sidebar-navigation-Inbox").unwrap();
+        let notes = visual.debug_bounds("sidebar-navigation-Notes").unwrap();
+        visual.simulate_mouse_move(inbox.center(), None, Default::default());
+        visual.run_until_parked();
+        assert_eq!(
+            root.read_with(visual, |s, _| s.sidebar_hover),
+            Some("Inbox")
+        );
+        visual.simulate_mouse_move(notes.center(), None, Default::default());
+        visual.run_until_parked();
+        assert_eq!(
+            root.read_with(visual, |s, _| s.sidebar_hover),
+            Some("Notes")
+        );
+        assert_eq!(transcript.read_with(visual, |t, _| t.render_passes), before);
     }
     #[gpui::test]
     fn many_blank_tabs_fit_without_creating_sidebar_conversations(cx: &mut TestAppContext) {

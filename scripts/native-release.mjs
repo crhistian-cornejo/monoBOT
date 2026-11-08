@@ -59,23 +59,20 @@ export function nativeManifest({ version, baseUrl, artifacts, notes = "" }) {
 export async function prepareNativeRelease(directory, env = process.env) {
   const version = env.MONOCODE_NATIVE_VERSION;
   previewVersion(version);
-  if (!env.TAURI_SIGNING_PRIVATE_KEY || !env.TAURI_UPDATER_PUBKEY)
-    throw new Error(
-      "The existing Tauri signing key and public key are required",
-    );
+  if (!env.MONOBOT_UPDATER_PRIVATE_KEY || !env.MONOBOT_UPDATER_PUBKEY)
+    throw new Error("The MonoBOT update signing key and public key are required");
+  const signer =
+    env.MONOBOT_UPDATER_SIGNER ??
+    "target/native-dev/examples/sign_native_update";
   directory = resolve(directory);
   const records = [];
   const files = [];
   const sign = async (filename) => {
-    const result = spawnSync(
-      process.execPath,
-      ["node_modules/@tauri-apps/cli/tauri.js", "signer", "sign", filename],
-      {
-        env: { ...env, CI: "true" },
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
+    const result = spawnSync(signer, ["sign", filename], {
+      env,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     if (result.error || result.status !== 0)
       throw new Error(`Could not sign ${basename(filename)}`);
     return (await readFile(`${filename}.sig`, "utf8")).trim();

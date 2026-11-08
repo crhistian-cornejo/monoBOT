@@ -1,7 +1,8 @@
-# MonoBOT Native preview
+# MonoBOT desktop (GPUI)
 
-MonoBOT Native is the experimental Rust + GPUI app. The production app still
-uses React/Tauri. Native builds have their own Cargo workspace and lockfile.
+MonoBOT's desktop app is written in Rust with GPUI. It is the only desktop app:
+the earlier React/Tauri app has been removed. It builds from the Cargo workspace at
+the repository root (`Cargo.toml`, `Cargo.lock`, output in `target/`).
 
 ## Requirements
 
@@ -11,7 +12,7 @@ uses React/Tauri. Native builds have their own Cargo workspace and lockfile.
   `pkg-config` on Debian/Ubuntu).
 - At least one installed, signed-in agent CLI. See [provider setup](../providers.md).
 
-The native commands do not require `pnpm install` or a frontend build.
+The desktop commands need no JavaScript dependencies or frontend build.
 macOS is the primary preview target. A Linux ARM64 source build has been
 smoke-tested in a VM; Linux x64 packages and Windows GUI interaction still need
 runtime testing. See [preview limitations](parity.md).
@@ -58,13 +59,13 @@ see [verification](verification.md).
 From the repository root:
 
 ```sh
-pnpm native:dev
+bun run dev
 ```
 
 Development uses a separate database. To open a particular project:
 
 ```sh
-pnpm native:dev --cwd /path/to/project
+bun run dev -- --cwd /path/to/project
 ```
 
 Type `r` then Enter in the terminal to rebuild and restart. The current app stays
@@ -76,8 +77,7 @@ platforms launch the executable directly.
 
 Dictation links sherpa-onnx, whose build script downloads its prebuilt libraries
 from GitHub into each target folder. A network that inspects TLS refuses that
-download, so the native scripts (`native:dev`, `native:build`, `native:test`,
-`native:check`) point `SHERPA_ONNX_LIB_DIR` at the libraries a Tauri build already
+download, so the native scripts (`dev`, `build`, `test`, `check`) point `SHERPA_ONNX_LIB_DIR` at libraries already
 fetched under `target/sherpa-onnx-prebuilt`, in this checkout or, from a git
 worktree, the main one. Running cargo by hand, use `node scripts/native-cargo.mjs`
 in its place, or set `SHERPA_ONNX_LIB_DIR` yourself.
@@ -85,7 +85,7 @@ in its place, or set `SHERPA_ONNX_LIB_DIR` yourself.
 ## Build
 
 ```sh
-pnpm native:build
+bun run build
 ```
 
 This creates an optimized build without launching it. **The release app uses the
@@ -94,14 +94,14 @@ installed MonoBOT database, and changes save there.** No extra flags are needed.
 On macOS, open:
 
 ```sh
-open "crates/monocode-gpui/target/release/MonoBOT Native.app"
+open "target/release/MonoBOT Native.app"
 ```
 
 The app has a separate name and application ID (`dev.usemono.gpui`) so it can be
 installed alongside MonoBOT. Local source builds are signed locally, without
 Apple notarization or configured automatic updates. Linux and Windows builds
 produce a standalone executable
-under `crates/monocode-gpui/target/release/`. `CARGO_TARGET_DIR` and
+under `target/release/`. `CARGO_TARGET_DIR` and
 `CARGO_BUILD_TARGET` can change these output paths.
 
 The **MonoBOT Native Preview** GitHub Actions workflow runs checks and build
@@ -131,17 +131,16 @@ profile remains unverified. Native preference edits are stored separately.
 Some desktop layout concepts still need native support; see
 [preview limitations](parity.md).
 
-The Windows reader always opens a temporary copy of localStorage. Copying while
-Tauri is writing is best-effort: an inconsistent copy can leave desktop
-preferences incomplete or unavailable for that launch. Close Tauri before
-starting GPUI for the first time. See [verification](verification.md) for
+These readers import preferences left by the old Tauri app, if it was ever
+installed. The Windows reader always opens a temporary copy of localStorage;
+close the old app before the first launch so the copy is consistent. See [verification](verification.md) for
 recorded checks.
 
 To inspect the installed database without opening a window or changing it, use
 the executable from a release build:
 
 ```sh
-crates/monocode-gpui/target/release/monocode-gpui --check-data
+target/release/monocode-gpui --check-data
 ```
 
 On Windows, the terminal prefers PowerShell 7 (`pwsh.exe`), then Windows
@@ -155,7 +154,7 @@ continues to use each provider's existing sign-in.
 ## Checks and fixtures
 
 ```sh
-pnpm native:check
+bun run check
 ```
 
 This runs the script tests, Rust formatting, strict Clippy and native tests.
@@ -166,7 +165,7 @@ A synthetic long-history fixture uses development data and makes no provider
 request:
 
 ```sh
-MONOCODE_NATIVE_DATA_DIR=/tmp/monocode-native-lab pnpm native:dev --fixture
+MONOCODE_NATIVE_DATA_DIR=/tmp/monocode-native-lab bun run dev --fixture
 ```
 
 Fixtures are refused with production data. Use a fresh temporary directory when

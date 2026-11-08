@@ -1,8 +1,8 @@
 # Paridad útil de interfaz: seguimiento nativo
 
-Referencia de comportamiento: la copia local de Tauri en
-`.claude/worktrees/agent-a3f69eafb1397eb18/src/`.
-La comparación usa su código real, no solo el inventario histórico de migración.
+Referencia de comportamiento: el código de la app Tauri, que ya no está en el
+repositorio (las rutas `features/...` de abajo eran suyas). La lista actualizada
+de lo que falta está en [tauri-gap-audit.md](tauri-gap-audit.md).
 
 ## Tarjetas de agentes y noticias
 
@@ -84,22 +84,12 @@ Resultados focalizados: **20 pruebas aprobadas**:
 - 8 regresiones del popover compartido.
 
 La comprobación de compilación nativa (`cargo check`, sin configuración de
-tests) pasa. La última suite global termina con **953 aprobadas, 7 fallidas y
-17 ignoradas**. No se presenta como una suite completamente aprobada.
-Los fallos adicionales que quedan sin resolver en esta entrega son:
-
-| Prueba | Fallo observado |
-| --- | --- |
-| `conversation::provider_retry::tests::an_overloaded_provider_counts_down_and_the_user_can_stop_it` | No aparece el aviso de reintento. |
-| `editor_analysis::parity_tests::large_tsx_analysis_highlights_the_end_of_the_current_and_original_file` | Bloqueo al esperar el análisis TSX. |
-| `file_editor::spreadsheet_chart::tests::columns_are_drawn_per_point_with_axes_titles_and_legend` | Falta la etiqueta «Unidades». |
-| `settings::pages::mobile::tests::pairing_dialog_matches_react_dimensions_and_scrolls_inside_small_windows` | Diferencia vertical de 0,25 px. |
-| `shell::classic_surface_tests::original_collapsed_picker_selects_monos_and_projects_with_search_and_keyboard` | No queda seleccionado el agente esperado. |
-| `shell::settings::tests::settings_replace_native_rail_and_tabs_and_return_to_the_same_session` | No coincide el padding esperado. |
-| `shell::tests::sidebar_hover_updates_labels_without_rebuilding_the_chat` | Las coordenadas de prueba alcanzan «New», no «Inbox». |
-
-Estos resultados describen la ejecución del árbol de trabajo, no una
-comparación de base que permita atribuir el origen de esos siete fallos.
+tests) pasa. Desde el 8 de noviembre de 2026 la suite global pasa entera: **972
+aprobadas, 0 fallidas y 17 ignoradas**. De los siete fallos que había antes, el
+análisis TSX ya pasaba. Dos de los otros seis eran errores reales y se
+arreglaron: el aviso de reintento no repintaba hasta el primer tic, y el
+selector de proyectos compacto no tenía altura. Los cuatro restantes eran
+expectativas viejas y se actualizaron.
 Se mantiene el aviso de compatibilidad futura de la dependencia `block 0.1.6`.
 
 Los eventos de ratón, reloj, scroll y foco son sintéticos y pasan por GPUI, no

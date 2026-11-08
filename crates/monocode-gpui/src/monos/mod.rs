@@ -23,8 +23,8 @@ pub(crate) mod html;
 #[cfg(target_os = "windows")]
 mod html_windows;
 mod images;
-mod memory_ui;
 mod mail_workspace;
+mod memory_ui;
 mod mobile;
 mod news;
 mod news_view;
@@ -72,6 +72,12 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+
+/// A Mono's document folders, cached by `(mono id, transcript rows, last row length)`.
+type DocumentFolders = (
+    (String, usize, usize),
+    Vec<monocode_core::mono::folders::Folder>,
+);
 
 fn can_dispatch(message: &Message, busy: bool) -> bool {
     message.error.is_none()
@@ -169,12 +175,7 @@ pub(crate) struct Monos {
     loading_papers: HashSet<String>,
     /// The Documents tab's folders, read from the chat; kept while the chat's
     /// rows stay as they were (mono id, row count, last row's length).
-    document_folders: std::cell::RefCell<
-        Option<(
-            (String, usize, usize),
-            Vec<monocode_core::mono::folders::Folder>,
-        )>,
-    >,
+    document_folders: std::cell::RefCell<Option<DocumentFolders>>,
     /// Folders the user closed in the Documents tab.
     closed_folders: HashSet<String>,
     project_changes: changes::ProjectChanges,
@@ -767,9 +768,13 @@ impl Monos {
     fn save(&mut self, cx: &mut Context<Self>) {
         self.sync_soon();
         let roster = self.roster.clone();
-        let cloud_ids: Vec<String> = roster.monos.iter().flat_map(|m| m.outbox.iter())
+        let cloud_ids: Vec<String> = roster
+            .monos
+            .iter()
+            .flat_map(|m| m.outbox.iter())
             .filter(|q| monocode_core::inbox::workspace::is_cloud(&q.id))
-            .map(|q| q.id.clone()).collect();
+            .map(|q| q.id.clone())
+            .collect();
         let store = self.store.clone();
         let queued = roster
             .monos
@@ -790,10 +795,16 @@ impl Monos {
                 let db = locked(&store)?;
                 roster.save(&db)?;
                 let cloud_error = if !cloud_ids.is_empty() {
-                    let dir = db.data_dir().map(PathBuf::from)
+                    let dir = db
+                        .data_dir()
+                        .map(PathBuf::from)
                         .unwrap_or_else(monocode_core::inbox::mail::desktop_data_dir);
-                    monocode_core::inbox::workspace::Service::new(dir).ack_deliveries(&cloud_ids).err()
-                } else { None };
+                    monocode_core::inbox::workspace::Service::new(dir)
+                        .ack_deliveries(&cloud_ids)
+                        .err()
+                } else {
+                    None
+                };
                 Ok::<_, String>(cloud_error)
             });
             let result = work.await;
@@ -808,8 +819,11 @@ impl Monos {
                         cx.notify();
                     }
                     for (id, messages) in queued {
-                        this.persisted_messages.extend(messages.into_iter().filter(|message|
-                            cloud_error.is_none() || !monocode_core::inbox::workspace::is_cloud(message)));
+                        this.persisted_messages
+                            .extend(messages.into_iter().filter(|message| {
+                                cloud_error.is_none()
+                                    || !monocode_core::inbox::workspace::is_cloud(message)
+                            }));
                         this.dispatch(&id, cx);
                     }
                 }

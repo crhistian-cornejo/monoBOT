@@ -20,11 +20,8 @@ const options = {
   plugins: [{
     name: "native-paths",
     setup(build) {
-      // Shared frontend helpers resolve from the repository root. Keep their
-      // editor extensions on this bundle's package instances as well.
+      // Keep every editor extension on this bundle's package instances.
       build.onResolve({ filter: /^@(codemirror|lezer|replit)\// }, args => ({ path: fileURLToPath(import.meta.resolve(args.path)) }));
-      build.onResolve({ filter: /platform\/tauri\/fs$/ }, () => ({ path: "basename", namespace: "native" }));
-      build.onLoad({ filter: /.*/, namespace: "native" }, () => ({ contents: 'export const basename = path => path.replace(/\\\\/g, "/").replace(/\\/+$/, "").split("/").pop() || "/";' }));
     },
   }],
 };
@@ -35,8 +32,9 @@ const sandbox = vm.createContext({});
 vm.runInContext(await readFile(asset, "utf8"), sandbox);
 const sample = JSON.parse(await sandbox.monocodeAnalyze("test.json", '{"bad": }', "{}"));
 if (!sample.diagnostics.length || !sample.changes.length) throw new Error("Native analysis smoke check failed");
+// The old React App.tsx (~600 KB), kept as a parity fixture for the native editor.
 // Windows checkouts may use CRLF, which CodeMirror counts as one line break.
-const largeSource = (await readFile(path.join(root, "src/app/App.tsx"), "utf8")).replace(/\r\n?/g, "\n");
+const largeSource = (await readFile(path.join(root, "crates/monocode-gpui/tests/fixtures/parity/App.tsx"), "utf8")).replace(/\r\n?/g, "\n");
 const largeAnalysis = JSON.parse(await sandbox.monocodeAnalyze("App.tsx", largeSource, `${largeSource}\nexport const previousHighlightTail = "tail";\n`));
 if (!largeAnalysis.tokens.some(token => token.to > largeSource.length - 1024)) throw new Error("Large-file highlighting stops before the end of App.tsx");
 if (!largeAnalysis.changes.some(change => change.original.includes("previousHighlightTail") && change.tokens.some(token => token.kind === "var(--syntax-string)"))) throw new Error("Large-file baseline highlighting stops before its final change");
@@ -47,10 +45,8 @@ if (search.matches.length !== 2 || search.matches[0].insert !== "hello!") throw 
 const formatter = vm.createContext({});
 vm.runInContext(await readFile(asset.replace("native-editor.js", "native-format.js"), "utf8"), formatter);
 if (JSON.parse(await formatter.monocodeFormat("a.json", '{"a":1}', 0)).formatted !== '{ "a": 1 }\n') throw new Error("Format smoke check failed");
-const paletteBuild = await build({ ...options, entryPoints: [], stdin: { contents: 'import { WORKSPACE_THEMES } from "../../src/features/settings/model/workspaceThemes"; globalThis.palettes = Object.fromEntries(WORKSPACE_THEMES.map(t => [t.id, { dark: { ...t.dark.syntax, heading: t.dark.heading }, light: { ...t.light.syntax, heading: t.light.heading } }]));', resolveDir: here }, write: false });
-const palettes = vm.createContext({});
-vm.runInContext(paletteBuild.outputFiles[0].text, palettes);
-await writeFile(asset.replace("native-editor.js", "editor-palettes.json"), JSON.stringify(palettes.palettes, null, 2) + "\n");
+// editor-palettes.json is edited by hand now: the native app has themes the
+// React sources never had, so it is no longer generated here.
 const notices = [await readFile(path.join(here, "node_modules/prettier/THIRD-PARTY-NOTICES.md"), "utf8")];
 for (const scope of ["@codemirror", "@lezer", "@replit"]) {
   for (const name of (await readdir(path.join(here, "node_modules", scope))).sort()) {

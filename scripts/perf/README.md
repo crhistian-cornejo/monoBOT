@@ -25,8 +25,8 @@ scripts/perf/stream-profile.sh target/release/monocode-gpui 30   # a local build
   over the same window.
 
 ```sh
-scripts/perf/frame-run.sh crates/monocode-gpui/target/release/monocode-gpui 20
-PROFILE=1 scripts/perf/frame-run.sh crates/monocode-gpui/target/release/monocode-gpui 15
+scripts/perf/frame-run.sh target/release/monocode-gpui 20
+PROFILE=1 scripts/perf/frame-run.sh target/release/monocode-gpui 15
 ```
 
 A frame log line reads:

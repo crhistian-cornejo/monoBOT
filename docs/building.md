@@ -1,105 +1,69 @@
 # Build from source
 
-MonoBOT supports macOS, Linux, and Windows. You need Node.js 20+ and a current stable Rust toolchain. Install and sign in to at least one agent CLI using [provider setup](providers.md).
+MonoBOT's desktop app is Rust + GPUI (`crates/monocode-gpui`). You need a current
+stable Rust toolchain, Node.js 22+ and [Bun](https://bun.sh/) for the root
+scripts, and at least one signed-in agent CLI ([provider setup](providers.md)).
+No JavaScript dependencies are installed for the desktop build.
 
 ## Platform prerequisites
 
-On Linux, install the standard Tauri prerequisites, including `libwebkit2gtk-4.1-dev`, `libgtk-3-dev`, `libsoup-3.0-dev`, and `libjavascriptcoregtk-4.1-dev` on Debian/Ubuntu. The setup helpers below install the native dependencies and packaging tools for their distributions.
+- **macOS:** Xcode with the macOS components (SDK 26 or newer for release builds).
+- **Debian/Ubuntu:** `clang cmake ninja-build pkg-config libfontconfig1-dev
+  libfreetype6-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev
+  libxcb-randr0-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev
+  libasound2-dev libx11-xcb-dev libegl1-mesa-dev libvulkan-dev libdbus-1-dev`.
+  Packaging also needs `squashfs-tools`, `desktop-file-utils` and `appimagetool`.
+- **Windows:** the `stable-x86_64-pc-windows-msvc` toolchain; packaging needs NSIS.
 
-On Windows, the packaging script uses `stable-x86_64-pc-windows-msvc`. The installer bootstraps the [WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) runtime when it is missing.
-
-## Run locally
+## Run and build
 
 From the repository root:
 
-```bash
-pnpm install
-pnpm tauri dev
+```sh
+bun run dev                       # development build, separate database
+bun run dev -- --cwd /path/to/project
+bun run build                     # optimized build (and the .app on macOS)
+bun run check                     # script tests, fmt, clippy -D warnings
+bun run test                      # core and GPUI tests
 ```
 
-## Ubuntu / Debian packages
+`bun run dev` rebuilds and restarts when you type `r` then Enter. See the
+[desktop guide](native/README.md) for data paths, fixtures and dictation
+libraries.
 
-On an Ubuntu/Debian workstation, the repository can install the native Tauri prerequisites and build distributable Linux packages directly:
+## Packages
 
-```bash
-pnpm setup:linux:deb
-pnpm install
-pnpm build:linux
-```
-
-The Linux build emits `.deb` and AppImage bundles under `target/release/bundle/`, in the `deb/` and `appimage/` directories. `build:linux` repacks the AppImage so it uses the host WebKitGTK 4.1 stack instead of bundled Ubuntu libraries. See [Linux installation](install.md) for runtime dependencies and package instructions.
-
-## Fedora / Enterprise Linux packages
-
-On Fedora or Enterprise Linux 10 (registered RHEL, Rocky, Alma, CentOS Stream, Oracle):
-
-```bash
-pnpm setup:linux:fedora
-pnpm install
-pnpm build:fedora
-```
-
-On EL 10, the setup helper enables EPEL 10 and CRB automatically, since the development packages need CRB. On Oracle Linux it enables `ol10_codeready_builder` and `ol10_developer_EPEL`. Fedora does not need these extra repositories.
-
-The build emits a `.rpm` under `target/release/bundle/rpm/`, installable with:
-
-```bash
-sudo dnf install ./target/release/bundle/rpm/MonoBOT-*.rpm
-```
-
-EL 9 and older are unsupported (`webkit2gtk4.1-devel` only exists in EPEL 10). The published release `.rpm` is built on Enterprise Linux 10 so it loads on Fedora and EL 10. See [Linux installation](install.md#fedora--enterprise-linux-packages) for release package installation and runtime repository setup.
-
-## Windows packages
-
-```bash
-pnpm install
-pnpm build:windows
-```
-
-The Windows build emits an NSIS installer under `target/release/bundle/nsis/`.
-
-## Tauri configuration
-
-- [src-tauri/tauri.conf.json](../src-tauri/tauri.conf.json) contains the shared application and bundle configuration.
-- [src-tauri/tauri.linux.conf.json](../src-tauri/tauri.linux.conf.json) loads automatically for Linux development and builds.
-- [src-tauri/tauri.windows.conf.json](../src-tauri/tauri.windows.conf.json) loads automatically for Windows development and builds.
-
-## Beta releases and updates
-
-Prerelease tags such as `v0.9.1-beta.1` publish to `beta/latest.json`, and beta builds use that feed even when a stable updater endpoint is configured. Beta releases leave the stable feed and macOS download links unchanged.
-
-To trial AppImage updates, install a beta AppImage in a writable directory, publish a newer beta, and verify the update downloads, installs, and relaunches successfully before publishing a stable version.
-
-The [release workflow](../.github/workflows/release.yml) packages the platform builds and publishes the updater feed. [scripts/release-channel.cjs](../scripts/release-channel.cjs) selects the stable or beta feed.
-
-Read [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines and checks. The experimental remote host has its own [build and packaging instructions](remote-access.md#release-packaging).
-
-## Monocode Native preview
-
-The experimental GPUI app uses a separate Cargo workspace. The production
-commands above continue to build React/Tauri.
-
-Requires Node.js 22+, stable Rust, and Xcode with macOS components on macOS.
-Native commands do not need JavaScript dependencies installed.
+CI packages every platform with `scripts/package-native.mjs` after a release
+build:
 
 ```sh
-pnpm native:dev     # launch with a separate development database
-pnpm native:build   # create an optimized app using installed MonoBOT data
-pnpm native:check   # run native checks
+cargo build --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-gpui --release
+node scripts/package-native.mjs <macos|linux|rpm|windows> target/release/monocode-gpui native-dist <arch>
 ```
 
-Type `r` then Enter in the development terminal to rebuild and restart. There is
-no hot reload or automatic rebuild on save. Ctrl+C stops the runner and app.
+It writes a signed/notarized `.app` and `.dmg` on macOS (when the Apple
+credentials are set), `.deb`, AppImage or `.rpm` on Linux, and an NSIS
+installer on Windows, all under `native-dist/`.
 
-The build command does not launch the app. On macOS, open the result with:
+## Releases and updates
 
-```sh
-open "crates/monocode-gpui/target/release/Monocode Native.app"
-```
+Pushing a tag `native-vX.Y.Z` runs [native-release.yml](../.github/workflows/native-release.yml).
+It builds all platforms, signs the update packages and the `latest.json`
+manifest, verifies them with the app's own update client, publishes a GitHub
+release and uploads the files to the `monobot-releases` R2 bucket under
+`native-preview/`. The app reads its feed from
+`<R2_PUBLIC_BASE_URL>/native-preview/latest.json`.
 
-The release app reads and writes your installed MonoBOT data. It is locally
-signed, without notarization or automatic updates. Linux/Windows GUI builds
-remain unverified.
+Repository secrets the workflow needs:
 
-See the [native guide](native/README.md) for data paths, output locations,
-fixtures and preview limitations.
+| Secret | Value |
+| --- | --- |
+| `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_PUBLIC_BASE_URL` | Cloudflare account, `monobot-releases`, its public `r2.dev` URL |
+| `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | An R2 API token limited to `monobot-releases` (Object Read & Write) |
+| `MONOBOT_UPDATER_PRIVATE_KEY`, `MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD`, `MONOBOT_UPDATER_PUBKEY` | The minisign key pair that signs updates |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8` | Developer ID signing and notarization |
+
+The remote host has its own [build and packaging instructions](remote-access.md#release-packaging).
+The mobile app builds from `mobile/` ([mobile README](../mobile/README.md)).
+
+Read [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.

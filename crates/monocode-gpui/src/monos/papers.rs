@@ -202,8 +202,8 @@ impl Monos {
             .and_then(|record| record.passage.as_deref())
             .and_then(|passage| monocode_core::papers::locate_in_items(&[&abstract_text], passage))
             .map(|found| found.start_offset..found.end_offset);
-        let body = gpui::StyledText::new(abstract_text.clone()).with_highlights(marked.map(
-            |range| {
+        let body =
+            gpui::StyledText::new(abstract_text.clone()).with_highlights(marked.map(|range| {
                 (
                     range,
                     gpui::HighlightStyle {
@@ -216,8 +216,7 @@ impl Monos {
                         ..Default::default()
                     },
                 )
-            },
-        ));
+            }));
         let open = url.to_owned();
         div()
             .size_full()

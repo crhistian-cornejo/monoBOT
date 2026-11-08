@@ -430,7 +430,6 @@ fn inline_selected(
                 thickness: px(1.),
                 color: None,
             }),
-            ..Default::default()
         };
         if fade.is_some_and(|fade| {
             fade.intersects(word_base + run.word_start..word_base + run.word_start + run.words)
@@ -469,7 +468,8 @@ fn inline_selected(
     let clicked_urls = urls.clone();
     let clicked_citations = prepared.citations.clone();
     let text_id: SharedString = format!("{id}-text").into();
-    let mut interactive = InteractiveText::new(text_id, styled).on_click(links.clone(), |_, _, _| {});
+    let mut interactive =
+        InteractiveText::new(text_id, styled).on_click(links.clone(), |_, _, _| {});
     if prepared.citations.iter().any(Option::is_some) {
         // Each cited source previews on hover and points an open paper at it.
         let cards: Vec<_> = links
@@ -487,9 +487,12 @@ fn inline_selected(
             .tooltip(move |at, window, cx| {
                 let (_, url, passage, title) =
                     cards.iter().find(|(range, ..)| range.contains(&at))?;
-                Some(crate::citation_card::tip(url.clone(), title.clone(), None, passage.clone())(
-                    window, cx,
-                ))
+                Some(crate::citation_card::tip(
+                    url.clone(),
+                    title.clone(),
+                    None,
+                    passage.clone(),
+                )(window, cx))
             })
             .on_hover(move |at, _, window, cx| {
                 let card = at.and_then(|at| hover_cards.iter().position(|(r, ..)| r.contains(&at)));
@@ -500,10 +503,7 @@ fn inline_selected(
                     let (_, url, passage, _) = &hover_cards[ix];
                     (url.clone(), passage.clone())
                 });
-                window.dispatch_action(
-                    Box::new(crate::citation_card::PointAtCitation(point)),
-                    cx,
-                );
+                window.dispatch_action(Box::new(crate::citation_card::PointAtCitation(point)), cx);
             });
     }
     let child = div()
@@ -657,7 +657,6 @@ fn rich_inline(
                         thickness: px(1.),
                         color: None,
                     }),
-                    ..Default::default()
                 };
                 let link = style.link.clone();
                 let citation = style.citation.then(|| style.citation_passage.clone());
@@ -804,7 +803,8 @@ pub(crate) fn open_citation(url: &str, passage: Option<&str>, window: &mut Windo
             monocode_core::papers::PaperStore::new(monocode_core::papers::cache_dir().ok()?);
         let pdf =
             monocode_core::papers::cached_citation(&store, &search_url, search_passage.as_deref());
-        let record = pdf.is_none() && monocode_core::papers::cached_record(&store, &search_url).is_some();
+        let record =
+            pdf.is_none() && monocode_core::papers::cached_record(&store, &search_url).is_some();
         Some((pdf, record))
     });
     window

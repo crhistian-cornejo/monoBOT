@@ -1,5 +1,7 @@
 # Investigar en la web: qué tienen los agentes
 
+> Las rutas `src/` y `src-tauri/` de este documento son de la app Tauri, que ya no está en el repositorio (se conserva en la etiqueta local de git `archive/tauri-app`). Lo que falta portar está en [tauri-gap-audit.md](native/tauri-gap-audit.md).
+
 Revisado el 5 de noviembre de 2026, comparando con Echo (`D:\DevPrograms\Echo`).
 
 ## Qué pueden hacer hoy

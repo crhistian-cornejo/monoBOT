@@ -609,10 +609,10 @@ impl ModelList {
         let stripped = id.and_then(|i| i.strip_prefix(&format!("{}:", kind.id())).or(Some(i)));
         cx.try_global::<crate::settings::Preferences>()
             .is_some_and(|prefs| {
-                prefs
-                    .favorite_models
-                    .iter()
-                    .any(|c| c.provider == kind.id() && (c.model.as_deref() == id || c.model.as_deref() == stripped))
+                prefs.favorite_models.iter().any(|c| {
+                    c.provider == kind.id()
+                        && (c.model.as_deref() == id || c.model.as_deref() == stripped)
+                })
             })
     }
     fn toggle_favorite(&mut self, kind: Kind, id: Option<String>, cx: &mut Context<Self>) {
@@ -878,9 +878,9 @@ impl ModelList {
             .iter()
             .find(|(provider, _)| *provider == kind)
             .and_then(|(_, models)| {
-                models
-                    .iter()
-                    .find(|model| Some(model.id.as_str()) == stripped || Some(model.id.as_str()) == id)
+                models.iter().find(|model| {
+                    Some(model.id.as_str()) == stripped || Some(model.id.as_str()) == id
+                })
             })
             .map(|model| model_display_name(kind, &model.id, &model.name))
             .unwrap_or_else(|| model_name(kind, id))
@@ -1551,6 +1551,11 @@ pub(crate) struct PickerMono {
     pub mascot: String,
     pub color: u32,
 }
+
+/// The project picker fills its host (`size_full`), so a menu or popover
+/// holding it gives it this height; without one it collapses to the card's
+/// padding and the rows fall outside the card.
+pub(crate) const PROJECT_PICKER_HEIGHT: f32 = 360.;
 
 /// ProjectPickerPopover: a search field over the projects, the current one
 /// first and checked, and "New project" at the foot.

@@ -1,19 +1,49 @@
 # MonoBOT
 
-App de escritorio Tauri 2: React en `src/`, Rust de la app en `src-tauri/src`, crates reutilizables en `crates/`. Gestor de paquetes: pnpm.
+App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay React ni Tauri.
 
-## UI: respeta lo que ya existe
+| Carpeta | Qué hay |
+| --- | --- |
+| `crates/monocode-gpui/` | App de escritorio (interfaz GPUI). Miembro del workspace de Cargo de la raíz (`Cargo.toml`, `Cargo.lock`, salida en `target/`). |
+| `crates/monocode-core/` | Lógica sin interfaz: proveedores, persistencia, Git/archivos, bots, correo, enlace móvil. No depende de GPUI. |
+| `crates/{mobile-link,email,http,dictation,voice,visual}` | Crates compartidos que enlaza el core o la app. |
+| `mobile/` | App Expo (iOS/Android). Proyecto pnpm propio con su lockfile; tiene su propio `AGENTS.md`. |
+| `host/` | Host remoto en Node (`monocode-host`) que instala la app por SSH. |
+| `deploy/cloudflare-mail/` | Worker opcional de correo entrante (Cloudflare Email Routing → R2 + D1). |
+| `vendor/gpui-pre*/` | GPUI fijado y parcheado. No lo actualices sin leer `docs/native/migration.md`. |
+| `scripts/` | Runner de desarrollo, empaquetado, publicación y generadores de JS embebido. |
 
-- Antes de crear UI nueva, busca en el repo un componente o patrón que ya lo haga y úsalo: `src/shared/ui` (Modal, SecondaryButton, SearchableSelect, Popover, PaneHeader, BetaBadge…) y los diálogos que ya existen (por ejemplo `src/features/source-control/ui/CreateWorktreeDialog.tsx`).
-- Estila con Tailwind y los tokens de `src/styles/index.css`: `content`, `background-base`, `selection`, `accent`… Nada de colores fijos (`#hex`, `orange-500`, `text-white` sobre un color propio). El acento es `accent`: sigue el color que el usuario elige en Ajustes y el tema activo.
-- Botón principal: clase `primary-action`. Botón secundario: `SecondaryButton`, o el botón plano de los diálogos (`rounded-md px-3 py-1.5 text-[12px] hover:bg-content/8`).
-- El cuerpo de un `Modal` no trae padding: ponlo tú (`p-4`, o `px-5 py-4` en diálogos grandes). Etiquetas `text-[12px] text-content/70`; campos `h-9 rounded-md border border-content/10 bg-background-base px-2.5 text-[13px] outline-none focus:border-content/25`.
-- Las capturas de otros productos (Factory, Claude, etc.) muestran qué hacer, no cómo debe verse: adapta la idea al lenguaje visual del repo y no copies su estilo.
-- No dupliques UI: si dos features necesitan lo mismo, reutiliza el componente de la otra o súbelo a `src/shared/ui`.
+## Comandos
+
+```sh
+bun run dev                 # app en desarrollo con datos aislados; r + Enter recompila
+bun run build               # build optimizado (y .app en macOS)
+bun run test                # tests de core y GPUI
+bun run check               # tests de scripts + fmt + clippy -D warnings
+node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev <filtro>
+```
+
+Antes de hacer commit: `cargo fmt --manifest-path crates/monocode-gpui/Cargo.toml --all` y los tests de lo que tocaste con `node scripts/native-cargo.mjs test … <filtro>`. Para el móvil, `pnpm exec tsc --noEmit` y `pnpm lint` dentro de `mobile/`.
 
 ## Código
 
-- Cada feature vive en `src/features/<feature>/{model,ui}`; la lógica va en `model`, sin React.
-- Los tests van junto al archivo (`*.test.ts`, vitest).
-- Antes de hacer commit: `pnpm exec tsc --noEmit` y `pnpm exec vitest run <ruta tocada>`.
-- Los nombres visibles dicen MonoBOT. Los identificadores internos (`monocode.*` en localStorage, `com.monocode.desktop`, nombres de crates) se quedan como están, porque cambiarlos borraría los datos del usuario.
+- La lógica va en `monocode-core`, sin GPUI. La app GPUI solo pinta y conecta. Nada de E/S, parseo ni disco en el hilo de la interfaz.
+- Los tests van junto al código (`#[cfg(test)] mod tests` o `<módulo>/tests.rs`). Los tests de interfaz usan el banco de pruebas de GPUI con eventos reales, no copias de la máquina de estados.
+- Los bundles `crates/monocode-gpui/assets/native-editor.js` y `settings-arcade.js` son generados. Su fuente está en `scripts/native-editor/` y `scripts/native-settings/`: cambia la fuente y regenera, no edites el bundle.
+
+## Interfaz: respeta lo que ya existe
+
+- Antes de crear interfaz nueva, busca un componente que ya lo haga y reutilízalo: `theme.rs` (botones de icono, tooltips, `section_label`, `primary_action`, rellenos), `modal.rs`, `popover.rs`, `pickers.rs`, `settings/widgets.rs`. Si dos zonas necesitan lo mismo, súbelo a un módulo compartido. No lo dupliques.
+- Los colores salen de `theme.rs` y de la paleta activa (`settings/palettes.rs`): `content(alpha)`, `background_base()`, `pane_fill()`, `accent_color()`, `text_selection()`… Nada de `rgb(0x…)` sueltos en las vistas. El acento sigue el color que el usuario elige en Ajustes y el tema activo.
+- El movimiento respeta el movimiento reducido del sistema (`cx.reduce_motion()`: dibuja el estado final). No añadas animación a interacciones muy frecuentes.
+- Las capturas de otros productos (Factory, Claude, etc.) muestran qué hacer, no cómo debe verse: adapta la idea al lenguaje visual de la app.
+
+## Nombres y datos
+
+- Lo que ve el usuario dice MonoBOT.
+- Los identificadores internos se quedan como están, porque cambiarlos borraría los datos del usuario: crates `monocode-*`, `com.monocode.desktop` (bundle y llavero), `MONOCODE_*` en variables de entorno y `~/.monocode-host`.
+- Los secretos (tokens de correo, Mailflare, Cloudflare) van al llavero del sistema, nunca a archivos, argumentos de proceso ni al chat.
+
+## Documentación
+
+Empieza por `docs/native/README.md`. El estado y lo pendiente están en `docs/native/parity.md`, `docs/native/monobot-port.md` y `docs/native/tauri-gap-audit.md`. El correo y Cloudflare, en `docs/native/mail-workspace.md`.

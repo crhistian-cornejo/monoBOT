@@ -72,7 +72,8 @@ impl Shell {
                 .get(&kind)
                 .cloned()
                 .unwrap_or_else(|| monocode_core::accounts::DEFAULT.into());
-            let profile = monocode_core::accounts::Profile::new(&account_id, std::path::Path::new(""));
+            let profile =
+                monocode_core::accounts::Profile::new(&account_id, std::path::Path::new(""));
             if let Some(cached) = monocode_core::catalog::cached_models_for(kind, &profile) {
                 let models: Vec<(String, String)> = cached
                     .into_iter()
@@ -753,14 +754,18 @@ mod tests {
             header.bottom() <= px(40.),
             "breadcrumb and search live in the title bar"
         );
+        // Fresh installs open on the boxy frame: the pane runs edge to edge,
+        // with no inset gutter or card border around the page column.
         assert!(
-            (page.left()
-                - card.left()
-                - (card.size.width - px(8.) - px(1024.)).max(px(0.)) / 2.
-                - px(33.))
-            .abs()
+            window
+                .update(visual, |shell, _, _| shell.workspace.boxy_layout())
+                .unwrap()
+        );
+        assert!(
+            (page.left() - card.left() - (card.size.width - px(1024.)).max(px(0.)) / 2. - px(32.))
+                .abs()
                 < px(1.),
-            "React's 32px page padding plus the card border: page={page:?}, frame={card:?}"
+            "React's 1024px column with its 32px page padding: page={page:?}, frame={card:?}"
         );
         assert!(visual.debug_bounds("settings-toggle-sounds").is_some());
         assert!(visual.debug_bounds("sidebar-content").is_none());

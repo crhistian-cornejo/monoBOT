@@ -64,6 +64,8 @@ impl Conversation {
         let random = (now % 997) as f64 / 997.;
         self.provider_retry.retry = retry::next(&self.retry_session(), &self.status, now, random);
         self.arm_provider_retry(cx);
+        // The notice shows now, not on the countdown's first tick.
+        cx.notify();
     }
 
     fn arm_provider_retry(&mut self, cx: &mut Context<Self>) {

@@ -80,11 +80,18 @@ fn registry_matches_the_typescript_connectors() {
     let source = source.as_array().unwrap();
     assert_eq!(
         source.iter().map(|c| c["id"].clone()).collect::<Vec<_>>(),
-        CONNECTORS.iter().filter(|c| c.id != "mailflare").map(|c| json!(c.id)).collect::<Vec<_>>()
+        CONNECTORS
+            .iter()
+            .filter(|c| c.id != "mailflare")
+            .map(|c| json!(c.id))
+            .collect::<Vec<_>>()
     );
     // The fixture captures the historical web desktop; native-only Mailflare
     // is checked independently below, not added to an immutable source fixture.
-    for (ts, rust) in source.iter().zip(CONNECTORS.iter().filter(|c| c.id != "mailflare")) {
+    for (ts, rust) in source
+        .iter()
+        .zip(CONNECTORS.iter().filter(|c| c.id != "mailflare"))
+    {
         assert_eq!(ts, &as_ts(rust), "{}", rust.id);
     }
 }
@@ -97,11 +104,18 @@ fn mailflare_is_private_opt_in_and_credentials_never_enter_launch_arguments() {
     assert!(!settings.is_ready(connector, Platform::Mac));
     settings.mail_workspace = Some("/tmp/monobot-mail".into());
     assert!(settings.is_ready(connector, Platform::Mac));
-    assert!(!settings.session_connectors(None, Platform::Mac).contains(&connector));
+    assert!(!settings
+        .session_connectors(None, Platform::Mac)
+        .contains(&connector));
     let granted = vec!["mailflare".into()];
-    assert!(settings.session_connectors(Some(&granted), Platform::Mac).contains(&connector));
+    assert!(settings
+        .session_connectors(Some(&granted), Platform::Mac)
+        .contains(&connector));
     let servers = settings.servers(&[connector]);
-    assert_eq!(servers["mailflare"]["args"], json!(["--mailflare-mcp", "/tmp/monobot-mail"]));
+    assert_eq!(
+        servers["mailflare"]["args"],
+        json!(["--mailflare-mcp", "/tmp/monobot-mail"])
+    );
     assert!(!connector.tools.contains(&"send_email"));
     assert!(!connector.tools.contains(&"delete_events"));
 }
@@ -111,17 +125,29 @@ fn mailflare_setup_reads_keychain_without_persisting_credentials_in_settings() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(&dir.path().join("native.sqlite")).unwrap();
     let service = crate::inbox::workspace::Service::new(store.data_dir().unwrap());
-    service.save_config(&crate::inbox::workspace::Config {
-        mailflare_url: "https://mail.example.com".into(), ..Default::default()
-    }).unwrap();
-    store.save_setting(&enabled_key("mailflare"), "true").unwrap();
+    service
+        .save_config(&crate::inbox::workspace::Config {
+            mailflare_url: "https://mail.example.com".into(),
+            ..Default::default()
+        })
+        .unwrap();
+    store
+        .save_setting(&enabled_key("mailflare"), "true")
+        .unwrap();
     let connector = connector("mailflare").unwrap();
     assert!(!ConnectorSettings::from_store(&store).is_ready(connector, Platform::Mac));
-    service.set_secret("mailflare", "test-mailflare-token").unwrap();
+    service
+        .set_secret("mailflare", "test-mailflare-token")
+        .unwrap();
     let settings = ConnectorSettings::from_store(&store);
     assert!(settings.is_ready(connector, Platform::Mac));
-    assert!(!Value::Object(settings.servers(&[connector])).to_string().contains("test-mailflare-token"));
-    assert!(!settings.codex_args(&[connector]).join(" ").contains("test-mailflare-token"));
+    assert!(!Value::Object(settings.servers(&[connector]))
+        .to_string()
+        .contains("test-mailflare-token"));
+    assert!(!settings
+        .codex_args(&[connector])
+        .join(" ")
+        .contains("test-mailflare-token"));
     assert!(!format!("{settings:?}").contains("test-mailflare-token"));
     service.set_secret("mailflare", "").unwrap();
     assert!(!ConnectorSettings::from_store(&store).is_ready(connector, Platform::Mac));

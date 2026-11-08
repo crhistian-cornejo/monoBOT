@@ -1,5 +1,7 @@
 # Workstreams (beta)
 
+> Las rutas `src/` y `src-tauri/` de este documento son de la app Tauri, que ya no está en el repositorio (se conserva en la etiqueta local de git `archive/tauri-app`). Lo que falta portar está en [tauri-gap-audit.md](native/tauri-gap-audit.md).
+
 Un workstream es para trabajo que le tomaría días a un equipo: una migración, una función que toca el front y el back, una tanda de bugs. Tú le das el objetivo a un **orquestador**. El orquestador lo divide en partes, lanza un **agente** por parte para que trabajen a la vez, y te devuelve el resultado como **pull requests**.
 
 Cuándo no usarlo: para un cambio de un solo archivo o una tarea de una hora, una sesión normal es más rápida y gasta muchos menos tokens.

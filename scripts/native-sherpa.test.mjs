@@ -8,9 +8,8 @@ import { sherpaArchive, sherpaEnv, sherpaVersion } from "./native-sherpa.mjs";
 async function checkout(t) {
   const root = await mkdtemp(join(tmpdir(), "monocode-sherpa-"));
   t.after(() => rm(root, { recursive: true, force: true }));
-  await mkdir(join(root, "crates/monocode-gpui"), { recursive: true });
   await writeFile(
-    join(root, "crates/monocode-gpui/Cargo.lock"),
+    join(root, "Cargo.lock"),
     '[[package]]\nname = "sherpa-onnx-sys"\nversion = "1.13.8"\n',
   );
   return root;
@@ -23,7 +22,7 @@ test("names the static build sherpa-onnx-sys unpacks for each platform", () => {
   assert.equal(sherpaArchive("1.13.8", "freebsd", "x64"), undefined);
 });
 
-test("reuses the libraries a Tauri build already fetched", async (t) => {
+test("reuses the libraries a previous build already fetched", async (t) => {
   const root = await checkout(t);
   assert.equal(sherpaVersion(root), "1.13.8");
   const options = { platform: "win32", arch: "x64", roots: [root] };

@@ -9,8 +9,9 @@ if [ "$(uname -s)" != Darwin ]; then
 fi
 
 native_profile="${1:-release}"
-native_target="${2:-${CARGO_TARGET_DIR:-crates/monocode-gpui/target}}/$native_profile"
-native_version="${3:-$(sed -n 's/^version = "\([^"]*\)".*/\1/p' crates/monocode-gpui/Cargo.toml)}"
+native_target="${2:-${CARGO_TARGET_DIR:-target}}/$native_profile"
+# monocode-gpui inherits the root workspace version.
+native_version="${3:-$(sed -n 's/^version = "\([^"]*\)".*/\1/p' Cargo.toml)}"
 if [ "$native_profile" = release ]; then
   native_data_mode="${4:-monocode-data}"
 else

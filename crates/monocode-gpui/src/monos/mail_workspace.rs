@@ -24,13 +24,11 @@ impl Monos {
                 for delivery in &deliveries {
                     if let Some(session) =
                         roster.get(&delivery.bot_id).and_then(|bot| bot.session_id)
-                    {
-                        if db
+                        && db
                             .setting(&format!("mono-delivered:{session}:{}", delivery.id))?
                             .is_some()
-                        {
-                            completed.push(delivery.id.clone());
-                        }
+                    {
+                        completed.push(delivery.id.clone());
                     }
                 }
                 drop(db);

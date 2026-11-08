@@ -3,7 +3,12 @@
 use std::{fs, path::Path};
 
 pub fn check(manifest_dir: &Path) {
-    let lockfile = manifest_dir.join("Cargo.lock");
+    // A workspace member has no lockfile of its own: use the nearest one above it.
+    let lockfile = manifest_dir
+        .ancestors()
+        .map(|dir| dir.join("Cargo.lock"))
+        .find(|lockfile| lockfile.is_file())
+        .expect("The native workspace requires Cargo.lock");
     println!("cargo:rerun-if-changed={}", lockfile.display());
     let lock = fs::read_to_string(&lockfile).expect("The native workspace requires Cargo.lock");
     // Cargo writes canonical TOML. Check package names rather than license metadata:

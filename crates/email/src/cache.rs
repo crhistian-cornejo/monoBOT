@@ -58,10 +58,10 @@ impl<V: Clone> Cache<V> {
     }
 
     fn forget(&mut self, key: &str) {
-        if let Some(at) = self.entries.iter().position(|(k, _, _)| k == key) {
-            if let Some((_, _, old)) = self.entries.remove(at) {
-                self.bytes -= old;
-            }
+        if let Some(at) = self.entries.iter().position(|(k, _, _)| k == key)
+            && let Some((_, _, old)) = self.entries.remove(at)
+        {
+            self.bytes -= old;
         }
     }
 

@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::{
     tool::ToolCall,
-    transcript::{Row, attachments},
+    transcript::{attachments, Row},
 };
 
 /// The kinds of file a folder lists.

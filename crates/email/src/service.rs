@@ -16,6 +16,9 @@ use crate::model::{AccountView, Action, BoxTotal, Folder, Message, Opened, Overv
 use crate::search::{Found, MAX_QUERY, Query, found_of};
 use crate::{remote, sanitize, secrets, triage};
 
+/// Messages to warm, grouped by account and folder: `(id, uid)` pairs.
+type PrefetchGroup = ((String, Folder), Vec<(String, u64)>);
+
 /// How many of the newest messages of the inbox, and of Sent and Drafts, are read.
 const INBOX_COUNT: u32 = 40;
 const SIDE_COUNT: u32 = 15;
@@ -381,7 +384,7 @@ impl Mail {
     /// Nothing is marked as read. At most `PREFETCH_MAX` messages, and one call at a time.
     pub fn prefetch(&self, accounts: &[Account], ids: &[String]) {
         let _one = self.warming.lock().unwrap_or_else(|p| p.into_inner());
-        let mut groups: Vec<((String, Folder), Vec<(String, u64)>)> = Vec::new();
+        let mut groups: Vec<PrefetchGroup> = Vec::new();
         for id in ids.iter().take(PREFETCH_MAX) {
             let Some((account_id, folder, uid)) = parse_id(id) else {
                 continue;
@@ -555,7 +558,7 @@ impl Mail {
                 Err(why) => problems.push(format!("{}: {why}", account.name)),
             }
         }
-        messages.sort_by(|a, b| b.at.cmp(&a.at));
+        messages.sort_by_key(|m| std::cmp::Reverse(m.at));
         let overview = Overview {
             accounts: accounts.iter().map(view_of).collect(),
             messages,
@@ -747,7 +750,7 @@ impl Mail {
             overview.messages.retain(|m| m.id != message.id);
             overview.messages.push(message);
         }
-        overview.messages.sort_by(|a, b| b.at.cmp(&a.at));
+        overview.messages.sort_by_key(|m| std::cmp::Reverse(m.at));
         Ok(overview.clone())
     }
 
@@ -788,7 +791,7 @@ impl Mail {
             }
         }
         if let Some(overview) = last.as_mut() {
-            overview.messages.sort_by(|a, b| b.at.cmp(&a.at));
+            overview.messages.sort_by_key(|m| std::cmp::Reverse(m.at));
         }
     }
 
@@ -930,10 +933,20 @@ impl Mail {
         all: bool,
         now_ms: i64,
     ) -> Result<(), String> {
-        self.send_with_transport(accounts, id, text, subject, all, now_ms, &crate::http_send::Transport::Smtp, "")
+        self.send_with_transport(
+            accounts,
+            id,
+            text,
+            subject,
+            all,
+            now_ms,
+            &crate::http_send::Transport::Smtp,
+            "",
+        )
     }
 
     /// The same approved reply, optionally delivered over HTTPS instead of SMTP.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_with_transport(
         &self,
         accounts: &[Account],

@@ -10,9 +10,9 @@
     "test:scripts": "node --test scripts/dev-native.test.mjs scripts/bundle-native-macos.test.mjs scripts/native-dependencies.test.mjs scripts/native-release.test.mjs scripts/package-native.test.mjs scripts/native-sherpa.test.mjs",
     "check": "bun run test:scripts && cargo fmt --all --check && node scripts/native-cargo.mjs clippy --locked -p monocode-core -p monocode-gpui --all-targets --profile native-dev -- -D warnings",
     "set-version": "node scripts/bump-version.mjs",
-    "mobile:install": "cd mobile && bun install",
-    "mobile:dev": "cd mobile && bun run start",
-    "mobile:ios": "cd mobile && bun run ios",
-    "mobile:android": "cd mobile && bun run android"
+    "mobile:install": "cd mobile && pnpm install",
+    "mobile:dev": "cd mobile && pnpm start",
+    "mobile:ios": "cd mobile && pnpm ios",
+    "mobile:android": "cd mobile && pnpm android"
   }
 }

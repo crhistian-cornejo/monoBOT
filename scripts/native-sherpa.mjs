@@ -1,9 +1,9 @@
 // sherpa-onnx-sys (dictation's speech engine) downloads its prebuilt
 // libraries from GitHub into each Cargo target folder. A network that
 // inspects TLS refuses that download, so a fresh native target folder could
-// not build. The Tauri build keeps the same libraries under
-// target/sherpa-onnx-prebuilt; the native build reuses them through
-// SHERPA_ONNX_LIB_DIR, and downloads them itself only when none are there.
+// not build. A previous build keeps the libraries under
+// target/sherpa-onnx-prebuilt; later builds (and other git worktrees) reuse
+// them through SHERPA_ONNX_LIB_DIR, and download them only when none are there.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -23,11 +23,11 @@ export function sherpaArchive(version, platform = process.platform, arch = proce
   return name ? `sherpa-onnx-v${version}-${name}` : undefined;
 }
 
-/** The sherpa-onnx-sys version the native lockfile pins. */
+/** The sherpa-onnx-sys version the workspace lockfile pins. */
 export function sherpaVersion(root) {
   let lock;
   try {
-    lock = readFileSync(join(root, "crates/monocode-gpui/Cargo.lock"), "utf8");
+    lock = readFileSync(join(root, "Cargo.lock"), "utf8");
   } catch {
     return undefined;
   }
@@ -52,10 +52,8 @@ export function sherpaEnv(root, env = process.env, options = {}) {
   const archive = version && sherpaArchive(version, options.platform, options.arch);
   if (!archive) return env;
   for (const checkout of options.roots ?? checkouts(root)) {
-    for (const target of ["target", "crates/monocode-gpui/target"]) {
-      const lib = join(checkout, target, "sherpa-onnx-prebuilt", archive, "lib");
-      if (existsSync(lib)) return { ...env, SHERPA_ONNX_LIB_DIR: lib };
-    }
+    const lib = join(checkout, "target", "sherpa-onnx-prebuilt", archive, "lib");
+    if (existsSync(lib)) return { ...env, SHERPA_ONNX_LIB_DIR: lib };
   }
   return env;
 }

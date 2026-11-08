@@ -5,9 +5,34 @@
 La implementación es opcional. Las cuentas IMAP y el envío SMTP existentes
 siguen funcionando sin Cloudflare ni Mailflare.
 
-**No se ha desplegado nada ni se han cambiado DNS, dominios o cuentas.**
-No hay acceso autenticado a Cloudflare en esta sesión. Los pasos que requieren
-tu cuenta están en la lista de pendientes de este documento.
+### Desplegado en la cuenta de Cloudflare (8 de noviembre de 2026)
+
+La cuenta se limpió: se borraron los Workers y buckets de Buddy y Echo. Solo
+quedan recursos de MonoBOT:
+
+| Recurso | Nombre | Uso |
+| --- | --- | --- |
+| Worker | `monobot-inbound-mail` | API de correo entrante, en `https://monobot-inbound-mail.getecho.workers.dev` |
+| D1 | `monobot-inbound-mail` | Índice de mensajes (migración `0001_init.sql` aplicada) |
+| R2 | `monobot-inbound-mail-raw` | MIME original; lifecycle `expire-raw-mail` a 37 días |
+| R2 | `monobot-releases` | Feed del actualizador y paquetes, público en `https://pub-5244a0b3b0814931924338438f119f34.r2.dev` |
+
+`INBOUND_TOKEN` es un valor aleatorio de 64 caracteres. Está guardado como
+secreto del Worker y en el llavero de macOS con el nombre «MonoBOT inbound mail
+token». Cópialo de Acceso a Llaveros al campo protegido *Inbound token* de
+**Inbox → Agenda**, junto con la URL del Worker.
+
+La cuenta todavía **no tiene dominio**. Mientras no lo tenga:
+
+- la API se publica en `workers.dev` (`workers_dev = true`) y sigue exigiendo el
+  token, que falla cerrado sin él;
+- `ALLOWED_RECIPIENTS` vale `bot@pending-domain.invalid`, así que no se acepta
+  correo real;
+- Email Routing, Email Sending y Mailflare no se pueden configurar, porque los
+  tres necesitan un dominio con DNS en esta cuenta.
+
+Mailflare tampoco está desplegado. Hay que construir su código (AGPL, externo)
+y el modo automático de esta sesión lo bloqueó. Ver los pasos abajo.
 
 Repositorio de referencia: **https://github.com/hieunc229/mailflare**
 
@@ -21,6 +46,31 @@ a los crates MIT de MonoBOT.
 | Recepción | Worker opcional, Email Routing → R2 + D1. El escritorio descarga páginas por HTTPS, sin abrir puertos públicos ni mantener IMAP para esos alias. |
 | Bandejas de bots | Alias → ID de bot y remitentes permitidos. Cola persistente; se crea o reanuda la conversación del bot. |
 | Agenda | Eventos locales, importación/exportación ICS y lectura del calendario de Mailflare, con zonas IANA y fechas con offset. |
+
+### Desplegar Mailflare en la cuenta
+
+Mailflare es un proyecto externo (AGPL). No se copia a este repositorio: se
+construye desde su repositorio y se despliega en la cuenta como Worker
+`mailflare`. Necesita un dominio en la cuenta para recibir y enviar.
+
+```sh
+git clone --depth 1 https://github.com/hieunc229/mailflare && cd mailflare
+npm ci
+npx wrangler d1 create mailflare          # pega el database_id en wrangler.jsonc (sin commitearlo)
+npx wrangler r2 bucket create mailflare-raw
+npx wrangler queues create mailflare-inbound
+npx wrangler queues create mailflare-outbound
+npx wrangler queues create mailflare-agent
+npm run deploy
+npx wrangler secret put CF_TOKEN          # token de Cloudflare con permisos sobre el dominio
+```
+
+`CF_TOKEN` se crea en **Manage Account → Account API Tokens** con DNS Edit,
+Zone Read, Zone Settings Edit y Email Routing Rules Edit sobre el dominio, más
+Email Sending Edit si va a enviar (requiere el plan Workers Paid). Después abre
+`https://mailflare.getecho.workers.dev/setup`, crea el administrador, conecta
+el dominio y genera la clave MCP (**Settings → API keys → Allow MCP access**).
+No ejecutes las migraciones de D1 a mano: `/setup` las aplica.
 
 ## Configuración en MonoBOT
 
@@ -155,20 +205,22 @@ remoto. Usa CRLF, escape de texto y plegado de líneas UTF-8.
 
 Nada de esta sección se ha ejecutado contra una cuenta real.
 
-- [ ] Elegir cuenta, dominio, subdominio HTTPS de la API y alias definitivos.
+- [x] Cuenta: la personal; recursos de otras apps borrados.
+- [ ] Añadir un dominio a Cloudflare y elegir el subdominio HTTPS de la API y los alias definitivos.
 - [ ] Revisar costes/planes de Workers, D1, R2 y Email Sending. No se ha activado
   facturación ni se garantiza que todo entre en cuotas gratuitas.
-- [ ] Crear D1 `monobot-inbound-mail` y R2 `monobot-inbound-mail-raw`.
+- [x] Crear D1 `monobot-inbound-mail` y R2 `monobot-inbound-mail-raw`.
 - [ ] Copiar `wrangler.example.toml` a `wrangler.toml` (ignorado por Git),
   completar bindings, destinatarios permitidos y ruta HTTPS.
-- [ ] Aplicar la migración del Worker y desplegarlo con Wrangler autenticado.
-- [ ] Crear `INBOUND_TOKEN` con al menos 32 caracteres aleatorios y guardarlo
-  como secreto del Worker y en el llavero de MonoBOT.
+- [x] Aplicar la migración del Worker y desplegarlo con Wrangler autenticado (en workers.dev).
+- [ ] Con dominio: volver a `workers_dev = false`, descomentar `routes` y poner los destinatarios reales en `ALLOWED_RECIPIENTS`.
+- [x] Crear `INBOUND_TOKEN` (64 caracteres) y guardarlo como secreto del Worker
+  y en el llavero de macOS. Falta pegarlo en MonoBOT (Inbox → Agenda).
 - [ ] Activar Email Routing y revisar los registros MX/SPF existentes antes de
   cambiarlos. No sustituir sin revisión el correo de un dominio en producción.
 - [ ] Crear reglas de alias hacia el Worker. Mantener catch-all desactivado
   salvo necesidad expresa; preferir destinatarios exactos.
-- [ ] Ajustar retención y lifecycle de R2. El lifecycle debe ser mayor que
+- [x] Ajustar retención y lifecycle de R2 (30 y 37 días). El lifecycle debe ser mayor que
   `RETENTION_DAYS` (por defecto 30 días, lifecycle sugerido 37).
 - [ ] Comprobar con correo real que Cloudflare antepone exactamente su
   `Authentication-Results` y que el formato coincide con `auth-results.ts`.

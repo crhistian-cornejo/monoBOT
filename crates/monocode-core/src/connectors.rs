@@ -521,9 +521,11 @@ impl ConnectorSettings {
     /// The command's arguments, with the checkout's file when it has one.
     pub fn args(&self, connector: &Connector) -> Vec<String> {
         if connector.id == "mailflare" {
-            return self.mail_workspace.as_ref().map(|dir| vec![
-                "--mailflare-mcp".into(), dir.to_string_lossy().into_owned()
-            ]).unwrap_or_default();
+            return self
+                .mail_workspace
+                .as_ref()
+                .map(|dir| vec!["--mailflare-mcp".into(), dir.to_string_lossy().into_owned()])
+                .unwrap_or_default();
         }
         let Server::Stdio { args, checkout, .. } = connector.server else {
             return Vec::new();
@@ -537,8 +539,13 @@ impl ConnectorSettings {
 
     fn command(&self, connector: &Connector, command: &str) -> String {
         if connector.id == "mailflare" {
-            std::env::current_exe().unwrap_or_else(|_| command.into()).to_string_lossy().into_owned()
-        } else { command.into() }
+            std::env::current_exe()
+                .unwrap_or_else(|_| command.into())
+                .to_string_lossy()
+                .into_owned()
+        } else {
+            command.into()
+        }
     }
 
     /// Each connector's `mcpServers` entry, keyed by its id.

@@ -305,12 +305,11 @@ impl Imap {
         ))?;
         for line in &lines {
             let text = line.text();
-            if let Some(rest) = text.strip_prefix("* ") {
-                if let Some((count, word)) = rest.split_once(' ') {
-                    if word.trim() == "EXISTS" {
-                        return Ok(count.parse().unwrap_or(0));
-                    }
-                }
+            if let Some(rest) = text.strip_prefix("* ")
+                && let Some((count, word)) = rest.split_once(' ')
+                && word.trim() == "EXISTS"
+            {
+                return Ok(count.parse().unwrap_or(0));
             }
         }
         Ok(0)

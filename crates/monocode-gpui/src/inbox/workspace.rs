@@ -7,7 +7,7 @@ mod view;
 
 use crate::{
     input::{self, Input},
-    runtime::{locked, Database},
+    runtime::{Database, locked},
     theme::*,
 };
 use chrono::{
@@ -1429,8 +1429,10 @@ mod tests {
         assert!(check(&config, false, &[a, route("A@Example.com")]).is_err());
         assert!(check(&config, true, &[]).is_err(), "no URL to use");
 
-        let mut config = Config::default();
-        config.mailflare_url = "http://example.com".into();
+        let mut config = Config {
+            mailflare_url: "http://example.com".into(),
+            ..Default::default()
+        };
         assert!(check(&config, false, &[]).is_err());
         config.mailflare_url = "https://mail.example.com".into();
         assert!(check(&config, true, &[]).is_ok());

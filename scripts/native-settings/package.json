@@ -1,0 +1,12 @@
+{
+  "name": "monocode-native-settings-arcade",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "node build-arcade.mjs"
+  },
+  "dependencies": {
+    "esbuild": "0.28.2"
+  }
+}

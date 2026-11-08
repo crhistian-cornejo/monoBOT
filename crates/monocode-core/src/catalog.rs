@@ -448,13 +448,7 @@ fn is_thought_effort(o: &Value) -> bool {
     o["category"] == "thought_level"
         || matches!(
             o["id"].as_str(),
-            Some(
-                "thought_level"
-                    | "effort"
-                    | "reasoning"
-                    | "reasoning_effort"
-                    | "thinking_level"
-            )
+            Some("thought_level" | "effort" | "reasoning" | "reasoning_effort" | "thinking_level")
         )
 }
 

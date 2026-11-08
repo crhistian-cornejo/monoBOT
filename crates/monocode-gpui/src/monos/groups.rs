@@ -240,6 +240,7 @@ impl Monos {
     }
 
     /// One member's part of a group's message, in its seat.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn send_to_member(
         &mut self,
         group: &str,

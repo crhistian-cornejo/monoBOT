@@ -911,8 +911,10 @@ mod tests {
 
     #[test]
     fn a_finished_scene_clears() {
-        let mut state = State::default();
-        state.playing = Some((Scene::Astra, Instant::now() - Duration::from_secs(10)));
+        let mut state = State {
+            playing: Some((Scene::Astra, Instant::now() - Duration::from_secs(10))),
+            ..Default::default()
+        };
         assert!(!state.active());
         assert!(state.playing.is_none());
         state.playing = Some((Scene::Opus, Instant::now()));

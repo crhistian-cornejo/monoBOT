@@ -372,7 +372,9 @@ impl TranscriptView {
                     )))
                     .debug_selector(move || format!("sent-quote-{ix}"))
                     .aria_label(format!("Quote: {body}"))
-                    .tooltip(crate::theme::text_tip(body.chars().take(1_200).collect::<String>()))
+                    .tooltip(crate::theme::text_tip(
+                        body.chars().take(1_200).collect::<String>(),
+                    ))
                     .min_w_0()
                     .max_w(px(320.))
                     .flex()

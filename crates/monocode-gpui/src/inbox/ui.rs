@@ -440,9 +440,7 @@ impl Inbox {
                     .when(!agenda && !connected.is_empty(), |d| {
                         d.flex_none().w(px(32.)).px(px(0.))
                     })
-                    .child(
-                        icon("clock", 14.).text_color(content(if agenda { 1. } else { 0.5 })),
-                    )
+                    .child(icon("clock", 14.).text_color(content(if agenda { 1. } else { 0.5 })))
                     .when(agenda || connected.is_empty(), |d| {
                         d.child(div().truncate().child("Agenda"))
                     })
@@ -2939,11 +2937,10 @@ impl gpui::Render for Inbox {
                         this.connect_provider = None;
                     } else if this.confirm_action.is_some() && !this.acting {
                         this.confirm_action = None;
-                    } else if this.state.email_open
-                        && this.mailbox.update(cx, |mailbox, cx| mailbox.escape(cx))
-                    {
-                    } else if this.agenda_open
-                        && this.agenda.update(cx, |agenda, cx| agenda.escape(cx))
+                    } else if (this.state.email_open
+                        && this.mailbox.update(cx, |mailbox, cx| mailbox.escape(cx)))
+                        || (this.agenda_open
+                            && this.agenda.update(cx, |agenda, cx| agenda.escape(cx)))
                     {
                     } else if this.filters_open
                         || this.connections_open

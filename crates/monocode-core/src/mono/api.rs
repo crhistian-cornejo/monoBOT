@@ -176,8 +176,16 @@ mod tests {
     use serde_json::json;
     #[test]
     fn validates_before_mutation() {
-        assert!(validate("calendar.list", &json!({"start":"2026-11-07T00:00:00Z","end":"2026-11-08T00:00:00Z"})).is_ok());
-        assert!(validate("calendar.create", &json!({"title":"Review","start":"now","end":"later","attendees":["a@example.com"]})).is_err());
+        assert!(validate(
+            "calendar.list",
+            &json!({"start":"2026-11-07T00:00:00Z","end":"2026-11-08T00:00:00Z"})
+        )
+        .is_ok());
+        assert!(validate(
+            "calendar.create",
+            &json!({"title":"Review","start":"now","end":"later","attendees":["a@example.com"]})
+        )
+        .is_err());
         assert!(validate("sessions.start", &json!({"prompt":"x","draft":"false"})).is_err());
         assert!(validate("sessions.delete", &json!({"sessionId":1,"force":true})).is_err());
         assert!(validate("sessions.start", &json!({"runtimeMode":"unsafe"})).is_err());

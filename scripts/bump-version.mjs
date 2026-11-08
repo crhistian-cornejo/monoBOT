@@ -26,18 +26,11 @@ replaceFirst(
   /("version": ")[^"]+(")/,
   `$1${version}$2`,
 );
-// The lockfile carries the version twice: once at the top and once on the
-// root package. Missing them left npm's lockfile claiming 0.1.0 sixteen
-// releases later. The second pattern is anchored on `packages` because the
-// top-level object repeats the same name/version pair.
+// The remote host reports this version, and the app only accepts a host whose
+// version matches its own CARGO_PKG_VERSION (crates/monocode-core/src/remote).
 replaceFirst(
-  join(root, "package-lock.json"),
-  /^(\{\n\s*"name": "monocode-desktop",\n\s*"version": ")[^"]+(")/,
-  `$1${version}$2`,
-);
-replaceFirst(
-  join(root, "package-lock.json"),
-  /("packages": \{\n\s*"": \{\n\s*"name": "monocode-desktop",\n\s*"version": ")[^"]+(")/,
+  join(root, "host/package.json"),
+  /("version": ")[^"]+(")/,
   `$1${version}$2`,
 );
 replaceFirst(
@@ -45,10 +38,12 @@ replaceFirst(
   /^(version = ")[^"]+(")/m,
   `$1${version}$2`,
 );
-replaceFirst(
-  join(root, "Cargo.lock"),
-  /(name = "monocode"\nversion = ")[^"]+(")/,
-  `$1${version}$2`,
-);
+for (const crate of ["monocode-core", "monocode-gpui"]) {
+  replaceFirst(
+    join(root, "Cargo.lock"),
+    new RegExp(`(name = "${crate}"\nversion = ")[^"]+(")`),
+    `$1${version}$2`,
+  );
+}
 
 console.log(`version ${version}`);

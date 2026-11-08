@@ -122,9 +122,9 @@ flowchart TB
 ```
 *Naranja = nuevo o modificado. Líneas punteadas = trabajo de port.*
 
-## Avance (5 de noviembre de 2026)
+## Avance (8 de noviembre de 2026)
 
-Primero la lógica de todo y luego la interfaz idéntica a Tauri, como pidió Crhistian.
+Primero la lógica de todo y luego la interfaz. La app Tauri ya no está en el repositorio; lo que le falta a la nativa respecto a ella está en [tauri-gap-audit.md](tauri-gap-audit.md).
 
 | Fase | Lógica (core y conexión) | Interfaz |
 | --- | --- | --- |
@@ -135,11 +135,11 @@ Primero la lógica de todo y luego la interfaz idéntica a Tauri, como pidió Cr
 | 5 Noticias | Hecha | Falta la lista y las tarjetas |
 | 6 Grupos | En un agente | En un agente |
 | 7 Correo | Hecha | Hecha |
-| 8 Teléfono (Poki) | Pendiente | Pendiente |
-| 9 Archivos y documentos | Lectores de xlsx, docx y pptx en core; imágenes (`images.generate`) conectadas | Tarjeta de imágenes hecha; faltan los visores |
+| 8 Teléfono (Poki) | Hecha: instalación, servicio y estado del conector | Hecha: Ajustes › MCP y tutorial; falta probar con un iPhone real |
+| 9 Archivos y documentos | Lectores de xlsx, docx, pptx y PDF en core; imágenes (`images.generate`) conectadas | Visores de hoja, Word, diapositivas y PDF hechos; quedan los detalles de la fase 9 |
 | 10 Dictado | En un agente | En un agente |
-| 11 Workstreams | Core hecho; falta el campo en el Mono y su contexto | Pendiente |
-| 12 Producción | Pendiente | Pendiente |
+| 11 Workstreams | Core hecho; nada lo llama todavía | Pendiente: no hay ninguna interfaz |
+| 12 Producción | Firma de actualizaciones propia, bucket de releases y host remoto en CI | Faltan secretos de GitHub, firma de Apple e instalador probado en Windows |
 
 Exportar, importar y sincronizar bots tienen la lógica hecha y conectada (la
 sincronización corre cada 2 minutos); falta su grupo en Ajustes › Monos y el
@@ -287,7 +287,7 @@ depende de la fase 6.
 
 - Instalador de Windows (MSI o NSIS), firma y notarización en Mac, actualizador.
 - Leer el `localStorage` real de WebView2 en Windows (hoy solo hay fixtures).
-- Comprobar que Tauri y la nativa conviven sin pisar los datos, y luego retirar Tauri.
+- ~~Retirar Tauri.~~ Hecho: el repositorio solo tiene la app nativa y la móvil.
 
 ## Lo que no se porta
 
@@ -304,9 +304,3 @@ depende de la fase 6.
 3. Fases 3 y 4, que desbloquean al resto de bots.
 4. Después de la fase 4, las fases 5, 6, 7, 8, 9 y 10 van en sesiones paralelas: cada una toca su propio módulo.
 5. Fase 11 cuando se quiera; fase 12 al final.
-
-## Decisión abierta
-
-Mientras dure el port, cada función nueva que se añada a Tauri hay que hacerla dos
-veces. Opciones: congelar las funciones nuevas en Tauri, o mantener la regla de
-que cualquier función nueva pone su lógica en Rust compartido desde el principio.

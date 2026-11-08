@@ -809,11 +809,16 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
             }
             "calendar.list" | "calendar.create" => {
                 let remote_calendar = mono.is_bot()
-                    && mono.bot_tools.as_ref().and_then(|tools| tools.connectors.as_ref())
+                    && mono
+                        .bot_tools
+                        .as_ref()
+                        .and_then(|tools| tools.connectors.as_ref())
                         .is_some_and(|ids| ids.iter().any(|id| id == "mailflare"))
-                    && monocode_core::connectors::connector("mailflare").is_some_and(|connector|
-                        monocode_core::connectors::session_state().0.is_ready(
-                            connector, monocode_core::connectors::Platform::current()));
+                    && monocode_core::connectors::connector("mailflare").is_some_and(|connector| {
+                        monocode_core::connectors::session_state()
+                            .0
+                            .is_ready(connector, monocode_core::connectors::Platform::current())
+                    });
                 self.call_work(call, target.clone(), move |store| {
                     let data_dir = locked(&store)?.data_dir().map(Path::to_path_buf)
                         .unwrap_or_else(monocode_core::inbox::mail::desktop_data_dir);

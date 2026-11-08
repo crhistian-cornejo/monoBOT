@@ -1374,7 +1374,13 @@ mod tests {
         assert_eq!(overlay.size, size(px(1200.), px(900.)));
         assert_eq!(dialog.size.width, px(560.));
         assert!(dialog.size.height > px(620.) && dialog.size.height < px(720.));
-        assert_eq!(dialog.center(), overlay.center());
+        // Centred; layout snaps the dialog's edges to device pixels, so a
+        // height with a fractional half lands up to half a pixel off.
+        let offset = dialog.center() - overlay.center();
+        assert!(
+            offset.x.abs() <= px(0.5) && offset.y.abs() <= px(0.5),
+            "dialog {dialog:?} overlay {overlay:?}"
+        );
         assert_eq!(code.size, size(px(384.), px(384.)));
         assert_eq!(code.center().x, dialog.center().x);
 

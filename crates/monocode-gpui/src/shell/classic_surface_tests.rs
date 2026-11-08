@@ -228,6 +228,13 @@ fn original_collapsed_picker_selects_monos_and_projects_with_search_and_keyboard
     let beta_row = visual.debug_bounds(beta).unwrap();
     let project_row = visual.debug_bounds("project-picker-project-0").unwrap();
     assert!(alpha_row.top() < beta_row.top() && beta_row.top() < project_row.top());
+    // The menu gives the picker its height; without it the card collapses to
+    // its padding and every row falls outside it, so clicks dismiss it.
+    let picker = visual.debug_bounds("project-picker").unwrap();
+    assert!(
+        picker.top() < alpha_row.top() && project_row.bottom() <= picker.bottom(),
+        "rows sit inside the picker: {picker:?}"
+    );
     visual.simulate_input("bEtA");
     visual.run_until_parked();
     visual.refresh().unwrap();

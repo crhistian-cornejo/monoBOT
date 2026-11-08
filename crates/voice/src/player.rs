@@ -43,12 +43,14 @@ fn decode(wav: &[u8]) -> Result<Audio, String> {
             }
             rate = Some(sample_rate);
         } else if &wav[at..at + 4] == b"data" {
-            if chunk.len() % 2 != 0 {
+            if !chunk.len().is_multiple_of(2) {
                 return Err("Incomplete voice samples".into());
             }
             samples = Some(
                 chunk
-                    .chunks_exact(2)
+                    .as_chunks::<2>()
+                    .0
+                    .iter()
                     .map(|sample| i16::from_le_bytes([sample[0], sample[1]]) as f32 / 32768.0)
                     .collect::<Vec<_>>(),
             );

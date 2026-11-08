@@ -327,7 +327,7 @@ impl Service {
             }
             overview.messages.push(item.message);
         }
-        overview.messages.sort_by(|a, b| b.at.cmp(&a.at));
+        overview.messages.sort_by_key(|m| std::cmp::Reverse(m.at));
         Ok(overview)
     }
     fn find(&self, id: &str) -> Result<Cached, String> {

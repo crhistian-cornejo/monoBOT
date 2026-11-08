@@ -46,13 +46,12 @@ fn request(
     let parsed = crate::mime::parse(head.as_bytes(), body.as_bytes());
     let mut headers = serde_json::Map::new();
     for line in head.lines() {
-        if let Some((name, value)) = line.split_once(':') {
-            if ["In-Reply-To", "References", "Message-ID"]
+        if let Some((name, value)) = line.split_once(':')
+            && ["In-Reply-To", "References", "Message-ID"]
                 .iter()
                 .any(|n| name.eq_ignore_ascii_case(n))
-            {
-                headers.insert(name.to_string(), json!(value.trim()));
-            }
+        {
+            headers.insert(name.to_string(), json!(value.trim()));
         }
     }
     let to: Vec<&str> = people.to.iter().map(|p| p.address.as_str()).collect();

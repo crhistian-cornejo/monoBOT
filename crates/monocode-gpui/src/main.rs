@@ -190,10 +190,15 @@ fn main() {
     }
     let cli_args: Vec<_> = std::env::args().skip(1).collect();
     if cli_args.first().is_some_and(|arg| arg == "--mailflare-mcp") {
-        let result = cli_args.get(1).filter(|_| cli_args.len() == 2)
+        let result = cli_args
+            .get(1)
+            .filter(|_| cli_args.len() == 2)
             .ok_or_else(|| "Mailflare proxy needs a data directory.".to_owned())
-            .and_then(|dir| monocode_core::inbox::workspace::run_mcp_proxy(dir));
-        if let Err(error) = result { eprintln!("{error}"); std::process::exit(1); }
+            .and_then(monocode_core::inbox::workspace::run_mcp_proxy);
+        if let Err(error) = result {
+            eprintln!("{error}");
+            std::process::exit(1);
+        }
         return;
     }
     if cli_args

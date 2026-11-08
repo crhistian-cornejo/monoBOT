@@ -1,9 +1,10 @@
 // Bundle the exact React game engines for GPUI's bounded interpreter.
-import {createRequire} from 'node:module';
+// Run from this folder after `pnpm install`: node build-arcade.mjs
+import {build} from 'esbuild';
 import path from 'node:path';
-const root=process.cwd();
-const require=createRequire(path.join(process.env.MONOCODE_REFERENCE_ROOT||root,'package.json'));
-const {build}=require('esbuild');
+import {fileURLToPath} from 'node:url';
+const here=path.dirname(fileURLToPath(import.meta.url));
+const root=path.resolve(here,'../..');
 await build({stdin:{contents:`import {GRID_GAMES} from './src/features/terminal/arcade/gridGames';
 import {PROJECT_MASCOTS} from './src/features/projects/model/projectMascots';
 import * as R from './src/features/sessions/model/composerRunner';
@@ -37,4 +38,4 @@ export function frame(cols,rows,dt,playing,index,mode,heading){
  const cells=[];for(let i=0;i<stamp.length;i++)if(stamp[i]>.02)cells.push([i,stamp[i]]);
  const sprites=board.sprites().map(s=>({...s,rows:PROJECT_MASCOTS.find(m=>m.name===s.mascot)?.[s.frame||'rest']}));
  return JSON.stringify({cells,sprites,pickup:board.logoPickup(),bubble:board.speechBubble(),score:board.score(),lives:board.lives(),dim:playing?1:game.idleDim,fade:board.fade()});
-}`,resolveDir:root,loader:'ts'},bundle:true,format:'iife',globalName:'NativeArcade',platform:'neutral',target:'es2020',minify:true,outfile:'crates/monocode-gpui/assets/settings-arcade.js',plugins:[{name:'native-provider-ids',setup(build){build.onLoad({filter:/features\/sessions\/model\/session\.ts$/},()=>({contents:'export const HARNESSES=["claude","codex","cursor","grok","opencode","pi","omp","fx","hermes","antigravity","devin"];',loader:'js'}));}}]});
+}`,resolveDir:here,loader:'ts'},absWorkingDir:here,bundle:true,format:'iife',globalName:'NativeArcade',platform:'neutral',target:'es2020',minify:true,outfile:path.join(root,'crates/monocode-gpui/assets/settings-arcade.js')});
