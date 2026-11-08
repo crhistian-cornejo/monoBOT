@@ -17,8 +17,10 @@ mod mono_divider;
 mod outline;
 mod perf_scroll;
 pub(crate) mod phases;
+mod plans;
 mod provider_switch;
 mod remote_plans;
+mod reply_media;
 pub(crate) mod selection;
 pub(crate) mod tasks;
 mod tools;
@@ -148,6 +150,10 @@ struct RenderedBlock {
 #[derive(Clone)]
 enum Body {
     RemotePlan(crate::conversation::remote_plans::Plan),
+    /// PlanPreview: a local plan turn's plan, by its `plan` row.
+    Plan(Arc<plans::Card>),
+    /// GeneratedImage: a picture the provider made during the turn.
+    Image(Arc<monocode_core::images::GeneratedImage>),
     SavedDraft,
     Markdown(Arc<MarkdownRow>),
     /// A dithered break between text replies in one Mono turn.
@@ -757,6 +763,15 @@ pub(crate) struct TranscriptView {
     /// Finished replies fold their work under "worked for".
     fold_work: bool,
     search_match: Option<(usize, String)>,
+    /// Edit and Write diffs already built, by tool row, with what they were
+    /// built from.
+    edit_previews: HashMap<
+        String,
+        (
+            u64,
+            Option<Arc<monocode_core::tool::edit_preview::EditPreview>>,
+        ),
+    >,
     highlights: HashMap<u64, Option<Arc<HighlightedDocument>>>,
     highlighting: HashSet<u64>,
     highlight_queue: VecDeque<Arc<Fence>>,
@@ -889,6 +904,13 @@ impl TranscriptView {
                 )
             })
             .collect()
+    }
+    /// Drops the mark a revealed search left, when "Find in conversation"
+    /// closes or its query is cleared.
+    pub(crate) fn clear_search(&mut self, cx: &mut Context<Self>) {
+        if self.search_match.take().is_some() || self.history_search.take().is_some() {
+            cx.notify();
+        }
     }
     pub(crate) fn reveal_search(&mut self, row: usize, query: &str, cx: &mut Context<Self>) {
         if row < self.history_start {
@@ -2638,6 +2660,7 @@ impl TranscriptView {
             collapse_groups: false,
             fold_work: true,
             search_match: None,
+            edit_previews: HashMap::new(),
             highlights: HashMap::new(),
             highlighting: HashSet::new(),
             highlight_queue: VecDeque::new(),
@@ -3399,6 +3422,7 @@ impl TranscriptView {
         let mut ready = false;
         let mut git_card: Option<Arc<git_turns::GitCard>> = None;
         let mut git_live_shown = false;
+        let mut promoted_answer = None;
         while at < self.source.len() {
             let mut end = at + 1;
             while end < self.source.len() && !self.source[end].first {
@@ -3473,6 +3497,9 @@ impl TranscriptView {
                     .insert(turn, final_answer.filter(|_| has_work && ready));
                 git_card = self.git_card(turn, turn_end, final_answer);
                 git_live_shown = false;
+                // A plan promoted from the final answer stands in for it.
+                promoted_answer =
+                    final_answer.filter(|_| plans::promoted(&self.source[turn..turn_end]));
             }
             let folded = self.fold_work
                 && !is_prompt
@@ -3632,6 +3659,34 @@ impl TranscriptView {
                         thought_phase: None,
                     });
                 }
+            } else if role == monocode_core::plan::ROLE {
+                if let Some(card) = plans::Card::parse(&self.source, at, &text, self.streaming) {
+                    self.rows.push(UiRow {
+                        key: (0, 0),
+                        body: Body::Plan(Arc::new(card)),
+                        message,
+                        first: false,
+                        last: false,
+                        work: false,
+                        work_tail: false,
+                        thought_phase: None,
+                    });
+                }
+            } else if role == monocode_core::images::REPLY_ROLE {
+                if let Ok(image) = serde_json::from_str(&text) {
+                    self.rows.push(UiRow {
+                        key: (0, 0),
+                        body: Body::Image(Arc::new(image)),
+                        message,
+                        first: false,
+                        last: false,
+                        work: false,
+                        work_tail: false,
+                        thought_phase: None,
+                    });
+                }
+            } else if role == "assistant" && promoted_answer == Some(at) {
+                // The plan card below shows this answer.
             } else if role == "visual" {
                 let document = serde_json::from_str::<monocode_core::visual::VisualDocument>(&text)
                     .ok()
@@ -3714,6 +3769,13 @@ impl TranscriptView {
                     self.seen_steps.insert(at);
                 }
                 // WorkFoldLine puts earlier commentary and work behind its receipt.
+            } else if role == "tool"
+                && text.contains("lan")
+                && serde_json::from_str::<ToolCall>(&text)
+                    .is_ok_and(|tool| plans::hands_back_plan(&tool))
+            {
+                // Its plan row shows the plan as a card.
+                self.seen_steps.insert(at);
             } else if role == "tool"
                 && let Ok(tool) = serde_json::from_str::<ToolCall>(&text)
             {
@@ -4954,6 +5016,8 @@ impl TranscriptView {
         let body = match row.body {
             Body::GitAction(card) => self.git_card_row(&card, message_start, cx),
             Body::RemotePlan(plan) => self.remote_plan_card(&plan, cx),
+            Body::Plan(card) => self.plan_card(&card, cx),
+            Body::Image(image) => self.reply_image(message_start, &image, cx),
             Body::Visual(document) => self.visual_row(message_start, document, cx),
             Body::Interjection(ref note) => {
                 let open = self.expanded.contains(&message_start);
@@ -5350,6 +5414,8 @@ impl TranscriptView {
                     self.code(fence.clone(), lines.clone(), ix, cx)
                 } else if let Part::Visual { id, caption } = &md.part {
                     self.placed_visual(id, caption, cx)
+                } else if let Part::Image { src, alt } = &md.part {
+                    self.markdown_media(row.key, src, alt, cx)
                 } else {
                     markdown::body_selected(
                         md,

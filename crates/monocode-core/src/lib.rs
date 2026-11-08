@@ -54,6 +54,7 @@ pub mod composer_quotes;
 pub mod contributions;
 pub mod orchestration;
 pub mod papers;
+pub mod plan;
 pub mod skills;
 pub mod sounds;
 

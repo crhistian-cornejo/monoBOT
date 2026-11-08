@@ -10,6 +10,7 @@ mod composer_shelf;
 #[cfg(test)]
 mod dictation_tests;
 mod edit_last_turn;
+pub(crate) mod find;
 mod follow_up;
 pub(crate) mod git_actions;
 mod history;
@@ -151,6 +152,7 @@ pub(crate) struct Conversation {
     pub(crate) summary: Session,
     remote_state: remote::State,
     remote_plans: remote_plans::State,
+    find: find::State,
     store: Database,
     pub(crate) transcript: Entity<TranscriptView>,
     pub(crate) review: Entity<crate::session_review::SessionReview>,
@@ -731,6 +733,7 @@ impl Conversation {
             summary,
             remote_state: remote::State::default(),
             remote_plans: remote_plans::State::default(),
+            find: find::State::default(),
         }
     }
     pub(crate) fn reveal_search(&mut self, row: usize, query: String, cx: &mut Context<Self>) {
@@ -1677,6 +1680,13 @@ impl Conversation {
             ResponseRequest::RemotePlan { id, text, build } => {
                 self.remote_plan_request(id, text, *build, cx)
             }
+            ResponseRequest::LocalPlan { at, text, build } => {
+                if *build {
+                    self.build_local_plan(*at, None, cx)
+                } else {
+                    self.open_local_plan(*at, text, cx)
+                }
+            }
             ResponseRequest::QuoteSelection { text } => self.mono_quote(text, window, cx),
             ResponseRequest::EditLastTurn { turn } => self.begin_edit_last_turn(*turn, window, cx),
             ResponseRequest::Draft { send } => self.draft_action(*send, cx),
@@ -1751,6 +1761,11 @@ impl Conversation {
         let Ok(target) = serde_json::from_str::<monocode_core::response::Target>(id) else {
             return;
         };
+        if kind == monocode_core::response::TransferKind::Build {
+            self.close_response_menu(cx);
+            self.build_local_plan(turn, Some(target), cx);
+            return;
+        }
         let from = self
             .transcript
             .read(cx)
@@ -3880,7 +3895,8 @@ impl Conversation {
         if !self.summary.has_messages {
             return self.empty(window, cx);
         }
-        self.attachment_drop_target("session-chat", cx)
+        let body = self.attachment_drop_target("session-chat", cx);
+        self.find_actions(body, cx)
             .relative()
             .capture_action(
                 cx.listener(|this, _: &crate::shell::DismissMenu, window, cx| {
@@ -3932,6 +3948,7 @@ impl Conversation {
                             .clone()
                             .cached(StyleRefinement::default().size_full()),
                     )
+                    .children(self.find_bar(cx))
                     // Level with the transcript's jump button, which moves to
                     // the column's other end.
                     .children(pill.map(|pill| {

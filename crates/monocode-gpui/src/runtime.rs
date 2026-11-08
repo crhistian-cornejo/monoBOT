@@ -56,6 +56,49 @@ pub(crate) struct Update {
     pub(crate) status: String,
     pub(crate) finished: bool,
 }
+impl Update {
+    /// Only a new status line, while the turn waits on something after its
+    /// provider finished.
+    fn status(start: usize, status: &str) -> Self {
+        Self {
+            worktree_cwd: None,
+            commands: None,
+            provider_turn_id: None,
+            turn_ready: false,
+            follow_up_delivered: Vec::new(),
+            follow_up_errors: Vec::new(),
+            delivered: None,
+            start,
+            rows: Vec::new(),
+            provider_id: None,
+            model: None,
+            config_model: None,
+            config_settings: None,
+            title: None,
+            context: None,
+            metrics: None,
+            usage_limit: None,
+            background: None,
+            approvals: Vec::new(),
+            approvals_resolved: Vec::new(),
+            questions: Vec::new(),
+            questions_resolved: Vec::new(),
+            handoff: None,
+            status: status.into(),
+            finished: false,
+        }
+    }
+}
+/// Appends a structured plan as the transcript's `plan` row.
+fn plan_row(transcript: &mut Transcript, text: String) -> Result<usize, String> {
+    let at = transcript.begin(monocode_core::plan::ROLE);
+    let row = monocode_core::plan::PlanRow {
+        text,
+        answer: false,
+    };
+    transcript.append(&serde_json::to_string(&row).map_err(|e| e.to_string())?);
+    Ok(at)
+}
 fn publish(
     tx: &async_channel::Sender<Update>,
     cancel: &AtomicBool,
@@ -137,6 +180,9 @@ fn run_turn_using(
     let mut accepted_messages = Vec::new();
     let mut provider_id = summary.provider_id.clone();
     let mut turn_start = 0;
+    let turn_started_ms = monocode_core::time::now_ms();
+    let mut planning = false;
+    let mut images_wanted = false;
     let mut turn_receipt: Option<(usize, monocode_core::agent::TurnInfo)> = None;
     let mut mono_fingerprint = None;
     let mut visual_introduction = None;
@@ -614,6 +660,10 @@ fn run_turn_using(
             settings,
         };
         let mut tool_rows = std::collections::HashMap::new();
+        // A plan turn's answer can become its plan once the turn has ended.
+        planning = request.settings.plan;
+        let antigravity = request.kind == Kind::Antigravity;
+        let mut plan_tools = std::collections::HashSet::new();
         // The running-work list attributes the provider and its tools to this session.
         let result = monocode_core::process::owned_by(summary.id, || {
             provider::run_with_controls(request, cancel.clone(), Some(controls), |events| {
@@ -741,7 +791,34 @@ fn run_turn_using(
                             start = start.min(at);
                             pending.changed(at);
                         }
+                        Event::Plan(text) => {
+                            let at = plan_row(&mut transcript, text)?;
+                            start = start.min(at);
+                            pending.changed(at);
+                            boundary = true;
+                        }
+                        Event::Image(image) => {
+                            let at = transcript.begin(monocode_core::images::REPLY_ROLE);
+                            transcript
+                                .append(&serde_json::to_string(&image).map_err(|e| e.to_string())?);
+                            start = start.min(at);
+                            pending.changed(at);
+                            boundary = true;
+                        }
                         Event::Tool(tool) => {
+                            if antigravity
+                                && !images_wanted
+                                && monocode_core::images::update_makes_image(
+                                    &serde_json::to_string(&tool).unwrap_or_default(),
+                                )
+                            {
+                                images_wanted = true;
+                            }
+                            // Claude hands its plan back through ExitPlanMode.
+                            let plan = monocode_core::plan::is_exit_plan_mode(&tool.name)
+                                .then(|| monocode_core::plan::exit_plan_mode_plan(&tool.input))
+                                .flatten()
+                                .filter(|_| plan_tools.insert(tool.id.clone()));
                             if tool.is_compaction() {
                                 status = if tool.state == monocode_core::tool::ToolState::Running {
                                     "Compacting context…"
@@ -758,6 +835,12 @@ fn run_turn_using(
                             start = start.min(ix);
                             pending.changed(ix);
                             contributions::record(&store, summary.id, &summary.cwd, &tool);
+                            if let Some(text) = plan {
+                                let at = plan_row(&mut transcript, text)?;
+                                start = start.min(at);
+                                pending.changed(at);
+                                boundary = true;
+                            }
                         }
                         Event::SessionId(id) => {
                             if provider_id.as_ref() != Some(&id) {
@@ -1004,6 +1087,44 @@ fn run_turn_using(
             }
             row.text = serde_json::to_string(&tool).unwrap();
             final_start = final_start.min(ix);
+        }
+    }
+    if history_loaded && result.is_ok() && !cancelled {
+        if images_wanted {
+            // Gemini's image subagent can still be writing when the turn ends.
+            let _ = tx.send_blocking(Update::status(
+                transcript.rows.len(),
+                "Waiting for Gemini's pictures…",
+            ));
+            let found = match monocode_core::skills::bundled::data_dir()
+                .zip(monocode_core::accounts::home())
+            {
+                Some((data, home)) => monocode_core::images::await_turn_images(
+                    std::time::Duration::from_secs(120),
+                    std::time::Duration::from_secs(2),
+                    || cancel.load(Ordering::Relaxed),
+                    || {
+                        monocode_core::images::collect_images_since(
+                            &home.join(monocode_core::images::BRAIN_DIR),
+                            &data.join(monocode_core::images::GENERATED_IMAGE_DIR),
+                            turn_started_ms,
+                        )
+                    },
+                    std::thread::sleep,
+                ),
+                None => Vec::new(),
+            };
+            for image in found {
+                let at = transcript.begin(monocode_core::images::REPLY_ROLE);
+                transcript.append(&serde_json::to_string(&image).unwrap_or_default());
+                final_start = final_start.min(at);
+            }
+        }
+        if planning && let Some(plan) = monocode_core::plan::promote(&transcript.rows[turn_start..])
+        {
+            let at = transcript.begin(monocode_core::plan::ROLE);
+            transcript.append(&serde_json::to_string(&plan).unwrap_or_default());
+            final_start = final_start.min(at);
         }
     }
     if let Some((cwd, id)) = &checkpoint

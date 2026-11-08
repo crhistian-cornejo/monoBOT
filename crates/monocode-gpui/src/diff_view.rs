@@ -194,7 +194,7 @@ fn hunk_range(lines: &[Line]) -> String {
         new.len()
     )
 }
-fn expand_tabs(text: &str) -> Cow<'_, str> {
+pub(crate) fn expand_tabs(text: &str) -> Cow<'_, str> {
     if !text.contains('\t') {
         return Cow::Borrowed(text);
     }

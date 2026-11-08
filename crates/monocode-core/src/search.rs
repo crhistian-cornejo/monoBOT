@@ -313,6 +313,9 @@ pub fn message_hit(
                 format!("{a}\n{b}\n{}\n{}", t.input, t.output)
             })
             .unwrap_or_else(|| text.to_owned())
+    } else if matches!(role, "plan" | "image") {
+        // Their rows are JSON; search what the chat shows of them.
+        crate::transcript::find::searchable(role, text)?.into_owned()
     } else {
         text.to_owned()
     };

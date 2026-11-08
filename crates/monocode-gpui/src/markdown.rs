@@ -171,6 +171,11 @@ pub(crate) enum Part {
         id: String,
         caption: String,
     },
+    /// An image or local video the reply shows (`Block::Image`).
+    Image {
+        src: String,
+        alt: String,
+    },
 }
 #[derive(Clone, PartialEq)]
 pub(crate) struct MarkdownRow {
@@ -288,6 +293,13 @@ fn flatten(
             Part::Visual {
                 id: id.clone(),
                 caption: caption.clone(),
+            },
+            16.,
+        ),
+        Block::Image { src, alt } => add(
+            Part::Image {
+                src: src.clone(),
+                alt: alt.clone(),
             },
             16.,
         ),
@@ -914,6 +926,17 @@ pub(crate) fn body_selected(
                 "Visual".to_owned()
             } else {
                 caption.clone()
+            })
+            .into_any_element(),
+        // Outside the transcript an image's alt text stands in for it, muted
+        // so it reads as a placeholder (ImageAltText).
+        Part::Image { src, alt } => body
+            .italic()
+            .text_color(content(0.45))
+            .child(if alt.trim().is_empty() {
+                src.clone()
+            } else {
+                alt.clone()
             })
             .into_any_element(),
         Part::Math(tex) => {

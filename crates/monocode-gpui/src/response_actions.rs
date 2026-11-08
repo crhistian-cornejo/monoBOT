@@ -12,6 +12,12 @@ pub(crate) enum Request {
         text: String,
         build: bool,
     },
+    /// A local plan card: open it in the reader, or build it here.
+    LocalPlan {
+        at: usize,
+        text: String,
+        build: bool,
+    },
     QuoteSelection {
         text: String,
     },

@@ -2,7 +2,9 @@
 use super::{TranscriptView, tasks};
 use crate::theme::*;
 use gpui::{AnyElement, Context, Div, Role, div, prelude::*, px, rgb};
+use monocode_core::tool::edit_preview::EditPreview;
 use monocode_core::tool::{CommandStep, ToolCall, ToolState};
+use std::sync::Arc;
 
 /// Shell plumbing that says nothing about what a chained command was for.
 fn is_noise(step: &CommandStep) -> bool {
@@ -44,7 +46,152 @@ fn search_pill() -> Div {
         .bg(content(0.06))
 }
 
+/// Lines an inline diff shows before pointing at the file.
+const DIFF_LINES: usize = 80;
+
+/// The edit's change under its row: what it is, its counts, then its lines.
+fn diff_block(
+    start: usize,
+    preview: &EditPreview,
+    state: &ToolState,
+    path: Option<String>,
+) -> gpui::Div {
+    use crate::right_panel::{DIFF_ADD, DIFF_DEL};
+    use monocode_core::diff::LineKind;
+    let more = preview.lines.len().saturating_sub(DIFF_LINES) + preview.hidden;
+    div()
+        .debug_selector(move || format!("tool-diff-{start}"))
+        .min_w_0()
+        .mb_2()
+        .rounded(px(8.))
+        .border_1()
+        .border_color(content(0.08))
+        .overflow_hidden()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .px_2p5()
+                .py_1()
+                .border_b_1()
+                .border_color(content(0.08))
+                .text_size(px(11.))
+                .text_color(content(0.5))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .child(preview.description(state)),
+                )
+                .when(preview.additions > 0, |d| {
+                    d.child(
+                        div()
+                            .text_color(rgb(DIFF_ADD))
+                            .child(format!("+{}", preview.additions)),
+                    )
+                })
+                .when(preview.deletions > 0, |d| {
+                    d.child(
+                        div()
+                            .text_color(rgb(DIFF_DEL))
+                            .child(format!("−{}", preview.deletions)),
+                    )
+                }),
+        )
+        .child(
+            div()
+                .py_1()
+                .font_family(crate::fonts::mono())
+                .text_size(px(12.))
+                .line_height(px(18.))
+                .children(preview.lines.iter().take(DIFF_LINES).map(|line| {
+                    let (mark, ink) = match line.kind {
+                        LineKind::Add => ("+", Some(rgb(DIFF_ADD))),
+                        LineKind::Del => ("−", Some(rgb(DIFF_DEL))),
+                        LineKind::Hunk => ("", None),
+                        LineKind::Context => (" ", None),
+                    };
+                    let hunk = line.kind == LineKind::Hunk;
+                    div()
+                        .flex()
+                        .min_w_0()
+                        .px_2()
+                        .when_some(ink, |d, ink| d.bg(gpui::Hsla::from(ink).opacity(0.08)))
+                        .child(
+                            div()
+                                .w(px(14.))
+                                .flex_shrink_0()
+                                .text_color(ink.map_or(content(0.3), Into::into))
+                                .child(mark),
+                        )
+                        .child(
+                            div()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(if hunk { content(0.35) } else { content(0.75) })
+                                .child(crate::diff_view::expand_tabs(&line.text).into_owned()),
+                        )
+                })),
+        )
+        .when(more > 0, |d| {
+            d.child(
+                div()
+                    .id(("tool-diff-more", start))
+                    .px_2p5()
+                    .py_1()
+                    .border_t_1()
+                    .border_color(content(0.08))
+                    .text_size(px(11.))
+                    .text_color(content(0.5))
+                    .child(format!(
+                        "{more} more {}",
+                        if more == 1 { "line" } else { "lines" }
+                    ))
+                    .when_some(path, |d, path| {
+                        d.role(Role::Button)
+                            .aria_label(format!("Open {path}"))
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(content(0.8)))
+                            .on_click(move |_, window, cx| {
+                                cx.stop_propagation();
+                                window.dispatch_action(
+                                    Box::new(crate::file_editor::OpenPath(path.clone())),
+                                    cx,
+                                );
+                            })
+                    }),
+            )
+        })
+}
+
 impl TranscriptView {
+    /// The edit's diff, built once per version of the step.
+    fn edit_preview(&mut self, key: &str, tool: &ToolCall) -> Option<Arc<EditPreview>> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        tool.input.hash(&mut hasher);
+        tool.output.len().hash(&mut hasher);
+        tool.display
+            .as_ref()
+            .map(|d| d.to_string())
+            .hash(&mut hasher);
+        let version = hasher.finish();
+        if let Some((built, preview)) = self.edit_previews.get(key)
+            && *built == version
+        {
+            return preview.clone();
+        }
+        let preview = monocode_core::tool::edit_preview::edit_preview(tool).map(Arc::new);
+        if self.edit_previews.len() > 64 {
+            self.edit_previews.clear();
+        }
+        self.edit_previews
+            .insert(key.to_owned(), (version, preview.clone()));
+        preview
+    }
+
     /// `tiled`: the row leads with its own tile, so the line drops the
     /// inline logo a MonoBOT tool would otherwise carry.
     pub(super) fn tool(
@@ -159,11 +306,9 @@ impl TranscriptView {
         } else {
             None
         };
+        let link_base = self.file_link_base.clone().unwrap_or_default();
         let link = |path: &str, line: Option<u64>| {
-            let (path, location) = crate::file_editor::file_location(
-                path,
-                self.file_link_base.as_deref().unwrap_or(""),
-            );
+            let (path, location) = crate::file_editor::file_location(path, &link_base);
             match location {
                 Some((line, col)) => format!("{path}:{line}:{col}"),
                 None => line.map_or(path.clone(), |line| format!("{path}:{line}")),
@@ -185,6 +330,17 @@ impl TranscriptView {
         let error_open = self.agent_panels.part_open(&error_key, false);
         let has_error = failed && !tool.output.trim().is_empty();
         let has_detail = has_error || chain;
+        // ToolDiffPreview: an edit shows its own change, independent of git.
+        let diff_key = format!("tool-diff:{start}:{}", tool.id);
+        let can_diff = !has_detail
+            && matches!(shown.action.as_str(), "Edit" | "Write")
+            && monocode_core::tool::edit_preview::available(&tool);
+        let diff_open = can_diff && self.agent_panels.part_open(&diff_key, false);
+        let preview = diff_open
+            .then(|| self.edit_preview(&diff_key, &tool))
+            .flatten();
+        let diff_state = tool.state.clone();
+        let diff_path = target_path.clone();
         let chips = if chain {
             let mut seen = std::collections::HashSet::new();
             let chips: Vec<_> = shown
@@ -436,6 +592,39 @@ impl TranscriptView {
             .when(failed, |d| {
                 d.child(icon("close", 14.).text_color(rgb(0xff6467)).flex_shrink_0())
             })
+            .when(can_diff, |d| {
+                let toggle_key = diff_key.clone();
+                let label = format!(
+                    "{} changes for {caption}",
+                    if diff_open { "Hide" } else { "Show" }
+                );
+                d.child(
+                    div()
+                        .id("diff-toggle")
+                        .debug_selector(move || format!("tool-diff-toggle-{start}"))
+                        .role(Role::Button)
+                        .aria_expanded(diff_open)
+                        .aria_label(label.clone())
+                        .tooltip(chrome_tip(label, None))
+                        .cursor_pointer()
+                        .p_1()
+                        .child(
+                            icon(
+                                if diff_open {
+                                    "chevron-down"
+                                } else {
+                                    "chevron-right"
+                                },
+                                14.,
+                            )
+                            .text_color(content(0.4)),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            cx.stop_propagation();
+                            this.toggle_agent_part(toggle_key.clone(), !diff_open, start, cx);
+                        })),
+                )
+            })
             .when(has_detail, |d| {
                 let toggle_key = error_key.clone();
                 d.cursor_pointer()
@@ -539,6 +728,9 @@ impl TranscriptView {
                         )),
                 )
             })
+            .when_some(preview, |d, preview| {
+                d.child(diff_block(start, &preview, &diff_state, diff_path))
+            })
             .when(has_error && error_open, |d| {
                 d.child(
                     div()
@@ -561,6 +753,68 @@ mod tests {
     use crate::transcript::Body;
     use gpui::{TestAppContext, point};
     use monocode_core::transcript::Row;
+
+    #[gpui::test]
+    fn edits_open_their_own_diff_under_the_row(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|_| TranscriptView::new())
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |view, _, cx| {
+                let mut call = ToolCall::new("edit", "Edit");
+                call.input = serde_json::json!({
+                    "file_path": "/repo/src/lib.rs",
+                    "old_string": "fn a() {}\n",
+                    "new_string": "fn a() {\n    b();\n}\n",
+                })
+                .to_string();
+                call.state = ToolState::Completed;
+                view.patch(
+                    0,
+                    vec![
+                        Row {
+                            role: "user".into(),
+                            text: "Edit it".into(),
+                            first: true,
+                            sent_at: None,
+                        },
+                        Row {
+                            role: "tool".into(),
+                            text: serde_json::to_string(&call).unwrap(),
+                            first: true,
+                            sent_at: None,
+                        },
+                    ],
+                    cx,
+                );
+                view.work_folds.insert(1, true);
+                view.phases.insert(1, true);
+                view.rebuild(0, cx);
+            })
+            .unwrap();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("tool-diff-1").is_none());
+        let toggle = visual
+            .debug_bounds("tool-diff-toggle-1")
+            .expect("an edit offers its diff");
+        visual.simulate_click(toggle.center(), Default::default());
+        visual.run_until_parked();
+        let diff = visual
+            .debug_bounds("tool-diff-1")
+            .expect("the diff opens under the row");
+        let row = visual.debug_bounds("tool-1").expect("the row stays");
+        assert!(diff.top() >= row.bottom() - px(1.), "{diff:?} {row:?}");
+        // Four changed lines and a header.
+        assert!(diff.size.height >= px(18. * 4.), "{diff:?}");
+        visual.simulate_click(toggle.center(), Default::default());
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("tool-diff-1").is_none());
+    }
 
     #[gpui::test]
     fn search_pills_and_overflow_count_share_a_single_compact_row(cx: &mut TestAppContext) {

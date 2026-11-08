@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 
 pub mod attachments;
+pub mod find;
+pub mod media;
 
 pub const ROW_BYTES: usize = 2048;
 

@@ -207,6 +207,65 @@ pub fn allows_image_tool(title: &str, kind: &str) -> bool {
         .is_match(&format!("{title} {kind}"))
 }
 
+/// The transcript role of a picture a provider made during an ordinary turn
+/// (Codex's `imageGeneration`, Antigravity's `generate_image`): a
+/// [`GeneratedImage`] as JSON (`image.generated`).
+pub const REPLY_ROLE: &str = "image";
+
+/// Whether a provider update shows the turn asking Gemini for a picture
+/// (`updateMakesImage`): its picture tool, or the subagent it hands them to.
+pub fn update_makes_image(update: &str) -> bool {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)generate_image|image[-_]generator").unwrap())
+        .is_match(update)
+}
+
+/// Saves a picture a provider returned as base64 (optionally a `data:` URL)
+/// into `dir`, after checking that its bytes are an image
+/// (`materializeGeneratedImage`).
+pub fn save_base64(
+    data: &str,
+    name: &str,
+    alt: Option<String>,
+    dir: &Path,
+) -> Result<GeneratedImage, String> {
+    use base64::Engine;
+    let payload = data
+        .trim()
+        .split_once("base64,")
+        .map_or(data.trim(), |(_, payload)| payload);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(payload.as_bytes())
+        .map_err(|_| "The picture is not valid base64".to_string())?;
+    if bytes.is_empty() || bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err("The picture is empty or too large".into());
+    }
+    let (extension, mime_type) = match image::guess_format(&bytes) {
+        Ok(image::ImageFormat::Png) => ("png", "image/png"),
+        Ok(image::ImageFormat::Jpeg) => ("jpg", "image/jpeg"),
+        Ok(image::ImageFormat::WebP) => ("webp", "image/webp"),
+        Ok(image::ImageFormat::Gif) => ("gif", "image/gif"),
+        _ => return Err("The picture is not a PNG, JPEG, WebP or GIF image".into()),
+    };
+    std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let stem = safe_file_name(name);
+    let stem = stem
+        .rsplit_once('.')
+        .map_or(stem.as_str(), |(stem, _)| stem);
+    let path = dir.join(format!("{}-{stem}.{extension}", uuid::Uuid::new_v4()));
+    std::fs::write(&path, &bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(GeneratedImage {
+        name: path
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        path: path.to_string_lossy().into_owned(),
+        mime_type: mime_type.into(),
+        size: bytes.len() as u64,
+        alt: alt.filter(|alt| !alt.trim().is_empty()),
+    })
+}
+
 /// A picture on disk (`GeneratedImageMeta`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -952,5 +1011,50 @@ mod tests {
         assert_eq!(safe_file_name("../a b/c d.png"), "c-d.png");
         assert_eq!(safe_file_name("..."), "attachment");
         assert_eq!(safe_file_name(&"x".repeat(200)).len(), 80);
+    }
+}
+
+#[cfg(test)]
+mod reply_tests {
+    use super::*;
+    use base64::Engine;
+
+    fn png() -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]))
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+        bytes
+    }
+
+    #[test]
+    fn a_base64_picture_is_saved_as_the_image_it_is() {
+        let dir = std::env::temp_dir().join(format!("monocode-reply-{}", uuid::Uuid::new_v4()));
+        let data = base64::engine::general_purpose::STANDARD.encode(png());
+        let saved =
+            save_base64(&data, "generated-image", Some("A red square".into()), &dir).unwrap();
+        assert!(saved.name.ends_with("-generated-image.png"));
+        assert_eq!(saved.mime_type, "image/png");
+        assert_eq!(saved.alt.as_deref(), Some("A red square"));
+        assert_eq!(std::fs::read(&saved.path).unwrap(), png());
+        let url = format!("data:image/png;base64,{data}");
+        assert!(save_base64(&url, "x", Some(" ".into()), &dir)
+            .unwrap()
+            .alt
+            .is_none());
+        let text = base64::engine::general_purpose::STANDARD.encode(b"not a picture");
+        assert!(save_base64(&text, "x", None, &dir).is_err());
+        assert!(save_base64("%%%", "x", None, &dir).is_err());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn picture_updates_are_recognised() {
+        assert!(update_makes_image(r#"{"title":"generate_image"}"#));
+        assert!(update_makes_image(r#"{"agent":"Image-Generator"}"#));
+        assert!(!update_makes_image(r#"{"title":"Read image.png"}"#));
     }
 }
