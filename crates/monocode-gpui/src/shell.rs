@@ -9545,6 +9545,13 @@ impl Render for Shell {
             .children(self.drag_ghost(cx))
             .children(self.background_modal(window, cx))
             .children(self.bot_import_modal(window, cx))
+            // The Workstreams tour and dialog open from the rail, which clips
+            // what it draws; they sit over the whole window instead.
+            .children(
+                self.monos
+                    .clone()
+                    .and_then(|monos| monos.update(cx, |m, cx| m.workstream_modal(cx))),
+            )
             .children(self.link_modal(window, cx))
             .children(self.action_modal(window, cx))
             .children(self.resource_modal(window, cx))

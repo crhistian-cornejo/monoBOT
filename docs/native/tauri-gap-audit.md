@@ -15,8 +15,8 @@ que no se encontró en el código.
 Este documento no repite los huecos ya conocidos: enviar más tarde, chips de
 cita y citas, pestañas News/Bots/Sub-agents, lista y tarjetas de noticias, el
 grupo para exportar, importar y sincronizar bots, girar y voltear formas, el
-título del eje Y, la paginación de Word, los archivos remotos, el campo
-Workstreams del Mono, producción (instalador, firma, actualizador) y `host/`.
+título del eje Y, la paginación de Word, los archivos remotos, producción
+(instalador, firma, actualizador) y `host/`.
 
 Tamaño: **S** cabe en una tarde, **M** lleva de uno a tres días, **L** es más
 de tres días o toca el diseño.
@@ -33,7 +33,7 @@ Rutas: `T:` es Tauri (`src/…` o `src-tauri/src/…`), `G:` es
 | 1.3 | **La tarjeta del plan no se puede editar.** En Tauri se elige modelo, harness y esfuerzo por tarea, se editan Task e Instructions, se fija «Parallel workers» y hay «Show fewer tasks». | `T: OrchestrationPreview.tsx` | `G: conversation/composer_features.rs:602` (`orchestration_card`) solo ofrece Start agents y Dismiss. Los trabajadores heredan el proveedor del líder y su número máximo es fijo. | M |
 | 1.4 | **Una ejecución interrumpida no se puede reanudar.** Tauri guarda el estado (interrupted, start_unknown, etapas) y muestra el banner «Continue interrupted and queued work». | `T: orchestrationState.ts`, `OrchestrationSidebarAgents.tsx` | El `Run` vive en un `HashMap` en memoria. Tras reiniciar solo queda el resumen del sidebar. | M |
 | 1.5 | **No se pueden abrir los trabajadores.** Faltan «Open this agent beside the orchestrator» y abrir todos en pestañas. | `T: orchestration/ui/OrchestrationActions.ts` | Solo existen las tarjetas anidadas de `G: shell/rails.rs`. | S |
-| 1.6 | **Workstreams no tiene interfaz.** Faltan `WorkstreamIntro` (`monocode.workstreams.introSeen`), `NewWorkstreamDialog` (nombre, objetivo y si el orquestador corre en su worktree o en la carpeta), la sección del rail con «New workstream» y las pestañas `WorkstreamPrs` (Open/Draft/Merged/Closed) y `WorkstreamFiles`. | `T: features/workstreams/ui/*`, `app/shell/MonoRailSection.tsx` | La lógica está en `C: mono/workstreams.rs` (`create`, `list_prs`, `pr_group`, `brief`), pero nada en gpui la llama. | L |
+| 1.6 | ~~**Workstreams no tiene interfaz.**~~ Hecho: el recorrido (`workstream_intro_seen` en el roster), «New workstream» (nombre, objetivo, repositorio y dónde corre el orquestador), la sección Workstreams del rail con Beta y las pestañas Agents (Waiting on you/Working/Idle), PRs (Open/Draft/Merged/Closed) y Files. El Mono guarda su `workstream`, el orquestador recibe `brief` y su chat empieza en su checkout. | `T: features/workstreams/ui/*`, `app/shell/MonoRailSection.tsx` | `G: monos/workstreams.rs`, `monos/panels.rs`; `C: mono/workstreams.rs`, `mono.rs` | L |
 
 ## 2. Chat y transcript
 
@@ -148,7 +148,7 @@ acciones de `TabGroupMenu` y `collectWindowTransfer`.
 1. **Orquestación de verdad (1.1–1.5).** Es la mayor diferencia funcional y la
    base de Workstreams. Primero el canal `control` y la reanudación, después la
    tarjeta editable y el aislamiento en worktrees.
-2. **Workstreams (1.6).** El core ya existe: falta la interfaz.
+2. ~~**Workstreams (1.6).**~~ Hecho.
 3. **Lo que se ve en cada chat (2.1–2.5):** buscar en el chat, la tarjeta del
    plan, las imágenes en las respuestas, las imágenes generadas y el diff de
    cada edición.

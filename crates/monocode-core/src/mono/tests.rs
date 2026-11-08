@@ -29,6 +29,39 @@ fn identity_projects_order_and_hidden_sessions_survive_restart() {
     assert_ne!(saved.monos[0].mascot, saved.monos[1].mascot);
 }
 #[test]
+fn a_workstream_orchestrator_survives_restart_with_its_tour_seen() {
+    let temp = tempfile::tempdir().unwrap();
+    let db = Store::open(&temp.path().join("native.sqlite")).unwrap();
+    let mut roster = Roster::default();
+    roster.create(Vec::new());
+    let workstream = workstreams::Workstream {
+        project: "/repo".into(),
+        cwd: "/repo-ws".into(),
+        slug: "migrate".into(),
+        folder: "/data/workstreams/ws".into(),
+        created_at: 1,
+    };
+    let mono = roster
+        .create_workstream(workstreams::Created {
+            id: "ws".into(),
+            name: "Migrate".into(),
+            workstream: workstream.clone(),
+        })
+        .clone();
+    assert_eq!(mono.kind.as_deref(), Some("workstream"));
+    assert_eq!(mono.projects, ["/repo"]);
+    assert!(mono.is_workstream() && !mono.is_coding() && !mono.is_personal());
+    assert!(mono.works_on("/repo"));
+    assert_ne!(mono.mascot, roster.monos[0].mascot);
+    roster.workstream_intro_seen = true;
+    roster.save(&db).unwrap();
+    let saved = Roster::load(&db).unwrap();
+    assert!(saved.workstream_intro_seen);
+    let back = saved.get("ws").unwrap();
+    assert_eq!(back.label(), "Migrate");
+    assert_eq!(back.workstream.as_ref(), Some(&workstream));
+}
+#[test]
 fn an_agent_message_names_its_sender_for_route_recovery() {
     let text = agents::agent_message("Principal", "principal", "Check the invoices");
     assert_eq!(agents::message_sender(&text), Some("Principal"));

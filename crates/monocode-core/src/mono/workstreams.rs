@@ -206,6 +206,69 @@ pub fn ensure_folder(data_dir: &Path, id: &str) -> Result<String, String> {
     Ok(path.to_string_lossy().replace('\\', "/"))
 }
 
+/// The longest name and goal the new-workstream dialog takes.
+pub const NAME_MAX: usize = 120;
+pub const GOAL_MAX: usize = 4000;
+
+/// The dialog's Start button: a name, and a repository other than home.
+pub fn can_start(name: &str, project: &str) -> bool {
+    let project = project.trim();
+    !name.trim().is_empty() && !project.is_empty() && project != "~"
+}
+
+/// One file in the shared folder (`WorkstreamFiles`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FolderFile {
+    pub name: String,
+    pub path: String,
+}
+
+/// The shared folder's files by name, without its subfolders. A folder that
+/// cannot be read has none.
+pub fn folder_files(folder: &Path) -> Vec<FolderFile> {
+    let Ok(entries) = std::fs::read_dir(folder) else {
+        return Vec::new();
+    };
+    let mut files: Vec<_> = entries
+        .flatten()
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_file()))
+        .map(|entry| FolderFile {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            path: entry.path().to_string_lossy().replace('\\', "/"),
+        })
+        .collect();
+    files.sort_by_key(|file| file.name.to_lowercase());
+    files
+}
+
+/// How the Agents tab groups the orchestrator's agents: what needs the user
+/// first, then what is running, then the rest (`MonoSessionList grouped`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum AgentGroup {
+    Waiting,
+    Working,
+    Idle,
+}
+impl AgentGroup {
+    pub const ALL: [Self; 3] = [Self::Waiting, Self::Working, Self::Idle];
+    pub fn of(busy: bool, needs_input: bool) -> Self {
+        if needs_input {
+            Self::Waiting
+        } else if busy {
+            Self::Working
+        } else {
+            Self::Idle
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Waiting => "Waiting on you",
+            Self::Working => "Working",
+            Self::Idle => "Idle",
+        }
+    }
+}
+
 /// What the user gives when starting a workstream (`createWorkstream`'s input).
 #[derive(Clone, Debug)]
 pub struct NewWorkstream {
@@ -228,7 +291,7 @@ pub struct Created {
 /// folder, and its orchestrator's checkout (the project itself, or a worktree
 /// of its own on `ws/<slug>/orchestrator`).
 pub fn create(data_dir: &Path, input: &NewWorkstream) -> Result<Created, String> {
-    let name: String = input.name.trim().chars().take(120).collect();
+    let name: String = input.name.trim().chars().take(NAME_MAX).collect();
     if name.is_empty() {
         return Err("Name the workstream".into());
     }
@@ -281,6 +344,8 @@ pub enum PrGroup {
     Closed,
 }
 impl PrGroup {
+    /// The PRs tab's sections, in the order they show.
+    pub const ALL: [Self; 4] = [Self::Open, Self::Draft, Self::Merged, Self::Closed];
     pub fn label(self) -> &'static str {
         match self {
             Self::Open => "Open",
@@ -454,6 +519,41 @@ mod tests {
         assert!(prs[0].is_draft);
         assert!(branch_prs_with_prefix("not json", "ws/").is_empty());
         assert!(branch_prs(Path::new("/nowhere"), "  ").is_err());
+    }
+
+    #[test]
+    fn starts_only_with_a_name_and_a_repository() {
+        assert!(can_start("Migrate", "/repo"));
+        assert!(!can_start("  ", "/repo"));
+        assert!(!can_start("Migrate", ""));
+        assert!(!can_start("Migrate", "~"));
+    }
+
+    #[test]
+    fn groups_agents_by_what_needs_the_user_first() {
+        assert_eq!(AgentGroup::of(true, true), AgentGroup::Waiting);
+        assert_eq!(AgentGroup::of(true, false), AgentGroup::Working);
+        assert_eq!(AgentGroup::of(false, false), AgentGroup::Idle);
+        assert_eq!(AgentGroup::Waiting.label(), "Waiting on you");
+        assert_eq!(
+            PrGroup::ALL.map(PrGroup::label),
+            ["Open", "Draft", "Merged", "Closed"]
+        );
+    }
+
+    #[test]
+    fn lists_the_shared_folders_files_by_name() {
+        let temp = tempfile::tempdir().unwrap();
+        assert!(folder_files(&temp.path().join("missing")).is_empty());
+        std::fs::write(temp.path().join("plan.md"), "# Plan").unwrap();
+        std::fs::write(temp.path().join("Notes.md"), "").unwrap();
+        std::fs::create_dir(temp.path().join("drafts")).unwrap();
+        let files = folder_files(temp.path());
+        assert_eq!(
+            files.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+            ["Notes.md", "plan.md"]
+        );
+        assert!(files[1].path.ends_with("/plan.md"));
     }
 
     #[test]

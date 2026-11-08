@@ -1368,49 +1368,71 @@ impl Monos {
     /// the dialog also opens from the rail with no Mono selected.
     pub(super) fn group_dialog_modal(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (view, _, size) = self.group_dialog.as_ref()?;
-        let width = 560f32.min(size.width.as_f32() - 24.);
-        let height = 680f32.min(size.height.as_f32() - 32.);
         let weak = cx.weak_entity();
-        Some(
-            div()
-                .absolute()
-                .size_full()
-                .child(
-                    gpui::deferred(
-                        gpui::anchored()
-                            .position(gpui::point(px(0.), px(0.)))
-                            .child(
-                                div()
-                                    .w(size.width)
-                                    .h(size.height)
-                                    .bg(gpui::black().opacity(0.4))
-                                    .occlude(),
-                            ),
-                    )
-                    .with_priority(94),
+        Some(self.centered_dialog(
+            "group-dialog",
+            *size,
+            (560., 680.),
+            None,
+            view.clone().into_any_element(),
+            move |_, cx| {
+                let _ = weak.update(cx, |this, cx| this.close_group_dialog(cx));
+            },
+        ))
+    }
+
+    /// A dialog centred over a scrim in a window of `size`, at most `width`
+    /// by `height`. A press outside it, other than in `keep` (a picker it
+    /// opened), dismisses it. The group editor and the Workstreams tour and
+    /// dialog share it.
+    pub(super) fn centered_dialog(
+        &self,
+        id: &'static str,
+        size: gpui::Size<gpui::Pixels>,
+        (width, height): (f32, f32),
+        keep: Option<AnchorSlot>,
+        child: AnyElement,
+        dismiss: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> AnyElement {
+        let width = width.min(size.width.as_f32() - 24.);
+        let height = height.min(size.height.as_f32() - 32.);
+        div()
+            .absolute()
+            .size_full()
+            .child(
+                gpui::deferred(
+                    gpui::anchored()
+                        .position(gpui::point(px(0.), px(0.)))
+                        .child(
+                            div()
+                                .w(size.width)
+                                .h(size.height)
+                                .bg(gpui::black().opacity(0.4))
+                                .occlude(),
+                        ),
                 )
-                .child(
-                    popover(
-                        "group-dialog",
-                        Anchor::Point(gpui::point(
-                            px((size.width.as_f32() - width) / 2.),
-                            px((size.height.as_f32() - height) / 2.),
-                        )),
-                    )
-                    .ignore(self.notice_region.clone())
-                    .modal_surface(true)
-                    .without_animation()
-                    .priority(95)
-                    .width(width)
-                    .height(height)
-                    .gap(0.)
-                    .on_dismiss(move |_, cx| {
-                        let _ = weak.update(cx, |this, cx| this.close_group_dialog(cx));
-                    })
-                    .child(view.clone()),
+                .with_priority(94),
+            )
+            .child(
+                popover(
+                    id,
+                    Anchor::Point(gpui::point(
+                        px((size.width.as_f32() - width) / 2.),
+                        px((size.height.as_f32() - height) / 2.),
+                    )),
                 )
-                .into_any_element(),
-        )
+                .ignore(self.notice_region.clone())
+                .when_some(keep, |p, keep| p.ignore(keep))
+                .modal_surface(true)
+                .without_animation()
+                .priority(95)
+                .width(width)
+                .height(height)
+                .gap(0.)
+                .on_dismiss(dismiss)
+                .child(child),
+            )
+            .into_any_element()
     }
 
     /// The group's Members tab (`GroupMembers`): who is in it, with adding

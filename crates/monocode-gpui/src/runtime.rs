@@ -466,6 +466,12 @@ fn run_turn_using(
                     &rules,
                 ),
             );
+            // A workstream's orchestrator reads how to plan, split the work
+            // across agents in worktrees and ship it as pull requests.
+            if let Some(workstream) = &mono.mono.workstream {
+                let brief = monocode_core::mono::workstreams::brief(&mono.mono.label(), workstream);
+                added = format!("{added}\n\n{brief}");
+            }
             // A group's lead reads how to run its room, a member in its
             // seat where its words go; handed again when either changes.
             if let Some(group) = mono.groups.brief(&mono.mono) {
