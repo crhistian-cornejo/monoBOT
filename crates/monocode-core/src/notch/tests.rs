@@ -129,8 +129,8 @@ fn the_notch_wraps_the_camera_and_the_island_floats_under_the_bar() {
             right: 160,
         },
     );
-    // The wider wing sets both, so the camera stays in the middle.
-    assert_eq!((busy.width, busy.x), (186. + 2. * 160., 662. - 160.));
+    // Each wing its own width: the camera stays where it is.
+    assert_eq!((busy.width, busy.x), (186. + 40. + 160., 662. - 40.));
     let open = frame(&look, &screen, Shape::Open { body: 200 });
     assert_eq!(open.y, 0.);
     assert_eq!(open.height, 37. + PANEL_HEADER + 200. + PANEL_PAD);
@@ -359,7 +359,9 @@ fn the_wings_show_who_works_and_what_the_lead_does() {
     assert_eq!(at_rest.lead_steps, Some((2, 6)));
     let (left, right) = at_rest.wings(true);
     assert_eq!(left, 14 + 3 * 18 + 22);
-    assert_eq!(right, 196);
+    // "Claude Code · Reading files" and 2/6.
+    assert_eq!(right, (6.2_f32 * 27. + 30. + 26.) as u32);
+    assert_eq!(Rest::default().wings(true).1, 36, "a mark, no words");
     assert_eq!(
         at_rest.wings(false).0,
         14 + 3 * 18,

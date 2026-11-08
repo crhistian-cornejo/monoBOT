@@ -57,12 +57,29 @@ impl Shell {
             }),
         );
         self.notch = Some(handle);
-        self.sync_notch(cx);
+        self.sync_notch_now(cx);
+    }
+
+    /// Asks for the notch to catch up. Sessions change on every streamed
+    /// token, so the work is gathered at most four times a second.
+    pub(super) fn sync_notch(&mut self, cx: &mut Context<Self>) {
+        if self.notch.is_none() || self.notch_sync.is_some() {
+            return;
+        }
+        self.notch_sync = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(250))
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                this.notch_sync = None;
+                this.sync_notch_now(cx);
+            });
+        }));
     }
 
     /// What the notch shows: the live agents card's sessions, every pending
     /// approval or question, and the group call.
-    pub(super) fn sync_notch(&mut self, cx: &mut Context<Self>) {
+    fn sync_notch_now(&mut self, cx: &mut Context<Self>) {
         let Some(notch) = self.notch.clone() else {
             return;
         };
@@ -196,7 +213,7 @@ impl Shell {
                         view.decide_notification_request(&request, decision, cx)
                     });
                 }
-                self.sync_notch(cx);
+                self.sync_notch_now(cx);
             }
             NotchEvent::NewChat => {
                 cx.activate(true);

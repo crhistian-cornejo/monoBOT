@@ -78,6 +78,16 @@ fn size(window: WindowHandle<Notch>, visual: &mut VisualTestContext) -> (f32, f3
         .unwrap()
 }
 
+/// Both wings' widths for two sessions reading files.
+fn busy_wings() -> f32 {
+    let (left, right) = model::rest(&Feed {
+        activities: vec![working(1), working(2)],
+        ..Feed::default()
+    })
+    .wings(true);
+    (left + right) as f32
+}
+
 fn working(id: i64) -> Activity {
     Activity {
         id,
@@ -125,7 +135,7 @@ fn the_quiet_notch_is_the_camera_and_work_grows_wings(cx: &mut TestAppContext) {
     leave(visual);
     assert_eq!(
         size(opened.window, visual),
-        (186. + 2. * (160. + SHOULDER), 37.)
+        (186. + busy_wings() + 2. * SHOULDER, 37.)
     );
     // Under the pointer it swells a little, to say it opens.
     let notch = visual.debug_bounds("notch").unwrap();
@@ -133,7 +143,7 @@ fn the_quiet_notch_is_the_camera_and_work_grows_wings(cx: &mut TestAppContext) {
     visual.run_until_parked();
     assert_eq!(
         size(opened.window, visual),
-        (186. + 2. * (160. + SHOULDER) + PEEK, 40.)
+        (186. + busy_wings() + 2. * SHOULDER + PEEK, 40.)
     );
 }
 
@@ -410,6 +420,6 @@ fn several_agents_spread_the_wings_with_the_leads_progress(cx: &mut TestAppConte
     assert_eq!(rest.more(), 1);
     assert_eq!(
         size(opened.window, visual),
-        (186. + 2. * left.max(right) as f32 + 2. * SHOULDER, 37.)
+        (186. + (left + right) as f32 + 2. * SHOULDER, 37.)
     );
 }

@@ -689,6 +689,8 @@ pub(crate) struct Shell {
     quick: crate::quick_composer::Controller,
     /// The notch's window, fed from the sessions and calls.
     notch: Option<crate::notch::Handle>,
+    /// The notch's pending catch-up.
+    notch_sync: Option<gpui::Task<()>>,
     unseen_finished: HashSet<i64>,
     archiving: HashSet<i64>,
     archive_shortcut_held: bool,
@@ -1089,6 +1091,7 @@ impl Shell {
             github_star: Default::default(),
             quick: Default::default(),
             notch: None,
+            notch_sync: None,
             unseen_finished: HashSet::new(),
             archiving: HashSet::new(),
             archive_shortcut_held: false,

@@ -9,9 +9,15 @@ use std::collections::HashSet;
 /// Shade a fixed glyph layout. Animated StyledText highlights change font-run
 /// boundaries (and kerning/ligatures) as neighboring colors become equal.
 pub(crate) fn shimmer(text: String, elapsed: f32) -> AnyElement {
+    shimmer_in(text, elapsed, crate::theme::content)
+}
+
+/// [`shimmer`] in another ink, such as the notch's white on black.
+pub(crate) fn shimmer_in(text: String, elapsed: f32, ink: fn(f32) -> gpui::Hsla) -> AnyElement {
     Shimmer {
         text: StyledText::new(text),
         elapsed,
+        ink,
     }
     .into_any_element()
 }
@@ -19,6 +25,7 @@ pub(crate) fn shimmer(text: String, elapsed: f32) -> AnyElement {
 struct Shimmer {
     text: StyledText,
     elapsed: f32,
+    ink: fn(f32) -> gpui::Hsla,
 }
 impl IntoElement for Shimmer {
     type Element = Self;
@@ -98,7 +105,7 @@ impl Element for Shimmer {
                                     run.font_id,
                                     glyph.id,
                                     line.font_size,
-                                    crate::theme::content(0.4 + 0.6 * sweep),
+                                    (self.ink)(0.4 + 0.6 * sweep),
                                 );
                             }
                         }
@@ -387,6 +394,7 @@ mod shimmer_tests {
                             let shimmer = Shimmer {
                                 text: StyledText::new(text),
                                 elapsed,
+                                ink: crate::theme::content,
                             };
                             let layout = shimmer.text.layout().clone();
                             let mut shimmer = shimmer.into_any_element();

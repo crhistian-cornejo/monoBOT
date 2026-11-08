@@ -41,12 +41,17 @@ const PEEK: f32 = 14.;
 const MARGIN: f32 = 12.;
 /// The pages' bodies, and the shelf's catalog of widgets.
 const SETTINGS_HEIGHT: f32 = 248.;
-const AGENTS_HEIGHT: f32 = 236.;
-const CHAT_HEIGHT: f32 = 204.;
+/// The Agents page scrolls past this.
+const AGENTS_MAX: f32 = 300.;
+/// A list's row and a section's caption.
+pub(crate) const ROW: f32 = 26.;
+pub(crate) const CAPTION: f32 = 22.;
 const CATALOG_HEIGHT: f32 = 26.;
 /// The content fades in after the shape starts to move.
 const FADE_DELAY: f32 = 0.04;
 const FADE: f32 = 0.12;
+/// A page's fade inside the open panel.
+const PAGE_FADE: f32 = 0.08;
 /// The beat between widgets coming in.
 const STAGGER: f32 = 0.03;
 /// How far a new page rises as it fades in.
@@ -62,6 +67,10 @@ struct Spring {
 const OPENING: Spring = Spring {
     response: 0.34,
     damping: 0.8,
+};
+const BETWEEN: Spring = Spring {
+    response: 0.2,
+    damping: 0.95,
 };
 const FOLDING: Spring = Spring {
     response: 0.26,
@@ -210,7 +219,11 @@ pub(crate) struct Notch {
     /// What was drawn last, and what stays drawn while the island folds
     /// away from it, fading out.
     drawn: Option<(Shape, Tab, Frame)>,
+    /// Whether the last change was only the page.
+    page_change: bool,
     leaving: Option<(Shape, Tab, Frame)>,
+    /// The clock the shimmer sweeps on.
+    epoch: Instant,
     /// Tests stand in for the screen.
     pub(crate) screen_override: Option<model::Screen>,
     /// The pointer's comings and goings where GPUI sees no hover.
@@ -338,7 +351,9 @@ impl Notch {
             placed: None,
             appeared: None,
             drawn: None,
+            page_change: false,
             leaving: None,
+            epoch: Instant::now(),
             screen_override: None,
             _pointer: None,
             responsive: None,
@@ -495,7 +510,10 @@ impl Notch {
                         if usage.is_some() {
                             this.usage = usage;
                         }
-                        cx.notify();
+                        // Only what shows a clock or a time repaints each second.
+                        if matches!(this.tab, Tab::Home | Tab::Agents) && !this.editing {
+                            cx.notify();
+                        }
                     })
                     .is_err()
                 {
@@ -569,8 +587,8 @@ impl Notch {
     fn body_height(&self) -> f32 {
         match self.tab {
             Tab::Settings => SETTINGS_HEIGHT,
-            Tab::Agents => AGENTS_HEIGHT,
-            Tab::Chat => CHAT_HEIGHT,
+            Tab::Agents => self.agents_height(),
+            Tab::Chat => self.chat_height(),
             Tab::Home => {
                 let rows = if self.editing {
                     self.look.shelf_rows as usize
@@ -585,6 +603,35 @@ impl Notch {
                     }
             }
         }
+    }
+
+    /// The Agents page as tall as its sections, up to where it scrolls.
+    fn agents_height(&self) -> f32 {
+        let feed = &self.feed;
+        let section = |rows: usize| {
+            if rows == 0 {
+                0.
+            } else {
+                CAPTION + ROW * rows as f32
+            }
+        };
+        let working = feed.activities.iter().filter(|a| !a.done).count();
+        let finished = feed.activities.len() - working;
+        let recent = feed.recent.len().max(1);
+        (section(feed.asks.len()) + section(working) + section(finished) + section(recent) + 4.)
+            .min(AGENTS_MAX)
+    }
+
+    /// The Chat page: its field, the quick composer and up to three chats.
+    fn chat_height(&self) -> f32 {
+        let recent = self.feed.recent.len().min(3);
+        40. + 28.
+            + if recent > 0 {
+                CAPTION + ROW * recent as f32
+            } else {
+                0.
+            }
+            + 4.
     }
 
     pub(crate) fn shape(&self) -> Shape {
@@ -699,6 +746,12 @@ impl Notch {
         let now = Instant::now();
         let same = |s: Shape| std::mem::discriminant(&s) == std::mem::discriminant(&shape);
         let changed = !matches!(self.appeared, Some((s, t, _)) if same(s) && t == self.tab);
+        // A page change inside the open panel shows at once, with a quick
+        // fade; a new shape waits a beat for the island to start moving.
+        if changed {
+            self.page_change = matches!(self.appeared, Some((s, _, _)) if same(s))
+                && matches!(shape, Shape::Open { .. });
+        }
         if changed {
             let first = self.appeared.is_none();
             self.appeared = Some((
@@ -717,7 +770,12 @@ impl Notch {
         let since = self
             .appeared
             .map_or(1., |(_, _, at)| now.duration_since(at).as_secs_f32());
-        let opacity = ((since - FADE_DELAY) / FADE).clamp(0., 1.);
+        let (delay, fade) = if self.page_change {
+            (0., PAGE_FADE)
+        } else {
+            (FADE_DELAY, FADE)
+        };
+        let opacity = ((since - delay) / fade).clamp(0., 1.);
         // The shelf's widgets come in one after another, a little later.
         if since < FADE_DELAY + FADE + STAGGER * model::WIDGETS.len() as f32 {
             window.request_animation_frame();
@@ -733,11 +791,16 @@ impl Notch {
         let since = self
             .appeared
             .map_or(1., |(_, _, at)| at.elapsed().as_secs_f32());
-        ((since - FADE_DELAY - STAGGER * index as f32) / FADE).clamp(0., 1.)
+        let delay = if self.page_change { 0. } else { FADE_DELAY };
+        ((since - delay - STAGGER * index as f32) / FADE).clamp(0., 1.)
     }
 }
 
 fn spring_for(from: Frame, to: Frame) -> Spring {
+    // Between pages of the open panel only the height moves: snappier.
+    if (from.width - to.width).abs() < 1. && from.height > 60. && to.height > 60. {
+        return BETWEEN;
+    }
     if to.width * to.height >= from.width * from.height {
         OPENING
     } else {
@@ -799,15 +862,25 @@ fn body(island: bool, edge: bool) -> impl IntoElement {
                 return;
             }
             let mut edge = gpui::PathBuilder::stroke(px(1.));
-            // The island's whole edge; the notch's sides and bottom only.
+            // Half a point inside the outline, so the whole line lies on the
+            // black and nothing behind the notch shows through its edge. The
+            // island's whole edge; the notch's sides and bottom only.
+            let inset = Bounds {
+                origin: bounds.origin + point(px(0.5), px(if island { 0.5 } else { 0. })),
+                size: gpui::size(
+                    bounds.size.width - px(1.),
+                    bounds.size.height - px(if island { 1. } else { 0.5 }),
+                ),
+            };
+            let inner = outline(inset, island);
             let edge_points: Vec<_> = if island {
-                points
+                inner
                     .iter()
                     .copied()
-                    .chain(points.first().copied())
+                    .chain(inner.first().copied())
                     .collect()
             } else {
-                points[4..points.len() - 4].to_vec()
+                inner[4..inner.len() - 4].to_vec()
             };
             edge.add_polygon(&edge_points, false);
             if let Ok(path) = edge.build() {
@@ -893,7 +966,8 @@ pub(crate) fn work_mark(id: &'static str, asking: bool, cx: &App) -> AnyElement 
     if cx.reduce_motion() {
         return crate::session_mark::spinner_at(0.3).into_any_element();
     }
-    crate::session_mark::spinner(id, crate::pulse::Rate::Smooth).into_any_element()
+    // At 15fps: it shows beside any app, all the time an agent works.
+    crate::session_mark::spinner(id, crate::pulse::Rate::Half).into_any_element()
 }
 
 /// One session's mark: its work, its question, or its finish.
@@ -917,7 +991,7 @@ impl Notch {
     /// The wings beside the camera, or the bar where there is none: on the
     /// left the work mark and a face per session at work (and "+N"), on the
     /// right who leads, what it does and how far along its list it is.
-    fn ears(&self, camera: Option<model::Camera>, width: f32, cx: &App) -> AnyElement {
+    fn ears(&self, camera: Option<model::Camera>, wings: (f32, f32), cx: &App) -> AnyElement {
         let rest = &self.rest;
         let mut faces = div().flex().items_center();
         for (at, provider) in rest.marks.iter().enumerate() {
@@ -949,6 +1023,17 @@ impl Notch {
             });
         let right: AnyElement = match (&rest.lead_text, rest.lead_steps) {
             (Some(text), steps) => {
+                // What the lead does sweeps with light while it works, as
+                // the transcript's live step; a question holds still.
+                let words: AnyElement = if rest.asking > 0 || cx.reduce_motion() {
+                    div().child(text.clone()).into_any_element()
+                } else {
+                    crate::activity::shimmer_in(
+                        text.clone(),
+                        self.epoch.elapsed().as_secs_f32(),
+                        ink,
+                    )
+                };
                 let line = div()
                     .min_w_0()
                     .flex()
@@ -959,9 +1044,10 @@ impl Notch {
                             .min_w_0()
                             .flex_1()
                             .truncate()
-                            .text_size(px(11.))
-                            .text_color(ink(0.88))
-                            .child(text.clone()),
+                            .text_size(px(11.5))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(ink(0.9))
+                            .child(words),
                     )
                     .children(steps.map(|(done, all)| {
                         div()
@@ -995,16 +1081,23 @@ impl Notch {
         };
         match camera {
             Some(camera) => {
-                let ear = ((width - camera.width) / 2.).max(0.);
+                let (left_wing, right_wing) = wings;
                 div()
                     .size_full()
                     .flex()
                     .items_center()
-                    .child(div().w(px(ear)).pl(px(12.)).flex().child(left))
+                    .child(
+                        div()
+                            .w(px(left_wing))
+                            .flex_shrink_0()
+                            .pl(px(12.))
+                            .flex()
+                            .child(left),
+                    )
                     .child(div().w(px(camera.width)).flex_shrink_0())
                     .child(
                         div()
-                            .w(px(ear))
+                            .w(px(right_wing))
                             .min_w_0()
                             .pl(px(10.))
                             .pr(px(12.))
@@ -1196,10 +1289,17 @@ impl Notch {
         let top = camera.map_or(0., |camera| camera.height);
         match shape {
             Shape::Quiet => div().into_any_element(),
-            Shape::Busy { .. } => self.ears(camera, size.width, cx),
+            Shape::Busy { left, right } => {
+                // The pointer's swell widens both wings evenly.
+                let swell = (size.width
+                    - camera.map_or(size.width, |c| c.width + left as f32 + right as f32))
+                    / 2.;
+                self.ears(camera, (left as f32 + swell, right as f32 + swell), cx)
+            }
             Shape::Notice { .. } => {
                 let notice = self.notices.current().cloned();
-                let ears = self.ears(camera, size.width, cx);
+                let side = camera.map_or(0., |c| (size.width - c.width) / 2.);
+                let ears = self.ears(camera, (side, side), cx);
                 div()
                     .size_full()
                     .flex()

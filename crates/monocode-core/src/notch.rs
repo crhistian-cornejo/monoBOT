@@ -403,8 +403,7 @@ pub fn frame(look: &Look, screen: &Screen, shape: Shape) -> Frame {
         Shape::Busy { left, right } => {
             let (left, right) = (left as f32, right as f32);
             match (island, camera) {
-                // The wings stay even, so the camera stays in the middle.
-                (false, Some(camera)) => (camera.width + 2. * left.max(right), camera.height),
+                (false, Some(camera)) => (camera.width + left + right, camera.height),
                 _ => ((left + right + 12.).max(ISLAND_REST.0), BAR_HEIGHT),
             }
         }
@@ -418,8 +417,13 @@ pub fn frame(look: &Look, screen: &Screen, shape: Shape) -> Frame {
             top + PANEL_HEADER + body as f32 + PANEL_PAD,
         ),
     };
-    let center = match (island, camera) {
-        (false, Some(camera)) => camera.center,
+    // Wings may differ: the camera stays where it is and each wing grows
+    // to what it says, so the words start right beside the camera.
+    let center = match (island, camera, shape) {
+        (false, Some(camera), Shape::Busy { left, right }) => {
+            camera.center + (right as f32 - left as f32) / 2.
+        }
+        (false, Some(camera), _) => camera.center,
         _ => screen.width / 2.,
     };
     let y = if island {
@@ -579,10 +583,15 @@ impl Rest {
             .len()
             .max(usize::from(self.asking > 0 || self.call));
         let left = 14 + 18 * marks as u32 + if show_count && self.more() > 0 { 22 } else { 0 };
-        let right = match (&self.lead_text, self.lead_steps) {
-            (Some(_), Some(_)) => 196,
-            (Some(_), None) => 160,
-            _ => 36,
+        // The lead's words at about 6.2 points a letter, its steps and room
+        // to breathe, never wider than a third of a small screen.
+        let right = match &self.lead_text {
+            Some(text) => {
+                let words = 6.2 * text.chars().count() as f32;
+                let steps = if self.lead_steps.is_some() { 30. } else { 0. };
+                (words + steps + 26.).clamp(64., 230.) as u32
+            }
+            None => 36,
         };
         (left.max(36), right)
     }

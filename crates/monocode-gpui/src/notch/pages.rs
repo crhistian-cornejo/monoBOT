@@ -6,8 +6,8 @@ use super::*;
 /// A section's small caps title.
 pub(super) fn caption(text: &'static str) -> gpui::Div {
     div()
-        .pt(px(6.))
-        .pb(px(3.))
+        .h(px(CAPTION))
+        .pt(px(8.))
         .text_size(px(9.5))
         .font_weight(gpui::FontWeight::SEMIBOLD)
         .text_color(ink(0.4))
@@ -24,7 +24,7 @@ pub(super) fn session_row(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
-        .h(px(26.))
+        .h(px(ROW))
         .px(px(6.))
         .flex()
         .items_center()
@@ -66,7 +66,7 @@ impl Notch {
         let mut list = div()
             .id("notch-agents-page")
             .debug_selector(|| "notch-agents-page".into())
-            .h(px(AGENTS_HEIGHT))
+            .h(px(self.agents_height()))
             .overflow_y_scroll()
             .flex()
             .flex_col();
@@ -205,7 +205,7 @@ impl Notch {
         let field = self.field.clone();
         div()
             .debug_selector(|| "notch-chat-page".into())
-            .h(px(CHAT_HEIGHT))
+            .h(px(self.chat_height()))
             .flex()
             .flex_col()
             .gap(px(6.))
