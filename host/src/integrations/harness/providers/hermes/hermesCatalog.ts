@@ -27,7 +27,7 @@ export function refreshHermesCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("hermes", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] hermes catalog", error);
+      console.debug("[MonoBOT] hermes catalog", error);
       reportCatalogError("hermes", error);
     })
     .finally(() => {

@@ -1,5 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
-import { hasHeadlessChildBackend } from "../../core/child";
+// Cursor's native session database lives with the desktop app. The headless
+// host has no copy, so stored enrichment is always empty here; the adapter
+// keeps the transcript and subagent events Cursor streams.
 
 export type StoredCursorToolCall = {
   toolCallId: string;
@@ -26,25 +27,16 @@ export type StoredCursorSubagentRun = {
 };
 
 export function readStoredCursorSubagentRuns(
-  sessionId: string,
-  toolCallIds: string[],
-  knownRevisions: Record<string, string> = {},
+  _sessionId: string,
+  _toolCallIds: string[],
+  _knownRevisions: Record<string, string> = {},
 ): Promise<StoredCursorSubagentRun[]> {
-  if (hasHeadlessChildBackend()) return Promise.resolve([]);
-  return invoke("cursor_subagent_runs", {
-    sessionId,
-    toolCallIds,
-    knownRevisions,
-  });
+  return Promise.resolve([]);
 }
 
 export function readStoredCursorToolCalls(
-  sessionId: string,
-  toolCallIds: string[],
+  _sessionId: string,
+  _toolCallIds: string[],
 ): Promise<StoredCursorToolCall[]> {
-  if (hasHeadlessChildBackend()) return Promise.resolve([]);
-  return invoke<StoredCursorToolCall[]>("cursor_tool_calls", {
-    sessionId,
-    toolCallIds,
-  });
+  return Promise.resolve([]);
 }

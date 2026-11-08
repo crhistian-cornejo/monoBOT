@@ -6,24 +6,13 @@ import type {
   TaskListItem,
   TaskListMeta,
 } from "../../../../features/sessions/model/session";
-import { loadClaudeHooks } from "../../../../features/settings/model/settings";
 import {
   askingPermissionMode,
   connectorAllowedTools,
   connectorAskTools,
-  connectorCheckout,
   connectorMcpConfig,
   sessionConnectors,
 } from "../../../../features/settings/model/connectors";
-import { startPoki } from "../../../../platform/tauri/poki";
-import { bundledPluginDirs } from "../../../../features/skills/model/bundledPlugins";
-import { enabledSkillPacks } from "../../../../features/skills/model/skillPacks";
-import {
-  botLaunchForSession,
-  groupLaunchForSession,
-  installedClaudeSkills,
-  isBotSession,
-} from "../../../../features/bots/model/botSession";
 import {
   killChild,
   resolveClaudeBinary,
@@ -91,12 +80,6 @@ import {
 } from "./claudeProtocol";
 import { isAgentToolName } from "../../core/preview";
 import { joinStreamText, snapshotRemainder } from "../../core/streamText";
-import {
-  VISUAL_ALLOWED_TOOLS,
-  VISUAL_INSTRUCTIONS,
-  visualMcpServer,
-  withVisualServer,
-} from "../../../../features/visuals/model/visualMcp";
 import {
   questionPromptTitle,
   questionsFromUnknown,
@@ -562,41 +545,14 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     },
   );
 
-  // A bot's installed skills outside its job are denied, so list them first.
-  const bot = botLaunchForSession(
-    input.sessionId,
-    isBotSession(input.sessionId) ? await installedClaudeSkills(input.cwd) : [],
-  );
-  // A group's chat and the coding Monos in groups get the groups' folders.
-  const group = groupLaunchForSession(input.sessionId);
-  // A Phone bot's bridge needs Poki's daemon; it starts from the saved
-  // folder unless one runs. When it cannot, the bridge says Poki is not
-  // running and the bot tells the user.
-  if (launch.mcpConfig?.mcpServers.poki)
-    await startPoki(connectorCheckout("poki")).catch(() => undefined);
-  // Every chat can show the agent's charts and explainers inline.
-  const visual = await visualMcpServer();
+  // Bots, groups, skill packs and inline visuals belong to the desktop app;
+  // a host session gets the provider and the default connectors only.
   await spawnChild(
     input.sessionId,
     path,
     buildClaudeSpawnArgs({
       ...launch,
-      mcpConfig: withVisualServer(launch.mcpConfig, visual),
-      appendSystemPrompt: visual ? VISUAL_INSTRUCTIONS : undefined,
-      allowedTools: [
-        ...(launch.allowedTools ?? []),
-        ...(visual ? [VISUAL_ALLOWED_TOOLS] : []),
-        ...(bot?.allowedTools ?? []),
-        ...(group?.allowedTools ?? []),
-      ],
-      disallowedTools: bot?.disallowedTools ?? group?.disallowedTools,
-      addDirs: bot?.addDirs ?? group?.addDirs,
-      // A bot's skill packs come with its tools; any other session takes
-      // the ones turned on in Settings.
-      pluginDirs: await bundledPluginDirs([
-        "monobot",
-        ...(bot ? bot.plugins : enabledSkillPacks()),
-      ]),
+      allowedTools: [...(launch.allowedTools ?? [])],
     }),
     input.cwd,
     { provider: "claude", id: input.providerAccountId ?? "default" },
@@ -1818,24 +1774,18 @@ function writeJson(
   return writeChild(sessionId, JSON.stringify(payload));
 }
 
+/** The host keeps the user's own Claude Code hooks, the desktop default. */
+const CLAUDE_HOOKS = true;
+
 function settingsKeyFor(input: HarnessSessionInput): string {
-  // A bot that changes its tools gets a fresh process on its next turn,
-  // resuming the same conversation.
-  const bot = botLaunchForSession(input.sessionId);
-  const botKey = bot
-    ? `:${JSON.stringify([bot.plugins, bot.allowedTools, bot.disallowedTools, bot.addDirs, bot.connectors ?? null, bot.skills ?? null])}`
-    : "";
-  // So does a session whose groups open or close a folder.
-  const group = bot ? null : groupLaunchForSession(input.sessionId);
-  const groupKey = group ? `:${JSON.stringify(group)}` : "";
-  return `${input.providerAccountId ?? "default"}${botKey}${groupKey}:${claudeSettingsKey({
+  return `${input.providerAccountId ?? "default"}:${claudeSettingsKey({
     model: nativeModelId(input.model),
     effort: input.modelSettings?.effort,
     fast: input.modelSettings?.fast,
     thinking: input.modelSettings?.thinking,
     context: input.modelSettings?.context,
     runtimeMode: input.runtimeMode,
-    hooks: loadClaudeHooks(),
+    hooks: CLAUDE_HOOKS,
   })}`;
 }
 
@@ -1854,11 +1804,7 @@ function launchOptions(
   allowedTools?: string[];
 } {
   const native = nativeModelId(input.model);
-  // A bot may narrow the app's connectors to the ones its job needs.
-  // One that acts (the user's iPhone) reaches only a bot the user gave it.
-  const connectors = sessionConnectors(
-    botLaunchForSession(input.sessionId)?.connectors,
-  );
+  const connectors = sessionConnectors(undefined);
   const effortRaw = input.modelSettings?.effort;
   const context = input.modelSettings?.context;
   const settings: ClaudeCliSettings = {};
@@ -1870,9 +1816,6 @@ function launchOptions(
   }
   if (isClaudeUltracodeEffort(effortRaw)) {
     settings.ultracode = true;
-  }
-  if (!loadClaudeHooks()) {
-    settings.disableAllHooks = true;
   }
   // Its acting tools ask every time, even where the user once said "always".
   const ask = connectorAskTools(connectors);

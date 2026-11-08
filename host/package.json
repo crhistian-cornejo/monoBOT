@@ -6,17 +6,14 @@
   "packageManager": "pnpm@12.6.0",
   "scripts": {
     "build": "node build.mjs",
-    "test": "node build.mjs && vitest run && node --test runtime-download.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "tsc --noEmit -p tsconfig.json && node build.mjs && vitest run && node --test runtime-download.test.mjs",
     "package": "node build.mjs && node package.mjs"
-  },
-  "dependencies": {
-    "@tauri-apps/api": "2.11.1",
-    "@tauri-apps/plugin-dialog": "2.7.2",
-    "react": "19.2.8"
   },
   "devDependencies": {
     "@types/node": "26.5.0",
     "esbuild": "0.28.2",
+    "typescript": "5.9.3",
     "vitest": "3.2.7"
   }
 }

@@ -334,7 +334,10 @@ describe("existing providers over headless process I/O", () => {
       let titleTask: ReturnType<typeof generateTitle> | undefined;
       const titleSpy = delayTitle
         ? vi
-            .spyOn(hostProviders.claude, "generateTitle")
+            .spyOn(
+              hostProviders.claude as Required<typeof hostProviders.claude>,
+              "generateTitle",
+            )
             .mockImplementation((input) => {
               titleTask = titleGate.promise.then(() => generateTitle(input));
               return titleTask;

@@ -27,7 +27,7 @@ export function refreshAntigravityCatalog(): Promise<void> {
     })
     .catch((error: unknown) => {
       // Preserve the last live catalog (or startup seeds) when offline/logged out.
-      console.debug("[monocode] antigravity catalog", error);
+      console.debug("[MonoBOT] antigravity catalog", error);
       reportCatalogError("antigravity", error);
     })
     .finally(() => {

@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
-    "target": "ES2023",
+    "target": "ES2024",
     "useDefineForClassFields": true,
-    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "lib": ["ES2024"],
     "module": "ESNext",
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,
@@ -14,5 +14,5 @@
     "types": ["node"]
   },
   "include": ["./**/*.ts"],
-  "exclude": ["./**/*.test.ts", "node_modules", "build"]
+  "exclude": ["node_modules", "build"]
 }

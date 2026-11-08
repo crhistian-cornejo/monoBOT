@@ -207,6 +207,24 @@ export type RewindLastTurnInput = CompactContextInput & {
   attachments?: Attachment[];
 };
 
+/** A bounded background text turn (titles, branch names) on a warm process. */
+export type TextPromptInput = {
+  prompt: string;
+  cwd: string;
+  model?: string;
+  modelSettings?: Record<string, string>;
+  providerAccountId?: string;
+  intent?: TurnIntent;
+  /** Defaults to true: background text never becomes a saved conversation. */
+  ephemeral?: boolean;
+  codexStore?: "mono";
+  threadId?: string;
+  onThreadId?: (threadId: string) => void;
+  onEvent?: (event: HarnessEvent) => void;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export type RewindLastTurnResult = {
   /** True when the harness already ran the replacement turn. */
   submitted: boolean;

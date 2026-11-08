@@ -40,7 +40,7 @@ export function refreshCodexCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("codex", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] codex catalog", error);
+      console.debug("[MonoBOT] codex catalog", error);
       reportCatalogError("codex", error);
     })
     .finally(() => {

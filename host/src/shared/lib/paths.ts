@@ -9,6 +9,11 @@ export function slash(path: string): string {
     ? path.replace(/\\/g, "/") : path;
 }
 
+/** Forward slashes and no trailing separator, keeping the root as `/`. */
+export function normalizeProjectPath(path: string): string {
+  return slash(path).replace(/\/+$/, "") || "/";
+}
+
 function trimSlash(path: string): string {
   return slash(path).replace(/\/+$/, "") || "/";
 }

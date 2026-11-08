@@ -234,7 +234,7 @@ describe("headless session ownership", () => {
     }) => void = () => {};
     provider.generateTitle = vi.fn(
       () =>
-        new Promise((resolve) => {
+        new Promise<{ title: string; workItem: null } | null>((resolve) => {
           finishTitle = resolve;
         }),
     );

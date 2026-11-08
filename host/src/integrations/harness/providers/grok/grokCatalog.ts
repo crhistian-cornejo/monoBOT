@@ -38,7 +38,7 @@ export function refreshGrokCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("grok", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] grok catalog", error);
+      console.debug("[MonoBOT] grok catalog", error);
       reportCatalogError("grok", error);
     })
     .finally(() => {
@@ -49,12 +49,12 @@ export function refreshGrokCatalog(): Promise<void> {
 
 export async function discoverGrokModels(workingDirectory?: string) {
   const fromAcp = await discoverViaAcp(workingDirectory).catch((error: unknown) => {
-    console.debug("[monocode] grok ACP catalog failed", error);
+    console.debug("[MonoBOT] grok ACP catalog failed", error);
     return [];
   });
   if (fromAcp.length > 0) return fromAcp;
   const fromCli = await discoverViaCli(workingDirectory).catch((error: unknown) => {
-    console.debug("[monocode] grok CLI catalog failed", error);
+    console.debug("[MonoBOT] grok CLI catalog failed", error);
     return [];
   });
   if (fromCli.length > 0) return fromCli;

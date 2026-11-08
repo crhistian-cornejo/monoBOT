@@ -226,7 +226,7 @@ export function refreshClaudeCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("claude", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] claude catalog", error);
+      console.debug("[MonoBOT] claude catalog", error);
       reportCatalogError("claude", error);
     })
     .finally(() => {
@@ -240,7 +240,7 @@ export async function discoverClaudeModels(
 ): Promise<AgentModel[]> {
   const listed = await discoverViaListModels(workingDirectory).catch(
     (error: unknown) => {
-      console.debug("[monocode] claude list_models catalog failed", error);
+      console.debug("[MonoBOT] claude list_models catalog failed", error);
       return [];
     },
   );

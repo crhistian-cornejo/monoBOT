@@ -15,6 +15,7 @@ const sync = (text: string): SessionSync => ({
       harness: "codex",
       model: "codex:test",
       runtimeMode: "supervised",
+      modelSettings: {},
       cwd: "/repo",
       title: "Session",
     },

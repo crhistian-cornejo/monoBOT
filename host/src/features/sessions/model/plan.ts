@@ -1,14 +1,3 @@
-import type { BuiltinSkill } from "../../skills/model/skills";
-
-export const PLAN_COMMAND: BuiltinSkill = {
-  kind: "builtin",
-  name: "plan",
-  invocation: "plan",
-  description: "Create a reviewable implementation plan before changing files.",
-  scope: "builtin",
-  source: "monocode",
-};
-
 /** Consume `/plan` when it is used as the leading composer command. */
 export function consumePlanCommand(text: string): {
   text: string;

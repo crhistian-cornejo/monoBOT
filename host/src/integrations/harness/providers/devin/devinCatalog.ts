@@ -31,7 +31,7 @@ export function refreshDevinCatalog(): Promise<void> {
       if (models.length > 0) setHarnessModels("devin", models);
     })
     .catch((error: unknown) => {
-      console.debug("[monocode] devin catalog", error);
+      console.debug("[MonoBOT] devin catalog", error);
       reportCatalogError("devin", error);
     })
     .finally(() => {

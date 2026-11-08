@@ -17,10 +17,16 @@ import type {
   GitDiffIndex,
   GitFileDiff,
 } from "./src/platform/tauri/fs";
-import type {
-  ProjectSearchMatch,
-  ProjectSearchResult,
-} from "./src/features/search/model/search";
+
+/** One content match, in the shape the desktop's project search reads. */
+type ProjectSearchMatch = {
+  path: string;
+  relative: string;
+  line: number;
+  column: number;
+  preview: string;
+};
+type ProjectSearchResult = { matches: ProjectSearchMatch[]; truncated: boolean };
 
 const exec = promisify(execFile);
 const MAX_FILE = 1024 * 1024;

@@ -1,7 +1,7 @@
 import { TurnNotReadyError } from "../../core/types";
 import { nativeModelId } from "../../../../features/sessions/model/models";
 import { taskListFromToolInput } from "../../../../features/sessions/model/taskList";
-import { normalizeProjectPath } from "../../../../features/projects/model/recents";
+import { normalizeProjectPath } from "../../../../shared/lib/paths";
 import type { UserQuestionReply } from "../../../../features/sessions/model/userQuestion";
 import type {
   CommandContext,

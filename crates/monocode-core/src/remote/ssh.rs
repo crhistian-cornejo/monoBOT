@@ -835,7 +835,7 @@ mod tests {
         let script = bootstrap_script(HostPlatform::Windows);
         assert!(!script.contains("@@"));
         assert!(script.contains("checksum mismatch"));
-        assert!(script.contains("Protect-MonoCodeDirectory"));
+        assert!(script.contains("Protect-MonoBOTDirectory"));
         assert!(pairing_script(HostPlatform::Windows, "Nick's $PC").contains("'Nick''s $PC'"));
     }
     #[cfg(windows)]

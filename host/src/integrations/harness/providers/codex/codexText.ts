@@ -15,10 +15,9 @@ import {
   mapCodexNotification,
   stringField,
 } from "./codexProtocol";
-import type { HarnessEvent } from "../../core/types";
+import type { HarnessEvent, TextPromptInput } from "../../core/types";
 import { JsonRpcClient, type JsonRpcId } from "../../core/jsonRpc";
 import { prepareCodexMonoContext } from "./codexStore";
-import type { TextPromptInput } from "../../core/registry";
 
 import { mergeStream, streamTextDelta } from "../../core/streamText";
 
