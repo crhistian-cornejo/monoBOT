@@ -48,6 +48,8 @@ mod sidebar_peek;
 mod space_reorder;
 mod terminal_dock;
 mod terminal_panes;
+#[cfg(test)]
+mod tooltip_tests;
 use terminal_panes::terminal_drag_ghost;
 mod title_tabs;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
@@ -5493,18 +5495,28 @@ impl Shell {
         self.menu = None;
         let mut events = Vec::new();
         let (label, items, width, style) = self.menu_items(&target, &mut events, window, cx);
-        let picker = matches!(
-            target,
-            MenuTarget::CompactProjectPicker | MenuTarget::Header
-        );
+        // Only the compact picker embeds the project picker, which fills its
+        // host and so needs a height; it gets its content's, capped so long
+        // lists scroll. Plain menus, like the header's, hug their rows.
+        let picker_height = matches!(target, MenuTarget::CompactProjectPicker)
+            .then(|| {
+                items.iter().find_map(|item| match item {
+                    MenuItem::Custom(view, _) => view
+                        .clone()
+                        .downcast::<ProjectPicker>()
+                        .ok()
+                        .map(|picker| picker.read(cx).fitted_height(style.padding(), cx)),
+                    _ => None,
+                })
+            })
+            .flatten();
         let menu = cx.new(|cx| {
             let menu = Menu::new(label, items, window, cx)
                 .width(width)
                 .style(style);
-            if picker {
-                menu.height(crate::pickers::PROJECT_PICKER_HEIGHT)
-            } else {
-                menu
+            match picker_height {
+                Some(height) => menu.height(height),
+                None => menu,
             }
         });
         events.push(
@@ -10323,6 +10335,36 @@ mod tests {
                 assert_ne!(shell.workspace.project, before);
             })
             .unwrap();
+    }
+    #[gpui::test]
+    fn header_menu_hugs_its_rows(cx: &mut TestAppContext) {
+        let (window, _, _) = window(cx);
+        cx.update(|cx| {
+            input::bind(cx);
+            crate::popover::bind(cx);
+            cx.set_reduce_motion(true);
+        });
+        window
+            .update(cx, |shell, w, cx| {
+                let anchor = Anchor::Slot(shell.project_anchor.clone());
+                shell.open_menu(MenuTarget::Header, anchor, w, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        let card = window
+            .update(visual, |shell, _, cx| {
+                let menu = shell.menu.as_ref().unwrap().menu.read(cx);
+                menu.surface_region().get().unwrap()
+            })
+            .unwrap();
+        let first = visual.debug_bounds("menu-action-switch-worktree").unwrap();
+        let last = visual.debug_bounds("menu-action-settings").unwrap();
+        // The card's 1px frame and 4px of padding, then the rows: no empty
+        // space under Settings.
+        assert_eq!(first.top() - card.top(), px(5.), "{card:?} {first:?}");
+        assert_eq!(card.bottom() - last.bottom(), px(5.), "{card:?} {last:?}");
     }
     #[gpui::test]
     fn project_appearance_menu_edits_and_background_dialog_persist_per_project(

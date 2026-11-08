@@ -1132,7 +1132,7 @@ impl SettingsView {
                             .flex()
                             .gap(px(2.))
                             .child(
-                                secondary_button(
+                                crate::settings::widgets::secondary_icon_button(
                                     "mute-previous-month",
                                     "Previous month",
                                     false,
@@ -1153,14 +1153,21 @@ impl SettingsView {
                                 )),
                             )
                             .child(
-                                secondary_button("mute-next-month", "Next month", false, false)
-                                    .child(icon("chevron-right", 14.))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                crate::settings::widgets::secondary_icon_button(
+                                    "mute-next-month",
+                                    "Next month",
+                                    false,
+                                    false,
+                                )
+                                .child(icon("chevron-right", 14.))
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
                                         if let Some(custom) = &mut this.notification_state.custom {
                                             custom.month = next;
                                         }
                                         cx.notify();
-                                    })),
+                                    },
+                                )),
                             ),
                     ),
             )

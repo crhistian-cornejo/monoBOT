@@ -559,6 +559,7 @@ impl IntroCard {
                                 .id("intro-dismiss")
                                 .role(Role::Button)
                                 .aria_label("Dismiss")
+                                .tooltip(crate::theme::chrome_tip("Dismiss", None))
                                 .size(px(20.))
                                 .flex()
                                 .items_center()

@@ -438,6 +438,7 @@ impl Automations {
                     .id(SharedString::from(format!("remove-trigger-{id}")))
                     .role(Role::Button)
                     .aria_label("Remove trigger")
+                    .tooltip(crate::theme::chrome_tip("Remove trigger", None))
                     .size(px(28.))
                     .flex_shrink_0()
                     .rounded(px(6.))

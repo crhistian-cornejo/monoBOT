@@ -192,6 +192,10 @@ impl Conversation {
                                 if counting { "Don't retry" } else { "Dismiss" },
                             )
                             .size(px(24.))
+                            .tooltip(crate::theme::chrome_tip(
+                                if counting { "Don't retry" } else { "Dismiss" },
+                                None,
+                            ))
                             .px_0()
                             .justify_center()
                             .child(icon("close", 14.))

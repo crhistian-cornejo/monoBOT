@@ -121,7 +121,7 @@ impl SettingsView {
                         .entry(kind)
                         .or_default()
                         .clone();
-                    secondary_button(
+                    crate::settings::widgets::secondary_icon_button(
                         SharedString::from(format!("binary-{}", kind.id())),
                         format!("Show {} CLI details", kind.label()),
                         false,

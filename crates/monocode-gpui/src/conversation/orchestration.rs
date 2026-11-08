@@ -554,6 +554,7 @@ impl Conversation {
                 .debug_selector(move || id.to_owned())
                 .role(Role::Button)
                 .aria_label(label)
+                .tooltip(crate::theme::chrome_tip(label, None))
                 .size(px(22.))
                 .rounded_md()
                 .flex()

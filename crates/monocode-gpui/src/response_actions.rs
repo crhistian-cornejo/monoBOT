@@ -49,7 +49,19 @@ pub(crate) struct Transfer {
     pub title: String,
     pub settings: Settings,
 }
+/// A message action's icon button, named by the app's standard hover tip.
 pub(crate) fn button(
+    turn: usize,
+    action: &'static str,
+    label: impl Into<SharedString>,
+    glyph: &'static str,
+    active: bool,
+) -> gpui::Stateful<gpui::Div> {
+    let label = label.into();
+    untipped(turn, action, label.clone(), glyph, active).tooltip(chrome_tip(label, None))
+}
+/// The same button for an action that draws its own, richer hover card.
+pub(crate) fn untipped(
     turn: usize,
     action: &'static str,
     label: impl Into<SharedString>,
@@ -58,6 +70,7 @@ pub(crate) fn button(
 ) -> gpui::Stateful<gpui::Div> {
     div()
         .id((action, turn))
+        .debug_selector(move || action.into())
         .role(Role::Button)
         .aria_label(label.into())
         .group("response-action")

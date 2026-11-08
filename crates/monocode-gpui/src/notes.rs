@@ -731,6 +731,7 @@ impl Notes {
                             .id(("remove-note-tag", ix))
                             .role(Role::Button)
                             .aria_label(format!("Remove #{tag}"))
+                            .tooltip(crate::theme::chrome_tip(format!("Remove #{tag}"), None))
                             .size(px(16.))
                             .flex()
                             .items_center()

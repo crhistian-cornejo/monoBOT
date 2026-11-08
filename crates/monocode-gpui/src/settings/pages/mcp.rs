@@ -191,7 +191,7 @@ impl SettingsView {
                         .gap_2()
                         .child(self.refresh_button("refresh-mcp", "Refresh", cx))
                         .child(
-                            secondary_button(
+                            crate::settings::widgets::secondary_icon_button(
                                 "mcp-show-all",
                                 if self.mcp_show_all {
                                     "Show available providers"
@@ -208,14 +208,21 @@ impl SettingsView {
                             })),
                         )
                         .child(
-                            secondary_button("add-mcp", "Add MCP server", false, busy)
-                                .debug_selector(|| "settings-add-mcp".into())
-                                .child(icon("plus", 14.))
-                                .on_click(cx.listener(move |this, _, window, cx| {
+                            crate::settings::widgets::secondary_icon_button(
+                                "add-mcp",
+                                "Add MCP server",
+                                false,
+                                busy,
+                            )
+                            .debug_selector(|| "settings-add-mcp".into())
+                            .child(icon("plus", 14.))
+                            .on_click(cx.listener(
+                                move |this, _, window, cx| {
                                     if !busy {
                                         this.open_management(Target::Mcp, window, cx);
                                     }
-                                })),
+                                },
+                            )),
                         ),
                 )
                 .into_any_element(),

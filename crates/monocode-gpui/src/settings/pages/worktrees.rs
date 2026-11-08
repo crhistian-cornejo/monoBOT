@@ -161,7 +161,7 @@ impl SettingsView {
                                     ),
                             )
                             .child(
-                                secondary_button(
+                                crate::settings::widgets::secondary_icon_button(
                                     SharedString::from(format!("reveal-tree-{ix}")),
                                     format!("Reveal {}", t.branch.as_deref().unwrap_or("worktree")),
                                     false,
@@ -171,7 +171,7 @@ impl SettingsView {
                                 .on_click(move |_, _, cx| cx.reveal_path(&path)),
                             )
                             .child(
-                                secondary_button(
+                                crate::settings::widgets::secondary_icon_button(
                                     SharedString::from(format!("delete-tree-{ix}")),
                                     format!("Delete {}", t.branch.as_deref().unwrap_or("worktree")),
                                     false,

@@ -370,6 +370,10 @@ impl Inbox {
             .collect::<Vec<_>>();
         let tab = |id: SharedString, label: &'static str| {
             div()
+                .debug_selector({
+                    let id = id.clone();
+                    move || id.to_string()
+                })
                 .id(id)
                 .role(Role::Tab)
                 .aria_label(label)
@@ -440,6 +444,9 @@ impl Inbox {
                     .when(!agenda && !connected.is_empty(), |d| {
                         d.flex_none().w(px(32.)).px(px(0.))
                     })
+                    .when(!agenda && !connected.is_empty(), |d| {
+                        d.tooltip(crate::theme::chrome_tip("Agenda", None))
+                    })
                     .child(icon("clock", 14.).text_color(content(if agenda { 1. } else { 0.5 })))
                     .when(agenda || connected.is_empty(), |d| {
                         d.child(div().truncate().child("Agenda"))
@@ -452,6 +459,9 @@ impl Inbox {
                     .relative()
                     .text_color(content(0.4))
                     .hover(|s| s.bg(content(0.05)))
+                    .when(connected.len() >= 2 || spread, |d| {
+                        d.tooltip(crate::theme::chrome_tip("Add connection", None))
+                    })
                     .child(self.connection_anchor.probe())
                     .child(icon("plus", 14.))
                     .when(connected.len() < 2 && !spread, |d| {
@@ -1205,6 +1215,7 @@ impl Inbox {
                                 .id("inbox-merge-options")
                                 .role(Role::Button)
                                 .aria_label("Merge options")
+                                .tooltip(crate::theme::chrome_tip("Merge options", None))
                                 .h_full()
                                 .w(px(28.))
                                 .flex()

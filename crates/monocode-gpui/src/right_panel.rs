@@ -122,11 +122,13 @@ pub(crate) fn icon_action(
     enabled: bool,
 ) -> Stateful<gpui::Div> {
     let id = id.into();
+    let label = label.into();
     let group: SharedString = format!("icon-action-{id:?}").into();
     div()
         .id(id)
         .role(Role::Button)
-        .aria_label(label.into())
+        .aria_label(label.clone())
+        .tooltip(chrome_tip(label, None))
         .group(group.clone())
         .size(px(20.))
         .flex_shrink_0()

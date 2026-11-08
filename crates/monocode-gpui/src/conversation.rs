@@ -4073,6 +4073,7 @@ fn send_button(
         .debug_selector(|| id.into())
         .role(Role::Button)
         .aria_label(label)
+        .tooltip(crate::theme::chrome_tip(label, None))
         .cursor_pointer()
         .flex_shrink_0()
         .size(px(26.))

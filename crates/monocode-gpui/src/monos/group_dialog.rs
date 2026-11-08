@@ -804,6 +804,7 @@ impl GroupDialog {
                                 .child(
                                     div()
                                         .id(SharedString::from(format!("folder-del-{ix}")))
+                                        .tooltip(crate::theme::chrome_tip("Remove folder", None))
                                         .cursor_pointer()
                                         .size(px(20.))
                                         .rounded_md()
@@ -1043,6 +1044,7 @@ impl GroupDialog {
                             .child(
                                 div()
                                     .id(SharedString::from(format!("context-del-{ix}")))
+                                    .tooltip(crate::theme::chrome_tip("Remove file", None))
                                     .cursor_pointer()
                                     .size(px(20.))
                                     .rounded_md()
@@ -1531,6 +1533,7 @@ impl Monos {
                                     "group-member-remove-{}",
                                     member.id
                                 )))
+                                .tooltip(crate::theme::chrome_tip("Remove from group", None))
                                 .cursor_pointer()
                                 .size(px(24.))
                                 .rounded_md()

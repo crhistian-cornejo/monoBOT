@@ -1599,6 +1599,17 @@ impl ProjectPicker {
     pub(crate) fn search_focus(&self, cx: &gpui::App) -> FocusHandle {
         self.search.focus_handle(cx)
     }
+    /// The height a host card gives the picker, which fills it: the search
+    /// field, its rows and its footer, plus the card's padding and border,
+    /// capped at `PROJECT_PICKER_HEIGHT` so long lists scroll instead.
+    pub(crate) fn fitted_height(&self, padding: f32, cx: &gpui::App) -> f32 {
+        const ROW: f32 = 36.;
+        let rows = self.matching_monos(cx).len() + self.matches(cx).len();
+        // `py-5` around a 12px caption when nothing matches.
+        let list = 12. + if rows == 0 { 56. } else { rows as f32 * ROW };
+        let footer = 1. + 12. + ROW * if self.allow_remote { 2. } else { 1. };
+        (44. + list + footer + padding * 2. + 2.).min(PROJECT_PICKER_HEIGHT)
+    }
     pub(crate) fn allow_remote(mut self) -> Self {
         self.allow_remote = true;
         self

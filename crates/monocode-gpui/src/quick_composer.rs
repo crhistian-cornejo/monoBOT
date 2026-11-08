@@ -1218,6 +1218,7 @@ impl QuickComposer {
                 )
                 .relative()
                 .size(px(26.))
+                .tooltip(crate::theme::chrome_tip("Add attachment", None))
                 .flex_shrink_0()
                 .justify_center()
                 .when(!supported || self.attaching || self.busy, |d| {

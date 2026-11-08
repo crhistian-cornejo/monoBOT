@@ -2375,9 +2375,6 @@ impl TranscriptView {
                 )
                 .ml(px(-4.))
                 .child(anchor.probe())
-                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                    this.action_hover(turn, "copy", *hovered, cx)
-                }))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
                     let born = Instant::now();
@@ -2418,9 +2415,6 @@ impl TranscriptView {
                 )
                 .when(pending, |d| d.opacity(0.4))
                 .child(anchor.probe())
-                .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                    this.action_hover(turn, "note", *hovered, cx)
-                }))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     if this.note_pending.insert(turn) {
                         this.note_feedback.remove(&turn);
@@ -2464,9 +2458,6 @@ impl TranscriptView {
                 response_actions::button(turn, glyph, label, glyph, active)
                     .aria_expanded(active)
                     .child(anchor.probe())
-                    .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
-                        this.action_hover(turn, action, *hovered, cx)
-                    }))
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(ResponseRequest::Target {
                             turn,
@@ -2483,7 +2474,7 @@ impl TranscriptView {
                 .or_default()
                 .clone();
             actions = actions.child(
-                response_actions::button(
+                response_actions::untipped(
                     turn,
                     "response-metrics",
                     "Turn metrics",
@@ -2534,60 +2525,44 @@ impl TranscriptView {
                     .child(format!("Could not save note. {error}")),
             );
         }
+        // The other actions use the standard hover tip; the metrics glyph has
+        // no click and shows the turn's numbers in its own card.
         if let Some((hover_turn, action)) = self.hovered_action
             && hover_turn == turn
+            && action == "metrics"
         {
-            let (headline, detail) = match action {
-                "copy" => (if copied { "Copied" } else { "Copy response" }.into(), None),
-                "note" => (
-                    if saved {
-                        "Saved to Notes"
-                    } else {
-                        "Save as note"
-                    }
-                    .into(),
-                    None,
-                ),
-                "handoff" => ("Handoff".into(), None),
-                "opinion" => ("Second opinion".into(), None),
-                _ => {
-                    let metrics = metrics.unwrap_or_default();
-                    let mut summary = Vec::new();
-                    if let Some(hit) = metrics.cache_hit_percent {
-                        summary.push(format!("Cache hit {hit:.0}%"));
-                    }
-                    if info.duration_ms > 0 && metrics.output_tokens > 0 {
-                        summary.push(format!(
-                            "Output {:.0} tok/s",
-                            metrics.output_tokens as f64 / (info.duration_ms as f64 / 1000.)
-                        ));
-                    }
-                    let headline = if summary.is_empty() {
-                        "Turn tokens".into()
-                    } else {
-                        summary.join(" · ")
-                    };
-                    let detail = [
-                        (metrics.input_tokens, "input"),
-                        (metrics.output_tokens, "output"),
-                        (metrics.cache_read_tokens, "cached"),
-                    ]
-                    .into_iter()
-                    .filter(|(n, _)| *n > 0)
-                    .map(|(n, label)| {
-                        format!("{} {label}", monocode_core::context::format_tokens(n))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" · ");
-                    (headline, Some(detail))
-                }
+            let metrics = metrics.unwrap_or_default();
+            let mut summary = Vec::new();
+            if let Some(hit) = metrics.cache_hit_percent {
+                summary.push(format!("Cache hit {hit:.0}%"));
+            }
+            if info.duration_ms > 0 && metrics.output_tokens > 0 {
+                summary.push(format!(
+                    "Output {:.0} tok/s",
+                    metrics.output_tokens as f64 / (info.duration_ms as f64 / 1000.)
+                ));
+            }
+            let headline = if summary.is_empty() {
+                "Turn tokens".into()
+            } else {
+                summary.join(" · ")
             };
+            let detail = [
+                (metrics.input_tokens, "input"),
+                (metrics.output_tokens, "output"),
+                (metrics.cache_read_tokens, "cached"),
+            ]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, label)| format!("{} {label}", monocode_core::context::format_tokens(n)))
+            .collect::<Vec<_>>()
+            .join(" · ");
             if let Some(anchor) = self.action_anchors.get(&(turn, action)) {
                 row = row.child(
                     popover(("response-tooltip", turn), Anchor::Slot(anchor.clone()))
                         .side(Side::Top)
                         .solid(rail_color())
-                        .max_width(if action == "metrics" { 300. } else { 240. })
+                        .max_width(300.)
                         .padding(8.)
                         .child(
                             div()
@@ -2597,14 +2572,12 @@ impl TranscriptView {
                                 .line_height(px(16.))
                                 .text_color(content(1.))
                                 .child(headline)
-                                .when_some(detail, |d, detail| {
-                                    d.child(
-                                        div()
-                                            .text_size(px(11.))
-                                            .text_color(content(0.5))
-                                            .child(detail),
-                                    )
-                                }),
+                                .child(
+                                    div()
+                                        .text_size(px(11.))
+                                        .text_color(content(0.5))
+                                        .child(detail),
+                                ),
                         ),
                 );
             }
@@ -5939,6 +5912,9 @@ impl TranscriptView {
         };
         outer
             .when(motion.is_some(), |d| d.overflow_hidden())
+            .when(user, |d| {
+                d.debug_selector(move || format!("user-row-{message_start}"))
+            })
             .when(self.mono || user, |d| {
                 d.on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                     this.mono_hover(user, message_start, message_turn, key, *hovered, cx)

@@ -580,6 +580,7 @@ fn queue_button(
         .id(id)
         .role(Role::Button)
         .aria_label(label)
+        .tooltip(crate::theme::chrome_tip(label, None))
         .size(px(24.))
         .flex_shrink_0()
         .rounded_md()

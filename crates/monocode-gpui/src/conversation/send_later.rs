@@ -44,6 +44,7 @@ impl Conversation {
             .debug_selector(|| "send-later".into())
             .role(Role::Button)
             .aria_label("Send later")
+            .tooltip(crate::theme::chrome_tip("Send later", None))
             .aria_expanded(open)
             .size(px(26.))
             .flex_shrink_0()

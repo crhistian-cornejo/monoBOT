@@ -850,7 +850,7 @@ impl SettingsView {
                             .gap_3()
                             .child(title)
                             .child(
-                                secondary_button(
+                                crate::settings::widgets::secondary_icon_button(
                                     "close-management",
                                     "Close dialog",
                                     false,

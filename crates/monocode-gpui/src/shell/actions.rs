@@ -206,6 +206,7 @@ impl Shell {
         };
         let chevron = segment("footer-action-menu")
             .aria_label("Actions")
+            .tooltip(crate::theme::chrome_tip("Actions", None))
             .aria_expanded(menu_open)
             .relative()
             .px(px(3.))
@@ -392,6 +393,7 @@ impl Shell {
                     .id(("action-icon", ix))
                     .role(Role::RadioButton)
                     .aria_label(SharedString::from(*name))
+                    .tooltip(crate::theme::chrome_tip(*name, None))
                     .aria_toggled(if selected {
                         gpui::Toggled::True
                     } else {
