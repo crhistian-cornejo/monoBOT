@@ -2,7 +2,7 @@
 //! `MONOCODE_PERF_SCROLL=<pixels per second>`, the first transcript to finish
 //! streaming scrolls itself up and down between its ends on every display
 //! frame, the way wheel scrolling moves its list and notifies it.
-//! scripts/perf/frame-run.sh sets it for `MODE=scroll`.
+//! `cargo xtask perf frame-run` sets it for `MODE=scroll`.
 use super::*;
 use std::cell::Cell;
 

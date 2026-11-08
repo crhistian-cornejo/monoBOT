@@ -4,7 +4,7 @@ import {build} from 'esbuild';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 const here=path.dirname(fileURLToPath(import.meta.url));
-const root=path.resolve(here,'../..');
+const root=path.resolve(here,'../../..');
 await build({stdin:{contents:`import {GRID_GAMES} from './src/features/terminal/arcade/gridGames';
 import {PROJECT_MASCOTS} from './src/features/projects/model/projectMascots';
 import * as R from './src/features/sessions/model/composerRunner';

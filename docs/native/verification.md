@@ -1,6 +1,8 @@
 # Native verification
 
 > Algunas filas registran comprobaciones de la app Tauri, que ya no está en el repositorio. Se dejan como historial.
+>
+> The dated sections quote the commands of their time (`npm run native:*`, `bun run *`, `scripts/*.mjs`). Those scripts are now `cargo xtask` commands; [Local checks](#local-checks) has the current ones.
 
 Status recorded on October 22, 2026, on macOS Apple Silicon. These are local
 results, not a release certification. Later dated sections supplement this
@@ -271,12 +273,34 @@ release workflow. No live-provider requests, companion device tests, or manual
 packaged upgrade checks were performed in this preflight. Existing platform
 runtime limitations remain as recorded above and in [preview limitations](parity.md).
 
+## Rust desktop tooling (`cargo xtask`) — November 8, 2026
+
+The Node, shell and Python build scripts were replaced by the `xtask` crate.
+Checked locally on macOS Apple Silicon with Rust 1.99.0:
+
+- `cargo xtask check` (fmt, strict Clippy for core, GPUI and xtask, xtask tests): passed.
+- xtask tests: 34 passed (the former Node script tests, plus manifest signing,
+  version bumps and packaging layouts).
+- Core tests: 1141 passed, 8 ignored. GPUI tests, serially: 972 passed, 17 ignored
+  (`title_particle_frames_only_invalidate_the_sidebar` failed once while a release
+  build ran in parallel and passed alone).
+- `cargo xtask build`: the optimized app and `MonoBOT Native.app`; layout,
+  Info.plist, resources and the ad-hoc signed executable are byte-identical to
+  the previous `bundle-native-macos.sh` output for the same binary.
+- Release dry run with a throwaway key: `cargo xtask release` signed six fake
+  updater packages and the feed (14 files to publish), `cargo xtask verify-release`
+  accepted them with the app's update client and refused a tampered package.
+- `cargo xtask icons material` reproduced `material-icons.json` byte for byte;
+  `cargo xtask icons hugeicons` reproduced every SVG whose source icon could be
+  identified. The moved JavaScript generators rebuilt identical bundles.
+
 ## Local checks
 
 Run the complete native check from the repository root:
 
 ```sh
-npm run native:check
+cargo xtask check   # fmt --check, strict Clippy (core, GPUI, xtask), xtask tests
+cargo xtask test    # core and GPUI tests
 ```
 
 Core tests run in parallel. GPUI tests run serially to isolate rendering state
@@ -285,11 +309,19 @@ and avoid CPU contention with the interpreter's wall-clock limits.
 For focused work, run the relevant part:
 
 ```sh
-npm run native:test:dev
-cargo fmt --manifest-path crates/monocode-gpui/Cargo.toml --all --check
-cargo clippy --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core -p monocode-gpui --all-targets --profile native-dev -- -D warnings
-npm run native:test
+cargo test --locked -p xtask        # dev runner, bundles, packages, signing, dependency guards
+cargo fmt --all --check
+cargo xtask cargo clippy --locked -p monocode-core -p monocode-gpui --all-targets --profile native-dev -- -D warnings
+cargo xtask test core               # or: cargo xtask test gpui
+cargo xtask cargo test -p monocode-gpui --profile native-dev <filter>
 ```
+
+A release dry run with a throwaway key: `cargo xtask update-keys <dir>`, put
+the packages and their `artifacts-*.json` in a folder, then
+`cargo xtask release <folder>` and `cargo xtask verify-release <folder>` with
+`MONOCODE_NATIVE_VERSION`, `R2_PUBLIC_BASE_URL`, `MONOBOT_UPDATER_PRIVATE_KEY`
+and `MONOBOT_UPDATER_PUBKEY` set. The verifier is the app's own update client
+(`monocode_core::app_update`).
 
 On macOS with a Metal device, the renderer regression opens no window:
 

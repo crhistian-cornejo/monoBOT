@@ -1,0 +1,25 @@
+[package]
+name = "xtask"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+description = "MonoBOT's build, packaging and release tooling (`cargo xtask`)."
+
+[features]
+# The icon generators evaluate npm packages with QuickJS. It is optional so the
+# everyday commands do not compile the interpreter; `cargo xtask icons` turns
+# it on by itself.
+icons = ["dep:rquickjs"]
+
+[dependencies]
+serde_json.workspace = true
+base64 = "0.22"
+minisign = { version = "0.10", default-features = false }
+percent-encoding = "2"
+url = "2"
+rquickjs = { version = "0.14.0", optional = true }
+tempfile = "3"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

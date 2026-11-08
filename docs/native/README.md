@@ -59,13 +59,13 @@ see [verification](verification.md).
 From the repository root:
 
 ```sh
-bun run dev
+cargo xtask dev
 ```
 
 Development uses a separate database. To open a particular project:
 
 ```sh
-bun run dev -- --cwd /path/to/project
+cargo xtask dev --cwd /path/to/project
 ```
 
 Type `r` then Enter in the terminal to rebuild and restart. The current app stays
@@ -77,15 +77,15 @@ platforms launch the executable directly.
 
 Dictation links sherpa-onnx, whose build script downloads its prebuilt libraries
 from GitHub into each target folder. A network that inspects TLS refuses that
-download, so the native scripts (`dev`, `build`, `test`, `check`) point `SHERPA_ONNX_LIB_DIR` at libraries already
+download, so `cargo xtask` (`dev`, `build`, `test`, `check`) points `SHERPA_ONNX_LIB_DIR` at libraries already
 fetched under `target/sherpa-onnx-prebuilt`, in this checkout or, from a git
-worktree, the main one. Running cargo by hand, use `node scripts/native-cargo.mjs`
+worktree, the main one. Running cargo by hand, use `cargo xtask cargo <args>`
 in its place, or set `SHERPA_ONNX_LIB_DIR` yourself.
 
 ## Build
 
 ```sh
-bun run build
+cargo xtask build
 ```
 
 This creates an optimized build without launching it. **The release app uses the
@@ -154,10 +154,12 @@ continues to use each provider's existing sign-in.
 ## Checks and fixtures
 
 ```sh
-bun run check
+cargo xtask check
+cargo xtask test
 ```
 
-This runs the script tests, Rust formatting, strict Clippy and native tests.
+`check` runs Rust formatting, strict Clippy and the xtask tests; `test` runs the
+core and GPUI tests.
 See [verification](verification.md) for individual commands, optional provider
 checks and the latest recorded results.
 
@@ -165,7 +167,7 @@ A synthetic long-history fixture uses development data and makes no provider
 request:
 
 ```sh
-MONOCODE_NATIVE_DATA_DIR=/tmp/monocode-native-lab bun run dev --fixture
+MONOCODE_NATIVE_DATA_DIR=/tmp/monocode-native-lab cargo xtask dev --fixture
 ```
 
 Fixtures are refused with production data. Use a fresh temporary directory when

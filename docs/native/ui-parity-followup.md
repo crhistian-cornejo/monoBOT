@@ -66,12 +66,12 @@ antigua del plan de migración.
 ## Comprobaciones y límites
 
 ```sh
-node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev mono_hover_card
-node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev poki::scenes
-node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev poki_setup_sits_under_its_switch_and_its_folder_is_stored
-node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev popover::tests
-node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev
-node scripts/native-cargo.mjs check -p monocode-gpui --profile native-dev
+cargo xtask cargo test -p monocode-gpui --profile native-dev mono_hover_card
+cargo xtask cargo test -p monocode-gpui --profile native-dev poki::scenes
+cargo xtask cargo test -p monocode-gpui --profile native-dev poki_setup_sits_under_its_switch_and_its_folder_is_stored
+cargo xtask cargo test -p monocode-gpui --profile native-dev popover::tests
+cargo xtask cargo test -p monocode-gpui --profile native-dev
+cargo xtask cargo check -p monocode-gpui --profile native-dev
 ```
 
 Resultados focalizados: **20 pruebas aprobadas**:

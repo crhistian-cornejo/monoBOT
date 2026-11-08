@@ -11,25 +11,28 @@ App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay R
 | `host/` | Host remoto en Node (`monocode-host`) que instala la app por SSH. |
 | `deploy/cloudflare-mail/` | Worker opcional de correo entrante (Cloudflare Email Routing → R2 + D1). |
 | `vendor/gpui-pre*/` | GPUI fijado y parcheado. No lo actualices sin leer `docs/native/migration.md`. |
-| `scripts/` | Runner de desarrollo, empaquetado, publicación y generadores de JS embebido. |
+| `xtask/` | Herramientas del escritorio en Rust (`cargo xtask`): runner de desarrollo, build, `.app`, instaladores, firma y publicación de actualizaciones. |
+| `scripts/` | Solo lo que no puede ser Rust: `generators/` (fuentes JS de los bundles que la app ejecuta en QuickJS) y `perf/` (el `claude` simulado para perfilar). |
 
 ## Comandos
 
 ```sh
-bun run dev                 # app en desarrollo con datos aislados; r + Enter recompila
-bun run build               # build optimizado (y .app en macOS)
-bun run test                # tests de core y GPUI
-bun run check               # tests de scripts + fmt + clippy -D warnings
-node scripts/native-cargo.mjs test -p monocode-gpui --profile native-dev <filtro>
+cargo xtask dev             # app en desarrollo con datos aislados; r + Enter recompila
+cargo xtask build           # build optimizado (y .app en macOS)
+cargo xtask test            # tests de core y GPUI
+cargo xtask check           # fmt + clippy -D warnings + tests de xtask
+cargo xtask cargo test -p monocode-gpui --profile native-dev <filtro>
+cargo xtask help            # el resto: package, release, bump-version, icons, ssh-smoke, perf
 ```
 
-Antes de hacer commit: `cargo fmt --manifest-path crates/monocode-gpui/Cargo.toml --all` y los tests de lo que tocaste con `node scripts/native-cargo.mjs test … <filtro>`. Para el móvil, `pnpm exec tsc --noEmit` y `pnpm lint` dentro de `mobile/`.
+El escritorio no necesita Node ni Bun. Antes de hacer commit: `cargo fmt --all` y los tests de lo que tocaste con `cargo xtask cargo test … <filtro>` (si tocaste `xtask/`, `cargo test -p xtask`). Para el móvil, `pnpm --dir mobile exec tsc --noEmit` y `pnpm --dir mobile lint`.
 
 ## Código
 
 - La lógica va en `monocode-core`, sin GPUI. La app GPUI solo pinta y conecta. Nada de E/S, parseo ni disco en el hilo de la interfaz.
 - Los tests van junto al código (`#[cfg(test)] mod tests` o `<módulo>/tests.rs`). Los tests de interfaz usan el banco de pruebas de GPUI con eventos reales, no copias de la máquina de estados.
-- Los bundles `crates/monocode-gpui/assets/native-editor.js` y `settings-arcade.js` son generados. Su fuente está en `scripts/native-editor/` y `scripts/native-settings/`: cambia la fuente y regenera, no edites el bundle.
+- Los bundles `crates/monocode-gpui/assets/native-editor.js` y `settings-arcade.js` son generados. Su fuente está en `scripts/generators/native-editor/` y `scripts/generators/native-settings/`: cambia la fuente y regenera, no edites el bundle. Los iconos (`hugeicons/`, `material-icons.json`) salen de `cargo xtask icons`.
+- Las herramientas nuevas del escritorio van en `xtask/` (Rust, con tests junto al código), no en scripts sueltos. Llama a programas externos (codesign, hdiutil, rpmbuild…) solo cuando no hay otra forma.
 
 ## Interfaz: respeta lo que ya existe
 

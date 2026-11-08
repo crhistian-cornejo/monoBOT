@@ -1,0 +1,4 @@
+[alias]
+# Desktop build, packaging and release tooling. `cargo xtask help` lists the
+# commands; the code is in xtask/src.
+xtask = "run --quiet --package xtask --"

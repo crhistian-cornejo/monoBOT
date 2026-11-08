@@ -6,13 +6,13 @@ Please don’t open PRs that add a new provider right now. The existing harnesse
 
 ## Get it running
 
-You need a current stable Rust toolchain, Node.js 22+, [Bun](https://bun.sh/) for the root scripts, and at least one provider CLI installed and logged in. See [provider setup](docs/providers.md) for installation and login instructions, and [building from source](docs/building.md) for platform prerequisites and packaging.
+You need a current stable Rust toolchain and at least one provider CLI installed and logged in. The desktop tooling is Rust too (`cargo xtask`); Node.js and pnpm are only for the mobile app and the remote host. See [provider setup](docs/providers.md) for installation and login instructions, and [building from source](docs/building.md) for platform prerequisites and packaging.
 
 ```bash
-bun run dev
+cargo xtask dev
 ```
 
-The mobile app is a separate pnpm project in `mobile/`; see its [README](mobile/README.md).
+`cargo xtask help` lists the other commands. The mobile app is a separate pnpm project in `mobile/` (`pnpm --dir mobile …`); see its [README](mobile/README.md).
 
 ## Where things live
 
@@ -22,17 +22,19 @@ The mobile app is a separate pnpm project in `mobile/`; see its [README](mobile/
 - `mobile/` - the Expo companion app.
 - `host/` - the remote host installed over SSH ([remote access](docs/remote-access.md)).
 - `deploy/cloudflare-mail/` - the optional inbound mail Worker.
+- `xtask/` - the desktop tooling behind `cargo xtask`: dev runner, builds, macOS bundles, installers, update signing.
+- `scripts/generators/` - JavaScript sources of the bundles the app runs in QuickJS; `scripts/perf/` - the profiling replay.
 
 `crates/monocode-core/src/provider/` is the most useful place to start if you want to fix something real. Each provider transport translates its CLI's protocol into MonoBOT's own events, and the parsers have unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed. That's for the providers we already ship - please don't add a new one yet.
 
 ## Before you push
 
 ```bash
-bun run check
-bun run test
+cargo xtask check
+cargo xtask test
 ```
 
-That runs what CI runs: the script tests, `cargo fmt`, strict `cargo clippy` and the core and GPUI tests. If it's green locally it should be green on GitHub. See [verification](docs/native/verification.md) for focused commands.
+That runs what CI runs: `cargo fmt`, strict `cargo clippy`, the xtask tests and the core and GPUI tests. If it's green locally it should be green on GitHub. See [verification](docs/native/verification.md) for focused commands.
 
 ## New providers
 
