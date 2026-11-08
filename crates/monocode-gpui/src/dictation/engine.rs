@@ -9,11 +9,16 @@ use std::sync::{
 };
 use std::time::Duration;
 
-/// How long Parakeet stays in memory after the last dictation. It holds over
-/// half a gigabyte, so it is loaded on the first dictation and let go once
-/// the user has not dictated for a while; dictating a few messages in a row
-/// still loads it once.
-const IDLE: Duration = Duration::from_secs(3 * 60);
+/// How long Parakeet stays in memory after the last dictation. The CPU build
+/// holds over half a gigabyte and takes seconds to load, so it is kept while
+/// the user dictates a few messages in a row. The Neural build holds about
+/// 70 MB and loads in a fraction of a second, so it goes sooner.
+fn idle(engine: Option<monobot_dictation::Engine>) -> Duration {
+    match engine {
+        Some(monobot_dictation::Engine::Neural) => Duration::from_secs(45),
+        _ => Duration::from_secs(3 * 60),
+    }
+}
 
 /// `dictation_status`, with the download's progress for a composer that
 /// follows a setup it did not start.
@@ -63,7 +68,6 @@ struct Local {
     /// Counts dictations, so a release scheduled after one is skipped when
     /// another started before it ran.
     uses: Arc<AtomicU64>,
-    idle: Duration,
 }
 
 impl Local {
@@ -76,7 +80,6 @@ impl Local {
             done: AtomicU64::new(0),
             total: AtomicU64::new(0),
             uses: Arc::new(AtomicU64::new(0)),
-            idle: IDLE,
         }
     }
 
@@ -85,7 +88,7 @@ impl Local {
         let this_use = self.uses.fetch_add(1, Ordering::AcqRel) + 1;
         let uses = self.uses.clone();
         let engine = self.engine.clone();
-        let idle = self.idle;
+        let idle = idle(engine.engine());
         let _ = std::thread::Builder::new()
             .name("dictation-idle".into())
             .spawn(move || {
@@ -118,8 +121,11 @@ impl Engine for Local {
     }
 
     fn prepare(&self) {
-        if !self.engine.installed() {
-            // When it cannot (no network, say) the composer offers it again.
+        // The first run fetches the model; a Mac that still has only the CPU
+        // build fetches the Neural one, dictating with the CPU meanwhile and
+        // deleting it after. When it cannot (no network, say) the composer
+        // offers it again.
+        if self.engine.wants_upgrade() {
             let _ = self.install(&mut |_, _| {});
         }
     }
@@ -265,16 +271,11 @@ mod tests {
             engine.installed(),
             "the speech model is in the desktop app's folder"
         );
+        assert_eq!(rate, 16_000, "a 16 kHz recording");
         let started = std::time::Instant::now();
-        let recognizer = engine.prepare().unwrap();
-        eprintln!("loaded in {:?}", started.elapsed());
-        let stream = recognizer.create_stream();
-        stream.accept_waveform(rate as i32, &samples);
-        recognizer.decode(&stream);
-        let heard = stream
-            .get_result()
-            .map(|result| result.text)
-            .unwrap_or_default();
+        let ear = engine.prepare().unwrap();
+        eprintln!("loaded {:?} in {:?}", ear.engine(), started.elapsed());
+        let heard = ear.transcribe(&samples);
         eprintln!("heard {:.1}s: {heard}", samples.len() as f32 / rate as f32);
         if let Ok(expected) = expected {
             let words = |text: &str| {

@@ -1,7 +1,9 @@
-//! The speech model on disk: Parakeet TDT 0.6B v3 (int8) and the Silero voice
-//! detector, each pinned by size and SHA-256. The app fetches them itself in
-//! the background the first time it runs, and nothing is fetched while the
-//! microphone is open.
+//! The speech model on disk, each file pinned by size and SHA-256: Parakeet
+//! TDT 0.6B v3 and the Silero voice detector. On Apple silicon Parakeet runs
+//! on the Neural Engine through Core ML (`Engine::Neural`); elsewhere, the
+//! int8 export runs on the CPU through sherpa-onnx (`Engine::Cpu`). The app
+//! fetches them itself in the background the first time it runs, and nothing
+//! is fetched while the microphone is open.
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -57,6 +59,200 @@ pub const FILES: [ModelFile; 5] = [
     },
 ];
 
+/// Which build of Parakeet v3 transcribes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Engine {
+    /// The int8 ONNX export on the CPU (sherpa-onnx): any platform, about
+    /// three quarters of a second per ten seconds of speech, over a gigabyte
+    /// of memory while loaded.
+    Cpu,
+    /// The Core ML conversion on Apple's Neural Engine: on Apple silicon,
+    /// about ten times as fast, loaded in a tenth of a second and some 70 MB
+    /// of memory (FluidInference's measurements, which IVY confirmed).
+    Neural,
+}
+
+impl Engine {
+    /// The build this computer should use.
+    pub fn preferred() -> Self {
+        if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            Self::Neural
+        } else {
+            Self::Cpu
+        }
+    }
+
+    /// Every file this build needs, with where it goes under the dictation
+    /// folder. Silero is shared by both.
+    pub fn files(self) -> Vec<(&'static str, &'static ModelFile)> {
+        match self {
+            Self::Cpu => FILES.iter().map(|file| ("", file)).collect(),
+            Self::Neural => NEURAL_FILES
+                .iter()
+                .map(|file| (NEURAL_FOLDER, file))
+                .chain(std::iter::once(("", silero())))
+                .collect(),
+        }
+    }
+
+    pub fn bytes(self) -> u64 {
+        self.files().iter().map(|(_, file)| file.bytes).sum()
+    }
+
+    pub fn installed(self, dir: &Path) -> bool {
+        self.files()
+            .iter()
+            .all(|(folder, file)| present(&dir.join(folder), file))
+    }
+}
+
+/// The Silero detector, which both builds share.
+pub fn silero() -> &'static ModelFile {
+    &FILES[4]
+}
+
+/// The build that is on disk, the preferred one first: a computer that had
+/// the CPU build before the Neural one arrived keeps dictating meanwhile.
+pub fn installed_engine(dir: &Path) -> Option<Engine> {
+    let preferred = Engine::preferred();
+    [preferred, Engine::Cpu]
+        .into_iter()
+        .find(|engine| engine.installed(dir))
+}
+
+/// Where the Neural build lives under the dictation folder.
+pub const NEURAL_FOLDER: &str = "neural";
+
+macro_rules! neural {
+    ($name:literal, $bytes:expr, $sha:literal) => {
+        ModelFile {
+            name: $name,
+            bytes: $bytes,
+            sha256: $sha,
+            url: Some(concat!(
+                "https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v3-coreml/resolve/7dd20fe6b1797d35f5e3307e8b1732d9a178edfe/",
+                $name
+            )),
+        }
+    };
+}
+
+/// Parakeet v3 converted to Core ML by FluidInference (CC-BY-4.0, from
+/// NVIDIA's model), at a pinned revision: only the parts that are loaded,
+/// about 460 MB. The same files IVY pins.
+pub const NEURAL_FILES: [ModelFile; 22] = [
+    neural!(
+        "config.json",
+        475,
+        "97f19ecccd0fdc730d76fb918090fa8bc64bce8ea4ad43715d5e9c2c7350db66"
+    ),
+    neural!(
+        "parakeet_v3_vocab.json",
+        151_122,
+        "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735"
+    ),
+    neural!(
+        "Decoder.mlmodelc/coremldata.bin",
+        554,
+        "18647af085d87bd8f3121c8a9b4d4564c1ede038dab63d295b4e745cf2d7fb99"
+    ),
+    neural!(
+        "Decoder.mlmodelc/metadata.json",
+        3_427,
+        "a39e93cd8371b8ded92635c7804fcd0590f0d1dd9415c6d19a0484be073077d9"
+    ),
+    neural!(
+        "Decoder.mlmodelc/model.mil",
+        13_110,
+        "ef2a0a281695398a62fde86ac269c68f73d5b578d7ed3b31f2ba91a2d1ea1f35"
+    ),
+    neural!(
+        "Decoder.mlmodelc/analytics/coremldata.bin",
+        243,
+        "4238c4e81ecd0dc94bd7dfbb60f7e2cc824107c1ffe0387b8607b72833dba350"
+    ),
+    neural!(
+        "Decoder.mlmodelc/weights/weight.bin",
+        23_604_992,
+        "48adf0f0d47c406c8253d4f7fef967436a39da14f5a65e66d5a4b407be355d41"
+    ),
+    neural!(
+        "Encoder.mlmodelc/coremldata.bin",
+        485,
+        "d48034a167a82e88fc3df64f60af963ab3983538271175b8319e7d5720a0fb86"
+    ),
+    neural!(
+        "Encoder.mlmodelc/metadata.json",
+        2_921,
+        "da24da9cca943fb29d7fa8e376d57fca7cb3aa08ca51b956b0b0e56813f087e9"
+    ),
+    neural!(
+        "Encoder.mlmodelc/model.mil",
+        959_769,
+        "ed7b19156ca29fa7dfd6891deb9fda4b0e8893f68597c985d135736546a43808"
+    ),
+    neural!(
+        "Encoder.mlmodelc/analytics/coremldata.bin",
+        243,
+        "42e638870d73f26b332918a3496ce36793fbb413a81cbd3d16ba01328637a105"
+    ),
+    neural!(
+        "Encoder.mlmodelc/weights/weight.bin",
+        445_187_200,
+        "e2020f323703477a5b21d7c2d282c403e371afb5962e79877e3033e73ba6f421"
+    ),
+    neural!(
+        "JointDecisionv3.mlmodelc/coremldata.bin",
+        521,
+        "f5fc08b741400f0088492c9e839418b1e18522f19cba28d361dd030c5f398342"
+    ),
+    neural!(
+        "JointDecisionv3.mlmodelc/metadata.json",
+        3_453,
+        "d9307211b9a37e0f0ac260c7660b1571a3de25841035cfdf9b58fd40425f890f"
+    ),
+    neural!(
+        "JointDecisionv3.mlmodelc/model.mil",
+        11_775,
+        "be60732943389a047175111a83f8839f3eb39d4803adafa828a0871b2f39818d"
+    ),
+    neural!(
+        "JointDecisionv3.mlmodelc/analytics/coremldata.bin",
+        243,
+        "26def4bf73dd56d29dee21c8ef97cb8969e62f6120ed1adc91e46828e2737b6c"
+    ),
+    neural!(
+        "JointDecisionv3.mlmodelc/weights/weight.bin",
+        12_642_764,
+        "4e0e63d840032f7f07ddb1d64446051166281e5491bf22da8a945c41f6eedb3e"
+    ),
+    neural!(
+        "Preprocessor.mlmodelc/coremldata.bin",
+        486,
+        "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d"
+    ),
+    neural!(
+        "Preprocessor.mlmodelc/metadata.json",
+        2_841,
+        "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf"
+    ),
+    neural!(
+        "Preprocessor.mlmodelc/model.mil",
+        28_181,
+        "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93"
+    ),
+    neural!(
+        "Preprocessor.mlmodelc/analytics/coremldata.bin",
+        243,
+        "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d"
+    ),
+    neural!(
+        "Preprocessor.mlmodelc/weights/weight.bin",
+        491_072,
+        "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea"
+    ),
+];
+
 /// The same four Parakeet files from sherpa-onnx's own GitHub release, for a
 /// network that refuses Hugging Face (a company proxy, say). The
 /// archive is pinned as published, and each member it holds is byte for byte
@@ -78,16 +274,15 @@ pub fn url_of(file: &ModelFile) -> String {
     }
 }
 
+/// The download size of the build this computer should use.
 pub fn total_bytes() -> u64 {
-    FILES.iter().map(|file| file.bytes).sum()
+    Engine::preferred().bytes()
 }
 
-/// Every file present at its pinned size. The full checksum is verified when
-/// a file is downloaded, not on every launch.
+/// Some build present, every file at its pinned size. The full checksum is
+/// verified when a file is downloaded, not on every launch.
 pub fn installed(dir: &Path) -> bool {
-    FILES
-        .iter()
-        .all(|file| fs::metadata(dir.join(file.name)).is_ok_and(|meta| meta.len() == file.bytes))
+    installed_engine(dir).is_some()
 }
 
 pub fn path(dir: &Path, name: &str) -> Result<String, Error> {
@@ -98,9 +293,52 @@ pub fn path(dir: &Path, name: &str) -> Result<String, Error> {
         .ok_or(Error::Path(path))
 }
 
-/// Downloads what is missing, reporting bytes done out of the total after
-/// every chunk and verifying each file's SHA-256.
-pub fn install(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<(), Error> {
+/// Downloads the build this computer should use.
+pub fn install(dir: &Path, progress: impl FnMut(u64, u64)) -> Result<(), Error> {
+    match Engine::preferred() {
+        Engine::Cpu => install_cpu(dir, progress),
+        Engine::Neural => install_neural(dir, progress),
+    }
+}
+
+/// Downloads what the Neural build is missing, each file verified. Once it is
+/// all in place the CPU build's Parakeet files, over 650 MB the Neural build
+/// replaces, are deleted; Silero stays, both use it.
+pub fn install_neural(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<(), Error> {
+    let files = Engine::Neural.files();
+    let total = files.iter().map(|(_, file)| file.bytes).sum();
+    let mut done = 0;
+    for (folder, file) in files {
+        let folder = dir.join(folder);
+        if !present(&folder, file) {
+            let target = folder.join(file.name);
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            download(file, &target, |chunk| {
+                done += chunk;
+                progress(done, total);
+            })?;
+        } else {
+            done += file.bytes;
+        }
+        progress(done, total);
+    }
+    remove_cpu(dir);
+    Ok(())
+}
+
+/// Deletes the CPU build's own files (not Silero). Errors are ignored: a file
+/// left behind only takes room.
+pub fn remove_cpu(dir: &Path) {
+    for file in FILES.iter().filter(|file| file.url.is_none()) {
+        let _ = fs::remove_file(dir.join(file.name));
+    }
+}
+
+/// Downloads what the CPU build is missing, reporting bytes done out of the
+/// total after every chunk and verifying each file's SHA-256.
+pub fn install_cpu(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<(), Error> {
     fs::create_dir_all(dir)?;
     let files = &FILES;
     let total = files.iter().map(|file| file.bytes).sum();
@@ -409,6 +647,74 @@ mod tests {
     }
 
     #[test]
+    fn the_neural_build_is_pinned_and_shares_silero() {
+        let files = Engine::Neural.files();
+        assert_eq!(files.len(), NEURAL_FILES.len() + 1);
+        for (folder, file) in &files {
+            let url = url_of(file);
+            assert!(url.starts_with("https://"), "{url}");
+            assert!(url.ends_with(file.name), "{url}");
+            assert_eq!(file.sha256.len(), 64);
+            if file.name == "silero_vad.onnx" {
+                assert_eq!(*folder, "");
+            } else {
+                assert_eq!(*folder, NEURAL_FOLDER);
+                assert!(url.contains("7dd20fe6b1797d35f5e3307e8b1732d9a178edfe"));
+            }
+        }
+        // Each of the four models brings its weights.
+        for model in ["Preprocessor", "Encoder", "Decoder", "JointDecisionv3"] {
+            let weights = format!("{model}.mlmodelc/weights/weight.bin");
+            assert!(
+                NEURAL_FILES.iter().any(|file| file.name == weights),
+                "{weights}"
+            );
+        }
+        assert!(Engine::Neural.bytes() < Engine::Cpu.bytes());
+    }
+
+    #[test]
+    fn the_neural_build_is_preferred_on_apple_silicon_only() {
+        let expected = if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+            Engine::Neural
+        } else {
+            Engine::Cpu
+        };
+        assert_eq!(Engine::preferred(), expected);
+        assert_eq!(total_bytes(), expected.bytes());
+    }
+
+    /// Writes `file` at its pinned size (not its bytes: `installed` only
+    /// looks at sizes).
+    fn stand_in(dir: &Path, folder: &str, file: &ModelFile) {
+        let target = dir.join(folder).join(file.name);
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        File::create(&target).unwrap().set_len(file.bytes).unwrap();
+    }
+
+    #[test]
+    fn the_build_on_disk_is_the_one_used_until_the_preferred_arrives() {
+        let dir =
+            std::env::temp_dir().join(format!("monobot-dictation-builds-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        assert_eq!(installed_engine(&dir), None);
+        for (folder, file) in Engine::Cpu.files() {
+            stand_in(&dir, folder, file);
+        }
+        assert_eq!(installed_engine(&dir), Some(Engine::Cpu));
+        for (folder, file) in Engine::Neural.files() {
+            stand_in(&dir, folder, file);
+        }
+        assert_eq!(installed_engine(&dir), Some(Engine::preferred()));
+        // Once the Neural build is in, the CPU one's model goes; Silero stays.
+        remove_cpu(&dir);
+        assert!(!Engine::Cpu.installed(&dir));
+        assert!(present(&dir, silero()));
+        assert!(Engine::Neural.installed(&dir));
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn a_folder_with_a_short_file_is_not_installed() {
         let dir = std::env::temp_dir().join(format!("monobot-dictation-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
@@ -567,7 +873,7 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         let started = std::time::Instant::now();
         let mut last = (0, 0);
-        install(&dir, |done, total| {
+        install_cpu(&dir, |done, total| {
             assert!(
                 done >= last.0 && done <= total,
                 "{done} after {} of {total}",
@@ -577,8 +883,9 @@ mod tests {
         })
         .unwrap();
         eprintln!("installed in {:?}", started.elapsed());
-        assert_eq!(last, (total_bytes(), total_bytes()));
-        assert!(installed(&dir));
+        let bytes = Engine::Cpu.bytes();
+        assert_eq!(last, (bytes, bytes));
+        assert!(Engine::Cpu.installed(&dir));
         assert!(!dir.join(ARCHIVE.name).exists());
         fs::remove_dir_all(&dir).unwrap();
     }

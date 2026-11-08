@@ -33,6 +33,7 @@ things were, move it to `old/`.
 | [workstreams.md](in-progress/workstreams.md) | Workstreams (beta): multi-day work run by an orchestrator |
 | [ivy-review.md](in-progress/ivy-review.md) | What to take from IVY: harness and agent gaps, Decider, live and group calls, dictation |
 | [notch.md](in-progress/notch.md) | Plan for a minimal macOS notch |
+| [voice-and-hands.md](in-progress/voice-and-hands.md) | Voice settings, models and keys, JOSIE-style calls, Gemini Live and Phonic, native hands and CUA |
 
 ## old/ — history
 

@@ -139,12 +139,14 @@ impl Dictation {
             let status = status.await;
             let _ = this.update(cx, |this, cx| {
                 this.model_bytes = status.bytes;
-                if status.installing {
-                    this.follow(cx);
-                } else if !status.installed {
-                    this.set_phase(Phase::NeedsModel, cx);
-                } else {
+                // A model on disk dictates at once, even while a faster
+                // build downloads behind it.
+                if status.installed {
                     this.start(cx);
+                } else if status.installing {
+                    this.follow(cx);
+                } else {
+                    this.set_phase(Phase::NeedsModel, cx);
                 }
             });
         }));

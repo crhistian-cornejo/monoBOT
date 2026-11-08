@@ -7,12 +7,10 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use sherpa_onnx::{
-    LinearResampler, OfflineRecognizer, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
-};
+use sherpa_onnx::{LinearResampler, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector};
 
 use crate::capture::Microphone;
-use crate::{model, text, Error};
+use crate::{model, text, Ear, Error};
 
 const RATE: i32 = 16_000;
 /// Kept ahead of each phrase the detector reports, so first consonants are
@@ -44,12 +42,17 @@ pub struct Session {
 impl Session {
     pub(crate) fn start(
         dir: &Path,
-        recognizer: Arc<OfflineRecognizer>,
+        recognizer: Arc<Ear>,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Self, Error> {
-        let vad =
-            VoiceActivityDetector::create(&silero(model::path(dir, "silero_vad.onnx")?), 30.0)
-                .ok_or(Error::Load)?;
+        let vad = VoiceActivityDetector::create(
+            &silero(
+                model::path(dir, "silero_vad.onnx")?,
+                recognizer.longest_phrase(),
+            ),
+            30.0,
+        )
+        .ok_or(Error::Load)?;
         let mic = Microphone::open()?;
         let resampler = (mic.sample_rate as i32 != RATE)
             .then(|| LinearResampler::create(mic.sample_rate as i32, RATE).ok_or(Error::Load))
@@ -109,7 +112,7 @@ impl Drop for Session {
 }
 
 struct Run {
-    recognizer: Arc<OfflineRecognizer>,
+    recognizer: Arc<Ear>,
     vad: VoiceActivityDetector,
     resampler: Option<LinearResampler>,
     /// Every 16 kHz sample heard, for the pre-roll ahead of a phrase.
@@ -197,7 +200,7 @@ impl Run {
             audio.extend_from_slice(segment.samples());
             self.delivered = start + segment.samples().len();
             self.vad.pop();
-            let heard = transcribe(&self.recognizer, &audio);
+            let heard = self.recognizer.transcribe(&audio);
             if !heard.trim().is_empty() {
                 self.phrases.push(heard);
                 changed = true;
@@ -220,20 +223,7 @@ impl Run {
     }
 }
 
-fn transcribe(recognizer: &OfflineRecognizer, samples: &[f32]) -> String {
-    if samples.is_empty() {
-        return String::new();
-    }
-    let stream = recognizer.create_stream();
-    stream.accept_waveform(RATE, samples);
-    recognizer.decode(&stream);
-    stream
-        .get_result()
-        .map(|result| result.text)
-        .unwrap_or_default()
-}
-
-fn silero(model: String) -> VadModelConfig {
+fn silero(model: String, longest_phrase: f32) -> VadModelConfig {
     VadModelConfig {
         silero_vad: SileroVadModelConfig {
             model: Some(model),
@@ -241,7 +231,7 @@ fn silero(model: String) -> VadModelConfig {
             min_silence_duration: 0.45,
             min_speech_duration: 0.15,
             window_size: 512,
-            max_speech_duration: 20.0,
+            max_speech_duration: longest_phrase,
         },
         sample_rate: RATE,
         num_threads: 1,
