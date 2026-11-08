@@ -352,7 +352,10 @@ fn the_wings_show_who_works_and_what_the_lead_does() {
         "longest running first"
     );
     assert_eq!(at_rest.more(), 1);
-    assert_eq!(at_rest.lead_text.as_deref(), Some("Claude Code · Reading files"));
+    assert_eq!(
+        at_rest.lead_text.as_deref(),
+        Some("Claude Code · Reading files")
+    );
     assert_eq!(at_rest.lead_steps, Some((2, 6)));
     let (left, right) = at_rest.wings(true);
     assert_eq!(left, 14 + 3 * 18 + 22);
