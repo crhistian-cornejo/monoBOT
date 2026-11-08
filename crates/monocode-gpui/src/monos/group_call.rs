@@ -20,13 +20,62 @@ use std::{
     collections::VecDeque,
     sync::{
         Arc, OnceLock,
-        atomic::{AtomicBool, AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
 };
 
 static LOCAL_VOICE: OnceLock<Arc<Voice>> = OnceLock::new();
 static VOICE_INSTALLING: AtomicBool = AtomicBool::new(false);
 static NEXT_GENERATION: AtomicU64 = AtomicU64::new(1);
+/// How long the voices stay loaded after the last call.
+const VOICE_IDLE: Duration = Duration::from_secs(120);
+static VOICE_USES: VoiceUses = VoiceUses::new();
+
+/// Which calls use the voices, so the release a hang-up schedules never
+/// unloads Supertonic between the sentences of a live call, in any window.
+pub(super) struct VoiceUses {
+    /// Bumped by every start and hang-up: a release is skipped once another
+    /// call started after it was scheduled.
+    uses: AtomicU64,
+    /// Calls holding the voices right now.
+    holds: AtomicUsize,
+}
+
+impl VoiceUses {
+    pub(super) const fn new() -> Self {
+        Self {
+            uses: AtomicU64::new(0),
+            holds: AtomicUsize::new(0),
+        }
+    }
+
+    /// A call starts using the voices, until the hold drops.
+    pub(super) fn hold(&'static self) -> VoiceHold {
+        self.holds.fetch_add(1, Ordering::AcqRel);
+        self.uses.fetch_add(1, Ordering::AcqRel);
+        VoiceHold(self)
+    }
+
+    /// A call hung up: the ticket its release checks when it runs.
+    pub(super) fn hung_up(&self) -> u64 {
+        self.uses.fetch_add(1, Ordering::AcqRel) + 1
+    }
+
+    /// Whether the release scheduled at `ticket` may run: no call holds the
+    /// voices and none started since.
+    pub(super) fn idle_since(&self, ticket: u64) -> bool {
+        self.holds.load(Ordering::Acquire) == 0 && self.uses.load(Ordering::Acquire) == ticket
+    }
+}
+
+/// Held by a call from the moment it loads the voices until it hangs up.
+pub(super) struct VoiceHold(&'static VoiceUses);
+
+impl Drop for VoiceHold {
+    fn drop(&mut self) {
+        self.0.holds.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 fn next_generation() -> u64 {
     NEXT_GENERATION.fetch_add(1, Ordering::Relaxed)
@@ -92,6 +141,7 @@ pub(super) struct CallState {
     mic: Entity<Dictation>,
     _subscriptions: Vec<Subscription>,
     voice: Arc<Voice>,
+    voice_hold: Option<VoiceHold>,
     queue: Option<VoiceQueue>,
     events: Option<Task<()>>,
     error: Option<String>,
@@ -178,6 +228,7 @@ impl Monos {
             mic,
             _subscriptions: vec![mic_events, submitted],
             voice: local_voice(),
+            voice_hold: None,
             queue: None,
             events: None,
             error: None,
@@ -228,6 +279,8 @@ impl Monos {
         call.epoch = next_generation();
         let (group, epoch, voice) = (call.group.clone(), call.epoch, call.voice.clone());
         call.phase = Phase::Starting;
+        // Also cancels a release an earlier hang-up left waiting.
+        call.voice_hold.get_or_insert_with(|| VOICE_USES.hold());
         let work = cx
             .background_executor()
             .spawn(async move { voice.speakers().map_err(|error| error.to_string()) });
@@ -424,10 +477,13 @@ impl Monos {
                 }
             }
         }
+        drop(call.voice_hold.take());
+        let ticket = VOICE_USES.hung_up();
         cx.spawn(async move |_, cx| {
-            cx.background_executor()
-                .timer(Duration::from_secs(120))
-                .await;
+            cx.background_executor().timer(VOICE_IDLE).await;
+            if !VOICE_USES.idle_since(ticket) {
+                return;
+            }
             cx.background_executor()
                 .spawn(async move {
                     voice.release();
@@ -929,6 +985,40 @@ impl Monos {
     }
 
     pub(super) fn call_panel(&mut self, group: &Mono, cx: &mut Context<Self>) -> AnyElement {
+        // Looking at another group keeps a live call going: only hanging up
+        // ends it.
+        if let Some(other) = self
+            .call
+            .as_ref()
+            .filter(|call| call.live() && call.group != group.id)
+        {
+            let name = self
+                .roster
+                .get(&other.group)
+                .map_or_else(|| "another group".into(), Mono::label);
+            return div()
+                .debug_selector(|| "group-call-elsewhere".into())
+                .p_3()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .child(
+                    div()
+                        .px_2()
+                        .text_size(px(13.))
+                        .text_color(content(0.7))
+                        .child(format!(
+                            "You are in a call with {name}. Hang up to call this group."
+                        )),
+                )
+                .child(
+                    div().px_2().flex().child(
+                        call_button("group-call-hang-up-elsewhere", "Hang up")
+                            .on_click(cx.listener(|this, _, _, cx| this.call_hang_up(cx))),
+                    ),
+                )
+                .into_any_element();
+        }
         self.ensure_call(group, cx);
         let members = self.call_members(group);
         if let Some(call) = self.call.as_mut().filter(|call| !call.live()) {

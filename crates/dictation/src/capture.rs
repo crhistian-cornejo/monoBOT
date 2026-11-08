@@ -2,7 +2,7 @@
 //! (it is not `Send` on every platform) until the session stops it.
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -16,6 +16,9 @@ pub struct Microphone {
     pub chunks: Receiver<Vec<f32>>,
     pub sample_rate: u32,
     pub level: Arc<AtomicU32>,
+    /// Why the stream died (the microphone was unplugged, say). Set before
+    /// the stream is let go, so `chunks` disconnects only after it.
+    failure: Arc<Mutex<Option<String>>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -25,14 +28,16 @@ impl Microphone {
         let (ready_tx, ready_rx) = mpsc::channel::<Result<u32, Error>>();
         let (tx, chunks) = mpsc::sync_channel::<Vec<f32>>(512);
         let level = Arc::new(AtomicU32::new(0));
+        let failure = Arc::new(Mutex::new(None));
         let stop = Arc::new(AtomicBool::new(false));
         let thread = {
             let level = level.clone();
+            let failure = failure.clone();
             let stop = stop.clone();
             std::thread::Builder::new()
                 .name("dictation-mic".into())
                 .spawn(move || {
-                    let stream = match build(tx, level) {
+                    let stream = match build(tx, level, failure.clone()) {
                         Ok((stream, rate)) => {
                             let _ = ready_tx.send(Ok(rate));
                             stream
@@ -42,9 +47,11 @@ impl Microphone {
                             return;
                         }
                     };
-                    while !stop.load(Ordering::Acquire) {
+                    while !stop.load(Ordering::Acquire) && !failed(&failure) {
                         std::thread::sleep(Duration::from_millis(20));
                     }
+                    // Dropping the stream drops its sender, so the session
+                    // sees the end of the audio.
                     drop(stream);
                 })?
         };
@@ -55,6 +62,7 @@ impl Microphone {
             chunks,
             sample_rate,
             level,
+            failure,
             stop,
             thread: Some(thread),
         })
@@ -62,6 +70,14 @@ impl Microphone {
 
     pub fn level(&self) -> f32 {
         f32::from_bits(self.level.load(Ordering::Relaxed))
+    }
+
+    /// Why the microphone stopped on its own, if it did.
+    pub fn failure(&self) -> Option<String> {
+        self.failure
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Stops recording; chunks already captured stay readable.
@@ -79,7 +95,27 @@ impl Drop for Microphone {
     }
 }
 
-fn build(tx: SyncSender<Vec<f32>>, level: Arc<AtomicU32>) -> Result<(cpal::Stream, u32), Error> {
+fn failed(failure: &Mutex<Option<String>>) -> bool {
+    failure.lock().unwrap_or_else(|e| e.into_inner()).is_some()
+}
+
+/// Keeps the first error that ended the stream. An underrun or overrun is
+/// only a glitch, and the stream goes on.
+fn record(failure: &Mutex<Option<String>>, error: &cpal::StreamError) {
+    if matches!(error, cpal::StreamError::BufferUnderrun) {
+        return;
+    }
+    let mut slot = failure.lock().unwrap_or_else(|e| e.into_inner());
+    if slot.is_none() {
+        *slot = Some(format!("The microphone stopped: {error}"));
+    }
+}
+
+fn build(
+    tx: SyncSender<Vec<f32>>,
+    level: Arc<AtomicU32>,
+    failure: Arc<Mutex<Option<String>>>,
+) -> Result<(cpal::Stream, u32), Error> {
     let device = cpal::default_host()
         .default_input_device()
         .ok_or_else(|| Error::Microphone("no microphone found".into()))?;
@@ -93,13 +129,13 @@ fn build(tx: SyncSender<Vec<f32>>, level: Arc<AtomicU32>) -> Result<(cpal::Strea
     }
     let rate = config.sample_rate;
     let stream = match format {
-        cpal::SampleFormat::F32 => stream::<f32>(&device, &config, tx, level),
-        cpal::SampleFormat::F64 => stream::<f64>(&device, &config, tx, level),
-        cpal::SampleFormat::I16 => stream::<i16>(&device, &config, tx, level),
-        cpal::SampleFormat::I32 => stream::<i32>(&device, &config, tx, level),
-        cpal::SampleFormat::U16 => stream::<u16>(&device, &config, tx, level),
-        cpal::SampleFormat::I8 => stream::<i8>(&device, &config, tx, level),
-        cpal::SampleFormat::U8 => stream::<u8>(&device, &config, tx, level),
+        cpal::SampleFormat::F32 => stream::<f32>(&device, &config, tx, level, failure),
+        cpal::SampleFormat::F64 => stream::<f64>(&device, &config, tx, level, failure),
+        cpal::SampleFormat::I16 => stream::<i16>(&device, &config, tx, level, failure),
+        cpal::SampleFormat::I32 => stream::<i32>(&device, &config, tx, level, failure),
+        cpal::SampleFormat::U16 => stream::<u16>(&device, &config, tx, level, failure),
+        cpal::SampleFormat::I8 => stream::<i8>(&device, &config, tx, level, failure),
+        cpal::SampleFormat::U8 => stream::<u8>(&device, &config, tx, level, failure),
         other => {
             return Err(Error::Microphone(format!(
                 "unsupported sample format {other}"
@@ -117,6 +153,7 @@ fn stream<T>(
     config: &cpal::StreamConfig,
     tx: SyncSender<Vec<f32>>,
     level: Arc<AtomicU32>,
+    failure: Arc<Mutex<Option<String>>>,
 ) -> Result<cpal::Stream, Error>
 where
     T: cpal::SizedSample,
@@ -141,7 +178,7 @@ where
                 // A full queue drops this chunk rather than block the audio thread.
                 let _ = tx.try_send(mono);
             },
-            |_| {},
+            move |error| record(&failure, &error),
             None,
         )
         .map_err(|error| Error::Microphone(format!("could not open the microphone: {error}")))
@@ -160,7 +197,21 @@ pub fn loudness(samples: &[f32]) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::loudness;
+    use super::{failed, loudness, record};
+    use std::sync::Mutex;
+
+    #[test]
+    fn the_first_stream_error_is_kept() {
+        let failure = Mutex::new(None);
+        assert!(!failed(&failure));
+        record(&failure, &cpal::StreamError::BufferUnderrun);
+        assert!(!failed(&failure), "a glitch keeps the stream");
+        record(&failure, &cpal::StreamError::DeviceNotAvailable);
+        record(&failure, &cpal::StreamError::StreamInvalidated);
+        assert!(failed(&failure));
+        let kept = failure.into_inner().unwrap().unwrap();
+        assert!(kept.contains("no longer available"), "{kept}");
+    }
 
     #[test]
     fn silence_is_low_and_speech_is_high() {

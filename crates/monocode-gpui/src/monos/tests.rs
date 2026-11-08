@@ -3870,6 +3870,64 @@ fn group_call_recovers_mic_errors_and_keeps_muted_installation_quiet(cx: &mut Te
     cx.run_until_parked();
 }
 
+#[test]
+fn a_release_after_a_hang_up_skips_a_call_that_started_since() {
+    let voices: &'static super::group_call::VoiceUses =
+        Box::leak(Box::new(super::group_call::VoiceUses::new()));
+    // The first call hangs up; a second starts before its release runs.
+    let first = voices.hold();
+    drop(first);
+    let ticket = voices.hung_up();
+    let second = voices.hold();
+    assert!(!voices.idle_since(ticket), "a live call keeps the voices");
+    // The second hangs up: the first release still skips, the second's runs.
+    drop(second);
+    assert!(!voices.idle_since(ticket));
+    let last = voices.hung_up();
+    assert!(voices.idle_since(last));
+    // A call that is still holding blocks even an up-to-date ticket.
+    let _third = voices.hold();
+    let stale = voices.hung_up();
+    assert!(!voices.idle_since(stale));
+}
+
+#[gpui::test]
+fn painting_another_group_keeps_the_live_call(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    let s = setup(cx);
+    let mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(mic.clone())));
+    let (spoken, _heard) = mpsc::channel();
+    s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member],
+            ..Group::default()
+        });
+        let group = group.clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        let mut other = group.clone();
+        other.id = "another-group".into();
+        let _ = m.call_panel(&other, cx);
+    });
+    cx.run_until_parked();
+    assert!(
+        s.manager.read_with(cx, |m, _| m.call.is_some()),
+        "the call is still up"
+    );
+    assert!(!mic.calls().iter().any(|call| call.starts_with("cancel")));
+    s.manager.update(cx, |m, cx| m.call_hang_up(cx));
+    cx.run_until_parked();
+    assert!(s.manager.read_with(cx, |m, _| m.call.is_none()));
+}
+
 #[gpui::test]
 fn group_call_tab_is_visible_and_closing_the_panel_hangs_up(cx: &mut TestAppContext) {
     use monocode_core::mono::groups::Group;

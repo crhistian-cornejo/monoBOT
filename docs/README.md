@@ -31,6 +31,8 @@ things were, move it to `old/`.
 | [limitations.md](in-progress/limitations.md) | Known limits and what still needs runtime checks, per area and platform |
 | [mail-workspace.md](in-progress/mail-workspace.md) | Mail, bot inboxes and agenda with Cloudflare and Mailflare; deployment checklist |
 | [workstreams.md](in-progress/workstreams.md) | Workstreams (beta): multi-day work run by an orchestrator |
+| [ivy-review.md](in-progress/ivy-review.md) | What to take from IVY: harness and agent gaps, Decider, live and group calls, dictation |
+| [notch.md](in-progress/notch.md) | Plan for a minimal macOS notch |
 
 ## old/ — history
 

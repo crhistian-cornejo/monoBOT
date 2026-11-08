@@ -132,6 +132,27 @@ fn listens_then_puts_the_words_in_at_the_caret(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn an_unplugged_microphone_keeps_the_words_and_says_why(cx: &mut TestAppContext) {
+    let fake = Fake::installed("hasta aquí");
+    let (input, dictation) = dictation(&fake, "", cx);
+    dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+    cx.run_until_parked();
+    fake.hear(Event::Partial("hasta aquí".into()));
+    fake.hear(Event::Lost("The microphone stopped: unplugged".into()));
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Idle);
+    assert_eq!(
+        dictation.read_with(cx, |d, _| d.error().map(str::to_owned)),
+        Some("The microphone stopped: unplugged".into())
+    );
+    assert_eq!(
+        input.read_with(cx, |i, _| i.content.to_string()),
+        "hasta aquí"
+    );
+    assert_eq!(fake.calls(), ["start", "stop 7"]);
+}
+
+#[gpui::test]
 fn escape_drops_what_was_heard(cx: &mut TestAppContext) {
     let fake = Fake::installed("never lands");
     let (input, dictation) = dictation(&fake, "draft", cx);

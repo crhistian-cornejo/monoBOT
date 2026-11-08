@@ -30,6 +30,9 @@ pub enum Event {
     /// The voice detector heard speech start (true) or stop (false), so a
     /// call can tell when the user has finished their turn.
     Speech(bool),
+    /// The microphone went away (unplugged, say). The session ends after
+    /// this, and stop still returns what was heard.
+    Lost(String),
 }
 
 pub struct Session {
@@ -147,6 +150,9 @@ impl Run {
                 Ok(chunk) => self.feed(&chunk, false),
                 Err(RecvTimeoutError::Timeout) => {}
                 Err(RecvTimeoutError::Disconnected) => {
+                    if let Some(reason) = mic.failure() {
+                        on_event(Event::Lost(reason));
+                    }
                     stop.store(true, Ordering::Release);
                     continue;
                 }

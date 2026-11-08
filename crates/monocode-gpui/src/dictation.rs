@@ -232,6 +232,15 @@ impl Dictation {
                     cx.notify();
                 }
             }
+            // The microphone went away: keep what was heard and say why, so
+            // nothing waits on a microphone that will never speak again.
+            Event::Lost(reason) => {
+                if self.phase == Phase::Listening {
+                    self.finish(cx);
+                }
+                self.error = Some(reason);
+                cx.notify();
+            }
         }
     }
 
