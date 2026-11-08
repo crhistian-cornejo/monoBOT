@@ -172,7 +172,9 @@ impl Mailbox {
                 )
             })
             .when(!accounts.is_empty(), |d| {
-                d.child(self.rules_view(window, cx)).child(self.activity_view())
+                d.child(self.sending_view())
+                    .child(self.rules_view(window, cx))
+                    .child(self.activity_view())
             })
             .child(self.form.clone())
             .into_any_element()
@@ -255,5 +257,48 @@ impl Mailbox {
                     ))
                 })
             })
+    }
+
+    /// How replies and new messages leave: each account's own server unless the user chose an
+    /// HTTP provider for a domain of their own.
+    fn sending_view(&self) -> AnyElement {
+        let (title, note) = match self.send_via.as_str() {
+            "resend" => (
+                "Sending through Resend",
+                "Replies and new messages go out through Resend for your own domain. Change it in Agenda › Advanced.",
+            ),
+            "cloudflare" => (
+                "Sending through Cloudflare Email",
+                "Replies and new messages go out through Cloudflare for your own domain. Change it in Agenda › Advanced.",
+            ),
+            _ => (
+                "Sending from your own account",
+                "Replies and new messages go out through each account's mail server (SMTP) with the same app password, and land in its Sent folder. Nothing else is needed for Gmail or iCloud.",
+            ),
+        };
+        div()
+            .id("mail-sending")
+            .debug_selector(|| "mail-sending".into())
+            .flex()
+            .flex_col()
+            .gap(px(2.))
+            .px(px(12.))
+            .py(px(8.))
+            .border_1()
+            .border_color(content(0.1))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .text_color(content(1.))
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .line_height(px(18.))
+                    .text_color(content(0.55))
+                    .child(note),
+            )
+            .into_any_element()
     }
 }

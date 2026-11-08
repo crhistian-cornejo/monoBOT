@@ -1,6 +1,6 @@
 //! MonoBOT's built-in MCP connectors, ported from
 //! src/features/settings/model/connectors.ts. Public servers need no account;
-//! the private Mailflare connector uses the system credential store and a
+//! the private remote mail server connector uses the system credential store and a
 //! local allowlisting proxy. Others use Streamable HTTP, `npx` or `node`.
 //! The enabled ones go to each Claude turn with `--mcp-config` (and
 //! to Codex as `-c` overrides), so neither CLI's own configuration is
@@ -97,8 +97,8 @@ const BASE: Connector = Connector {
 pub const CONNECTORS: [Connector; 11] = [
     Connector {
         id: "mailflare",
-        name: "Mailflare",
-        description: "Your self-hosted mail and calendar. Configure its URL and token in Inbox › Agenda. Bots need your explicit grant; sending always stays in Mailflare's human review.",
+        name: "Remote mail server",
+        description: "Your self-hosted mail and calendar over MCP. Configure its URL and token in Inbox › Agenda › Advanced. Bots need your explicit grant; sending always stays in the server's human review.",
         site: "https://github.com/hieunc229/mailflare",
         user_granted: true,
         // The local proxy keeps credentials out of CLI arguments and enforces

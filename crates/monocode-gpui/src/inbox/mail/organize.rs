@@ -1,4 +1,4 @@
-//! Keeping the inbox in order, as Mailflare and Gmail do: snoozing a message until later,
+//! Keeping the inbox in order: snoozing a message until later,
 //! stopping a list's mail with the unsubscribe its sender offers, the earlier messages of a
 //! conversation, and Gmail's labels. Snoozes are this computer's own; labels and archives are
 //! the server's.

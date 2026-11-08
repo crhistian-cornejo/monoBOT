@@ -126,6 +126,8 @@ pub(crate) struct Mailbox {
     rule_error: Option<String>,
     /// What the agents did with the mail lately.
     activity: Vec<model::activity::Entry>,
+    /// How mail leaves: `smtp` (each account's own server), `resend` or `cloudflare`.
+    send_via: String,
     form: Entity<connect::ConnectForm>,
     /// Which agents read each account, and the bots it can be kept for.
     access: model::Access,
@@ -327,6 +329,7 @@ impl Mailbox {
             rule_form: None,
             rule_error: None,
             activity: Vec::new(),
+            send_via: String::new(),
             form,
             access: model::Access::new(),
             agents: Vec::new(),
@@ -427,6 +430,10 @@ impl Mailbox {
             let snoozed = service.snoozed();
             let rules = service.rules();
             let activity = service.activity(40);
+            let send_via = monocode_core::inbox::workspace::Service::new(&service.data_dir)
+                .config()
+                .map(|config| config.send_provider)
+                .unwrap_or_default();
             let agents = store
                 .and_then(|store| {
                     let db = crate::runtime::locked(&store).ok()?;
@@ -440,17 +447,19 @@ impl Mailbox {
                 photos,
                 access,
                 agents,
-                (snoozed, rules, activity),
+                (snoozed, rules, activity, send_via),
             )
         });
         cx.spawn(async move |this, cx| {
-            let (accounts, last, photos, access, agents, (snoozed, rules, activity)) = task.await;
+            let (accounts, last, photos, access, agents, (snoozed, rules, activity, send_via)) =
+                task.await;
             let _ = this.update(cx, |this, cx| {
                 let empty = accounts.is_empty();
                 this.access = access;
                 this.snoozed = snoozed;
                 this.rules = rules;
                 this.activity = activity;
+                this.send_via = send_via;
                 this.form
                     .update(cx, |form, cx| form.set_agents(agents.clone(), cx));
                 this.agents = agents;

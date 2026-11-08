@@ -193,7 +193,7 @@ fn main() {
         let result = cli_args
             .get(1)
             .filter(|_| cli_args.len() == 2)
-            .ok_or_else(|| "Mailflare proxy needs a data directory.".to_owned())
+            .ok_or_else(|| "The mail server proxy needs a data directory.".to_owned())
             .and_then(monocode_core::inbox::workspace::run_mcp_proxy);
         if let Err(error) = result {
             eprintln!("{error}");

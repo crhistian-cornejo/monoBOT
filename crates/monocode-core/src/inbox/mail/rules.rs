@@ -1,4 +1,4 @@
-//! The user's mail rules (Mailflare's routing, on their own Gmail): when a message that
+//! The user's mail rules, on their own Gmail: when a message that
 //! arrived after the rule was made comes from a sender, or says something in its subject, put a
 //! Gmail label on it, star it, mark it read, archive it, and/or hand it to one of the user's
 //! agents. The rules and what they already did live in `mail/rules.json`; nothing is deleted

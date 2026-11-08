@@ -94,12 +94,12 @@ Esto funciona igual en macOS y Windows, sin Cloudflare.
   La primera vez se importa el `monocode.mail.private` de la app de escritorio
   antigua.
 
-## Gmail sin dominio: lo que se adaptó de Mailflare
+## Gmail sin dominio: la pestaña Email completa
 
 Todo esto funciona con un Gmail normal (IMAP + contraseña de aplicación), sin
 Cloudflare ni dominio, en macOS y Windows:
 
-| Mailflare | En MonoBOT |
+| Función | En MonoBOT |
 | --- | --- |
 | Redactar y responder | **New message (C)** y **Forward (F)** en la pestaña Email (`inbox/mail/compose.rs`). Sale por SMTP con la misma contraseña de aplicación; Gmail guarda su copia en Enviados. *Save as draft* lo deja en Borradores del servidor. Un reenvío lleva el texto, no los adjuntos. |
 | El agente redacta respuestas | `mail.propose`: el agente propone una respuesta o un correo nuevo y aparece como tarjeta en su chat, con remitente, destinatarios y asunto. Solo el usuario pulsa *Send*, *Save as draft* o *Discard* (`monos/mail_card.rs`). |
@@ -110,12 +110,17 @@ Cloudflare ni dominio, en macOS y Windows:
 | Darse de baja | Botón **Unsubscribe** cuando el correo trae `List-Unsubscribe`: una petición si admite `One-Click` (RFC 8058), si no abre la página o prepara el correo al `mailto`. Nunca en correo retenido, y nunca hacia `localhost` ni la red local. |
 | Posponer | **Snooze** (3 horas, mañana 8:00, lunes 8:00). Es local: el correo sale de las vistas hasta su hora y espera en la vista **Snoozed**. |
 
-## Configuración en MonoBOT
+## Configuración en MonoBOT (solo con dominio propio)
 
-Abre **Inbox → Agenda**. Allí están los ajustes del espacio de correo:
+Con Gmail o iCloud no hace falta nada de esto: la pestaña Email envía por SMTP
+con la contraseña de aplicación, y **Email › Cuentas** lo dice
+(«Sending from your own account»).
 
-1. **Mailflare URL:** el origen HTTPS de tu instancia o su URL `/mcp`.
-2. **Mailflare token:** clave creada en Mailflare, no el token de Cloudflare.
+Abre **Inbox → Agenda → Advanced**. La página explica para qué sirve y deja
+los ajustes plegados salvo que ya haya alguno en uso (`uses_own_domain`):
+
+1. **Remote mail server URL** (servidor MCP, p. ej. una instancia de Mailflare): el origen HTTPS o su URL `/mcp`.
+2. **Access token:** la clave que ese servidor espera, no el token de Cloudflare.
 3. **Transporte de envío:** SMTP (predeterminado), Resend o Cloudflare.
 4. **Cloudflare account ID:** necesario únicamente para enviar con Cloudflare.
 5. **Inbound Worker URL:** el origen HTTPS del Worker de este repositorio.
@@ -128,7 +133,7 @@ sin secretos se guardan en `<data-dir>/mail/workspace.json`; las credenciales
 se guardan en Keychain/Credential Manager o el almacén equivalente de Linux.
 Los campos vacíos de credenciales no deben sobrescribir los valores guardados.
 
-Después de configurar Mailflare, habilita el conector y concédelo al bot desde
+Después de configurar el servidor, activa «Let bots use this server» y concédelo al bot desde
 sus herramientas. Los agentes no pueden concedérselo a sí mismos. Las sesiones
 sin bot no reciben este conector privado automáticamente.
 
@@ -213,6 +218,24 @@ el archivo original de R2.
 
 ### Agenda e ICS
 
+La Agenda es un calendario: vista **Month** (seis semanas) o **Week**, con
+‹ Today › para moverse, y debajo los eventos del día elegido (los locales se
+pueden borrar). **New event** propone el día elegido.
+
+**Google Calendar** sigue un calendario por su «Secret address in iCal
+format» (Google Calendar › Configuración › tu calendario › Integrar
+calendario). La dirección funciona como una contraseña: va al llavero
+(`mail-workspace-calendar-…`), el campo se vacía al guardar y nunca se
+escribe en disco. MonoBOT la descarga por HTTPS (8 MiB máx., sin red local),
+expande las recurrencias (`DAILY`, `WEEKLY` con `BYDAY`, `MONTHLY` con
+`BYDAY`/`BYMONTHDAY`, `YEARLY`, `INTERVAL`, `COUNT`, `UNTIL`, `EXDATE`,
+`RECURRENCE-ID` y eventos cancelados) de 62 días atrás a 400 adelante, y la
+guarda en `mail/calendar-feed.json`. Se actualiza al abrir la Agenda si tiene
+más de 15 minutos. Una regla que no sabe expandir (`BYSETPOS`…) se muestra
+solo en su primera fecha y la Agenda lo dice. Es de solo lectura: MonoBOT no
+crea ni cambia eventos en Google, y los agentes no leen este calendario
+(`agenda_for_user` es solo para la vista del usuario).
+
 Los eventos locales se guardan en `<data-dir>/mail/agenda.json`. Los tiempos
 de entrada deben llevar offset ISO 8601 y la zona debe ser IANA, por ejemplo
 `Europe/Madrid`. La agenda remota usa rangos positivos de hasta 90 días.
@@ -220,7 +243,7 @@ Una respuesta remota truncada no se presenta como agenda completa.
 
 Acciones disponibles para los Monos:
 
-`calendar.list` solo incluye Mailflare si ese bot recibió el conector
+`calendar.list` solo incluye el servidor remoto si ese bot recibió el conector
 explícitamente y sigue habilitado. Los demás agentes solo leen la agenda local.
 
 ```text
@@ -232,9 +255,10 @@ La importación ICS es atómica y conserva UID para no duplicar una segunda
 importación del mismo archivo. Admite eventos únicos UTC, `TZID` y días
 completos con `DTEND`, conservando `VALUE=DATE` al volver a exportar.
 Los bloques con hora no se convierten en días completos por empezar a medianoche.
-Rechaza recurrencias, horas flotantes y horas ambiguas
-durante cambios de horario, en lugar de interpretarlas incorrectamente.
-Las recurrencias de Mailflare sí se leen ya expandidas en su agenda.
+Rechaza recurrencias (para eso está seguir el calendario por su dirección
+iCal), horas flotantes y horas ambiguas durante cambios de horario, en lugar
+de interpretarlas incorrectamente. Las recurrencias del servidor remoto se
+leen ya expandidas en su agenda.
 
 La exportación incluye los eventos locales/importados, no copia el calendario
 remoto. Usa CRLF, escape de texto y plegado de líneas UTF-8.

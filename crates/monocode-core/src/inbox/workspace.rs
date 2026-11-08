@@ -1,10 +1,12 @@
 //! Optional mail infrastructure. Settings never contain credentials. Cloud mail
 //! is pulled from a durable backlog, so no public desktop port is needed.
 mod calendar;
+mod feed;
 mod inbound;
 mod mcp;
 mod secrets;
 pub use calendar::{CalendarEvent, NewEvent};
+pub use feed::{feed_url, FeedState, STALE_MS as FEED_STALE_MS};
 pub use inbound::is_cloud;
 pub use inbound::Delivery;
 pub use mcp::run_mcp_proxy;

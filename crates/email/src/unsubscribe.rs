@@ -8,7 +8,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 
 /// The host of an `https` link, if it is one a message may make the app reach.
-fn public_host(link: &str) -> Result<String, String> {
+pub fn public_host(link: &str) -> Result<String, String> {
     let rest = link
         .strip_prefix("https://")
         .or_else(|| link.strip_prefix("HTTPS://"))

@@ -1,8 +1,9 @@
 //! The Inbox's Agenda tab and the mail workspace's setup: a local agenda (reminders and time
 //! blocks that never invite anyone), calendar files in and out, and the settings for
-//! Mailflare, HTTP sending, the inbound mailbox and the bots that own an address.
+//! a remote mail server, HTTP sending, the inbound mailbox and the bots that own an address.
 //! Everything the user types goes to `monocode_core::inbox::workspace`; credentials are
 //! typed into masked fields, handed to the core once and never read back or shown.
+mod calendar;
 mod view;
 
 use crate::{
@@ -25,16 +26,21 @@ use std::{
     time::{Duration, Instant},
 };
 
-/// How far ahead the agenda looks. The core accepts at most 90 days.
-const AGENDA_DAYS: i64 = 30;
 /// An agenda that is newer than this is not fetched again when the tab reopens.
 const FRESH: Duration = Duration::from_secs(60);
 /// A calendar file larger than this is not a calendar the user means to import.
 const ICS_LIMIT: usize = 2 * 1024 * 1024;
 /// The inbound secret is a bearer token for a public Worker, so the core wants it long.
 const INBOUND_MIN: usize = 32;
-/// The connector id the core registers for the Mailflare MCP server.
+/// The connector id the core registers for the remote mail server (MCP).
 const MAILFLARE: &str = "mailflare";
+
+/// How much of the calendar the agenda shows at once.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum Span {
+    Week,
+    Month,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Page {
@@ -86,6 +92,16 @@ pub(crate) struct Workspace {
     deleting: Option<String>,
     form_open: bool,
     form_error: Option<String>,
+    /// Week or month, the day the shown span is around, and the day whose events are listed.
+    span: Span,
+    anchor: NaiveDate,
+    selected: NaiveDate,
+    /// The calendar the user follows by its private iCal address.
+    feed: model::FeedState,
+    feed_open: bool,
+    feed_busy: bool,
+    feed_input: Entity<Input>,
+    feed_error: Option<String>,
     title: Entity<Input>,
     start: Entity<Input>,
     end: Entity<Input>,
@@ -99,7 +115,7 @@ pub(crate) struct Workspace {
     cloudflare_account: Entity<Input>,
     secrets: [Secret; 4],
     send_provider: String,
-    /// Whether bots and sessions may use the Mailflare connector, as the store has it.
+    /// Whether bots and sessions may use the remote mail server connector, as the store has it.
     mailflare_on: bool,
     mailflare_on_saved: bool,
     routes: Vec<RouteDraft>,
@@ -107,6 +123,8 @@ pub(crate) struct Workspace {
     bots: Vec<(String, String)>,
     validated: bool,
     removing: Option<&'static str>,
+    /// The own-domain settings are unfolded: by the user, or because something is set.
+    advanced_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -130,11 +148,17 @@ impl Workspace {
         let start = field("Start", "YYYY-MM-DD HH:MM", cx);
         let end = field("End", "YYYY-MM-DD HH:MM", cx);
         let notes = field("Notes", "Optional", cx);
-        let mailflare_url = field("Mailflare URL", "https://mailflare.example.com", cx);
+        let feed_input = field(
+            "Secret iCal address",
+            "https://calendar.google.com/calendar/ical/…/private-…/basic.ics",
+            cx,
+        );
+        feed_input.update(cx, |input, _| input.set_secret(true));
+        let mailflare_url = field("Mail server URL", "https://mail.example.com", cx);
         let inbound_url = field("Inbound Worker URL", "https://inbound.example.com", cx);
         let cloudflare_account = field("Cloudflare account ID", "32 hexadecimal characters", cx);
         let secrets = [
-            secret(MAILFLARE, "Mailflare access token", cx),
+            secret(MAILFLARE, "Mail server access token", cx),
             secret("resend", "Resend API key", cx),
             secret("cloudflare", "Cloudflare API token", cx),
             secret("inbound", "Inbound shared secret", cx),
@@ -175,6 +199,14 @@ impl Workspace {
             deleting: None,
             form_open: false,
             form_error: None,
+            span: Span::Month,
+            anchor: Local::now().date_naive(),
+            selected: Local::now().date_naive(),
+            feed: model::FeedState::default(),
+            feed_open: false,
+            feed_busy: false,
+            feed_input,
+            feed_error: None,
             title,
             start,
             end,
@@ -193,6 +225,7 @@ impl Workspace {
             bots: Vec::new(),
             validated: false,
             removing: None,
+            advanced_open: false,
             _subscriptions: subscriptions,
         }
     }
@@ -207,6 +240,7 @@ impl Workspace {
             && self.refreshed.is_none_or(|at| at.elapsed() > FRESH)
         {
             self.load_agenda(cx);
+            self.check_feed(cx);
         }
     }
 
@@ -214,7 +248,8 @@ impl Workspace {
     pub(crate) fn escape(&mut self, cx: &mut Context<Self>) -> bool {
         let closed = self.removing.take().is_some()
             | self.deleting.take().is_some()
-            | std::mem::take(&mut self.form_open);
+            | std::mem::take(&mut self.form_open)
+            | std::mem::take(&mut self.feed_open);
         if closed {
             cx.notify();
         }
@@ -240,12 +275,13 @@ impl Workspace {
         self.ticket += 1;
         let ticket = self.ticket;
         self.loading = true;
-        let (from, to) = window(Local::now());
+        let days = grid_days(self.span, self.anchor);
+        let (from, to) = day_window(days[0], *days.last().unwrap_or(&days[0]));
         let service = self.service.clone();
-        // The core asks Mailflare over the network when it is set up.
+        // The core asks the remote mail server over the network when it is set up.
         let task = cx
             .background_executor()
-            .spawn(async move { service.agenda(&from, &to) });
+            .spawn(async move { service.agenda_for_user(&from, &to) });
         cx.spawn(async move |this, cx| {
             let result = task.await;
             let _ = this.update(cx, |this, cx| {
@@ -273,12 +309,15 @@ impl Workspace {
 
     fn open_form(&mut self, cx: &mut Context<Self>) {
         let now = Local::now().naive_local();
-        let start = now
-            .date()
-            .and_hms_opt(now.hour(), 0, 0)
-            .unwrap_or(now)
-            .checked_add_signed(chrono::Duration::hours(1))
-            .unwrap_or(now);
+        let start = if self.selected == now.date() {
+            now.date()
+                .and_hms_opt(now.hour(), 0, 0)
+                .unwrap_or(now)
+                .checked_add_signed(chrono::Duration::hours(1))
+                .unwrap_or(now)
+        } else {
+            self.selected.and_hms_opt(9, 0, 0).unwrap_or(now)
+        };
         let end = start
             .checked_add_signed(chrono::Duration::hours(1))
             .unwrap_or(start);
@@ -342,7 +381,154 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Removes a local or imported event. Mailflare's own are read-only here.
+    // Calendar -------------------------------------------------------------------------
+
+    /// Shows the week or month `steps` spans away (0: the one around today).
+    pub(super) fn shift(&mut self, steps: i32, cx: &mut Context<Self>) {
+        let today = Local::now().date_naive();
+        self.anchor = match (steps, self.span) {
+            (0, _) => today,
+            (n, Span::Week) => self.anchor + chrono::Duration::weeks(n as i64),
+            (n, Span::Month) => shift_months(self.anchor, n),
+        };
+        self.selected = if self.anchor == today || in_span(self.span, self.anchor, today) {
+            today
+        } else {
+            self.anchor
+        };
+        self.load_agenda(cx);
+        cx.notify();
+    }
+
+    pub(super) fn set_span(&mut self, span: Span, cx: &mut Context<Self>) {
+        if self.span != span {
+            self.span = span;
+            self.anchor = self.selected;
+            self.load_agenda(cx);
+            cx.notify();
+        }
+    }
+
+    pub(super) fn select_day(&mut self, day: NaiveDate, cx: &mut Context<Self>) {
+        self.selected = day;
+        self.deleting = None;
+        if !in_span(self.span, self.anchor, day) {
+            self.anchor = day;
+            self.load_agenda(cx);
+        }
+        cx.notify();
+    }
+
+    /// Reads where the followed calendar stands, and fetches it again when it is stale.
+    fn check_feed(&mut self, cx: &mut Context<Self>) {
+        let service = self.service.clone();
+        let task = cx.background_executor().spawn(async move {
+            let state = service.calendar_feed_state();
+            let stale = state.connected
+                && Utc::now().timestamp_millis() - state.refreshed_at > model::FEED_STALE_MS;
+            if stale {
+                let _ = service.refresh_calendar_feed();
+                (service.calendar_feed_state(), true)
+            } else {
+                (state, false)
+            }
+        });
+        cx.spawn(async move |this, cx| {
+            let (state, fetched) = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.feed = state;
+                if fetched {
+                    this.load_agenda(cx);
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Follows the calendar at the typed address (`remove`: stops following it), then fetches it.
+    pub(super) fn save_feed(&mut self, remove: bool, cx: &mut Context<Self>) {
+        if self.feed_busy {
+            return;
+        }
+        let address = if remove {
+            String::new()
+        } else {
+            self.feed_input.read(cx).content.trim().to_owned()
+        };
+        if !remove && let Err(error) = model::feed_url(&address) {
+            self.feed_error = Some(error);
+            cx.notify();
+            return;
+        }
+        self.feed_busy = true;
+        self.feed_error = None;
+        let service = self.service.clone();
+        let task = cx.background_executor().spawn(async move {
+            service.set_calendar_feed(&address)?;
+            if !address.is_empty() {
+                service.refresh_calendar_feed()?;
+            }
+            Ok::<_, String>(service.calendar_feed_state())
+        });
+        // The address leaves the field at once: it works like a password.
+        self.feed_input
+            .update(cx, |input, cx| input.set_text(String::new(), cx));
+        cx.spawn(async move |this, cx| {
+            let result = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.feed_busy = false;
+                match result {
+                    Ok(state) => {
+                        this.notice = Some(if remove {
+                            "You no longer follow that calendar.".into()
+                        } else {
+                            format!("Following your calendar: {} events.", state.events)
+                        });
+                        this.feed = state;
+                        this.feed_open = false;
+                        this.load_agenda(cx);
+                    }
+                    Err(error) => {
+                        this.feed = this.service.calendar_feed_state();
+                        this.feed_error = Some(error);
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Fetches the followed calendar now.
+    pub(super) fn refresh_feed(&mut self, cx: &mut Context<Self>) {
+        if self.feed_busy || !self.feed.connected {
+            return;
+        }
+        self.feed_busy = true;
+        let service = self.service.clone();
+        let task = cx.background_executor().spawn(async move {
+            let result = service.refresh_calendar_feed();
+            (result, service.calendar_feed_state())
+        });
+        cx.spawn(async move |this, cx| {
+            let (result, state) = task.await;
+            let _ = this.update(cx, |this, cx| {
+                this.feed_busy = false;
+                this.feed = state;
+                match result {
+                    Ok(_) => this.load_agenda(cx),
+                    Err(error) => this.feed_error = Some(error),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    /// Removes a local or imported event. The mail server's and followed calendars' are read-only.
     fn delete_event(&mut self, id: String, cx: &mut Context<Self>) {
         if self.busy.is_some() {
             return;
@@ -489,6 +675,7 @@ impl Workspace {
                 match config {
                     Ok(config) => {
                         this.config_loaded = true;
+                        this.advanced_open |= uses_own_domain(&config);
                         this.apply_config(config, cx);
                     }
                     Err(error) => this.error = Some(error),
@@ -885,6 +1072,92 @@ fn event_draft(title: &str, start: &str, end: &str, notes: &str) -> Result<NewEv
     })
 }
 
+/// The days a span shows: the week (Monday first) around `anchor`, or the six weeks that
+/// hold its month.
+pub(super) fn grid_days(span: Span, anchor: NaiveDate) -> Vec<NaiveDate> {
+    let monday =
+        |day: NaiveDate| day - chrono::Duration::days(day.weekday().num_days_from_monday() as i64);
+    let (first, count) = match span {
+        Span::Week => (monday(anchor), 7),
+        Span::Month => (monday(anchor.with_day(1).unwrap_or(anchor)), 42),
+    };
+    (0..count)
+        .map(|i| first + chrono::Duration::days(i))
+        .collect()
+}
+
+/// Whether `day` is in the span shown around `anchor` (for a month: in that month).
+pub(super) fn in_span(span: Span, anchor: NaiveDate, day: NaiveDate) -> bool {
+    match span {
+        Span::Week => grid_days(span, anchor).contains(&day),
+        Span::Month => day.year() == anchor.year() && day.month() == anchor.month(),
+    }
+}
+
+/// The same day `months` months away, or the month's last day when it has no such day.
+pub(super) fn shift_months(day: NaiveDate, months: i32) -> NaiveDate {
+    let total = day.year() * 12 + day.month0() as i32 + months;
+    let (year, month0) = (total.div_euclid(12), total.rem_euclid(12) as u32);
+    (0..4)
+        .find_map(|back| NaiveDate::from_ymd_opt(year, month0 + 1, day.day().saturating_sub(back)))
+        .unwrap_or(day)
+}
+
+/// «November 2026», or «2 – 8 Nov 2026» for a week.
+pub(super) fn span_title(span: Span, anchor: NaiveDate) -> String {
+    match span {
+        Span::Month => anchor.format("%B %Y").to_string(),
+        Span::Week => {
+            let days = grid_days(span, anchor);
+            let (first, last) = (days[0], days[6]);
+            if first.month() == last.month() {
+                format!(
+                    "{} \u{2013} {}",
+                    first.format("%-d"),
+                    last.format("%-d %b %Y")
+                )
+            } else if first.year() == last.year() {
+                format!(
+                    "{} \u{2013} {}",
+                    first.format("%-d %b"),
+                    last.format("%-d %b %Y")
+                )
+            } else {
+                format!(
+                    "{} \u{2013} {}",
+                    first.format("%-d %b %Y"),
+                    last.format("%-d %b %Y")
+                )
+            }
+        }
+    }
+}
+
+/// From the start of `first` to the end of `last`, on this computer's clock, as UTC instants.
+fn day_window(first: NaiveDate, last: NaiveDate) -> (String, String) {
+    let midnight = |day: NaiveDate| {
+        day.and_hms_opt(0, 0, 0)
+            .and_then(|time| time.and_local_timezone(Local).earliest())
+            .unwrap_or_else(Local::now)
+    };
+    let wire = |time: DateTime<Local>| {
+        time.with_timezone(&Utc)
+            .to_rfc3339_opts(SecondsFormat::Secs, true)
+    };
+    (
+        wire(midnight(first)),
+        wire(midnight(last + chrono::Duration::days(1))),
+    )
+}
+
+/// Whether anything of the own-domain setup is in use, so its settings show unfolded.
+fn uses_own_domain(config: &Config) -> bool {
+    !config.mailflare_url.trim().is_empty()
+        || !config.inbound_url.trim().is_empty()
+        || !config.routes.is_empty()
+        || !matches!(config.send_provider.as_str(), "" | "smtp")
+}
+
 /// A calendar file's text, or why it cannot be one.
 fn check_ics(text: &str) -> Result<(), String> {
     if text.len() > ICS_LIMIT {
@@ -896,21 +1169,6 @@ fn check_ics(text: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// The agenda's window as UTC instants: from the start of today to a month ahead.
-fn window(now: DateTime<Local>) -> (String, String) {
-    let midnight = now
-        .date_naive()
-        .and_hms_opt(0, 0, 0)
-        .and_then(|time| time.and_local_timezone(Local).earliest())
-        .unwrap_or(now);
-    let end = midnight + chrono::Duration::days(AGENDA_DAYS);
-    let wire = |time: DateTime<Local>| {
-        time.with_timezone(&Utc)
-            .to_rfc3339_opts(SecondsFormat::Secs, true)
-    };
-    (wire(midnight), wire(end))
-}
-
 pub(super) struct Entry {
     pub event: CalendarEvent,
     pub start: Option<Moment>,
@@ -920,7 +1178,7 @@ pub(super) struct Entry {
 }
 
 impl Entry {
-    /// Whether the user can remove it here; Mailflare's schedule is read-only.
+    /// Whether the user can remove it here; the mail server's and a followed calendar's are read-only.
     pub(super) fn removable(&self) -> bool {
         !self.event.id.is_empty() && !self.event.source.eq_ignore_ascii_case("mailflare")
     }
@@ -1022,7 +1280,8 @@ pub(super) fn source_label(source: &str) -> Option<String> {
     match source.trim().to_lowercase().as_str() {
         "" | "local" => None,
         "ics" => Some("Imported".into()),
-        "mailflare" => Some("Mailflare".into()),
+        "mailflare" => Some("Mail server".into()),
+        "feed" => Some("Calendar".into()),
         other => {
             let mut chars = other.chars();
             chars
@@ -1138,7 +1397,7 @@ fn check_setup(
     secrets: &[(&str, String)],
 ) -> Result<(), String> {
     for (label, url) in [
-        ("Mailflare URL", &config.mailflare_url),
+        ("Mail server URL", &config.mailflare_url),
         ("Inbound Worker URL", &config.inbound_url),
     ] {
         if let Some(issue) = url_issue(url) {
@@ -1146,7 +1405,7 @@ fn check_setup(
         }
     }
     if mailflare_on && config.mailflare_url.trim().is_empty() {
-        return Err("Add the Mailflare URL before letting bots use it.".into());
+        return Err("Add the mail server URL before letting bots use it.".into());
     }
     if config.send_provider == "cloudflare" && !account_id_ok(&config.cloudflare_account_id) {
         return Err(
@@ -1323,7 +1582,8 @@ mod tests {
             "Tomorrow \u{b7} Fri 15 May"
         );
         assert_eq!(source_label("local"), None);
-        assert_eq!(source_label("mailflare").as_deref(), Some("Mailflare"));
+        assert_eq!(source_label("mailflare").as_deref(), Some("Mail server"));
+        assert_eq!(source_label("feed").as_deref(), Some("Calendar"));
         assert_eq!(source_label("ics").as_deref(), Some("Imported"));
 
         let remote = CalendarEvent {
@@ -1360,13 +1620,38 @@ mod tests {
     }
 
     #[test]
-    fn the_agenda_window_is_a_month_of_utc_instants() {
-        let (from, to) = window(Local::now());
-        let from = DateTime::parse_from_rfc3339(&from).unwrap();
-        let to = DateTime::parse_from_rfc3339(&to).unwrap();
-        assert!(from <= Local::now());
-        assert!(to - from >= chrono::Duration::days(AGENDA_DAYS - 1));
-        assert!(to - from <= chrono::Duration::days(90));
+    fn a_span_lays_out_whole_weeks_and_steps_by_week_or_month() {
+        let day = NaiveDate::from_ymd_opt(2026, 11, 8).unwrap();
+        let month = grid_days(Span::Month, day);
+        assert_eq!(month.len(), 42);
+        assert_eq!(month[0], NaiveDate::from_ymd_opt(2026, 10, 26).unwrap());
+        assert_eq!(month[0].weekday(), chrono::Weekday::Mon);
+        let week = grid_days(Span::Week, day);
+        assert_eq!(week[0], NaiveDate::from_ymd_opt(2026, 11, 2).unwrap());
+        assert_eq!(week[6], day);
+        assert!(in_span(
+            Span::Month,
+            day,
+            NaiveDate::from_ymd_opt(2026, 11, 30).unwrap()
+        ));
+        assert!(!in_span(Span::Month, day, month[0]));
+        let jan31 = NaiveDate::from_ymd_opt(2027, 1, 31).unwrap();
+        assert_eq!(
+            shift_months(jan31, 1),
+            NaiveDate::from_ymd_opt(2027, 2, 28).unwrap()
+        );
+        assert_eq!(
+            shift_months(day, -11),
+            NaiveDate::from_ymd_opt(2025, 12, 8).unwrap()
+        );
+        assert_eq!(span_title(Span::Month, day), "November 2026");
+        assert_eq!(span_title(Span::Week, day), "2 \u{2013} 8 Nov 2026");
+        let (from, to) = day_window(month[0], month[41]);
+        let (from, to) = (
+            DateTime::parse_from_rfc3339(&from).unwrap(),
+            DateTime::parse_from_rfc3339(&to).unwrap(),
+        );
+        assert!(to - from >= chrono::Duration::days(41) && to - from <= chrono::Duration::days(43));
     }
 
     #[test]
@@ -1456,5 +1741,79 @@ mod tests {
         assert!(check_ics("begin:vcalendar\nend:vcalendar").is_ok());
         assert!(check_ics("hello").is_err());
         assert!(check_ics(&"x".repeat(ICS_LIMIT + 1)).is_err());
+    }
+}
+
+#[cfg(test)]
+mod calendar_tests {
+    use super::*;
+    use gpui::{Modifiers, TestAppContext, VisualTestContext, px};
+    use std::sync::{Arc, Mutex};
+
+    fn agenda(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext, PathBuf) {
+        let dir = std::env::temp_dir().join(format!(
+            "monobot-native-agenda-{}",
+            monocode_core::mono::new_id()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let store: Database = Arc::new(Mutex::new(
+            monocode_core::store::Store::open(&dir.join("native.sqlite")).unwrap(),
+        ));
+        let data_dir = dir.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| Workspace::new(data_dir, store, cx));
+        (view, cx, dir)
+    }
+
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        cx.refresh().unwrap();
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} is not on screen"));
+        cx.simulate_click(bounds.center(), Modifiers::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn the_agenda_is_a_month_or_a_week_and_a_day_is_chosen_with_a_click(cx: &mut TestAppContext) {
+        let (view, cx, _dir) = agenda(cx);
+        cx.simulate_resize(gpui::size(px(1200.), px(1400.)));
+        view.update(cx, |view, cx| view.activate(cx));
+        cx.run_until_parked();
+        let today = Local::now().date_naive();
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.span, Span::Month);
+            assert_eq!(view.selected, today);
+        });
+        click(cx, "agenda-span-week");
+        view.read_with(cx, |view, _| assert_eq!(view.span, Span::Week));
+        let monday = grid_days(Span::Week, today)[0];
+        let selector: &'static str = format!("agenda-day-{monday}").leak();
+        click(cx, selector);
+        view.read_with(cx, |view, _| assert_eq!(view.selected, monday));
+        click(cx, "agenda-span-month");
+        click(cx, "agenda-calendar");
+        view.read_with(cx, |view, _| assert!(view.feed_open));
+        cx.refresh().unwrap();
+        assert!(cx.debug_bounds("agenda-feed").is_some());
+        click(cx, "agenda-feed-save");
+        view.read_with(cx, |view, _| {
+            assert!(
+                view.feed_error.is_some(),
+                "an empty address is not followed"
+            );
+            assert!(!view.feed.connected);
+        });
+    }
+
+    #[gpui::test]
+    fn the_own_domain_settings_stay_folded_until_asked_for(cx: &mut TestAppContext) {
+        let (view, cx, _dir) = agenda(cx);
+        view.update(cx, |view, cx| view.set_page(Page::Setup, cx));
+        cx.run_until_parked();
+        cx.refresh().unwrap();
+        assert!(cx.debug_bounds("agenda-advanced-intro").is_some());
+        view.read_with(cx, |view, _| assert!(!view.advanced_open));
+        click(cx, "agenda-advanced-toggle");
+        view.read_with(cx, |view, _| assert!(view.advanced_open));
     }
 }

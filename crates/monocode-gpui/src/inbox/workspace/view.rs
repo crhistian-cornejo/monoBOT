@@ -9,7 +9,7 @@ const LABEL: f32 = 0.7;
 const COLUMN: f32 = 720.;
 
 /// The square icon buttons of the bars (`size-7`).
-fn tool(id: impl Into<SharedString>, label: &str, name: &'static str) -> Stateful<Div> {
+pub(super) fn tool(id: impl Into<SharedString>, label: &str, name: &'static str) -> Stateful<Div> {
     let id: SharedString = id.into();
     let tip = label.to_owned();
     div()
@@ -29,7 +29,7 @@ fn tool(id: impl Into<SharedString>, label: &str, name: &'static str) -> Statefu
 }
 
 /// The flat text buttons of the mail (`rounded-md px-2.5 py-1 text-[12px] hover:bg-content/8`).
-fn text_button(
+pub(super) fn text_button(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     ink: f32,
@@ -54,7 +54,7 @@ fn text_button(
 }
 
 /// The app's primary action (`primary-action`): the accent when the user picked one.
-fn primary(
+pub(super) fn primary(
     id: impl Into<SharedString>,
     label: impl Into<SharedString>,
     enabled: bool,
@@ -84,7 +84,7 @@ fn primary(
         .child(label)
 }
 
-fn alert(text: impl Into<SharedString>) -> Div {
+pub(super) fn alert(text: impl Into<SharedString>) -> Div {
     div()
         .text_size(px(12.))
         .line_height(px(18.))
@@ -92,7 +92,7 @@ fn alert(text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
-fn hint(text: impl Into<SharedString>) -> Div {
+pub(super) fn hint(text: impl Into<SharedString>) -> Div {
     div()
         .text_size(px(11.))
         .line_height(px(16.))
@@ -101,7 +101,7 @@ fn hint(text: impl Into<SharedString>) -> Div {
 }
 
 /// A labelled field: `text-[12px] text-content/70` over an `h-9` bordered box.
-fn labelled(
+pub(super) fn labelled(
     label: impl Into<SharedString>,
     input: &Entity<Input>,
     window: &Window,
@@ -210,7 +210,7 @@ fn section(title: &'static str, text: &'static str) -> Div {
 }
 
 impl Workspace {
-    fn event_row(&self, entry: &Entry, cx: &mut Context<Self>) -> Div {
+    pub(super) fn event_row(&self, entry: &Entry, cx: &mut Context<Self>) -> Div {
         let event = &entry.event;
         let note = event
             .description
@@ -381,7 +381,7 @@ impl Workspace {
             .border_b_1()
             .border_color(content(0.07))
             .child(self.page_tab("agenda-page-agenda", "Agenda", Page::Agenda, cx))
-            .child(self.page_tab("agenda-page-setup", "Setup", Page::Setup, cx))
+            .child(self.page_tab("agenda-page-setup", "Advanced", Page::Setup, cx))
             .child(div().flex_1())
             .when(agenda, |d| {
                 d.child(
@@ -411,6 +411,27 @@ impl Workspace {
                     .on_click(cx.listener(|this, _, _, cx| this.export_ics(cx))),
                 )
                 .child(
+                    text_button(
+                        "agenda-calendar",
+                        if self.feed.connected {
+                            "Google Calendar ✓"
+                        } else {
+                            "Google Calendar"
+                        },
+                        0.7,
+                        idle,
+                    )
+                    .debug_selector(|| "agenda-calendar".into())
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.feed_open = !this.feed_open;
+                        this.feed_error = None;
+                        if this.feed_open {
+                            window.focus(&this.feed_input.focus_handle(cx), cx);
+                        }
+                        cx.notify();
+                    })),
+                )
+                .child(
                     tool(
                         "agenda-refresh",
                         "Refresh agenda",
@@ -436,124 +457,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn agenda_page(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let today = Local::now().date_naive();
-        let days = group_days(&self.events);
-        let waiting = self.loading && self.refreshed.is_none();
-        let local_only = self.config_loaded && self.config.mailflare_url.trim().is_empty();
-        let mut column = div()
-            .w_full()
-            .max_w(px(COLUMN))
-            .px(px(20.))
-            .py(px(20.))
-            .flex()
-            .flex_col()
-            .gap(px(16.))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .text_size(px(15.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(content(1.))
-                            .child("Next 30 days"),
-                    )
-                    .child(hint(
-                        "Reminders and time blocks kept on this computer. MonoBOT never invites anyone.",
-                    )),
-            );
-        if let Some(notice) = self.notice.clone() {
-            column = column.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .text_size(px(12.))
-                    .text_color(content(0.7))
-                    .child(icon("check", 14.).text_color(content(0.7)))
-                    .child(notice),
-            );
-        }
-        if let Some(error) = self.error.clone() {
-            column = column.child(alert(error));
-        }
-        if self.form_open {
-            column = column.child(self.event_form(window, cx));
-        }
-        if waiting {
-            column = column.child(hint("Loading your agenda…"));
-        } else if days.is_empty() && !self.form_open {
-            column = column.child(
-                div()
-                    .py(px(40.))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(10.))
-                    .child(icon("clock", 24.).text_color(content(0.3)))
-                    .child(
-                        div()
-                            .text_size(px(13.))
-                            .text_color(content(0.8))
-                            .child("Nothing scheduled in the next 30 days"),
-                    )
-                    .child(
-                        div()
-                            .max_w(px(420.))
-                            .text_size(px(12.))
-                            .line_height(px(19.))
-                            .text_color(content(0.5))
-                            .text_center()
-                            .child(if local_only {
-                                "Add a reminder or time block, paste a calendar file with Import .ics, or connect Mailflare in Setup to see your mail schedule here."
-                            } else {
-                                "Add a reminder or time block, or paste a calendar file with Import .ics."
-                            }),
-                    ),
-            );
-        }
-        for day in days {
-            let heading = day
-                .date
-                .map(|date| day_heading(date, today))
-                .unwrap_or_else(|| "Unknown date".into());
-            let is_today = day.date == Some(today);
-            let rows = day
-                .entries
-                .iter()
-                .map(|entry| self.event_row(entry, cx))
-                .collect::<Vec<_>>();
-            column = column.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .pb(px(6.))
-                            .text_size(px(11.))
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(if is_today {
-                                accent_color()
-                            } else {
-                                content(0.5)
-                            })
-                            .child(heading),
-                    )
-                    .children(rows),
-            );
-        }
-        div()
-            .id("agenda-scroll")
-            .size_full()
-            .overflow_y_scroll()
-            .child(div().w_full().flex().justify_center().child(column))
-            .into_any_element()
-    }
-
-    fn event_form(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    pub(super) fn event_form(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let busy = self.busy == Some(Busy::Event);
         div()
             .flex()
@@ -841,6 +745,62 @@ impl Workspace {
                 })
                 .into_any_element();
         }
+        let intro = div()
+            .id("agenda-advanced-intro")
+            .debug_selector(|| "agenda-advanced-intro".into())
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .p(px(16.))
+            .mb(px(24.))
+            .border_1()
+            .border_color(content(0.1))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(content(1.))
+                    .child("Only for mail on a domain you own"),
+            )
+            .child(hint(
+                "Gmail and iCloud need nothing here: connect them in Email › Accounts with an app password, and your replies go out through them. Use these settings only if your mail lives on your own domain or you run your own mail server.",
+            ))
+            .child(
+                div().flex().child(
+                    text_button(
+                        "agenda-advanced-toggle",
+                        if self.advanced_open {
+                            "Hide settings"
+                        } else {
+                            "Show settings"
+                        },
+                        0.8,
+                        true,
+                    )
+                    .debug_selector(|| "agenda-advanced-toggle".into())
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.advanced_open = !this.advanced_open;
+                        cx.notify();
+                    })),
+                ),
+            );
+        if !self.advanced_open {
+            return div()
+                .id("agenda-setup-scroll")
+                .size_full()
+                .overflow_y_scroll()
+                .child(
+                    div().w_full().flex().justify_center().child(
+                        div()
+                            .w_full()
+                            .max_w(px(COLUMN))
+                            .px(px(20.))
+                            .pt(px(20.))
+                            .child(intro),
+                    ),
+                )
+                .into_any_element();
+        }
         let provider = self.send_provider.clone();
         let options = self.bot_options();
         let pending = self.pending(cx);
@@ -848,14 +808,14 @@ impl Workspace {
         let saving = self.busy == Some(Busy::Save);
 
         let mailflare = section(
-            "Mailflare",
-            "A Mailflare server you host on Cloudflare lets bots read your mail and schedule through MCP. MonoBOT connects to the address below with the token you save here.",
+            "Remote mail server",
+            "A mail server you host that speaks MCP can let bots read that mailbox and its schedule. MonoBOT connects to the address below with the token you save here.",
         )
         .child(labelled("Server URL", &self.mailflare_url, window, cx))
         .child(self.secret_field(
             MAILFLARE,
             "Access token",
-            "The token your Mailflare server expects.",
+            "The token your mail server expects.",
             window,
             cx,
         ))
@@ -872,16 +832,16 @@ impl Workspace {
                             div()
                                 .text_size(px(13.))
                                 .text_color(content(1.))
-                                .child("Turn on the Mailflare connector"),
+                                .child("Let bots use this server"),
                         )
                         .child(hint(
-                            "Needs the URL and a saved token. It does not give any bot access by itself: a bot can use Mailflare only after you add it to that bot's tools.",
+                            "Needs the URL and a saved token. It gives no bot access by itself: a bot can use it only after you add it to that bot's tools.",
                         )),
                 )
                 .child(
                     switch(
                         "agenda-mailflare-enabled",
-                        "Turn on the Mailflare connector",
+                        "Let bots use this server",
                         self.mailflare_on,
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -1040,6 +1000,7 @@ impl Workspace {
                                 .pt(px(20.))
                                 .flex()
                                 .flex_col()
+                                .child(intro)
                                 .child(mailflare)
                                 .child(sending)
                                 .child(inbound)

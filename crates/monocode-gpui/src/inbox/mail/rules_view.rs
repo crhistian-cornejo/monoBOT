@@ -1,4 +1,4 @@
-//! The Email tab's rules (Mailflare's routing on the user's own Gmail) and what the agents did
+//! The Email tab's rules (on the user's own Gmail) and what the agents did
 //! with the mail. A rule says which new mail it is for (a sender, words of the subject) and
 //! what happens to it: a Gmail label, a star, read, archived, handed to an agent. Only the user
 //! makes or changes rules, here.

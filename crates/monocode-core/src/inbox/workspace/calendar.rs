@@ -104,7 +104,7 @@ impl Service {
     pub fn agenda(&self, start: &str, end: &str) -> Result<Vec<CalendarEvent>, String> {
         self.agenda_with_remote(start, end, true)
     }
-    /// Agent callers must pass false unless the user granted Mailflare to
+    /// Agent callers must pass false unless the user granted the remote mail server to
     /// their identity. The user's native Agenda view may include it directly.
     pub fn agenda_with_remote(
         &self,
@@ -122,12 +122,12 @@ impl Service {
             let schedule = self.mailflare_call("get_schedule", json!({"start":start,"end":end}))?;
             if schedule["truncated"] == true {
                 return Err(
-                    "Mailflare's schedule was truncated. Choose a shorter date range.".into(),
+                    "The mail server's schedule was truncated. Choose a shorter date range.".into(),
                 );
             }
             let remote = schedule["events"]
                 .as_array()
-                .ok_or("Mailflare returned an invalid schedule.")?;
+                .ok_or("The mail server returned an invalid schedule.")?;
             for item in remote {
                 let text = |key: &str| item[key].as_str().unwrap_or("").to_owned();
                 let event = checked(
@@ -144,6 +144,19 @@ impl Service {
                 events.push(event);
             }
         }
+        events.sort_by_key(|event| {
+            instant(&event.start)
+                .map(|at| at.timestamp_millis())
+                .unwrap_or(0)
+        });
+        Ok(events)
+    }
+    /// The user's own agenda view: their events, the calendar they follow, and the remote
+    /// mail server's schedule when one is set up. Agents never get the followed calendar.
+    pub fn agenda_for_user(&self, start: &str, end: &str) -> Result<Vec<CalendarEvent>, String> {
+        let (from, to) = range(start, end)?;
+        let mut events = self.agenda_with_remote(start, end, true)?;
+        events.extend(self.feed_events(from, to));
         events.sort_by_key(|event| {
             instant(&event.start)
                 .map(|at| at.timestamp_millis())
@@ -170,7 +183,7 @@ impl Service {
                         "RRULE" | "RDATE" | "EXDATE" | "RECURRENCE-ID"
                     )
                 }) {
-                    return Err("Recurring ICS events are not imported. View recurring schedules through Mailflare instead.".into());
+                    return Err("Recurring events are not imported from a file. Follow the calendar by its iCal address instead (Agenda › Calendar).".into());
                 }
                 let property = |name: &str| event.properties.iter().find(|p| p.name == name);
                 let value = |name: &str| {
@@ -276,6 +289,58 @@ impl Service {
             .join("\r\n")
             + "\r\n")
     }
+}
+
+/// A calendar date as an instant with its offset, its zone's name, and whether it is a whole
+/// day (`VALUE=DATE`).
+pub(super) fn ics_date_of(
+    property: &ical::property::Property,
+) -> Result<(DateTime<chrono::FixedOffset>, String, bool), String> {
+    let all_day = property
+        .value
+        .as_deref()
+        .is_some_and(|v| v.trim().len() == 8);
+    let (start, timezone) = ics_date(property)?;
+    Ok((instant(&start)?, timezone, all_day))
+}
+
+/// An event of a followed calendar, checked like the user's own but read only.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn checked_feed(
+    id: String,
+    title: &str,
+    description: &str,
+    start: DateTime<chrono::FixedOffset>,
+    end: DateTime<chrono::FixedOffset>,
+    timezone: &str,
+    all_day: bool,
+    uid: &str,
+) -> Result<CalendarEvent, String> {
+    let title: String = title
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(500)
+        .collect();
+    let title = if title.trim().is_empty() {
+        "(No title)".to_owned()
+    } else {
+        title.trim().to_owned()
+    };
+    let zone: Tz = timezone.parse().unwrap_or(chrono_tz::UTC);
+    if end <= start {
+        return Err("The event must end after it starts.".into());
+    }
+    Ok(CalendarEvent {
+        id,
+        title,
+        start: start.with_timezone(&zone).to_rfc3339(),
+        end: end.with_timezone(&zone).to_rfc3339(),
+        timezone: zone.name().into(),
+        description: description.chars().take(10_000).collect(),
+        source: "feed".into(),
+        uid: uid.chars().take(1_000).collect(),
+        all_day,
+    })
 }
 
 fn ics_date(property: &ical::property::Property) -> Result<(String, String), String> {
