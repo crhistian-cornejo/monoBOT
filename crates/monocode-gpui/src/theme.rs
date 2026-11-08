@@ -98,29 +98,44 @@ pub(crate) fn configure_project(
     };
     let palette = crate::settings::palette(workspace_theme, light);
     let glass = window_glass(p, system_light);
+    // An untouched preset paints its own sidebar and main-pane pair in each
+    // mode; a tint moved on the sliders recolors them from hue and saturation.
+    let preset = crate::settings::is_preset_tint(workspace_theme, hue, saturation, dark_lightness);
+    let alpha = if glass {
+        p.sidebar_opacity.clamp(15, 100) as f32 / 100.
+    } else {
+        1.
+    };
     // Both layouts derive their surface roles from the same saved settings.
-    let shell = gpui::hsla(
-        hue.min(360) as f32 / 360.,
-        saturation.min(100) as f32 / 100.,
-        if light {
-            // Tauri's faintly grey light sidebar, hsl(… 97.5%).
-            0.975
-        } else {
-            dark_lightness.min(30) as f32 / 100.
-        },
-        if glass {
-            p.sidebar_opacity.clamp(15, 100) as f32 / 100.
-        } else {
-            1.
-        },
-    );
+    let shell = if preset {
+        let mut shell: Hsla = rgb(palette.surface).into();
+        shell.a = alpha;
+        shell
+    } else {
+        gpui::hsla(
+            hue.min(360) as f32 / 360.,
+            saturation.min(100) as f32 / 100.,
+            if light {
+                // Tauri's faintly grey light sidebar, hsl(… 97.5%).
+                0.975
+            } else {
+                dark_lightness.min(30) as f32 / 100.
+            },
+            alpha,
+        )
+    };
     let mut pane = shell;
     pane.a = if glass && p.body_glass { 0.28 } else { 1. };
     // The window already paints its glass tint. A glass content card reveals
     // that layer directly; adding another tint would hide the desktop twice.
     // Solid content keeps its deeper dark tone or white light appearance.
-    let mut inset_pane = shell;
-    inset_pane.l = if light { 1. } else { shell.l * 0.45 };
+    let mut inset_pane = if preset {
+        rgb(palette.panel).into()
+    } else {
+        let mut inset = shell;
+        inset.l = if light { 1. } else { shell.l * 0.45 };
+        inset
+    };
     inset_pane.a = if glass && p.body_glass { 0. } else { 1. };
     let custom = accent_color
         .filter(|s| s.len() == 7)
@@ -398,6 +413,13 @@ pub(crate) fn pane_fill() -> Hsla {
     } else {
         rgb(CHAT).into()
     }
+}
+/// The boxy layouts' main column: the theme's main-pane color, as translucent
+/// as the pane, so it stands apart from the sidebar's chrome beside it.
+pub(crate) fn main_pane_fill() -> Hsla {
+    let mut fill = inset_pane_fill();
+    fill.a = pane_fill().a;
+    fill
 }
 /// `--color-background-base`: the theme's opaque surface, also the ink on
 /// solid `bg-content` buttons.
@@ -836,6 +858,32 @@ mod composer_tests {
         assert_eq!(composer_blur(), 0.);
         assert_eq!(composer_border(false), content(0.1));
         assert_eq!(composer_border(true), content(0.2));
+    }
+
+    #[test]
+    fn a_preset_paints_its_own_sidebar_and_main_pane_in_each_mode() {
+        let mut preferences = crate::settings::Preferences::default();
+        preferences.apply_workspace_theme("solarized".into());
+        preferences.body_glass = false;
+        preferences.theme = "light".into();
+        configure(&preferences, false);
+        // Solarized Light: base2 sidebar around a base3 editor, not a cyan
+        // wash borrowed from the dark surface's hue.
+        assert_eq!(background_base(), rgb(0xeee8d5).into());
+        assert_eq!(inset_pane_fill(), rgb(0xfdf6e3).into());
+
+        preferences.theme = "dark".into();
+        configure(&preferences, false);
+        let mut base = background_base();
+        base.a = 1.;
+        assert_eq!(base, rgb(0x002b36).into());
+        assert_eq!(inset_pane_fill(), rgb(0x00212b).into());
+
+        // A tint moved on the sliders recolors the surfaces from them.
+        preferences.theme = "light".into();
+        preferences.theme_hue = 120;
+        configure(&preferences, false);
+        assert_eq!(inset_pane_fill(), gpui::hsla(1. / 3., 1., 1., 1.));
     }
 
     #[test]

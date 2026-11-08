@@ -212,10 +212,11 @@ impl Preferences {
     }
 
     pub(crate) fn apply_workspace_theme(&mut self, id: String) {
-        let color: gpui::Hsla = gpui::rgb(super::palette(&id, false).surface).into();
-        self.theme_hue = (color.h * 360.).round() as u32;
-        self.theme_saturation = (color.s * 100.).round() as u32;
-        self.theme_dark_lightness = ((color.l * 100.).round() as u32).min(30);
+        (
+            self.theme_hue,
+            self.theme_saturation,
+            self.theme_dark_lightness,
+        ) = super::preset_tint(&id);
         self.workspace_theme = id;
     }
 

@@ -197,14 +197,10 @@ impl ThemeDialog {
                                     .on_click(cx.listener(move |this, _, _, cx| {
                                         // As Appearance's preset picker: the preset's
                                         // dark surface sets the window tint too.
-                                        let surface: gpui::Hsla =
-                                            rgb(crate::settings::palette(id, false).surface).into();
                                         this.change(cx, |theme| {
                                             theme.workspace_theme = id.into();
-                                            theme.hue = (surface.h * 360.).round() as u32;
-                                            theme.saturation = (surface.s * 100.).round() as u32;
-                                            theme.dark_lightness =
-                                                ((surface.l * 100.).round() as u32).min(30);
+                                            (theme.hue, theme.saturation, theme.dark_lightness) =
+                                                crate::settings::preset_tint(id);
                                         });
                                     }))
                             }),

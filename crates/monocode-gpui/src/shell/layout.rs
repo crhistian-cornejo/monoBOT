@@ -405,7 +405,9 @@ impl Shell {
                         } else {
                             crate::right_panel::stroke()
                         })
-                        .when(original, |d| d.bg(pane_fill()))
+                        // The same chrome wash as the inset layout's sidebar,
+                        // so it reads apart from the main column's own color.
+                        .bg(inset_chrome_wash())
                         .child(
                             // Full width while it slides; the frame clips it.
                             div()
@@ -439,7 +441,7 @@ impl Shell {
                     .h_full()
                     .flex()
                     .flex_col()
-                    .when(!compact_surface, |d| d.bg(pane_fill()))
+                    .when(!compact_surface, |d| d.bg(main_pane_fill()))
                     .when(compact_surface, |d| {
                         // Keep one continuous shell tint behind all traffic
                         // lights; the content wash starts below the title bar.
@@ -451,7 +453,7 @@ impl Shell {
                                 .bottom_0()
                                 .left_0()
                                 .right_0()
-                                .bg(pane_fill()),
+                                .bg(main_pane_fill()),
                         )
                     })
                     .child(

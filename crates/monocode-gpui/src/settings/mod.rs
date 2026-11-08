@@ -12,7 +12,7 @@ mod pages;
 mod palettes;
 mod preferences;
 mod skill_document;
-pub(crate) use palettes::{PALETTES, palette};
+pub(crate) use palettes::{PALETTES, is_preset_tint, palette, preset_tint};
 pub(crate) mod widgets;
 
 pub(crate) use keymap::apply as apply_keybindings;
