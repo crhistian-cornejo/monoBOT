@@ -9,7 +9,7 @@ App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay R
 | `crates/{mobile-link,email,http,dictation,voice,visual}` | Crates compartidos que enlaza el core o la app. |
 | `mobile/` | App Expo (iOS/Android). Proyecto pnpm propio con su lockfile; tiene su propio `AGENTS.md`. |
 | `host/` | Host remoto en Node (`monocode-host`) que instala la app por SSH. |
-| `deploy/cloudflare-mail/` | Worker opcional de correo entrante (Cloudflare Email Routing → R2 + D1). |
+| `deploy/cloudflare-mail/` | Worker opcional de correo entrante en Rust → WebAssembly (Cloudflare Email Routing → R2 + D1). Crate aparte, no está en el workspace. |
 | `vendor/gpui-pre*/` | GPUI fijado y parcheado. No lo actualices sin leer `docs/native/migration.md`. |
 | `scripts/` | Runner de desarrollo, empaquetado, publicación y generadores de JS embebido. |
 

@@ -51,8 +51,12 @@ Run EAS commands from `mobile/`. The iOS development and production profiles pin
 
 The `development` profile builds for Android or physical iOS devices; `development-simulator` builds for the iOS simulator. EAS requires an Expo account, and physical iOS distribution requires Apple signing credentials.
 
+The app's identity is `com.crhistiancornejo.monobot` (iOS and Android). The first time, link it to your own Expo project: `eas init` writes `owner` and `extra.eas.projectId` into `app.json`, and `eas update:configure` adds the update URL. Push notifications need that project ID.
+
 ```bash
 pnpm exec eas-cli@latest login
+pnpm exec eas-cli@latest init
+pnpm exec eas-cli@latest update:configure
 pnpm exec eas-cli@latest build --platform ios --profile development-simulator
 # or: pnpm exec eas-cli@latest build --platform android --profile development
 ```

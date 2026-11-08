@@ -296,7 +296,7 @@ fn request(url: &str) -> Result<ureq::Response, String> {
         .timeout_read(Duration::from_secs(60))
         .build()
         .get(url)
-        .set("User-Agent", "Monocode-Native-Updater")
+        .set("User-Agent", "MonoBOT-Updater")
         .set("Accept-Encoding", "identity")
         .call()
         .map_err(|e| e.to_string())?;

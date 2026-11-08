@@ -4,8 +4,8 @@ Pod::Spec.new do |s|
   s.summary = 'MonoBOT direct QUIC connection'
   s.description = s.summary
   s.license = { :type => 'MIT' }
-  s.author = 'MonoBOT'
-  s.homepage = 'https://usemono.dev'
+  s.author = 'Crhistian Cornejo'
+  s.homepage = 'https://github.com/crhistian-cornejo/monoBOT'
   s.platforms = { :ios => '16.4' }
   s.source = { :git => 'https://github.com/crhistian-cornejo/monoBOT.git' }
   s.static_framework = true

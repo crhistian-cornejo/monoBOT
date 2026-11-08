@@ -139,7 +139,7 @@ pub(crate) fn install(prefs: &crate::settings::Preferences, cx: &mut App) {
             MenuItem::action("Zoom", ZoomWindow),
         ]),
         Menu::new("Help").items([
-            MenuItem::action("MonoBOT Website", OpenUrl("https://usemono.dev")),
+            MenuItem::action("MonoBOT on GitHub", OpenUrl("https://github.com/crhistian-cornejo/monoBOT")),
             MenuItem::action("View on GitHub", OpenUrl(REPO)),
             MenuItem::separator(),
             MenuItem::action(

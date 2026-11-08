@@ -92,4 +92,6 @@ Optional mail infrastructure, Mailflare MCP, agent inboxes and agenda:
 
 ## License
 
+MonoBOT is developed by Crhistian Cornejo. It started as a fork of Monocode by Nick, also MIT-licensed, whose copyright notice is kept in [LICENSE](LICENSE) as the license requires.
+
 [MIT](LICENSE). Provider names and logos are trademarks of their respective owners. See [NOTICE](NOTICE).

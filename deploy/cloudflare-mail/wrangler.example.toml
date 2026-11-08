@@ -2,8 +2,9 @@
 # No account id is needed here: wrangler takes it from `wrangler login` or
 # from CLOUDFLARE_ACCOUNT_ID in the environment.
 name = "monobot-inbound-mail"
-main = "src/index.ts"
+main = "build/worker/shim.mjs"
 compatibility_date = "2025-06-01"
+
 
 # The HTTP API is reachable only through the route below, never through
 # a public workers.dev hostname.
@@ -11,6 +12,10 @@ workers_dev = false
 preview_urls = false
 
 # routes = [{ pattern = "mail-api.REPLACE_WITH_YOUR_DOMAIN", custom_domain = true }]
+
+# Rust compiled to WebAssembly by worker-build (`cargo install worker-build`).
+[build]
+command = "worker-build --release"
 
 [triggers]
 # Daily retention sweep (UTC).

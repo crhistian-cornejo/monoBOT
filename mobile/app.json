@@ -1,8 +1,7 @@
 {
   "expo": {
     "name": "MonoBOT",
-    "slug": "monocode-mobile",
-    "owner": "hardbeat920",
+    "slug": "monobot",
     "version": "1.0.0",
     "runtimeVersion": {
       "policy": "fingerprint"
@@ -13,7 +12,7 @@
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/app.icon",
-      "bundleIdentifier": "com.hardbeat920.monocode-mobile",
+      "bundleIdentifier": "com.crhistiancornejo.monobot",
       "infoPlist": {
         "CFBundleDisplayName": "MonoBOT",
         "NSLocalNetworkUsageDescription": "Connect securely to your paired MonoBOT desktop.",
@@ -39,7 +38,8 @@
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS"
-      ]
+      ],
+      "package": "com.crhistiancornejo.monobot"
     },
     "web": {
       "output": "static",
@@ -101,12 +101,8 @@
       "reactCompiler": true
     },
     "extra": {
-      "eas": {
-        "projectId": "f80fe97b-6056-48a4-9fb2-b45ca2c8974b"
-      }
+      "eas": {}
     },
-    "updates": {
-      "url": "https://u.expo.dev/f80fe97b-6056-48a4-9fb2-b45ca2c8974b"
-    }
+    "updates": {}
   }
 }

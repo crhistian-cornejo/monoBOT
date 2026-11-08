@@ -43,7 +43,7 @@ a los crates MIT de MonoBOT.
 | --- | --- |
 | Mailflare MCP | Conector nativo, desactivado inicialmente y concedido explícitamente a cada bot. Proxy local con lista de herramientas permitidas y token en el llavero del sistema. |
 | Envío HTTP | Resend y Cloudflare Email Sending, además de SMTP. Lo usa el botón Enviar existente; los agentes solo guardan borradores. |
-| Recepción | Worker opcional, Email Routing → R2 + D1. El escritorio descarga páginas por HTTPS, sin abrir puertos públicos ni mantener IMAP para esos alias. |
+| Recepción | Worker opcional en Rust (WebAssembly), Email Routing → R2 + D1. El escritorio descarga páginas por HTTPS, sin abrir puertos públicos ni mantener IMAP para esos alias. |
 | Bandejas de bots | Alias → ID de bot y remitentes permitidos. Cola persistente; se crea o reanuda la conversación del bot. |
 | Agenda | Eventos locales, importación/exportación ICS y lectura del calendario de Mailflare, con zonas IANA y fechas con offset. |
 
@@ -223,7 +223,7 @@ Nada de esta sección se ha ejecutado contra una cuenta real.
 - [x] Ajustar retención y lifecycle de R2 (30 y 37 días). El lifecycle debe ser mayor que
   `RETENTION_DAYS` (por defecto 30 días, lifecycle sugerido 37).
 - [ ] Comprobar con correo real que Cloudflare antepone exactamente su
-  `Authentication-Results` y que el formato coincide con `auth-results.ts`.
+  `Authentication-Results` y que el formato coincide con `auth_results.rs`.
   Sin esa evidencia, dejar las rutas de bots desactivadas. No rebajar la
   comprobación para forzar que funcione.
 - [ ] Verificar que un fallo de D1/R2 durante `email()` no se presenta al
@@ -276,8 +276,8 @@ cargo test -p monocode-gpui --profile native-dev cloud_mail_waits_for_a_separate
 cargo test -p monocode-gpui --profile native-dev inbox::workspace::tests
 cargo check -p monocode-gpui --profile native-dev
 cd deploy/cloudflare-mail
-node ../../node_modules/typescript/bin/tsc -p tsconfig.json
-node --test "test/*.test.ts"
+cargo test
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
 ```
 
 Documentación de contratos públicos:

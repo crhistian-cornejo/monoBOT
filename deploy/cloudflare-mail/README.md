@@ -1,7 +1,9 @@
 # MonoBOT inbound mail Worker (optional)
 
-A small Cloudflare Worker that receives mail through Cloudflare Email Routing,
-stores it durably, and lets the desktop app pull it later over HTTPS. Nothing
+A small Cloudflare Worker, written in Rust and compiled to WebAssembly with
+[workers-rs](https://github.com/cloudflare/workers-rs), that receives mail
+through Cloudflare Email Routing, stores it durably, and lets the desktop app
+pull it later over HTTPS. Nothing
 here runs unless you deploy it; MonoBOT works without it.
 
 ```
@@ -123,13 +125,16 @@ because the account has no domain yet. Its `ALLOWED_RECIPIENTS` is a
 placeholder, so it accepts no mail until a domain is added and the route below
 is configured. See [mail workspace](../../docs/native/mail-workspace.md).
 
-Prerequisites: a Cloudflare account, a domain on Cloudflare DNS, Node 22+.
+Prerequisites: a Cloudflare account, a domain on Cloudflare DNS, stable Rust
+with the `wasm32-unknown-unknown` target, `worker-build` and Node 22+ (only
+for the `wrangler` CLI, run through `npx`).
 Commands run from `deploy/cloudflare-mail`. No account id is stored in files;
 wrangler uses your login (or `CLOUDFLARE_ACCOUNT_ID`).
 
 ```sh
-npm install                       # typescript, @types/node, wrangler (this folder only)
-npm run check                     # typecheck + tests
+rustup target add wasm32-unknown-unknown
+cargo install worker-build
+cargo test                        # logic tests on the host
 
 npx wrangler login
 cp wrangler.example.toml wrangler.toml   # git-ignored
@@ -177,7 +182,7 @@ EOF
 Check that the first message shows `authFailed: false` for a sender that passes
 SPF and DMARC. If it is always `true`, inspect the raw message (fetch `/v1/messages/1`)
 and compare its `Authentication-Results` header with the format in
-`src/auth-results.ts`; do not loosen the check without understanding why.
+`src/auth_results.rs`; do not loosen the check without understanding why.
 
 ### Retention
 
@@ -201,11 +206,16 @@ messages. Choose the retention accordingly.
 ## Develop
 
 ```sh
-npm run typecheck   # tsc, strict
-npm test            # node --test, TypeScript type stripping, node:sqlite as D1
+cargo test                                             # logic, natively
+cargo clippy --all-targets -- -D warnings
+cargo clippy --target wasm32-unknown-unknown -- -D warnings
+worker-build --release                                 # build/worker/shim.mjs + wasm
 ```
 
-Tests run the real migration on an in-memory SQLite and fake R2/Email message
+The logic (`config`, `auth_results`, `email`, `http`, `retention`) is plain Rust
+behind the `store::Index` and `store::Bodies` traits; `src/cf.rs` binds them to
+D1, R2 and the Email Worker message on wasm32. Logs only take fixed text and
+counts, so tokens and addresses cannot reach them. Tests run the real migration on an in-memory SQLite (rusqlite) and fake R2/Email message
 objects. They cover receive/store, byte-exact retrieval, auth and fail-closed
 token, strict pagination, cursor stability across failures, allowlist, size
 limits, `Authentication-Results` spoofing, durability on partial failure, id
