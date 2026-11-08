@@ -430,6 +430,10 @@ pub(crate) fn inset_pane_fill() -> Hsla {
         .unwrap_or_else(pane_fill)
 }
 pub(crate) fn section_label(label: &'static str) -> Div {
+    section_label_with(label, false)
+}
+/// A section label, followed by the Beta badge when `beta`.
+pub(crate) fn section_label_with(label: &'static str, beta: bool) -> Div {
     div()
         .h(px(28.))
         .px_2()
@@ -440,7 +444,33 @@ pub(crate) fn section_label(label: &'static str) -> Div {
         .text_size(px(12.))
         .font_weight(gpui::FontWeight::MEDIUM)
         .text_color(content(0.5))
-        .child(div().flex_1().child(label))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .child(label)
+                .when(beta, |d| d.child(beta_badge())),
+        )
+}
+/// BetaBadge: marks a feature that still changes from one version to the
+/// next, in the accent the user picked.
+pub(crate) fn beta_badge() -> Div {
+    div()
+        .h(px(16.))
+        .flex_shrink_0()
+        .flex()
+        .items_center()
+        .rounded(px(4.))
+        .bg(accent_color().opacity(0.1))
+        .px_1()
+        .text_size(px(10.))
+        .line_height(px(10.))
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .text_color(accent_color())
+        .child("BETA")
 }
 pub(crate) fn icon(path: &'static str, side: f32) -> Svg {
     svg()

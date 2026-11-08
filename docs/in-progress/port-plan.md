@@ -67,7 +67,7 @@ para la lógica y `crates/monocode-gpui` para la interfaz.
 | Hojas de cálculo, PDF, Word, PowerPoint | `files/` | `file_editor/`, `monos/files.rs`, `image_lightbox.rs` |
 | Papers y citas en el PDF | `files/`, `resources.rs` | `monos/files.rs` |
 | Dictado y llamadas | `crates/dictation`, `crates/voice` | `input/`, `composer_runner.rs` |
-| Workstreams | `orchestration.rs`, `worktree_management.rs` | `shell/orchestration.rs`, `shell/worktrees.rs` |
+| Workstreams | `mono/workstreams.rs` | `monos/workstreams.rs`, `monos/panels.rs` (pestañas) |
 | Tema, fuentes, radios, acento | `project_appearance.rs` | `theme.rs`, `fonts.rs`, `project_theme.rs` |
 
 ## Motion: de Tauri a la nativa
@@ -138,7 +138,7 @@ Primero la lógica de todo y luego la interfaz. La app Tauri ya no está en el r
 | 8 Teléfono (Poki) | Hecha: instalación, servicio y estado del conector | Hecha: Ajustes › MCP y tutorial; falta probar con un iPhone real |
 | 9 Archivos y documentos | Lectores de xlsx, docx, pptx y PDF en core; imágenes (`images.generate`) conectadas | Visores de hoja, Word, diapositivas y PDF hechos; quedan los detalles de la fase 9 |
 | 10 Dictado | En un agente | En un agente |
-| 11 Workstreams | Core hecho; nada lo llama todavía | Pendiente: no hay ninguna interfaz |
+| 11 Workstreams | Hecho: `Mono.workstream`, el brief del orquestador y su chat en su checkout | Hecho: recorrido, «New workstream», sección del rail y pestañas Agents, PRs y Files |
 | 12 Producción | Firma de actualizaciones propia, bucket de releases y host remoto en CI | Faltan secretos de GitHub, firma de Apple e instalador probado en Windows |
 
 Exportar, importar y sincronizar bots tienen la lógica hecha y conectada (la

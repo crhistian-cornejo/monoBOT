@@ -36,6 +36,8 @@ pub(crate) enum Section {
     Principal,
     Bots,
     Groups,
+    /// Workstream orchestrators, under Code after the Monos.
+    Workstreams,
 }
 
 impl Section {
@@ -45,6 +47,7 @@ impl Section {
             Self::Principal => mono.is_principal(),
             Self::Bots => mono.is_bot() && !mono.is_principal(),
             Self::Groups => mono.is_group(),
+            Self::Workstreams => mono.is_workstream(),
         }
     }
     pub(super) fn label(self) -> &'static str {
@@ -53,6 +56,7 @@ impl Section {
             Self::Principal => "Principal",
             Self::Bots => "Bots",
             Self::Groups => "Groups",
+            Self::Workstreams => "Workstreams",
         }
     }
 }

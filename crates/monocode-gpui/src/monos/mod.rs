@@ -43,6 +43,7 @@ pub(crate) use sync::{SyncUpdated, SyncView};
 #[cfg(test)]
 mod tests;
 mod work;
+mod workstreams;
 use crate::{
     conversation::{Conversation, MonoSubmitted, SessionChanged},
     input::{self, Input},
@@ -219,6 +220,8 @@ pub(crate) struct Monos {
         Subscription,
         gpui::Size<gpui::Pixels>,
     )>,
+    /// The Workstreams tour and dialog, and the PRs and Files tabs' lists.
+    workstreams: workstreams::State,
     backgrounds: HashMap<String, Entity<crate::project_background::ProjectBackground>>,
     drag: Option<(String, gpui::Point<gpui::Pixels>, Option<String>)>,
     rail_bounds: HashMap<String, AnchorSlot>,
@@ -492,6 +495,7 @@ impl Monos {
             completion_work: HashSet::new(),
             background: None,
             group_dialog: None,
+            workstreams: Default::default(),
             backgrounds: HashMap::new(),
             drag: None,
             rail_bounds: HashMap::new(),
@@ -870,7 +874,9 @@ impl Monos {
                 .as_deref()
                 .and_then(Kind::parse)
                 .unwrap_or(Kind::Codex);
-            let mut summary = db.create(provider.id(), &home)?;
+            // A workstream's orchestrator starts in its own checkout.
+            let cwd = mono::workstreams::chat_cwd(mono.workstream.as_ref(), &home);
+            let mut summary = db.create(provider.id(), cwd)?;
             summary.title = mono.label();
             db.title(summary.id, &summary.title)?;
             // A Mono's chat is conversation: it answers quickly at low effort
@@ -1588,9 +1594,19 @@ impl Monos {
         })
         .detach();
     }
+    /// The Code zone's Monos, then its workstreams (the project's, when
+    /// one is given), as ProjectRail and the inset sidebar list them.
     pub(crate) fn rail(&mut self, project: Option<String>, cx: &mut Context<Self>) -> AnyElement {
         self.rail_ids.clear();
-        self.rail_impl(project, false, false, agents::Section::Coding, cx)
+        let monos = self.rail_impl(project.clone(), false, false, agents::Section::Coding, cx);
+        let workstreams = self.rail_impl(project, false, false, agents::Section::Workstreams, cx);
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(monos)
+            .child(workstreams)
+            .into_any_element()
     }
     /// Original navigation lists every Mono, before the projects; the inset
     /// layout continues to list only the current project's Monos.
@@ -1600,7 +1616,16 @@ impl Monos {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.rail_ids.clear();
-        self.rail_impl(None, true, compact, agents::Section::Coding, cx)
+        let monos = self.rail_impl(None, true, compact, agents::Section::Coding, cx);
+        let workstreams = self.rail_impl(None, true, compact, agents::Section::Workstreams, cx);
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .when(compact, |d| d.items_center().gap(px(6.)))
+            .child(monos)
+            .child(workstreams)
+            .into_any_element()
     }
     fn rail_impl(
         &mut self,
@@ -1610,7 +1635,8 @@ impl Monos {
         section: agents::Section,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        if !self.prefs.monos && section == agents::Section::Coding {
+        let workstreams = section == agents::Section::Workstreams;
+        if !self.prefs.monos && (section == agents::Section::Coding || workstreams) {
             return div().into_any_element();
         }
         let roster: Vec<_> = self
@@ -1652,20 +1678,27 @@ impl Monos {
                             .flex_1()
                             .min_w_0()
                             .px_1()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
                             .text_size(px(12.))
                             .line_height(px(20.))
                             .text_color(content(0.5))
-                            .child(section.label()),
+                            .child(section.label())
+                            .when(workstreams, |d| d.child(beta_badge())),
                     )
                 })
         } else {
-            section_label(section.label())
+            section_label_with(section.label(), workstreams)
         }
         .when(has && section == agents::Section::Bots, |d| {
             d.child(self.new_bot_button(cx))
         })
         .when(has && section == agents::Section::Groups, |d| {
             d.child(self.new_group_button(cx))
+        })
+        .when(has && workstreams, |d| {
+            d.child(self.new_workstream_button(cx))
         })
         .when(has && section == agents::Section::Coding, |d| {
             d.child(
@@ -1703,6 +1736,9 @@ impl Monos {
             })
             .when(!has && section == agents::Section::Groups, |d| {
                 d.child(self.new_group_row(cx))
+            })
+            .when(!has && workstreams, |d| {
+                d.child(self.new_workstream_row(original, cx))
             })
             .when(
                 !has && section == agents::Section::Coding && project.is_some(),
@@ -1982,8 +2018,10 @@ impl Monos {
             }))
             .children(preview)
             // MonoRailSection owns its menu and background dialog; the Mono
-            // view paints them instead while it is open.
-            .when(self.current().is_none(), |d| {
+            // view paints them instead while it is open. The Monos section
+            // paints them for the Workstreams below it: twice would break
+            // their clicks.
+            .when(self.current().is_none() && !workstreams, |d| {
                 d.children(self.options_surface(cx))
                     .children(self.background_modal())
                     .children(self.group_dialog_modal(cx))

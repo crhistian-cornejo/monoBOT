@@ -15,8 +15,8 @@ que no se encontró en el código.
 Este documento no repite los huecos ya conocidos: enviar más tarde, chips de
 cita y citas, pestañas News/Bots/Sub-agents, lista y tarjetas de noticias, el
 grupo para exportar, importar y sincronizar bots, girar y voltear formas, el
-título del eje Y, la paginación de Word, los archivos remotos, el campo
-Workstreams del Mono, producción (instalador, firma, actualizador) y `host/`.
+título del eje Y, la paginación de Word, los archivos remotos, producción
+(instalador, firma, actualizador) y `host/`.
 
 Tamaño: **S** cabe en una tarde, **M** lleva de uno a tres días, **L** es más
 de tres días o toca el diseño.
@@ -33,7 +33,7 @@ Rutas: `T:` es Tauri (`src/…` o `src-tauri/src/…`), `G:` es
 | 1.3 | ~~**La tarjeta del plan no se puede editar.**~~ **Hecho.** En Tauri se elige modelo, harness y esfuerzo por tarea, se editan Task e Instructions, se fija «Parallel workers» y hay «Show fewer tasks». | `T: OrchestrationPreview.tsx` | `G: conversation/orchestration.rs` (`PlanCard`): cada tarea abre Task e Instructions, elige harness y modelo con el `ModelList` del compositor y su esfuerzo entre los niveles de ese modelo. «Parallel workers» va de 1 a 4, y los planes largos se pliegan con «Show N more tasks» / «Show fewer tasks». | M |
 | 1.4 | ~~**Una ejecución interrumpida no se puede reanudar.**~~ **Hecho.** Tauri guarda el estado (interrupted, start_unknown, etapas) y muestra el banner «Continue interrupted and queued work». | `T: orchestrationState.ts`, `OrchestrationSidebarAgents.tsx` | La ejecución se guarda en orden tras cada cambio (`orchestration-run:<lead>`, `C: store.rs`). Si la app se cerró con trabajo en marcha, o si el turno del líder se interrumpe, vuelve en pausa: la tarjeta muestra «Continue interrupted and queued work» y Resume continúa a cada trabajador en su sesión y su worktree con un turno de recuperación. Las etapas intermedias de Tauri (`start_unknown`, `stop_unknown`) no hacen falta: un worktree creado para un intento que falla se borra. | M |
 | 1.5 | ~~**No se pueden abrir los trabajadores.**~~ **Hecho.** Faltan «Open this agent beside the orchestrator» y abrir todos en pestañas. | `T: orchestration/ui/OrchestrationActions.ts` | Cada agente del rail tiene «Open beside» (`G: shell/rails.rs`) y la tarjeta del líder tiene «Open agents», que los abre a todos junto a él. | S |
-| 1.6 | **Workstreams no tiene interfaz.** Faltan `WorkstreamIntro` (`monocode.workstreams.introSeen`), `NewWorkstreamDialog` (nombre, objetivo y si el orquestador corre en su worktree o en la carpeta), la sección del rail con «New workstream» y las pestañas `WorkstreamPrs` (Open/Draft/Merged/Closed) y `WorkstreamFiles`. | `T: features/workstreams/ui/*`, `app/shell/MonoRailSection.tsx` | La lógica está en `C: mono/workstreams.rs` (`create`, `list_prs`, `pr_group`, `brief`), pero nada en gpui la llama. | L |
+| 1.6 | ~~**Workstreams no tiene interfaz.**~~ Hecho: el recorrido (`workstream_intro_seen` en el roster), «New workstream» (nombre, objetivo, repositorio y dónde corre el orquestador), la sección Workstreams del rail con Beta y las pestañas Agents (Waiting on you/Working/Idle), PRs (Open/Draft/Merged/Closed) y Files. El Mono guarda su `workstream`, el orquestador recibe `brief` y su chat empieza en su checkout. | `T: features/workstreams/ui/*`, `app/shell/MonoRailSection.tsx` | `G: monos/workstreams.rs`, `monos/panels.rs`; `C: mono/workstreams.rs`, `mono.rs` | L |
 
 ## 2. Chat y transcript
 
@@ -148,7 +148,7 @@ acciones de `TabGroupMenu` y `collectWindowTransfer`.
 1. ~~**Orquestación de verdad (1.1–1.5).**~~ Hecho: el canal `control`, la
    reanudación, la tarjeta editable, el aislamiento en worktrees y abrir los
    trabajadores.
-2. **Workstreams (1.6).** El core ya existe: falta la interfaz.
+2. ~~**Workstreams (1.6).**~~ Hecho.
 3. ~~**Lo que se ve en cada chat (2.1–2.5)**~~: hecho, salvo editar el plan
    antes de construirlo (2.2).
 4. **Subagentes y extensiones de proveedores (3.1–3.3).** Sin esto se pierden

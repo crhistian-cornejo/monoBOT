@@ -5,7 +5,7 @@ use crate::{
     project_settings::{BackgroundDialog, Event as BackgroundEvent},
 };
 use gpui::{AnyView, Div, FontWeight, Stateful};
-use monocode_core::mono::heartbeat;
+use monocode_core::mono::{heartbeat, workstreams::AgentGroup};
 use monocode_core::project_appearance::{MASCOTS, ProjectAppearance};
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum OverviewTab {
@@ -25,6 +25,10 @@ pub(super) enum OverviewTab {
     Members,
     /// The group's local voice call.
     Call,
+    /// A workstream's pull requests, from its `ws/<slug>/` branches.
+    Prs,
+    /// A workstream's shared folder: plan, notes and findings.
+    Files,
 }
 /// MonoOverview's tab sets, in the order they show. A personal bot works in
 /// no project: no sessions to list and no code changes, but the subagents it
@@ -34,6 +38,9 @@ pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
     use OverviewTab::*;
     if mono.is_group() {
         &[Members, Call, Documents, Habits]
+    } else if mono.is_workstream() {
+        // Its agents, their pull requests, and the shared folder.
+        &[Sessions, Prs, Files]
     } else if mono.is_principal() {
         &[News, Habits, Documents, Bots]
     } else if mono.is_bot() {
@@ -364,6 +371,20 @@ pub(super) fn card() -> Div {
         .flex_col()
 }
 /// MonoOverview's search row above the Sessions, Habits and Documents lists.
+/// A labelled section inside an overview list, such as the Agents and PRs
+/// tabs' groups: its name and how many it holds.
+pub(super) fn list_heading(selector: String, text: String) -> AnyElement {
+    div()
+        .debug_selector(move || selector.clone())
+        .flex_shrink_0()
+        .px_1()
+        .pt_2()
+        .text_size(px(12.))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(content(0.5))
+        .child(text)
+        .into_any_element()
+}
 pub(super) fn search_bar(field: Entity<Input>) -> Div {
     div()
         .h(px(36.))
@@ -1085,6 +1106,10 @@ impl Monos {
             .iter()
             .map(|&tab| match tab {
                 OverviewTab::Overview => (tab, "Overview", "dashboard", 0),
+                // A workstream's sessions are its agents.
+                OverviewTab::Sessions if mono.is_workstream() => {
+                    (tab, "Agents", "message-multiple", mono.launches.len())
+                }
                 OverviewTab::Sessions => {
                     (tab, "Sub-agents", "message-multiple", mono.launches.len())
                 }
@@ -1121,6 +1146,8 @@ impl Monos {
                     mono.group.as_ref().map(|g| g.members.len()).unwrap_or(0),
                 ),
                 OverviewTab::Call => (tab, "Call", "mic-01", 0),
+                OverviewTab::Prs => (tab, "PRs", "git-pull-request", self.open_pr_count(mono)),
+                OverviewTab::Files => (tab, "Files", "folder-01", 0),
                 OverviewTab::Activity => (tab, "Activity", "list-bullet", 0),
             })
             .collect();
@@ -1155,6 +1182,8 @@ impl Monos {
                     OverviewTab::Subagents => "mono-overview-Subagents",
                     OverviewTab::Members => "mono-overview-Members",
                     OverviewTab::Call => "mono-overview-Call",
+                    OverviewTab::Prs => "mono-overview-Prs",
+                    OverviewTab::Files => "mono-overview-Files",
                     OverviewTab::Activity => unreachable!(),
                 };
                 crate::project_tabs::tab_button(
@@ -1219,6 +1248,8 @@ impl Monos {
             OverviewTab::Subagents => self.subagents_list(mono, cx),
             OverviewTab::Members => self.members_list(mono, cx),
             OverviewTab::Call => self.call_panel(mono, cx),
+            OverviewTab::Prs => self.workstream_prs(mono, cx),
+            OverviewTab::Files => self.workstream_files(mono, cx),
             OverviewTab::Activity => self.activity_view(mono, cx),
         };
         div()
@@ -1231,7 +1262,11 @@ impl Monos {
     fn session_list(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
         let filter = self.field(
             "mono-session-search",
-            "Search sub-agents…",
+            if mono.is_workstream() {
+                "Search agents…"
+            } else {
+                "Search sub-agents…"
+            },
             String::new(),
             false,
             cx,
@@ -1285,39 +1320,119 @@ impl Monos {
                 .on_click(cx.listener(|this, _, window, cx| this.filter_menu(window, cx))),
         );
         let no_matches = launches.is_empty() && !mono.launches.is_empty();
-        div().size_full().flex().flex_col()
-            .when(!mono.launches.is_empty(),|d|d.child(search_bar))
-            .child(div().id("mono-session-list").debug_selector(|| "mono-session-list".into()).flex_1().min_h_0().overflow_y_scroll().p_2().flex().flex_col().gap_1p5()
-                .when(mono.launches.is_empty(),|d|d.child(empty_state("message-multiple",&format!("Ask {} to hand work to a sub-agent on one of your projects, like a bug fix or a review, and it shows up here.",mono.label()))))
-                .when(no_matches,|d|d.child(empty_state("search-01",if query.trim().is_empty(){"No sub-agents match these filters."}else{"No sub-agents match this search."})))
-                .children(launches.into_iter().map(|launch|{
-                    let id = launch.session_id;
-                    let state = views.iter().find(|v| v.id == id);
-                    let title = state.map(|s| s.title.clone()).unwrap_or(launch.title.clone());
-                    let cwd = state.map(|s| &s.cwd).unwrap_or(&launch.cwd);
-                    let project = mono.projects.iter().find(|p| monocode_core::files::path_key(p) == monocode_core::files::path_key(cwd)).unwrap_or(cwd);
-                    let project = std::path::Path::new(project).file_name().map_or(project.clone(), |n| n.to_string_lossy().to_string());
-                    let branch = state.and_then(|s| s.branch.clone());
-                    sub_agent_card(SubAgent {
-                        id,
-                        title,
-                        harness: &launch.harness,
-                        model: state.map(|s| s.model.clone()).filter(|m| !m.is_empty()),
-                        model_id: launch.model.as_deref(),
-                        place: match &branch { Some(b) => format!("{project} · {b}"), None => project },
-                        branch: branch.is_some(),
-                        state: match state {
-                            Some(s) if s.needs_input => AgentState::NeedsInput,
-                            Some(s) if s.busy => AgentState::Working,
-                            Some(s) => AgentState::Idle(s.updated_at),
-                            None => AgentState::Unavailable,
-                        },
+        let workstream = mono.is_workstream();
+        let empty = if workstream {
+            "Tell the orchestrator the goal. Each agent it starts shows up here; open one to answer it or follow its work.".to_string()
+        } else {
+            format!(
+                "Ask {} to hand work to a sub-agent on one of your projects, like a bug fix or a review, and it shows up here.",
+                mono.label()
+            )
+        };
+        let cards: Vec<(AgentGroup, AnyElement)> = launches
+            .into_iter()
+            .map(|launch| {
+                let id = launch.session_id;
+                let state = views.iter().find(|v| v.id == id);
+                let title = state
+                    .map(|s| s.title.clone())
+                    .unwrap_or(launch.title.clone());
+                let cwd = state.map(|s| &s.cwd).unwrap_or(&launch.cwd);
+                let project = mono
+                    .projects
+                    .iter()
+                    .find(|p| {
+                        monocode_core::files::path_key(p) == monocode_core::files::path_key(cwd)
                     })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.route = Some(Route::Session(id));
-                        cx.notify();
-                    }))
-}))).into_any_element()
+                    .unwrap_or(cwd);
+                let project = std::path::Path::new(project)
+                    .file_name()
+                    .map_or(project.clone(), |n| n.to_string_lossy().to_string());
+                let branch = state.and_then(|s| s.branch.clone());
+                let group = AgentGroup::of(
+                    state.is_some_and(|s| s.busy),
+                    state.is_some_and(|s| s.needs_input),
+                );
+                let card = sub_agent_card(SubAgent {
+                    id,
+                    title,
+                    harness: &launch.harness,
+                    model: state.map(|s| s.model.clone()).filter(|m| !m.is_empty()),
+                    model_id: launch.model.as_deref(),
+                    place: match &branch {
+                        Some(b) => format!("{project} · {b}"),
+                        None => project,
+                    },
+                    branch: branch.is_some(),
+                    state: match state {
+                        Some(s) if s.needs_input => AgentState::NeedsInput,
+                        Some(s) if s.busy => AgentState::Working,
+                        Some(s) => AgentState::Idle(s.updated_at),
+                        None => AgentState::Unavailable,
+                    },
+                })
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.route = Some(Route::Session(id));
+                    cx.notify();
+                }))
+                .into_any_element();
+                (group, card)
+            })
+            .collect();
+        // A workstream's agents by what needs the user first.
+        let rows: Vec<AnyElement> = if workstream {
+            let mut rows = Vec::new();
+            let mut cards = cards;
+            for group in AgentGroup::ALL {
+                let (these, rest): (Vec<_>, Vec<_>) =
+                    cards.into_iter().partition(|(g, _)| *g == group);
+                cards = rest;
+                if these.is_empty() {
+                    continue;
+                }
+                rows.push(list_heading(
+                    format!("mono-agents-{group:?}"),
+                    format!("{} · {}", group.label(), these.len()),
+                ));
+                rows.extend(these.into_iter().map(|(_, card)| card));
+            }
+            rows
+        } else {
+            cards.into_iter().map(|(_, card)| card).collect()
+        };
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .when(!mono.launches.is_empty(), |d| d.child(search_bar))
+            .child(
+                div()
+                    .id("mono-session-list")
+                    .debug_selector(|| "mono-session-list".into())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .p_2()
+                    .flex()
+                    .flex_col()
+                    .gap_1p5()
+                    .when(mono.launches.is_empty(), |d| {
+                        d.child(empty_state("message-multiple", &empty))
+                    })
+                    .when(no_matches, |d| {
+                        d.child(empty_state(
+                            "search-01",
+                            match (workstream, query.trim().is_empty()) {
+                                (true, true) => "No agents match these filters.",
+                                (true, false) => "No agents match this search.",
+                                (false, true) => "No sub-agents match these filters.",
+                                (false, false) => "No sub-agents match this search.",
+                            },
+                        ))
+                    })
+                    .children(rows),
+            )
+            .into_any_element()
     }
     fn document_list(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
         let filter = self.field(

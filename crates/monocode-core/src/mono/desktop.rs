@@ -19,6 +19,7 @@ const IDENTITY_FIELDS: &[&str] = &[
     "specialty",
     "botTools",
     "group",
+    "workstream",
 ];
 
 impl Roster {
@@ -122,6 +123,7 @@ impl Roster {
 }
 
 fn desktop_mono(store: &Store, value: &Value, backgrounds: Option<&Value>) -> Option<Mono> {
+    let workstream = super::workstreams::from_roster_entry(value);
     let id = value.get("id")?.as_str()?;
     if id.is_empty() || !id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-') {
         return None;
@@ -178,12 +180,14 @@ fn desktop_mono(store: &Store, value: &Value, backgrounds: Option<&Value>) -> Op
             .unwrap_or(false),
         background,
         // Bots, workstreams and groups (mono.ts readEntry); a bot without a
-        // known role is an Assistant, as on the desktop.
+        // known role is an Assistant, as on the desktop. A workstream
+        // without a complete object loses its kind, as parseMono drops it.
         kind: value
             .get("kind")
             .and_then(Value::as_str)
-            .filter(|kind| ["bot", "workstream", "group"].contains(kind))
+            .filter(|kind| ["bot", "group"].contains(kind) || workstream.is_some())
             .map(str::to_owned),
+        workstream,
         bot_role: (value.get("kind").and_then(Value::as_str) == Some("bot")).then(|| {
             value
                 .get("botRole")
@@ -322,6 +326,36 @@ mod tests {
         )
         .unwrap();
         assert!(bot.group.is_none());
+    }
+
+    #[test]
+    fn desktop_workstreams_keep_their_object_or_lose_their_kind() {
+        let store = Store::open_monocode(Path::new(":memory:")).unwrap();
+        let entry = json!({
+            "id":"ws-1", "name":"Migrate", "kind":"workstream", "projects":["/repo"],
+            "workstream":{"project":"/repo","cwd":"/repo-ws","slug":"migrate",
+                          "folder":"/data/workstreams/ws-1","createdAt":5}
+        });
+        let mono = desktop_mono(&store, &entry, None).unwrap();
+        assert!(mono.is_workstream());
+        assert!(!mono.is_coding() && !mono.is_personal());
+        let workstream = mono.workstream.as_ref().unwrap();
+        assert_eq!(workstream.cwd, "/repo-ws");
+        assert_eq!(workstream.created_at, 5);
+        // What the native roster saves reads back the same.
+        let saved = serde_json::to_value(&mono).unwrap();
+        assert_eq!(saved["workstream"]["slug"], "migrate");
+        let back: Mono = serde_json::from_value(saved).unwrap();
+        assert_eq!(back.workstream, mono.workstream);
+        // Without a complete object it is a coding Mono, as on the desktop.
+        let broken = desktop_mono(
+            &store,
+            &json!({"id":"ws-2","kind":"workstream","workstream":{"project":"/repo"}}),
+            None,
+        )
+        .unwrap();
+        assert!(broken.kind.is_none() && broken.workstream.is_none());
+        assert!(broken.is_coding());
     }
 
     #[test]

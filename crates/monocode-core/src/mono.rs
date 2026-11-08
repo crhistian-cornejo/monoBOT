@@ -101,6 +101,10 @@ pub struct Mono {
     /// own seats stay in `group.seats`.
     #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub seats: std::collections::BTreeMap<String, i64>,
+    /// A workstream's repository, checkout, branch names and shared folder:
+    /// every Mono of kind `workstream` has one (its orchestrator).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workstream: Option<workstreams::Workstream>,
 }
 
 /// What a Mono's sessions start with when it names no provider, model or
@@ -176,6 +180,7 @@ impl Default for Mono {
             bot_tools: None,
             group: None,
             seats: std::collections::BTreeMap::new(),
+            workstream: None,
         }
     }
 }
@@ -185,6 +190,10 @@ impl Mono {
     }
     pub fn is_group(&self) -> bool {
         self.kind.as_deref() == Some("group")
+    }
+    /// A workstream's orchestrator, listed in the Code zone's Workstreams.
+    pub fn is_workstream(&self) -> bool {
+        self.kind.as_deref() == Some("workstream") && self.workstream.is_some()
     }
     /// A coding Mono, listed under Code rather than Agents.
     pub fn is_coding(&self) -> bool {
@@ -307,6 +316,8 @@ pub struct Roster {
     pub hidden_sessions: Vec<i64>,
     /// The "A bot of your own" card was closed (botIntroDismissed).
     pub bot_intro_dismissed: bool,
+    /// The Workstreams tour was shown once (`monocode.workstreams.introSeen`).
+    pub workstream_intro_seen: bool,
     /// Last observed desktop identities, for reconciling later desktop edits
     /// without discarding deliberate native edits or resurrecting deletions.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -421,6 +432,25 @@ impl Roster {
         if let Some(instructions) = instructions.filter(|s| !s.trim().is_empty()) {
             let _ = files::save(root, &mono.id, None, "SOUL.md", instructions, None);
         }
+        self.monos.push(mono);
+        self.monos.last().unwrap()
+    }
+    /// A workstream's orchestrator (createWorkstreamMono in Tauri): the Mono
+    /// `workstreams::create` prepared, working on the workstream's project,
+    /// with the next free look.
+    pub fn create_workstream(&mut self, created: workstreams::Created) -> &Mono {
+        let (mascot, color) = self.next_look();
+        let mut mono = Mono {
+            id: created.id,
+            name: created.name,
+            mascot,
+            color,
+            projects: vec![created.workstream.project.clone()],
+            kind: Some("workstream".into()),
+            workstream: Some(created.workstream),
+            ..Default::default()
+        };
+        mono.normalize();
         self.monos.push(mono);
         self.monos.last().unwrap()
     }

@@ -4390,3 +4390,349 @@ fn resting_on_a_citation_moves_only_the_paper_on_screen_and_records_show_their_a
     assert!(visual.debug_bounds("paper-record").is_some());
     let _ = std::fs::remove_dir_all(dir);
 }
+
+/// Makes the test project a git repository with one commit, so a workstream
+/// can give its orchestrator a worktree.
+fn git_project(project: &str) {
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(project)
+            .output()
+            .unwrap();
+        assert!(status.status.success(), "git {args:?}: {status:?}");
+    };
+    git(&["init", "-b", "main"]);
+    git(&["config", "user.name", "Native test"]);
+    git(&["config", "user.email", "native@example.invalid"]);
+    git(&["config", "commit.gpgsign", "false"]);
+    git(&["commit", "--allow-empty", "-m", "Base"]);
+}
+
+/// The Code zone with no Mono open: the rail lists the Monos and Workstreams.
+fn show_rail(s: &Setup, cx: &mut TestAppContext) {
+    cx.update(|cx| {
+        cx.set_reduce_motion(true);
+        input::bind(cx);
+        crate::popover::bind(cx);
+        s.manager.update(cx, |m, cx| {
+            m.settings = None;
+            m.close(cx);
+            cx.notify();
+        });
+    });
+}
+
+fn click(visual: &mut gpui::VisualTestContext, selector: &'static str) {
+    let bounds = visual
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("{selector} is not on screen"));
+    visual.simulate_click(bounds.center(), Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+}
+
+#[gpui::test]
+fn new_workstream_from_the_rail_starts_an_orchestrator_in_its_own_worktree(
+    cx: &mut TestAppContext,
+) {
+    let s = setup(cx);
+    git_project(&s.project);
+    show_rail(&s, cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+
+    // The first time, the tour; Escape skips it and it never shows again.
+    click(visual, "new-workstream");
+    assert!(visual.debug_bounds("workstream-intro").is_some());
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("workstream-intro").is_none());
+    s.manager
+        .read_with(visual, |m, _| assert!(m.roster.workstream_intro_seen));
+
+    click(visual, "new-workstream");
+    assert!(visual.debug_bounds("workstream-intro").is_none());
+    assert!(visual.debug_bounds("new-workstream-dialog").is_some());
+    let dialog = s.manager.read_with(visual, |m, _| {
+        m.workstreams.dialog.as_ref().unwrap().0.clone()
+    });
+    // It starts on the sidebar's project, and needs a name first.
+    dialog.read_with(visual, |d, cx| {
+        assert_eq!(d.project, s.project);
+        assert!(d.worktree);
+        assert!(!d.ready(cx));
+    });
+    assert!(visual.debug_bounds("new-workstream-branches").is_none());
+    click(visual, "new-workstream-start");
+    dialog.read_with(visual, |d, _| assert!(!d.busy));
+
+    click(visual, "new-workstream-name");
+    visual.simulate_input("Migrar la API");
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("new-workstream-branches").is_some());
+    dialog.read_with(visual, |d, cx| {
+        assert_eq!(d.name.read(cx).content, "Migrar la API");
+        assert!(d.ready(cx));
+    });
+    // Where the orchestrator runs is a choice; its own worktree is the default.
+    click(visual, "new-workstream-checkout-project");
+    dialog.read_with(visual, |d, _| assert!(!d.worktree));
+    click(visual, "new-workstream-checkout-worktree");
+    dialog.read_with(visual, |d, _| assert!(d.worktree));
+
+    click(visual, "new-workstream-start");
+    assert!(visual.debug_bounds("new-workstream-dialog").is_none());
+    let (id, workstream) = s.manager.read_with(visual, |m, _| {
+        let mono = m.current().expect("the orchestrator opens");
+        assert!(mono.is_workstream());
+        assert_eq!(mono.name, "Migrar la API");
+        assert_eq!(mono.projects, std::slice::from_ref(&s.project));
+        assert!(m.overview_tab == OverviewTab::Sessions);
+        // No goal, so nothing is sent: the user explains it in the chat.
+        assert!(mono.outbox.is_empty());
+        (mono.id.clone(), mono.workstream.clone().unwrap())
+    });
+    assert_eq!(workstream.slug, "migrar-la-api");
+    assert_ne!(workstream.cwd, s.project);
+    assert!(std::path::Path::new(&workstream.folder).is_dir());
+    assert!(workstream.folder.ends_with(&format!("workstreams/{id}")));
+    let branches = std::process::Command::new("git")
+        .args(["branch", "--list", "ws/migrar-la-api/orchestrator"])
+        .current_dir(&s.project)
+        .output()
+        .unwrap();
+    assert!(String::from_utf8_lossy(&branches.stdout).contains("ws/migrar-la-api/orchestrator"));
+    // Its chat starts in its own checkout, and it is saved.
+    visual.update(|_, cx| {
+        let m = s.manager.read(cx);
+        assert_eq!(m.chats[&id].read(cx).summary.cwd, workstream.cwd);
+    });
+    let saved = Roster::load(&locked(&s.store).unwrap()).unwrap();
+    assert_eq!(
+        saved.get(&id).unwrap().workstream.as_ref(),
+        Some(&workstream)
+    );
+    assert!(saved.workstream_intro_seen);
+
+    // The same name again: the branch is taken, and the dialog says so.
+    show_rail(&s, visual);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    click(visual, "sidebar-new-workstream");
+    click(visual, "new-workstream-name");
+    visual.simulate_input("Migrar la API");
+    visual.run_until_parked();
+    click(visual, "new-workstream-start");
+    assert!(visual.debug_bounds("new-workstream-error").is_some());
+    let dialog = s.manager.read_with(visual, |m, _| {
+        m.workstreams.dialog.as_ref().unwrap().0.clone()
+    });
+    dialog.read_with(visual, |d, _| {
+        assert!(!d.busy);
+        assert!(d.error.is_some());
+    });
+    let _ = std::fs::remove_dir_all(&s.project);
+}
+
+#[gpui::test]
+fn workstream_tour_steps_forward_and_back_then_opens_the_dialog(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    show_rail(&s, cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    click(visual, "new-workstream");
+    let step = |visual: &mut gpui::VisualTestContext| {
+        s.manager.read_with(visual, |m, cx| {
+            m.workstreams.intro.as_ref().unwrap().0.read(cx).step
+        })
+    };
+    assert_eq!(step(visual), 0);
+    assert!(visual.debug_bounds("workstream-intro-back").is_none());
+    click(visual, "workstream-intro-next");
+    click(visual, "workstream-intro-next");
+    assert_eq!(step(visual), 2);
+    click(visual, "workstream-intro-back");
+    assert_eq!(step(visual), 1);
+    click(visual, "workstream-intro-next");
+    click(visual, "workstream-intro-next");
+    assert_eq!(step(visual), workstreams::STEPS.len() - 1);
+    // The last step's button starts one.
+    click(visual, "workstream-intro-next");
+    assert!(visual.debug_bounds("workstream-intro").is_none());
+    assert!(visual.debug_bounds("new-workstream-dialog").is_some());
+    s.manager
+        .read_with(visual, |m, _| assert!(m.roster.workstream_intro_seen));
+    // Cancel closes it without making anything.
+    let before = s.manager.read_with(visual, |m, _| m.roster.monos.len());
+    click(visual, "new-workstream-cancel");
+    assert!(visual.debug_bounds("new-workstream-dialog").is_none());
+    s.manager
+        .read_with(visual, |m, _| assert_eq!(m.roster.monos.len(), before));
+}
+
+#[gpui::test]
+fn a_workstream_goal_is_its_orchestrators_first_message(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let data = s.root.parent().unwrap().to_path_buf();
+    let created = mono::workstreams::create(
+        &data,
+        &mono::workstreams::NewWorkstream {
+            name: "Batch of bugs".into(),
+            project: s.project.clone(),
+            worktree: false,
+        },
+    )
+    .unwrap();
+    s.window
+        .update(cx, |_, window, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.finish_workstream(created, "Fix the five open crash reports.", window, cx);
+                let mono = m.current().unwrap();
+                assert!(mono.is_workstream());
+                // The project itself when it has no worktree of its own.
+                assert_eq!(mono.workstream.as_ref().unwrap().cwd, s.project);
+                assert_eq!(mono.outbox.len(), 1);
+                assert_eq!(mono.outbox[0].text, "Fix the five open crash reports.");
+                assert!(!mono.outbox[0].internal);
+                // Nothing reaches a real provider from a test.
+                let id = mono.id.clone();
+                m.roster.get_mut(&id).unwrap().outbox.clear();
+            })
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn a_workstream_shows_its_agents_prs_and_shared_files(cx: &mut TestAppContext) {
+    use mono::workstreams::{BranchPr, Workstream};
+    let s = setup(cx);
+    let folder = s.root.parent().unwrap().join("workstreams").join("ws-tabs");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("plan.md"), "# Plan").unwrap();
+    std::fs::write(folder.join("findings.md"), "").unwrap();
+    let workstream = Workstream {
+        project: s.project.clone(),
+        cwd: s.project.clone(),
+        slug: "migrate".into(),
+        folder: folder.to_string_lossy().into_owned(),
+        created_at: 1,
+    };
+    let pr = |number, state: &str, draft, head: &str| BranchPr {
+        number,
+        title: format!("Part {number}"),
+        url: format!("https://github.com/o/r/pull/{number}"),
+        state: state.into(),
+        is_draft: draft,
+        head_ref_name: head.into(),
+    };
+    // One agent the orchestrator started, idle in its own session.
+    let agent = locked(&s.store)
+        .unwrap()
+        .create("codex", &s.project)
+        .unwrap()
+        .id;
+    show_rail(&s, cx);
+    s.window
+        .update(cx, |shell, window, cx| {
+            shell.mono_track_sessions(vec![agent], cx);
+            s.manager.update(cx, |m, cx| {
+                m.roster.create_workstream(mono::workstreams::Created {
+                    id: "ws-tabs".into(),
+                    name: "Migrate".into(),
+                    workstream: workstream.clone(),
+                });
+                m.roster
+                    .get_mut("ws-tabs")
+                    .unwrap()
+                    .launches
+                    .push(mono::Launch {
+                        session_id: agent,
+                        cwd: s.project.clone(),
+                        title: "API agent".into(),
+                        harness: "codex".into(),
+                        model: None,
+                        origin_turn: 0,
+                        notify_on_complete: false,
+                        completed: false,
+                        dismissed: false,
+                    });
+                // What gh would list: two open, one draft, one merged.
+                m.workstreams.prs.insert(
+                    "ws-tabs".into(),
+                    workstreams::Listing {
+                        items: Some(Ok(vec![
+                            pr(4, "OPEN", false, "ws/migrate/api"),
+                            pr(3, "OPEN", true, "ws/migrate/web"),
+                            pr(2, "MERGED", false, "ws/migrate/tests"),
+                            pr(1, "OPEN", false, "ws/migrate/docs"),
+                        ])),
+                        loading: false,
+                        loaded_at: Some(std::time::Instant::now()),
+                    },
+                );
+                m.open("ws-tabs", window, cx);
+                m.overview_tab = OverviewTab::Sessions;
+                m.show_overview(cx);
+            })
+        })
+        .unwrap();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+
+    // Listed under Workstreams, with its own tabs.
+    assert!(visual.debug_bounds("mono-rail-ws-tabs").is_some());
+    s.manager.read_with(visual, |m, _| {
+        let mono = m.roster.get("ws-tabs").unwrap();
+        assert!(
+            panels::overview_tabs(mono)
+                == [OverviewTab::Sessions, OverviewTab::Prs, OverviewTab::Files]
+        );
+        assert_eq!(m.open_pr_count(mono), 2);
+    });
+    // Agents: grouped by what needs the user first.
+    assert!(visual.debug_bounds("mono-agents-Idle").is_some());
+    let card: &'static str = Box::leak(format!("mono-launch-{agent}").into_boxed_str());
+    assert!(visual.debug_bounds(card).is_some());
+
+    click(visual, "mono-overview-Prs");
+    s.manager
+        .read_with(visual, |m, _| assert!(m.overview_tab == OverviewTab::Prs));
+    for selector in [
+        "workstream-prs-Open",
+        "workstream-prs-Draft",
+        "workstream-prs-Merged",
+        "workstream-pr-4",
+        "workstream-pr-1",
+    ] {
+        assert!(visual.debug_bounds(selector).is_some(), "{selector}");
+    }
+    assert!(visual.debug_bounds("workstream-prs-Closed").is_none());
+    let open = visual.debug_bounds("workstream-prs-Open").unwrap();
+    let draft = visual.debug_bounds("workstream-prs-Draft").unwrap();
+    let merged = visual.debug_bounds("workstream-prs-Merged").unwrap();
+    assert!(open.top() < draft.top() && draft.top() < merged.top());
+
+    click(visual, "mono-overview-Files");
+    s.manager
+        .read_with(visual, |m, _| assert!(m.overview_tab == OverviewTab::Files));
+    assert!(visual.debug_bounds("workstream-files-reveal").is_some());
+    let files = s.manager.read_with(visual, |m, _| {
+        match m.workstreams.files["ws-tabs"].items.as_ref() {
+            Some(Ok(files)) => files.iter().map(|f| f.name.clone()).collect::<Vec<_>>(),
+            other => panic!("files not read: {:?}", other.map(|r| r.is_ok())),
+        }
+    });
+    assert_eq!(files, ["findings.md", "plan.md"]);
+    assert!(visual.debug_bounds("workstream-file-1").is_some());
+
+    // A note the orchestrator writes shows up on Refresh.
+    std::fs::write(folder.join("notes.md"), "").unwrap();
+    click(visual, "workstream-files-refresh");
+    assert!(visual.debug_bounds("workstream-file-2").is_some());
+}

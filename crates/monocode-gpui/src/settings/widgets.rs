@@ -61,6 +61,61 @@ pub(super) fn note(text: impl Into<SharedString>) -> AnyElement {
         .into_any_element()
 }
 
+/// Segmented: equal-width options in a hairline frame, the one picked
+/// filled. Each option's debug selector is `<selector>-<id>-<option>`.
+pub(crate) fn segmented(
+    id: &'static str,
+    label: &'static str,
+    value: &str,
+    options: &[(&'static str, &str)],
+    selector: &'static str,
+    pick: impl Fn(&'static str, &mut gpui::Window, &mut gpui::App) + Clone + 'static,
+) -> AnyElement {
+    div()
+        .id(SharedString::from(format!("segmented-{id}")))
+        .role(Role::RadioGroup)
+        .aria_label(label)
+        .grid()
+        .grid_cols(options.len() as u16)
+        .flex_shrink_0()
+        .gap(px(2.))
+        .rounded_md()
+        .border_1()
+        .border_color(content(0.1))
+        .p(px(2.))
+        .text_size(px(12.))
+        .line_height(px(16.))
+        .children(options.iter().map(|&(option, text)| {
+            let selected = value == option;
+            let pick = pick.clone();
+            div()
+                .id(SharedString::from(format!("segmented-{id}-{option}")))
+                .debug_selector(move || format!("{selector}-{id}-{option}"))
+                .role(Role::RadioButton)
+                .aria_label(text.to_owned())
+                .aria_selected(selected)
+                .min_w_0()
+                .flex()
+                .justify_center()
+                .whitespace_nowrap()
+                .rounded(px(5.))
+                .px(px(10.))
+                .py_1()
+                .cursor_pointer()
+                .map(|d| {
+                    if selected {
+                        d.bg(content(0.1)).text_color(content(1.))
+                    } else {
+                        d.text_color(content(0.5))
+                            .hover(|s| s.text_color(content(1.)))
+                    }
+                })
+                .child(text.to_owned())
+                .on_click(move |_, window, cx| pick(option, window, cx))
+        }))
+        .into_any_element()
+}
+
 /// SecondaryButton.tsx.
 pub(crate) fn secondary_button(
     id: impl Into<ElementId>,
@@ -408,49 +463,18 @@ impl SettingsView {
         cx: &mut Context<Self>,
         change: impl Fn(&mut Self, &'static str, &mut Context<Self>) + Clone + 'static,
     ) -> AnyElement {
-        div()
-            .id(SharedString::from(format!("segmented-{id}")))
-            .role(Role::RadioGroup)
-            .aria_label(label)
-            .grid()
-            .grid_cols(options.len() as u16)
-            .flex_shrink_0()
-            .gap(px(2.))
-            .rounded_md()
-            .border_1()
-            .border_color(content(0.1))
-            .p(px(2.))
-            .text_size(px(12.))
-            .line_height(px(16.))
-            .children(options.iter().map(|&(option, text)| {
-                let selected = value == option;
+        let weak = cx.weak_entity();
+        segmented(
+            id,
+            label,
+            value,
+            options,
+            "settings",
+            move |option, _, cx| {
                 let change = change.clone();
-                div()
-                    .id(SharedString::from(format!("segmented-{id}-{option}")))
-                    .debug_selector(move || format!("settings-{id}-{option}"))
-                    .role(Role::RadioButton)
-                    .aria_label(text.to_owned())
-                    .aria_selected(selected)
-                    .min_w_0()
-                    .flex()
-                    .justify_center()
-                    .whitespace_nowrap()
-                    .rounded(px(5.))
-                    .px(px(10.))
-                    .py_1()
-                    .cursor_pointer()
-                    .map(|d| {
-                        if selected {
-                            d.bg(content(0.1)).text_color(content(1.))
-                        } else {
-                            d.text_color(content(0.5))
-                                .hover(|s| s.text_color(content(1.)))
-                        }
-                    })
-                    .child(text.to_owned())
-                    .on_click(cx.listener(move |this, _, _, cx| change(this, option, cx)))
-            }))
-            .into_any_element()
+                let _ = weak.update(cx, |this, cx| change(this, option, cx));
+            },
+        )
     }
 
     /// Slider: a 4px track and 12px thumb, then its value, in a 224px row.
