@@ -236,7 +236,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: host/build/host-runtime-cache
-          key: host-runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ runner.os == 'Linux' && 'all' || 'native' }}-${{ hashFiles('host/package.mjs') }}
+          key: host-runtime-v1-${{ runner.os }}-${{ runner.arch }}-${{ runner.os == 'Linux' && 'all' || 'native' }}-${{ hashFiles('host/scripts/package.mjs') }}
       - run: pnpm --dir host package -- --all
         if: runner.os == 'Linux'
       - run: pnpm --dir host package

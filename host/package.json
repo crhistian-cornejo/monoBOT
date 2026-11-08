@@ -5,10 +5,10 @@
   "type": "module",
   "packageManager": "pnpm@12.6.0",
   "scripts": {
-    "build": "node build.mjs",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "tsc --noEmit -p tsconfig.json && node build.mjs && vitest run && node --test runtime-download.test.mjs",
-    "package": "node build.mjs && node package.mjs"
+    "test": "tsc --noEmit -p tsconfig.json && node scripts/build.mjs && vitest run && node --test scripts/runtime-download.test.mjs",
+    "package": "node scripts/build.mjs && node scripts/package.mjs"
   },
   "devDependencies": {
     "@types/node": "26.5.0",
