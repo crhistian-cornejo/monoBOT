@@ -19,7 +19,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "memory.add"=>"fact topic until shared personal","memory.replace"=>"find fact topic until shared personal","memory.remove"=>"find topic shared personal",
         "habits.add"=>"name instructions schedule","habits.update"=>"id name instructions schedule enabled","habits.run"|"habits.remove"=>"id",
         "chat.card"=>"type repo number note sessionId options name instructions schedule",
-        "mail.list"=>"view query unread limit","mail.read"=>"id maxChars","mail.draft"=>"id text",
+        "mail.list"=>"view query unread limit","mail.read"=>"id maxChars","mail.draft"=>"id text","mail.propose"=>"id account to cc subject text all",
         "mail.search"=>"query account limit oldestFirst","mail.connect"=>"address provider name shared",
         "calendar.list"=>"start end",
         "calendar.create"=>"title start end timezone description",

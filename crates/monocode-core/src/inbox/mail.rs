@@ -7,11 +7,11 @@
 //! (views, days, the reply's prompt and subject) follows `src/features/mail/model/mail.ts`.
 //! Every function that reaches a server blocks: callers run it off the UI thread.
 mod agent;
-pub use agent::{agent_action, take_dialog, ConnectRequest, ACTIONS as AGENT_ACTIONS};
+pub use agent::{agent_action, take_card, take_dialog, ConnectRequest, ACTIONS as AGENT_ACTIONS};
 pub use monobot_email::inspect::{Level, Risk};
 pub use monobot_email::{
-    Account, AccountView, Action, Attachment, Folder, Message, Opened, Overview, Person,
-    Recipients, Triage, MAX_ACCOUNTS,
+    parse_people, Account, AccountView, Action, Attachment, Folder, Message, Opened, Outgoing,
+    Overview, Person, Recipients, Triage, MAX_ACCOUNTS, MAX_RECIPIENTS,
 };
 use monobot_email::{Heard, Mail};
 use serde::{Deserialize, Serialize};
@@ -456,6 +456,25 @@ impl Service {
             &transport,
             &token,
         )
+    }
+
+    /// Sends a new message (or a forward) from the account `account_id`. Only the user's own
+    /// press calls this.
+    pub fn send_new(&self, account_id: &str, out: &Outgoing) -> Result<(), String> {
+        let (transport, token) = super::workspace::Service::new(&self.data_dir).outgoing()?;
+        mail().send_new(
+            &self.load().accounts,
+            account_id,
+            out,
+            now_ms(),
+            &transport,
+            &token,
+        )
+    }
+
+    /// Saves a new message as a draft on the account's server.
+    pub fn draft_new(&self, account_id: &str, out: &Outgoing) -> Result<(), String> {
+        mail().draft_new(&self.load().accounts, account_id, out, now_ms())
     }
 
     /// A picture on the web the message names, which the user chose to load, as a data URL.
@@ -1357,6 +1376,31 @@ pub fn mail_text(message: &Message, opened: Option<&Opened>) -> String {
     }
 }
 
+/// A forward of `message`: «Fwd: » and its subject, and its text under a line that says who
+/// sent it and when. Its files are not forwarded.
+pub fn forward_of(message: &Message, opened: Option<&Opened>) -> (String, String) {
+    let subject = message.subject.trim();
+    let subject = if subject.to_lowercase().starts_with("fwd:") {
+        subject.to_owned()
+    } else {
+        format!("Fwd: {subject}")
+    };
+    let label = person_label(&message.from, &message.address);
+    let from = if label.eq_ignore_ascii_case(&message.address) {
+        message.address.clone()
+    } else {
+        format!("{label} <{}>", message.address)
+    };
+    let text = format!(
+        "\n\n---------- Forwarded message ----------\nFrom: {}\nDate: {}\nSubject: {}\n\n{}",
+        from,
+        full_time(message.at),
+        message.subject.trim(),
+        mail_text(message, opened)
+    );
+    (subject, text)
+}
+
 /// The colors of the reader's page, resolved from the app's theme.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Colors {
@@ -1893,6 +1937,25 @@ mod tests {
         assert_eq!(organisation_domain("nobody"), None);
         assert_eq!(person_label("Ana", "ana@x.test"), "Ana");
         assert_eq!(person_label(" ANA@x.test ", "ana@x.test"), "ana@x.test");
+    }
+
+    #[test]
+    fn a_forward_quotes_who_sent_it_and_its_text() {
+        let message: Message = serde_json::from_value(serde_json::json!({
+            "id": "a.inbox.1", "accountId": "a", "folder": "inbox", "from": "Ana",
+            "address": "ana@x.test", "subject": "Factura", "preview": "p", "body": ["Hola", "Adjunto"],
+            "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
+        }))
+        .unwrap();
+        let (subject, text) = forward_of(&message, None);
+        assert_eq!(subject, "Fwd: Factura");
+        assert!(text.contains("From: Ana <ana@x.test>"));
+        assert!(text.ends_with("Hola\n\nAdjunto"));
+        let again = Message {
+            subject: "FWD: Factura".into(),
+            ..message
+        };
+        assert_eq!(forward_of(&again, None).0, "FWD: Factura");
     }
 
     #[test]

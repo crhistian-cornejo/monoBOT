@@ -32,5 +32,5 @@ pub use model::{
     AccountView, Action, Attachment, BoxTotal, Folder, Message, Opened, Overview, Triage,
 };
 pub use search::Found;
-pub use service::{Mail, Person, Recipients, view_of};
+pub use service::{MAX_RECIPIENTS, Mail, Outgoing, Person, Recipients, parse_people, view_of};
 pub use watch::{Heard, Interesting, Listener};

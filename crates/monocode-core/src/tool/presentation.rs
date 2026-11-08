@@ -419,6 +419,7 @@ pub fn app_activity(action: &str, running: bool) -> (&'static str, &'static str)
         "mail.list" | "mail.read" => ("Reading", "Read", "email"),
         "mail.search" => ("Searching", "Searched", "email"),
         "mail.draft" => ("Drafting", "Drafted", "a reply"),
+        "mail.propose" => ("Proposing", "Proposed", "a message to send"),
         "mail.connect" => ("Asking", "Asked", "to connect a mailbox"),
         a if a.starts_with("worktrees.") || a.starts_with("folders.") => {
             ("Organizing", "Organized", "the project")

@@ -784,7 +784,8 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
             }
             // The user's mail, from the accounts connected in the Inbox's Email tab. An
             // account a bot connected for itself is read by that bot alone.
-            "mail.list" | "mail.read" | "mail.draft" | "mail.search" | "mail.connect" => {
+            "mail.list" | "mail.read" | "mail.draft" | "mail.propose" | "mail.search"
+            | "mail.connect" => {
                 let reader = mono.id.clone();
                 self.call_work(
                     call,
@@ -800,9 +801,13 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                         let service = mail::Service::new(data_dir.clone());
                         let mut value =
                             mail::agent_action(&service, &action, &input, Some(&reader), &access)?;
-                        let effect = mail::take_dialog(&mut value)
-                            .map(|request| Effect::MailConnect(Box::new((data_dir, request))))
-                            .unwrap_or(Effect::None);
+                        let effect = if let Some(card) = mail::take_card(&mut value) {
+                            Effect::Card(card)
+                        } else {
+                            mail::take_dialog(&mut value)
+                                .map(|request| Effect::MailConnect(Box::new((data_dir, request))))
+                                .unwrap_or(Effect::None)
+                        };
                         Ok((value, effect))
                     },
                     cx,

@@ -5,10 +5,11 @@
 use super::*;
 use serde_json::json;
 
-pub const ACTIONS: [&str; 5] = [
+pub const ACTIONS: [&str; 6] = [
     "mail.list",
     "mail.read",
     "mail.draft",
+    "mail.propose",
     "mail.search",
     "mail.connect",
 ];
@@ -90,6 +91,7 @@ pub fn agent_action(
     };
     match action {
         "mail.connect" => connect(service, input, reader, access),
+        "mail.propose" => propose(service, input, &readable),
         "mail.search" => {
             let query = required(input, "query", 300)?;
             let account = optional(input, "account", 320)?;
@@ -270,7 +272,7 @@ pub fn agent_action(
                     "subject": message.subject,
                     "at": iso(message.at),
                     "text": text.chars().take(max_chars).collect::<String>(),
-                    "next": "To answer it, write the reply with mail.draft: the user reviews and sends it.",
+                    "next": "To answer it, propose the reply with mail.propose (the user sends it from a card in your chat), or save it with mail.draft.",
                     "note": MAIL_NOTE,
                 });
                 if text.chars().count() > max_chars {
@@ -297,6 +299,98 @@ pub fn agent_action(
         }
         _ => Err("Unknown mail action".into()),
     }
+}
+
+const CARD: &str = "card";
+
+/// The card a `mail.propose` answer asks the app to show in the agent's chat, taken out of
+/// the answer. None: nothing to show.
+pub fn take_card(answer: &mut Value) -> Option<Value> {
+    answer.as_object_mut()?.remove(CARD)
+}
+
+fn people_json(people: &[Person]) -> Value {
+    json!(people
+        .iter()
+        .map(|p| json!({"name": p.name, "address": p.address}))
+        .collect::<Vec<_>>())
+}
+
+/// A reply, or a new message, the agent wrote for the user to send: it becomes a card in the
+/// agent's chat with the people it goes to, its subject and text, and Send. Nothing leaves
+/// until the user presses it.
+fn propose(
+    service: &Service,
+    input: &Value,
+    readable: &dyn Fn(&str) -> bool,
+) -> Result<Value, String> {
+    let text = required(input, "text", 10_000)?;
+    if text.trim().is_empty() {
+        return Err("text must not be empty".into());
+    }
+    let subject = optional(input, "subject", 200)?.map(|s| s.trim().to_owned());
+    let all = flag(input, "all")?;
+    let card = if let Some(id) = optional(input, "id", 300)? {
+        for key in ["account", "to", "cc"] {
+            if input.get(key).is_some() {
+                return Err(format!(
+                    "A reply goes to its message's people: leave out {key}"
+                ));
+            }
+        }
+        let overview = service.overview(false);
+        let message = overview
+            .messages
+            .iter()
+            .find(|m| m.id == id)
+            .ok_or("No message has that id. List them with mail.list.")?;
+        let owner = overview
+            .accounts
+            .iter()
+            .find(|a| a.id == message.account_id)
+            .filter(|a| readable(&a.address))
+            .ok_or("No message has that id. List them with mail.list.")?;
+        if message.triage == Triage::Held {
+            return Err("That message is held back as a possible scam: it can't be answered. Tell the user it's in the Held view.".into());
+        }
+        let people = service.recipients(&id, all)?;
+        json!({
+            "type": "mail", "mode": "reply", "messageId": id,
+            "accountId": owner.id, "from": owner.address,
+            "to": people_json(&people.to), "cc": people_json(&people.cc),
+            "subject": subject.filter(|s| !s.is_empty()).unwrap_or_else(|| reply_subject(&message.subject)),
+            "text": text, "all": all,
+        })
+    } else {
+        let account = required(input, "account", 320)?;
+        let owner = service
+            .accounts()
+            .into_iter()
+            .find(|a| a.address.eq_ignore_ascii_case(account.trim()) && a.provider != "cloudflare")
+            .filter(|a| readable(&a.address))
+            .ok_or("account must be one of the accounts you may read (mail.list names them)")?;
+        let to = parse_people(&required(input, "to", 2_000)?)?;
+        let cc = parse_people(&optional(input, "cc", 2_000)?.unwrap_or_default())?;
+        if to.is_empty() {
+            return Err("to must name at least one address".into());
+        }
+        if to.len() + cc.len() > MAX_RECIPIENTS {
+            return Err(format!("A message goes to {MAX_RECIPIENTS} people at most"));
+        }
+        json!({
+            "type": "mail", "mode": "new",
+            "accountId": owner.id, "from": owner.address,
+            "to": people_json(&to), "cc": people_json(&cc),
+            "subject": subject.unwrap_or_default(), "text": text,
+        })
+    };
+    let mut card = card;
+    card["id"] = json!(crate::mono::new_id());
+    Ok(json!({
+        "proposed": true,
+        "note": "The user sees it as a card in your chat, with who it goes to, and sends it with its Send button, saves it as a draft or discards it. You cannot send it. Don't repeat it in your reply; say in one line what it is.",
+        CARD: card,
+    }))
 }
 
 /// What an agent asked to connect: the app shows its own dialog with it filled in, and the
@@ -415,6 +509,52 @@ mod tests {
             json!({"address": "ana@x.pe", "provider": "pop"})
         )
         .is_err());
+    }
+
+    #[test]
+    fn a_proposed_message_becomes_a_card_only_from_an_account_the_agent_may_read() {
+        let (_dir, service) = service();
+        let propose = |input: Value, access: &Access| {
+            agent_action(&service, "mail.propose", &input, Some("finance"), access)
+        };
+        let mut answer = propose(
+            json!({"account": "ANA@gmail.com", "to": "Luis <luis@x.test>", "subject": "Gastos", "text": "Hola"}),
+            &Access::new(),
+        )
+        .unwrap();
+        assert_eq!(answer["proposed"], true);
+        let card = take_card(&mut answer).unwrap();
+        assert!(
+            answer.get("card").is_none(),
+            "the agent never sees the card"
+        );
+        assert_eq!(card["type"], "mail");
+        assert_eq!(card["mode"], "new");
+        assert_eq!(card["from"], "ana@gmail.com");
+        assert_eq!(card["to"][0]["address"], "luis@x.test");
+        assert!(card["id"].as_str().is_some_and(|id| !id.is_empty()));
+        let kept = parse_access(&json!({"ana@gmail.com": ["planner"]}));
+        assert!(propose(
+            json!({"account": "ana@gmail.com", "to": "l@x.test", "text": "Hola"}),
+            &kept
+        )
+        .is_err());
+        assert!(propose(
+            json!({"account": "ana@gmail.com", "to": "no address", "text": "Hola"}),
+            &Access::new()
+        )
+        .is_err());
+        assert!(propose(
+            json!({"account": "ana@gmail.com", "text": "Hola"}),
+            &Access::new()
+        )
+        .is_err());
+        assert!(propose(
+            json!({"id": "x", "to": "l@x.test", "text": "Hola"}),
+            &Access::new()
+        )
+        .is_err());
+        assert!(propose(json!({"id": "nope", "text": "Hola"}), &Access::new()).is_err());
     }
 
     #[test]

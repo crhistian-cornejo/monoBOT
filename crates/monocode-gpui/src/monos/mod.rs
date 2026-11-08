@@ -23,6 +23,7 @@ pub(crate) mod html;
 #[cfg(target_os = "windows")]
 mod html_windows;
 mod images;
+mod mail_card;
 mod mail_connect;
 mod mail_workspace;
 mod memory_ui;
@@ -221,6 +222,8 @@ pub(crate) struct Monos {
         Subscription,
         gpui::Size<gpui::Pixels>,
     )>,
+    /// Mail cards whose Send or Save as draft is on its way.
+    mail_sending: HashSet<String>,
     /// The dialog a bot opened with `mail.connect`: the bot, the form, and the window size.
     mail_connect: Option<(
         String,
@@ -504,6 +507,7 @@ impl Monos {
             background: None,
             group_dialog: None,
             mail_connect: None,
+            mail_sending: HashSet::new(),
             workstreams: Default::default(),
             backgrounds: HashMap::new(),
             drag: None,

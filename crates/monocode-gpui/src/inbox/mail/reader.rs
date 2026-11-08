@@ -110,7 +110,10 @@ impl Mailbox {
                 )
             })
             .when(!held, |d| {
-                d.child(
+                d.child(text_button("mail-forward", "Forward (F)", 0.7).on_click(
+                    cx.listener(|this, _, window, cx| this.start_compose(true, window, cx)),
+                ))
+                .child(
                     text_button("mail-reply", "Reply (R)", 1.)
                         .on_click(cx.listener(|this, _, window, cx| this.start_reply(window, cx))),
                 )

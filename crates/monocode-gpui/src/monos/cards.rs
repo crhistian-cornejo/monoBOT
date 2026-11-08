@@ -246,6 +246,7 @@ pub(crate) fn render(
         "document" => return artifact(value, cx),
         "choices" => return choices(value, chosen, cx),
         "images" => return super::images::render(value, cx),
+        "mail" => return super::mail_card::render(value, cx),
         "session" => {
             let id = value["sessionId"].as_i64().unwrap_or_default();
             let view = value["state"]
@@ -540,6 +541,7 @@ impl Monos {
             }
         }
         match value["type"].as_str().unwrap_or_default() {
+            "mail" => self.mail_card_action(mono, value, cx),
             "choice" => {
                 if let Some(text) = value["text"].as_str() {
                     self.enqueue(mono, text.into(), Vec::new(), false, cx);

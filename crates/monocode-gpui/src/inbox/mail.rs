@@ -4,6 +4,7 @@
 //! (`monocode_core::inbox::mail`), so a mailbox connected there shows here.
 mod accounts;
 mod art;
+mod compose;
 pub(crate) mod connect;
 mod reader;
 mod reply;
@@ -111,6 +112,8 @@ pub(crate) struct Mailbox {
     reader: Option<Reader>,
     opened: VecDeque<Opened>,
     reply: Option<Entity<MailReply>>,
+    /// A new message or a forward being written, in place of the reader.
+    compose: Option<Entity<compose::MailCompose>>,
     form: Entity<connect::ConnectForm>,
     /// Which agents read each account, and the bots it can be kept for.
     access: model::Access,
@@ -305,6 +308,7 @@ impl Mailbox {
             reader: None,
             opened: VecDeque::new(),
             reply: None,
+            compose: None,
             form,
             access: model::Access::new(),
             agents: Vec::new(),
@@ -358,6 +362,15 @@ impl Mailbox {
                 self.settings_open = false;
                 cx.notify();
             }
+            return true;
+        }
+        if self
+            .compose
+            .as_ref()
+            .is_some_and(|compose| !compose.read(cx).busy())
+        {
+            self.compose = None;
+            cx.notify();
             return true;
         }
         if self.reply.take().is_some() {
@@ -886,6 +899,59 @@ impl Mailbox {
         cx.notify();
     }
 
+    /// A new message (`forward`: the forward of the open one) in place of the reader.
+    fn start_compose(&mut self, forward: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.compose.is_some() {
+            return;
+        }
+        let accounts: Vec<AccountView> = self
+            .accounts
+            .clone()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| a.provider != "cloudflare")
+            .collect();
+        if accounts.is_empty() {
+            return;
+        }
+        let selected = self.selected_message().cloned();
+        let (from, forwarded) = match (forward, selected) {
+            (true, Some(message)) => {
+                if message.triage == model::Triage::Held {
+                    return;
+                }
+                let opened = self.reader.as_ref().and_then(|r| r.opened.as_ref());
+                (
+                    Some(message.account_id.clone()),
+                    Some(model::forward_of(&message, opened)),
+                )
+            }
+            (true, None) => return,
+            (false, _) => (self.account_id.clone(), None),
+        };
+        let service = self.service.clone();
+        let compose = cx.new(|cx| {
+            compose::MailCompose::new(service, accounts, from.as_deref(), forwarded, window, cx)
+        });
+        self._subscriptions.push(cx.subscribe(
+            &compose,
+            |this, compose, event: &compose::ComposeEvent, cx| {
+                if this.compose.as_ref() != Some(&compose) {
+                    return;
+                }
+                this.compose = None;
+                if let compose::ComposeEvent::Sent(note) = event
+                    && let Some(reader) = this.reader.as_mut()
+                {
+                    reader.notice = Some(note.clone());
+                }
+                cx.notify();
+            },
+        ));
+        self.compose = Some(compose);
+        cx.notify();
+    }
+
     /// J/K move, E archives, S stars, R replies: outside text fields only.
     fn on_key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         if !self.focus.is_focused(window) {
@@ -931,6 +997,8 @@ impl Mailbox {
                 None => return,
             },
             "r" if selected.is_some() => self.start_reply(window, cx),
+            "c" => self.start_compose(false, window, cx),
+            "f" if selected.is_some() => self.start_compose(true, window, cx),
             _ => return,
         }
         cx.stop_propagation();
@@ -1157,6 +1225,11 @@ impl Mailbox {
                         })),
                 )
             })
+            .child(
+                tool("mail-new", "New message (C)", "pencil", content(0.55)).on_click(
+                    cx.listener(|this, _, window, cx| this.start_compose(false, window, cx)),
+                ),
+            )
             .child(
                 tool(
                     "mail-refresh",
@@ -1681,7 +1754,9 @@ impl gpui::Render for Mailbox {
         if accounts.is_empty() {
             return root.child(self.welcome(window, cx)).into_any_element();
         }
-        let detail = if self.selected_message().is_some() {
+        let detail = if let Some(compose) = self.compose.clone() {
+            compose.into_any_element()
+        } else if self.selected_message().is_some() {
             self.reader_view(window, cx)
         } else {
             self.idle()

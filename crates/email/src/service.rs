@@ -985,6 +985,74 @@ impl Mail {
         Ok(())
     }
 
+    /// Sends a new message (or a forward) the owner wrote, from one of their accounts, to the people `out` names and no
+    /// one else. Only the owner's press gets here. Like a reply, Gmail keeps its own copy; any other account gets one in
+    /// its sent folder.
+    pub fn send_new(
+        &self,
+        accounts: &[Account],
+        account_id: &str,
+        out: &Outgoing,
+        now_ms: i64,
+        transport: &crate::http_send::Transport,
+        token: &str,
+    ) -> Result<(), String> {
+        let (account, out) = new_parts(accounts, account_id, out)?;
+        let people = Recipients {
+            to: out.to.clone(),
+            cc: out.cc.clone(),
+        };
+        let message = compose(&account, &people, &out.subject, &out.text, None, now_ms);
+        if *transport == crate::http_send::Transport::Smtp {
+            let password = secrets::get(&account.address)?;
+            let addresses: Vec<String> = people
+                .to
+                .iter()
+                .chain(&people.cc)
+                .map(|p| p.address.clone())
+                .collect();
+            crate::smtp::send(&account, &password, &addresses, &message)?;
+        } else {
+            crate::http_send::send(transport, token, &account.address, &people, &message)?;
+        }
+        if !account.is_gmail() || *transport != crate::http_send::Transport::Smtp {
+            let password = secrets::get(&account.address).unwrap_or_default();
+            if let Ok(mut imap) = connect(&self.open, &account, &password) {
+                if let Some(sent) = imap.mailboxes().ok().and_then(|list| boxes_of(&list).sent) {
+                    let _ = imap.save_sent(&sent, &message);
+                }
+                imap.logout();
+            }
+        }
+        Ok(())
+    }
+
+    /// Saves a new message as a draft on the account's server, for the owner to send from any app.
+    pub fn draft_new(
+        &self,
+        accounts: &[Account],
+        account_id: &str,
+        out: &Outgoing,
+        now_ms: i64,
+    ) -> Result<(), String> {
+        let (account, out) = new_parts(accounts, account_id, out)?;
+        let people = Recipients {
+            to: out.to.clone(),
+            cc: out.cc.clone(),
+        };
+        let password = secrets::get(&account.address)?;
+        let mut imap = connect(&self.open, &account, &password)?;
+        let drafts = boxes_of(&imap.mailboxes()?)
+            .drafts
+            .ok_or("Esta cuenta no tiene carpeta de borradores.")?;
+        imap.save_draft(
+            &drafts,
+            &compose(&account, &people, &out.subject, &out.text, None, now_ms),
+        )?;
+        imap.logout();
+        Ok(())
+    }
+
     /// The account and the message a reply goes with, and its text, checked.
     fn reply_parts(
         &self,
@@ -1127,8 +1195,22 @@ fn compose_reply(
     text: &str,
     now_ms: i64,
 ) -> String {
-    use base64::Engine;
     let subject = reply_subject(entry, subject);
+    let answers = (!entry.message_id.is_empty()).then_some(entry.message_id.as_str());
+    compose(account, people, &subject, text, answers, now_ms)
+}
+
+/// A message from `account` to `people`: `answers`, the Message-ID it replies to; its text in base64 so no server can
+/// alter it.
+fn compose(
+    account: &Account,
+    people: &Recipients,
+    subject: &str,
+    text: &str,
+    answers: Option<&str>,
+    now_ms: i64,
+) -> String {
+    use base64::Engine;
     let mut message = format!(
         "From: {} <{}>\r\nTo: {}\r\n",
         mime::encode_word(&safe(&account.name)),
@@ -1140,13 +1222,13 @@ fn compose_reply(
     }
     message.push_str(&format!(
         "Subject: {}\r\nDate: {}\r\n",
-        mime::encode_word(&subject),
+        mime::encode_word(&safe(subject)),
         rfc2822(now_ms)
     ));
-    if !entry.message_id.is_empty() {
+    if let Some(id) = answers {
         message.push_str(&format!(
             "In-Reply-To: {0}\r\nReferences: {0}\r\n",
-            safe(&entry.message_id)
+            safe(id)
         ));
     }
     message.push_str("MIME-Version: 1.0\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
@@ -1156,6 +1238,96 @@ fn compose_reply(
         message.push_str("\r\n");
     }
     message
+}
+
+/// A new message the owner wrote, or a forward: who gets it, the subject and the text.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Outgoing {
+    pub to: Vec<Person>,
+    pub cc: Vec<Person>,
+    pub subject: String,
+    pub text: String,
+}
+
+/// The most people one new message goes to.
+pub const MAX_RECIPIENTS: usize = 20;
+
+/// The people a field names, «Ana <ana@x.test>, luis@x.test; eva@x.test»: every address checked, none twice.
+pub fn parse_people(text: &str) -> Result<Vec<Person>, String> {
+    let mut people: Vec<Person> = Vec::new();
+    for part in text.split([',', ';', '\n']) {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
+        let (name, address) = match (part.rfind('<'), part.rfind('>')) {
+            (Some(open), Some(close)) if open < close => (
+                part[..open].trim().trim_matches('"').trim().to_string(),
+                part[open + 1..close].trim().to_string(),
+            ),
+            _ => (String::new(), part.to_string()),
+        };
+        if !crate::account::valid_address(&address) {
+            return Err(format!("«{address}» is not an email address."));
+        }
+        if !people
+            .iter()
+            .any(|p| p.address.eq_ignore_ascii_case(&address))
+        {
+            people.push(Person { name, address });
+        }
+    }
+    Ok(people)
+}
+
+/// The account a new message goes from and the message, checked: someone to send it to, a subject on one line, a text.
+fn new_parts(
+    accounts: &[Account],
+    account_id: &str,
+    out: &Outgoing,
+) -> Result<(Account, Outgoing), String> {
+    let account = accounts
+        .iter()
+        .find(|a| a.id == account_id)
+        .ok_or("Esa cuenta ya no está conectada.")?
+        .clone();
+    if out.to.is_empty() {
+        return Err("Write who it goes to.".into());
+    }
+    if out.to.len() + out.cc.len() > MAX_RECIPIENTS {
+        return Err(format!(
+            "A message goes to {MAX_RECIPIENTS} people at most."
+        ));
+    }
+    if out
+        .to
+        .iter()
+        .chain(&out.cc)
+        .any(|p| !crate::account::valid_address(&p.address))
+    {
+        return Err("One of the addresses is not valid.".into());
+    }
+    let text = out.text.trim().to_string();
+    if text.is_empty() {
+        return Err("Write the message first.".into());
+    }
+    if text.chars().count() > MAX_REPLY {
+        return Err("The message is too long.".into());
+    }
+    let subject: String = safe(&out.subject)
+        .trim()
+        .chars()
+        .take(MAX_SUBJECT)
+        .collect();
+    Ok((
+        account,
+        Outgoing {
+            to: out.to.clone(),
+            cc: out.cc.clone(),
+            subject,
+            text,
+        },
+    ))
 }
 
 /// «Sat, 24 Oct 2026 12:00:00 +0000».
@@ -1382,6 +1554,56 @@ mod tests {
             reply.ends_with("\r\n") && !reply.contains("Gracias"),
             "the text goes in base64"
         );
+    }
+
+    #[test]
+    fn a_new_message_names_only_its_people_and_answers_nothing() {
+        let people =
+            parse_people("Lucía <lucia@ejemplo.test>, luis@ejemplo.test; LUIS@ejemplo.test")
+                .unwrap();
+        assert_eq!(people.len(), 2);
+        assert_eq!(people[0].name, "Lucía");
+        assert!(parse_people("ana@ejemplo.test, no es correo").is_err());
+        assert!(parse_people("x@y.test\r\nBcc: z@y.test").is_err());
+        let out = Outgoing {
+            to: people,
+            cc: Vec::new(),
+            subject: "Fwd: Factura\r\nBcc: z@y.test".into(),
+            text: "Te reenvío la factura.".into(),
+        };
+        let me = account();
+        let (account, out) = new_parts(std::slice::from_ref(&me), &me.id, &out).unwrap();
+        let message = compose(
+            &account,
+            &Recipients {
+                to: out.to.clone(),
+                cc: out.cc.clone(),
+            },
+            &out.subject,
+            &out.text,
+            None,
+            1_792_231_200_000,
+        );
+        assert!(message.contains("To: =?UTF-8?B?"), "{message}");
+        assert!(message.contains(", luis@ejemplo.test\r\n"));
+        assert!(!message.contains("\r\nBcc:") && !message.contains("In-Reply-To"));
+        let empty = Outgoing {
+            text: "hola".into(),
+            ..Outgoing::default()
+        };
+        assert!(new_parts(std::slice::from_ref(&account), &me.id, &empty).is_err());
+        let many = Outgoing {
+            to: (0..=MAX_RECIPIENTS)
+                .map(|i| Person {
+                    name: String::new(),
+                    address: format!("p{i}@x.test"),
+                })
+                .collect(),
+            text: "hola".into(),
+            ..Outgoing::default()
+        };
+        assert!(new_parts(std::slice::from_ref(&account), &me.id, &many).is_err());
+        assert!(new_parts(&[account], "other", &out).is_err());
     }
 
     #[test]

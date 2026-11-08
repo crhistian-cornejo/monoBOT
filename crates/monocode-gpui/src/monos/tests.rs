@@ -5308,3 +5308,62 @@ fn a_bots_mail_connect_opens_the_apps_dialog_and_the_user_picks_who_reads(cx: &m
     s.manager
         .read_with(visual, |m, _| assert!(m.mail_connect.is_none()));
 }
+
+#[gpui::test]
+fn a_bots_proposed_mail_waits_as_a_card_for_the_users_send(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let data_dir = locked(&s.store)
+        .unwrap()
+        .data_dir()
+        .map(std::path::Path::to_path_buf)
+        .unwrap();
+    std::fs::create_dir_all(data_dir.join("mail")).unwrap();
+    std::fs::write(
+        data_dir.join("mail/accounts.json"),
+        r#"{"accounts":[{"id":"9b","name":"Ana","address":"ana@gmail.com","provider":"gmail","host":"imap.gmail.com","port":993}],"interesting":[]}"#,
+    )
+    .unwrap();
+    let answer = call(
+        &s,
+        "propose-luis",
+        "mail.propose",
+        json!({"account":"ana@gmail.com","to":"Luis <luis@x.test>","subject":"Gastos","text":"Hola Luis"}),
+        cx,
+    )
+    .try_recv()
+    .unwrap()
+    .unwrap();
+    assert_eq!(answer["proposed"], true);
+    assert!(
+        answer.get("card").is_none(),
+        "the agent never holds the card"
+    );
+    let card_of = |cx: &mut TestAppContext| {
+        s.manager.read_with(cx, |m, cx| {
+            let chat = m.chats.get(&s.id).expect("the bot's chat");
+            chat.read(cx)
+                .mono_rows(cx)
+                .iter()
+                .filter(|r| r.role == "mono-card")
+                .filter_map(|r| serde_json::from_str::<Value>(&r.text).ok())
+                .find(|c| c["type"] == "mail")
+                .expect("the card is in the chat")
+        })
+    };
+    let card = card_of(cx);
+    assert_eq!(card["to"][0]["address"], "luis@x.test");
+    assert!(card.get("state").is_none(), "nothing has left");
+    s.manager.update(cx, |m, cx| {
+        m.settings = None;
+        cx.notify();
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let selector: &'static str =
+        format!("mono-mail-discard-{}", card["id"].as_str().unwrap()).leak();
+    let discard = visual.debug_bounds(selector).expect("the card's Discard");
+    visual.simulate_click(discard.center(), Default::default());
+    visual.run_until_parked();
+    assert_eq!(card_of(visual)["state"], "discarded");
+}
