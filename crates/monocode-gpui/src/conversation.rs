@@ -16,6 +16,7 @@ mod history;
 mod mobile;
 mod mono;
 mod notifications;
+mod orchestration;
 mod provider_retry;
 mod remote;
 pub(crate) mod remote_plans;
@@ -184,6 +185,10 @@ pub(crate) struct Conversation {
     pub(crate) orchestration_plan: Option<monocode_core::orchestration::Plan>,
     orchestration_error: Option<String>,
     pub(crate) orchestration_progress: Option<String>,
+    plan_card: Option<orchestration::PlanCard>,
+    orchestration_paused: bool,
+    /// The orchestration lead managing this worker.
+    managed_by: Option<i64>,
     status: String,
     loaded: bool,
     history_unloaded: bool,
@@ -648,6 +653,9 @@ impl Conversation {
             orchestration_plan: None,
             orchestration_error: None,
             orchestration_progress: None,
+            plan_card: None,
+            orchestration_paused: false,
+            managed_by: None,
             status: "Loading conversation…".into(),
             loaded: false,
             history_unloaded: false,
@@ -1598,6 +1606,8 @@ impl EventEmitter<OpenSessionChanges> for Conversation {}
 impl EventEmitter<Transfer> for Conversation {}
 impl EventEmitter<composer_features::StartOrchestration> for Conversation {}
 impl EventEmitter<composer_features::StopOrchestration> for Conversation {}
+impl EventEmitter<composer_features::ResumeOrchestration> for Conversation {}
+impl EventEmitter<composer_features::OpenOrchestrationAgents> for Conversation {}
 
 impl Conversation {
     pub(crate) fn install_transfer(

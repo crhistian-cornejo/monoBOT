@@ -11,6 +11,8 @@ pub struct SessionSidebarMetadata {
     pub sidebar_hidden: HashSet<i64>,
     pub started_by: HashMap<i64, i64>,
     pub orchestrations: HashMap<i64, orchestration::Summary>,
+    /// Lead-supervised runs still open (active or paused), for resuming.
+    pub orchestration_runs: HashMap<i64, orchestration::control::Run>,
     pub groups: HashMap<String, session_groups::Groups>,
     pub reminders: Vec<super::Reminder>,
 }
@@ -101,6 +103,18 @@ impl Store {
             },
             started_by: self.started_links().unwrap_or_default(),
             orchestrations: self.orchestration_summaries().unwrap_or_default(),
+            orchestration_runs: self
+                .orchestration_runs()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|(_, run)| {
+                    matches!(
+                        run.status,
+                        orchestration::control::RunStatus::Active
+                            | orchestration::control::RunStatus::Paused
+                    )
+                })
+                .collect(),
             groups: projects
                 .iter()
                 .filter_map(|project| {

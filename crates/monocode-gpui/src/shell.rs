@@ -611,7 +611,8 @@ pub(crate) struct Shell {
     mobile: mobile_host::Mobile,
     app_results: HashMap<(i64, String), (String, Result<serde_json::Value, String>)>,
     app_pending: HashSet<(i64, String)>,
-    orchestrations: HashMap<i64, orchestration::Run>,
+    orchestrations: HashMap<i64, orchestration::Live>,
+    orchestration_control: orchestration::Control,
     /// Each lead's last orchestration, whose agents hang under it in the sidebar.
     orchestration_summaries: HashMap<i64, monocode_core::orchestration::Summary>,
     /// Sessions an /operator thread started, by the session that started them.
@@ -1024,7 +1025,8 @@ impl Shell {
             mobile: mobile_host::Mobile::default(),
             app_results: HashMap::new(),
             app_pending: HashSet::new(),
-            orchestrations: HashMap::new(),
+            orchestrations: orchestration::restore(sidebar_metadata.orchestration_runs),
+            orchestration_control: Default::default(),
             orchestration_summaries: sidebar_metadata.orchestrations,
             started_by: sidebar_metadata.started_by,
             rails: Default::default(),
@@ -8785,6 +8787,7 @@ impl Render for Shell {
             self.focus_pane(id, window, cx);
             self.open_review(tab, window, cx);
         }
+        self.open_orchestration_agents_requested(window, cx);
         // Native fullscreen transitions resize the window, which redraws it.
         self.fullscreen = window.is_fullscreen();
         self.window_controls = corner_controls_width(window);

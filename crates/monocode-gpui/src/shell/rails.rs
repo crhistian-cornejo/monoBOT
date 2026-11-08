@@ -954,18 +954,21 @@ impl Shell {
                                                     }),
                                                 ),
                                             )
+                                            .child(
+                                                solid("rail-agent-beside", "Open beside").on_click(
+                                                    cx.listener(move |this, _, window, cx| {
+                                                        this.open_beside(worker, lead, window, cx)
+                                                    }),
+                                                ),
+                                            )
                                         })
                                         .when_some(worker.filter(|_| running), |d, worker| {
                                             d.child(
                                                 solid("rail-agent-cancel", "Cancel task").on_click(
                                                     cx.listener(move |this, _, _, cx| {
-                                                        if let Some(view) =
-                                                            this.sessions.get(&worker)
-                                                        {
-                                                            view.update(cx, |v, cx| {
-                                                                v.stop_if_busy(cx)
-                                                            });
-                                                        }
+                                                        this.cancel_orchestration_worker(
+                                                            lead, worker, cx,
+                                                        )
                                                     }),
                                                 ),
                                             )

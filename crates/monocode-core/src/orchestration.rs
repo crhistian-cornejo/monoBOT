@@ -1,5 +1,9 @@
-//! Reviewable orchestration plans. Workers share a checkout; overlapping scopes
-//! are serialized even when they have no explicit dependency.
+//! Reviewable orchestration plans. The user edits and starts the lead's plan;
+//! the lead then supervises its workers through `control`. Each worker gets
+//! its own worktree (`isolation`), and overlapping scopes are serialized even
+//! when they have no explicit dependency.
+pub mod control;
+pub mod isolation;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashSet,
@@ -22,7 +26,8 @@ pub struct SummaryTask {
     pub title: String,
     pub provider: String,
     pub model: Option<String>,
-    /// queued, running, completed, failed or blocked.
+    /// queued, running, review (completed, not yet accepted), completed,
+    /// failed, blocked or cancelled.
     pub status: String,
 }
 impl SummaryTask {
@@ -37,15 +42,17 @@ impl SummaryTask {
         match self.status.as_str() {
             "queued" => "Queued",
             "running" => "Working",
+            "review" => "Review",
             "completed" => "Done",
             "failed" => "Failed",
             "blocked" => "Needs review",
+            "cancelled" => "Cancelled",
             _ => "Queued",
         }
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
     pub title: String,
@@ -53,8 +60,15 @@ pub struct Task {
     pub files: Vec<String>,
     #[serde(default, alias = "dependsOn")]
     pub depends_on: Vec<String>,
+    /// The harness, model and effort chosen on the card; the lead's otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "harness")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Plan {
     pub title: String,
     pub summary: String,
@@ -63,7 +77,7 @@ pub struct Plan {
 pub const INSTRUCTIONS: &str = r#"Prepare an orchestration plan for the user's request. Inspect the project with read-only tools. Do not edit or launch workers yet. The user will review and start the plan in MonoBOT.
 Return a short explanation followed by exactly one JSON block between <monocode_orchestration> and </monocode_orchestration>.
 Schema: {"title":"short title","summary":"approach","tasks":[{"id":"task-1","title":"assignment title","prompt":"complete self-contained instructions, validation and expected report","files":["src/path"],"depends_on":[]}]}
-Use 1 to 12 assignments, unique ASCII IDs, exact project-relative file or directory scopes ('.' for the whole project), and dependency IDs. Independent assignments may run concurrently (up to four); overlapping scopes run serially. Each worker uses this session's provider, model and access policy. Include verification in the assignments. Never claim that workers have already started."#;
+Use 1 to 12 assignments, unique ASCII IDs, exact project-relative file or directory scopes ('.' for the whole project), and dependency IDs. Independent assignments may run concurrently (up to four), each in its own worktree; overlapping scopes run serially. Workers use this session's provider and model unless the user changes them on the card. After the user starts the plan you supervise the workers and review their changes. Include verification in the assignments. Never claim that workers have already started."#;
 pub fn parse(text: &str) -> Result<Plan, String> {
     let body = text
         .split_once("<monocode_orchestration>")
@@ -157,9 +171,6 @@ pub fn overlaps(a: &[String], b: &[String]) -> bool {
         })
     })
 }
-pub fn worker_prompt(task: &Task, previous: &str) -> String {
-    format!("You are completing assignment {} in a MonoBOT orchestration.\n{}\n\n{}\n\nWrite only within these project-relative scopes: {}. Other agents may work in this checkout; preserve their changes and do not reset the repository. If you need a change outside your scopes, report the blocker. Run focused checks and report your changes, validation and any remaining issues.\n\nDependency reports:\n{}", task.id, task.title, task.prompt, task.files.join(", "), previous)
-}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,6 +181,7 @@ mod tests {
             prompt: "Work".into(),
             files: vec![file.into()],
             depends_on: deps.iter().map(|s| (*s).into()).collect(),
+            ..Default::default()
         }
     }
     #[test]

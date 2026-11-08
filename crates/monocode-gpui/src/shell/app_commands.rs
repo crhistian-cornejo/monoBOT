@@ -183,6 +183,11 @@ impl Shell {
         Ok(())
     }
     fn handle_app_call(&mut self, call: Call, window: &mut Window, cx: &mut Context<Self>) {
+        // The lead's `control` CLI shares this channel; its run authorizes it.
+        if call.action.starts_with("control.") {
+            self.handle_control_call(call, cx);
+            return;
+        }
         if let Err(error) = self.authorize_app_call(&call, cx) {
             let _ = call.reply.send(Err(error));
             return;
