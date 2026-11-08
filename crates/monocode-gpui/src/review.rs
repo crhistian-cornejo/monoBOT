@@ -737,6 +737,12 @@ impl ReviewPane {
         }
     }
 
+    /// The PDF the active tab shows, if it shows one.
+    pub(crate) fn pdf_path(&self, cx: &gpui::App) -> Option<String> {
+        let editor = self.sources.get(self.state.active)?.editor.as_ref()?;
+        editor.read(cx).pdf_path(cx)
+    }
+
     pub(crate) fn focus_paper(
         &mut self,
         page: usize,

@@ -4332,3 +4332,61 @@ fn typing_at_in_a_group_lists_its_members(cx: &mut TestAppContext) {
     let text = visual.update(|_, cx| chat.read(cx).input.read(cx).content.clone());
     assert_eq!(text, "@Cash ");
 }
+
+#[gpui::test]
+fn resting_on_a_citation_moves_only_the_paper_on_screen_and_records_show_their_abstract(
+    cx: &mut TestAppContext,
+) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let dir = std::env::temp_dir().join(format!("monobot-paper-point-{}", mono::new_id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("paper.pdf");
+    std::fs::write(&path, b"%PDF-1.4\n").unwrap();
+    let path = path.to_string_lossy().into_owned();
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    s.window
+        .update(visual, |_, w, cx| {
+            s.manager.update(cx, |m, cx| {
+                m.open(&s.id, w, cx);
+                m.dismiss_settings(w, cx);
+            })
+        })
+        .unwrap();
+    s.manager.update(visual, |m, cx| {
+        m.open_paper(path.clone(), 1, None, "A paper".into(), cx)
+    });
+    visual.run_until_parked();
+    s.manager.update(visual, |m, cx| {
+        assert!(m.point_open_paper(&path, 1, Some("a passage".into()), cx));
+        assert!(!m.point_open_paper("/elsewhere.pdf", 1, None, cx));
+        m.route = None;
+        assert!(
+            !m.point_open_paper(&path, 1, None, cx),
+            "a paper not on screen is left alone"
+        );
+        let meta: monocode_core::papers::PaperMeta = serde_json::from_value(serde_json::json!({
+            "paper": {
+                "key": "10.1/x", "title": "Rivers", "authors": ["Ana Ríos"], "pdfUrls": [],
+                "access": "closed",
+                "abstract": "We show that the reported result preserves the complete data."
+            },
+            "availability": "abstract"
+        }))
+        .unwrap();
+        m.paper_records.insert(
+            "https://doi.org/10.1/x".into(),
+            super::papers::PaperRecord {
+                meta: Some(meta),
+                passage: Some("the reported result preserves the complete data".into()),
+            },
+        );
+        m.route = Some(Route::PaperRecord("https://doi.org/10.1/x".into()));
+        m.show_overview(cx);
+        cx.notify();
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("paper-record").is_some());
+    let _ = std::fs::remove_dir_all(dir);
+}

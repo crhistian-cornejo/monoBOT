@@ -13,7 +13,7 @@ use gpui::{
     MouseButton, Pixels, Point, Role, SharedString, StrikethroughStyle, StyledText, div,
     prelude::*, px, rgb,
 };
-pub(crate) use search::{mark_row, mark_styles, row_text};
+pub(crate) use search::{mark_row, mark_styles, row_text, search_underline};
 
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = markdown, no_json)]
@@ -418,6 +418,7 @@ fn inline_selected(
                 .search
                 .map(search::search_background)
                 .or(style.citation.then(|| content(0.08))),
+            underline: style.search.map(search::search_underline),
             fade_out: Some(1. - base_opacity),
             font_weight: if style.citation {
                 Some(FontWeight::MEDIUM)
@@ -468,9 +469,46 @@ fn inline_selected(
     let clicked_urls = urls.clone();
     let clicked_citations = prepared.citations.clone();
     let text_id: SharedString = format!("{id}-text").into();
+    let mut interactive = InteractiveText::new(text_id, styled).on_click(links.clone(), |_, _, _| {});
+    if prepared.citations.iter().any(Option::is_some) {
+        // Each cited source previews on hover and points an open paper at it.
+        let cards: Vec<_> = links
+            .iter()
+            .zip(&urls)
+            .zip(prepared.citations.iter().zip(&prepared.titles))
+            .filter_map(|((range, url), (passage, title))| {
+                Some((range.clone(), url.clone(), passage.clone()?, title.clone()))
+            })
+            .collect();
+        let cards = std::rc::Rc::new(cards);
+        let hover_cards = cards.clone();
+        let pointed = std::rc::Rc::new(std::cell::Cell::new(None::<usize>));
+        interactive = interactive
+            .tooltip(move |at, window, cx| {
+                let (_, url, passage, title) =
+                    cards.iter().find(|(range, ..)| range.contains(&at))?;
+                Some(crate::citation_card::tip(url.clone(), title.clone(), None, passage.clone())(
+                    window, cx,
+                ))
+            })
+            .on_hover(move |at, _, window, cx| {
+                let card = at.and_then(|at| hover_cards.iter().position(|(r, ..)| r.contains(&at)));
+                if pointed.replace(card) == card {
+                    return;
+                }
+                let point = card.map(|ix| {
+                    let (_, url, passage, _) = &hover_cards[ix];
+                    (url.clone(), passage.clone())
+                });
+                window.dispatch_action(
+                    Box::new(crate::citation_card::PointAtCitation(point)),
+                    cx,
+                );
+            });
+    }
     let child = div()
         .id(id)
-        .child(InteractiveText::new(text_id, styled).on_click(links, |_, _, _| {}))
+        .child(interactive)
         .on_click(move |event, window, cx| {
             if !activate_link(event, clicked_selection.as_ref()) {
                 return;
@@ -611,6 +649,7 @@ fn rich_inline(
                 let highlight = HighlightStyle {
                     color: Some(opaque_color),
                     background_color: style.search.map(search::search_background),
+                    underline: style.search.map(search::search_underline),
                     fade_out: Some(1. - base_opacity),
                     font_weight: style.bold.then_some(FontWeight::SEMIBOLD),
                     font_style: style.italic.then_some(FontStyle::Italic),
@@ -622,6 +661,10 @@ fn rich_inline(
                 };
                 let link = style.link.clone();
                 let citation = style.citation.then(|| style.citation_passage.clone());
+                let card = link
+                    .clone()
+                    .zip(citation.clone())
+                    .map(|(url, passage)| (url, passage, style.citation_title.clone()));
                 let menu_link = link.clone();
                 let styled =
                     StyledText::new(text.to_owned()).with_highlights([(0..text.len(), highlight)]);
@@ -649,6 +692,18 @@ fn rich_inline(
                         .opacity(alpha)
                         .when(link.is_some(), |d| {
                             d.cursor(gpui::CursorStyle::PointingHand)
+                        })
+                        .when_some(card, |d, (url, passage, title)| {
+                            let point = (url.clone(), passage.clone());
+                            d.tooltip(crate::citation_card::tip(url, title, None, passage))
+                                .on_hover(move |hovered, window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(crate::citation_card::PointAtCitation(
+                                            hovered.then(|| point.clone()),
+                                        )),
+                                        cx,
+                                    );
+                                })
                         })
                         .child(child)
                         .on_click(move |event, window, cx| {
@@ -747,13 +802,21 @@ pub(crate) fn open_citation(url: &str, passage: Option<&str>, window: &mut Windo
     let work = cx.background_executor().spawn(async move {
         let store =
             monocode_core::papers::PaperStore::new(monocode_core::papers::cache_dir().ok()?);
-        monocode_core::papers::cached_citation(&store, &search_url, search_passage.as_deref())
+        let pdf =
+            monocode_core::papers::cached_citation(&store, &search_url, search_passage.as_deref());
+        let record = pdf.is_none() && monocode_core::papers::cached_record(&store, &search_url).is_some();
+        Some((pdf, record))
     });
     window
         .spawn(cx, async move |cx| {
-            let target = work.await;
+            let (target, record) = work.await.unwrap_or((None, false));
             let _ = cx.update(|window, cx| {
-                if let Some((path, page, title)) = target {
+                if record {
+                    window.dispatch_action(
+                        Box::new(crate::file_editor::OpenPaperRecord { url, passage }),
+                        cx,
+                    );
+                } else if let Some((path, page, title)) = target {
                     window.dispatch_action(
                         Box::new(crate::file_editor::OpenPaper {
                             path: path.to_string_lossy().into_owned(),

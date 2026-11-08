@@ -18,6 +18,7 @@ pub(super) struct PreparedInline {
     pub links: Vec<Range<usize>>,
     pub urls: Vec<String>,
     pub citations: Vec<Option<Option<String>>>,
+    pub titles: Vec<Option<String>>,
 }
 impl PreparedInline {
     pub fn new(runs: &[InlineRun], heading: bool) -> Self {
@@ -27,6 +28,7 @@ impl PreparedInline {
         let mut links = Vec::new();
         let mut urls = Vec::new();
         let mut citations = Vec::new();
+        let mut titles = Vec::new();
         let mut word = 0;
         for run in runs {
             let start = text.len();
@@ -58,6 +60,7 @@ impl PreparedInline {
                 links.push(range.clone());
                 urls.push(url.clone());
                 citations.push(style.citation.then(|| style.citation_passage.clone()));
+                titles.push(style.citation_title.clone());
             }
             prepared.push(PreparedRun {
                 range,
@@ -74,6 +77,7 @@ impl PreparedInline {
             links,
             urls,
             citations,
+            titles,
         }
     }
 }

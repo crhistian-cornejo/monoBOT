@@ -32,6 +32,17 @@ pub(crate) struct PdfView {
     spans: Vec<PageSpan>,
     focus_rects: Vec<[f32; 4]>,
     search_rects: Vec<[f32; 4]>,
+    /// The match the search stands on, drawn apart from the others.
+    search_current_rects: Vec<[f32; 4]>,
+    /// Every passage answers cited from this paper, and where each sits on
+    /// the shown page with its citation number.
+    cited: Vec<monocode_core::papers::CitedPassage>,
+    cited_marks: Vec<(Vec<[f32; 4]>, Option<u32>)>,
+    /// A citation named a passage, so opening at the first cited one would
+    /// move away from it.
+    asked_passage: bool,
+    opened_first_cited: bool,
+    _cited_task: Option<Task<()>>,
     selection_rects: Vec<[f32; 4]>,
     selected_spans: Option<RangeInclusive<usize>>,
     drag_anchor: Option<usize>,
@@ -103,6 +114,12 @@ impl PdfView {
             spans: initial_spans,
             focus_rects: Vec::new(),
             search_rects: Vec::new(),
+            search_current_rects: Vec::new(),
+            cited: Vec::new(),
+            cited_marks: Vec::new(),
+            asked_passage: false,
+            opened_first_cited: false,
+            _cited_task: None,
             selection_rects: Vec::new(),
             selected_spans: None,
             drag_anchor: None,
@@ -132,7 +149,65 @@ impl PdfView {
         };
         view.render_page(cx);
         view.load_text(cx);
+        view.load_cited(cx);
         view
+    }
+
+    pub(crate) fn path(&self) -> &str {
+        &self.path
+    }
+
+    /// Reads what answers cited from this paper; a new citation may have
+    /// been noted since the view opened.
+    fn load_cited(&mut self, cx: &mut Context<Self>) {
+        let path = PathBuf::from(&self.path);
+        let work = cx.background_executor().spawn(async move {
+            let store =
+                monocode_core::papers::PaperStore::new(monocode_core::papers::cache_dir().ok()?);
+            store.cited(&path).ok()
+        });
+        self._cited_task = Some(cx.spawn(async move |this, cx| {
+            let Some(cited) = work.await else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if this.cited != cited {
+                    this.cited = cited;
+                    this.refresh_cited_marks();
+                    cx.notify();
+                }
+                this.open_at_first_cited(cx);
+            });
+        }));
+    }
+
+    /// A paper opened without a passage shows the first one answers cited.
+    fn open_at_first_cited(&mut self, cx: &mut Context<Self>) {
+        if self.asked_passage || self.opened_first_cited || self.pending_focus.is_some() {
+            return;
+        }
+        let (Some(first), Some(text)) = (self.cited.first(), self.text.as_ref()) else {
+            return;
+        };
+        self.opened_first_cited = true;
+        if let Some((page, _)) =
+            monocode_core::papers::locate_page(&text.pages, &first.passage, None)
+        {
+            self.pending_focus = Some((page, Some(first.passage.clone())));
+            self.apply_focus(cx);
+        }
+    }
+
+    fn refresh_cited_marks(&mut self) {
+        self.cited_marks = self
+            .cited
+            .iter()
+            .filter_map(|cited| {
+                let range = self.locate_spans_for_passage(&cited.passage)?;
+                let rects = merge_span_rects(&self.spans[range]);
+                (!rects.is_empty()).then_some((rects, cited.number))
+            })
+            .collect();
     }
 
     fn load_text(&mut self, cx: &mut Context<Self>) {
@@ -152,6 +227,7 @@ impl PdfView {
                         this.update_text(cx);
                         this.update_search(false, cx);
                         this.apply_focus(cx);
+                        this.open_at_first_cited(cx);
                     }
                     Err(error) => {
                         this.text_error = Some(error);
@@ -192,13 +268,7 @@ impl PdfView {
         {
             let start = (*range.start()).min(self.spans.len().saturating_sub(1));
             let end = (*range.end()).min(self.spans.len().saturating_sub(1));
-            (start <= end).then(|| {
-                self.spans[start..=end]
-                    .iter()
-                    .map(|span| span.text.as_str())
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
+            (start <= end).then(|| spans_text(&self.spans[start..=end]))
         } else {
             None
         }
@@ -212,10 +282,7 @@ impl PdfView {
             input.content.get(range).map(str::to_owned)
         })?;
 
-        let clean = raw_selected
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        let clean = monocode_core::papers::clean_selection(&raw_selected);
         if clean.is_empty() {
             return None;
         }
@@ -286,8 +353,10 @@ impl PdfView {
         passage: Option<String>,
         cx: &mut Context<Self>,
     ) {
+        self.asked_passage |= passage.is_some();
         self.pending_focus = Some((page.max(1), passage));
         self.apply_focus(cx);
+        self.load_cited(cx);
     }
 
     fn locate_spans_for_passage(&self, passage: &str) -> Option<RangeInclusive<usize>> {
@@ -384,6 +453,7 @@ impl PdfView {
         let query = self.search_input.read(cx).content.trim().to_owned();
         self.search_matches.clear();
         self.search_rects.clear();
+        self.search_current_rects.clear();
         if query.is_empty() {
             self.search_index = 0;
             cx.notify();
@@ -521,7 +591,8 @@ impl PdfView {
 
     fn refresh_page_search_rects(&mut self, _cx: &mut Context<Self>) {
         self.search_rects.clear();
-        for m in &self.search_matches {
+        self.search_current_rects.clear();
+        for (ix, m) in self.search_matches.iter().enumerate() {
             if m.page == self.page
                 && let Some(range) = &m.span_range
                 && !self.spans.is_empty()
@@ -529,11 +600,16 @@ impl PdfView {
                 let start = (*range.start()).min(self.spans.len().saturating_sub(1));
                 let end = (*range.end()).min(self.spans.len().saturating_sub(1));
                 if start <= end {
-                    self.search_rects
-                        .extend(merge_span_rects(&self.spans[start..=end]));
+                    let rects = merge_span_rects(&self.spans[start..=end]);
+                    if ix == self.search_index {
+                        self.search_current_rects.extend(rects);
+                    } else {
+                        self.search_rects.extend(rects);
+                    }
                 }
             }
         }
+        self.refresh_cited_marks();
     }
 
     pub(super) fn select_span_range(&mut self, start: usize, end: usize, cx: &mut Context<Self>) {
@@ -1041,6 +1117,8 @@ impl Render for PdfView {
                             .size_full();
                             let focus_rects = self.focus_rects.clone();
                             let search_rects = self.search_rects.clone();
+                            let search_current_rects = self.search_current_rects.clone();
+                            let cited_marks = self.cited_marks.clone();
                             let selection_rects = self.selection_rects.clone();
                             // Only what the user selected by hand asks to be added,
                             // once the press ends; a cited passage keeps the toolbar's.
@@ -1118,15 +1196,74 @@ impl Render for PdfView {
                                             .size_full()
                                             .object_fit(ObjectFit::Fill),
                                     )
+                                    .children(cited_marks.into_iter().enumerate().flat_map(
+                                        |(ix, (rects, number))| {
+                                            let badge = rects.first().copied();
+                                            rects
+                                                .into_iter()
+                                                .map(move |[x, y, w, h]| {
+                                                    div()
+                                                        .debug_selector(move || {
+                                                            format!("pdf-cited-{ix}")
+                                                        })
+                                                        .absolute()
+                                                        .left(relative(x))
+                                                        .top(relative(y))
+                                                        .w(relative(w))
+                                                        .h(relative(h))
+                                                        .bg(accent(0.07))
+                                                        .border_b_2()
+                                                        .border_color(accent(0.7))
+                                                        .into_any_element()
+                                                })
+                                                .chain(badge.zip(number).map(|([x, y, _, _], n)| {
+                                                    div()
+                                                        .absolute()
+                                                        .left(relative(x))
+                                                        .top(relative(y))
+                                                        .mt(px(-9.))
+                                                        .ml(px(-6.))
+                                                        .min_w(px(13.))
+                                                        .h(px(13.))
+                                                        .px(px(3.))
+                                                        .rounded_full()
+                                                        .bg(accent_color())
+                                                        .text_color(gpui::white())
+                                                        .text_size(px(9.))
+                                                        .line_height(px(13.))
+                                                        .flex()
+                                                        .justify_center()
+                                                        .child(n.to_string())
+                                                        .into_any_element()
+                                                }))
+                                                .collect::<Vec<_>>()
+                                        },
+                                    ))
                                     .children(search_rects.into_iter().map(|[x, y, w, h]| {
                                         div()
+                                            .debug_selector(|| "pdf-search-highlight".into())
                                             .absolute()
                                             .left(relative(x))
                                             .top(relative(y))
                                             .w(relative(w))
                                             .h(relative(h))
                                             .rounded(px(2.))
-                                            .bg(hsla(48. / 360., 0.95, 0.52, 0.22))
+                                            .bg(hsla(48. / 360., 0.95, 0.52, 0.30))
+                                            .border_b_2()
+                                            .border_color(hsla(42. / 360., 0.92, 0.46, 0.9))
+                                    }))
+                                    .children(search_current_rects.into_iter().map(|[x, y, w, h]| {
+                                        div()
+                                            .debug_selector(|| "pdf-search-current".into())
+                                            .absolute()
+                                            .left(relative(x))
+                                            .top(relative(y))
+                                            .w(relative(w))
+                                            .h(relative(h))
+                                            .rounded(px(2.))
+                                            .bg(accent(0.32))
+                                            .border_b_2()
+                                            .border_color(accent_color())
                                     }))
                                     .children(focus_rects.into_iter().map(|[x, y, w, h]| {
                                         div()
@@ -1230,6 +1367,22 @@ impl Render for PdfView {
                     ),
             )
     }
+}
+
+/// Words of a selection as the page lays them out: a new line where the
+/// next word starts lower, so a hyphen broken across lines can be rejoined.
+fn spans_text(spans: &[PageSpan]) -> String {
+    let mut out = String::new();
+    let mut last: Option<[f32; 4]> = None;
+    for span in spans {
+        if let Some([_, y, _, h]) = last {
+            let next_line = span.rect[1] + span.rect[3] * 0.5 > y + h;
+            out.push(if next_line { '\n' } else { ' ' });
+        }
+        out.push_str(&span.text);
+        last = Some(span.rect);
+    }
+    out
 }
 
 fn extract_text_with_fallback(bytes: &[u8]) -> Result<monocode_core::papers::PaperText, String> {
@@ -2127,7 +2280,7 @@ mod tests {
                 view.update_search(true, cx);
                 assert_eq!(view.search_matches.len(), 1);
                 assert_eq!(view.page, 1);
-                assert!(!view.search_rects.is_empty());
+                assert!(!view.search_current_rects.is_empty());
             })
             .unwrap();
     }
@@ -2218,6 +2371,66 @@ mod tests {
                     view.step_zoom(true, cx);
                 }
                 assert_eq!(view.zoom, 4.0);
+            })
+            .unwrap();
+    }
+
+    #[test]
+    fn a_word_broken_across_lines_reads_whole_in_the_quote() {
+        let span = |text: &str, y: f32| PageSpan {
+            text: text.into(),
+            rect: [0.1, y, 0.1, 0.02],
+        };
+        let spans = [
+            span("the", 0.1),
+            span("experi-", 0.1),
+            span("mental", 0.13),
+            span("data", 0.13),
+        ];
+        let text = spans_text(&spans);
+        assert_eq!(text, "the experi-\nmental data");
+        assert_eq!(
+            monocode_core::papers::clean_selection(&text),
+            "the experimental data"
+        );
+    }
+
+    #[gpui::test]
+    fn cited_passages_are_marked_and_the_current_match_stands_apart(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|cx| PdfView::new("study.pdf".into(), two_page_text_pdf(), cx))
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |view, _, cx| {
+                view.pages = 2;
+                view.page = 1;
+                view.text = Some(extract_text_with_fallback(&view.bytes).unwrap());
+                view.spans = page_spans(&view.bytes, 1);
+                view.cited = vec![monocode_core::papers::CitedPassage {
+                    passage: "The reported result preserves the complete data.".into(),
+                    number: Some(3),
+                }];
+                view.refresh_cited_marks();
+                assert_eq!(view.cited_marks.len(), 1);
+                assert_eq!(view.cited_marks[0].1, Some(3));
+                assert!(!view.cited_marks[0].0.is_empty());
+
+                view.search_input
+                    .update(cx, |input, cx| input.set_text("the".to_string(), cx));
+                view.update_search(true, cx);
+                let on_page = view.search_matches.iter().filter(|m| m.page == 1).count();
+                assert!(on_page >= 2, "both words on the page match");
+                assert_eq!(view.page, 1);
+                assert!(!view.search_current_rects.is_empty(), "the current match");
+                assert!(!view.search_rects.is_empty(), "every other match");
+                assert_eq!(
+                    view.cited_marks.len(),
+                    1,
+                    "citations stay marked while searching"
+                );
             })
             .unwrap();
     }

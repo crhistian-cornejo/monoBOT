@@ -164,6 +164,8 @@ pub(crate) struct Monos {
     /// Native visuals the Mono published in its chat, opened as documents.
     visual_documents: HashMap<String, Entity<crate::visuals::VisualView>>,
     papers: HashMap<String, papers::PaperPage>,
+    /// Cited papers known only by their record, by the citation's link.
+    paper_records: HashMap<String, papers::PaperRecord>,
     loading_papers: HashSet<String>,
     /// The Documents tab's folders, read from the chat; kept while the chat's
     /// rows stay as they were (mono id, row count, last row's length).
@@ -466,6 +468,7 @@ impl Monos {
             html_documents: HashMap::new(),
             visual_documents: HashMap::new(),
             papers: HashMap::new(),
+            paper_records: HashMap::new(),
             loading_papers: HashSet::new(),
             document_folders: Default::default(),
             closed_folders: HashSet::new(),

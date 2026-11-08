@@ -12,6 +12,8 @@ pub(crate) struct InlineStyle {
     /// A numbered link to a page it cites: shown as a chip with the site.
     pub citation: bool,
     pub citation_passage: Option<String>,
+    /// The cited work's title, for the citation's hover card.
+    pub citation_title: Option<String>,
     pub task: Option<TaskMarker>,
     pub math: bool,
     pub search: Option<bool>,
@@ -740,6 +742,9 @@ fn inline_span(
                     citation: true,
                     citation_passage: monocode_core::citations::parse_title(Some(&title), &url)
                         .snippet,
+                    citation_title: Some(
+                        monocode_core::citations::parse_title(Some(&title), &url).title,
+                    ),
                     ..style
                 },
             });

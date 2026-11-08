@@ -675,6 +675,8 @@ impl SearchView {
                     HighlightStyle {
                         font_weight: Some(gpui::FontWeight::SEMIBOLD),
                         color: Some(accent_color()),
+                        background_color: Some(accent_color().opacity(0.14)),
+                        underline: Some(crate::markdown::search_underline(true)),
                         ..Default::default()
                     },
                 )
@@ -798,6 +800,8 @@ impl SearchView {
                             HighlightStyle {
                                 font_weight: None,
                                 color: Some(accent_color()),
+                                background_color: Some(accent_color().opacity(0.14)),
+                                underline: Some(crate::markdown::search_underline(true)),
                                 ..Default::default()
                             },
                         )

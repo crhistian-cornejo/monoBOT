@@ -799,6 +799,8 @@ pub(crate) struct Shell {
     /// A session review card's Review, opened beside its pane next frame.
     pending_review: Option<(i64, crate::review::ReviewTab)>,
     pending_composer_focus: Option<i64>,
+    /// A citation the pointer rests on, waiting to point its open paper there.
+    citation_point: Option<((String, Option<String>), gpui::Task<()>)>,
     review_focused: bool,
     review_drag: bool,
     split_bounds: HashMap<i64, AnchorSlot>,
@@ -1172,6 +1174,7 @@ impl Shell {
             review_slide: None,
             pending_review: None,
             pending_composer_focus: None,
+            citation_point: None,
             review_focused: false,
             review_drag: false,
             split_bounds: HashMap::new(),
@@ -2293,6 +2296,44 @@ impl Shell {
         self.chat_hidden_off(id, cx);
         self.pending_composer_focus = Some(id);
         cx.notify();
+    }
+    /// Resting on a citation points a paper already open beside the chat at
+    /// the cited passage; passing over it quickly does nothing.
+    fn point_at_citation(&mut self, point: Option<(String, Option<String>)>, cx: &mut Context<Self>) {
+        let Some(target) = point else {
+            self.citation_point = None;
+            return;
+        };
+        if self.citation_point.as_ref().is_some_and(|(at, _)| *at == target) {
+            return;
+        }
+        let (url, passage) = target.clone();
+        let task = cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(std::time::Duration::from_millis(160))
+                .await;
+            let lookup = passage.clone();
+            let Some((path, page)) = cx
+                .background_executor()
+                .spawn(async move { crate::citation_card::resolve(&url, lookup.as_deref()) })
+                .await
+            else {
+                return;
+            };
+            let _ = this.update(cx, |this, cx| {
+                if let Some(monos) = this.monos.clone()
+                    && monos.update(cx, |m, cx| m.point_open_paper(&path, page, passage.clone(), cx))
+                {
+                    return;
+                }
+                if let Some(pane) = this.active_review(cx)
+                    && pane.read(cx).pdf_path(cx).as_deref() == Some(path.as_str())
+                {
+                    pane.update(cx, |pane, cx| pane.focus_paper(page, passage, cx));
+                }
+            });
+        });
+        self.citation_point = Some((target, task));
     }
     fn chat_hidden_off(&mut self, id: i64, cx: &mut Context<Self>) {
         if let Some(review) = self.reviews.get(&id) {
@@ -9042,6 +9083,25 @@ impl Render for Shell {
                     }
                 }),
             )
+            .on_action(cx.listener(
+                |this, event: &crate::file_editor::OpenPaperRecord, _, cx| {
+                    // Outside a Mono there is no panel for a paper's record.
+                    if this.mono_active(cx)
+                        && let Some(monos) = this.monos.clone()
+                    {
+                        monos.update(cx, |m, cx| {
+                            m.open_paper_record(event.url.clone(), event.passage.clone(), cx)
+                        });
+                    } else {
+                        cx.open_url(&event.url);
+                    }
+                },
+            ))
+            .on_action(cx.listener(
+                |this, event: &crate::citation_card::PointAtCitation, _, cx| {
+                    this.point_at_citation(event.0.clone(), cx)
+                },
+            ))
             .on_action(
                 cx.listener(|this, _: &crate::Quit, window, cx| this.request_quit(window, cx)),
             )

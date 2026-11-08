@@ -9,6 +9,21 @@ pub(crate) fn search_background(current: bool) -> gpui::Hsla {
     color.a = if current { 0.62 } else { 0.46 };
     color
 }
+/// Found words are painted and underlined, so they still read as found on
+/// a coloured or selected line.
+pub(crate) fn search_underline(current: bool) -> gpui::UnderlineStyle {
+    let mut color = if current {
+        accent_color()
+    } else {
+        rgb(0xc9932f).into()
+    };
+    color.a = 0.95;
+    gpui::UnderlineStyle {
+        thickness: px(if current { 2. } else { 1.5 }),
+        color: Some(color),
+        wavy: false,
+    }
+}
 pub(crate) fn row_text(row: &MarkdownRow) -> String {
     match &row.part {
         Part::Text { runs, .. } => runs.iter().map(|r| r.text.as_str()).collect(),
@@ -108,6 +123,7 @@ pub(crate) fn mark_styles(
                 .any(|m| m.start < range.end && m.end > range.start)
             {
                 style.background_color = Some(search_background(current));
+                style.underline = Some(search_underline(current));
             }
             (range, style)
         })

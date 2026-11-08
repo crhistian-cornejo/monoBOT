@@ -55,6 +55,8 @@ pub(super) enum Route {
     Document(String),
     /// A cached paper's PDF, by file path.
     Paper(String),
+    /// A cited paper without a PDF, by the citation's link.
+    PaperRecord(String),
     Habit(String),
     NewHabit,
 }
@@ -65,6 +67,7 @@ impl Route {
             Self::Session(id) => format!("session:{id}"),
             Self::Document(id) => format!("document:{id}"),
             Self::Paper(path) => format!("paper:{path}"),
+            Self::PaperRecord(url) => format!("paper-record:{url}"),
             Self::Habit(id) => format!("habit:{id}"),
             Self::NewHabit => "new-habit".into(),
         }
@@ -1775,6 +1778,7 @@ impl Monos {
                     .into_any_element()
             }
             Route::Paper(path) => self.paper_page(&path, cx),
+            Route::PaperRecord(url) => self.paper_record_page(&url, cx),
             Route::Habit(id) => self.habit_page(mono, Some(&id), window, cx),
             Route::NewHabit => self.habit_page(mono, None, window, cx),
         }

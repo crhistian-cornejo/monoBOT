@@ -16,6 +16,19 @@ impl TranscriptView {
         if sources.is_empty() {
             return None;
         }
+        // A paper's viewer underlines every passage its replies cited.
+        if self.cited_noted.get(&turn) != Some(&sources.len()) {
+            self.cited_noted.insert(turn, sources.len());
+            let cited: Vec<_> = sources
+                .iter()
+                .filter_map(|s| Some((s.url.clone(), s.snippet.clone()?, s.number)))
+                .collect();
+            if !cited.is_empty() {
+                cx.background_executor()
+                    .spawn(async move { crate::citation_card::record(cited) })
+                    .detach();
+            }
+        }
         let open = self.sources_open.contains(&turn);
         let stack: Vec<_> = sources
             .iter()
@@ -78,12 +91,27 @@ impl TranscriptView {
                         sources.into_iter().zip(rows).map(|(source, site)| {
                             let url = source.url.clone();
                             let passage = source.snippet.clone();
+                            let point = Some((url.clone(), passage.clone()));
                             div()
                                 .id(SharedString::from(format!(
                                     "source-{turn}-{}",
                                     source.number
                                 )))
                                 .role(Role::Link)
+                                .tooltip(crate::citation_card::tip(
+                                    url.clone(),
+                                    Some(source.title.clone()),
+                                    Some(source.number),
+                                    passage.clone(),
+                                ))
+                                .on_hover(move |hovered, window, cx| {
+                                    window.dispatch_action(
+                                        Box::new(crate::citation_card::PointAtCitation(
+                                            hovered.then(|| point.clone()).flatten(),
+                                        )),
+                                        cx,
+                                    );
+                                })
                                 .aria_label(source.title.clone())
                                 .flex()
                                 .items_center()

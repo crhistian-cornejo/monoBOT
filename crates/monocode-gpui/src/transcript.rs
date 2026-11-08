@@ -768,6 +768,8 @@ pub(crate) struct TranscriptView {
     copied_response: Option<(usize, Instant)>,
     /// Turns whose cited sources are open.
     sources_open: std::collections::HashSet<usize>,
+    /// How many cited papers' passages each turn has noted for their viewers.
+    cited_noted: HashMap<usize, usize>,
     note_pending: HashSet<usize>,
     note_feedback: HashMap<usize, Result<(), String>>,
     action_anchors: HashMap<(usize, &'static str), AnchorSlot>,
@@ -2646,6 +2648,7 @@ impl TranscriptView {
             copied: None,
             copied_response: None,
             sources_open: Default::default(),
+            cited_noted: Default::default(),
             note_pending: HashSet::new(),
             note_feedback: HashMap::new(),
             action_anchors: HashMap::new(),

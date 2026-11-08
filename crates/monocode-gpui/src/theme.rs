@@ -572,6 +572,32 @@ impl Render for LabelTooltip {
             })
     }
 }
+/// A tooltip for longer text, like a quote waiting in the composer: it wraps
+/// instead of running off the window.
+struct TextTooltip(SharedString);
+impl Render for TextTooltip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .max_w(px(360.))
+            .px_2()
+            .py_1p5()
+            .rounded_md()
+            .bg(rail_color())
+            .border_1()
+            .border_color(content(0.15))
+            .shadow_lg()
+            .text_size(px(12.))
+            .line_height(px(17.))
+            .text_color(content(0.9))
+            .child(self.0.clone())
+    }
+}
+pub(crate) fn text_tip(
+    text: impl Into<SharedString>,
+) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let text = text.into();
+    move |_, cx| cx.new(|_| TextTooltip(text.clone())).into()
+}
 /// The `.tooltip` builder for chrome controls without an `icon_button`, like
 /// the zone switch or the right-panel toggle.
 pub(crate) fn chrome_tip(

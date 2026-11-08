@@ -16,6 +16,13 @@ const MAX_PDF_BYTES: u64 = 40 * 1024 * 1024;
 const MAX_META_BYTES: u64 = 16 * 1024 * 1024;
 const SOURCES_KEY: &str = "native:paper-sources";
 const MAX_SOURCES: usize = 400;
+/// The passages answers cited from each paper (paperCitations.ts), so its
+/// viewer underlines every one, not only the one a click named.
+const CITED_KEY: &str = "native:cited-passages";
+const CITED_PER_PAPER: usize = 40;
+const CITED_PAPERS: usize = 60;
+/// Shorter than this matches anywhere, so it is not worth underlining.
+const CITED_MIN_CHARS: usize = 24;
 static WRITE_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +71,23 @@ pub struct PaperMeta {
     pub file: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<String>,
+}
+
+/// A passage an answer cited, and the number it gave the paper: "1" in [1].
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CitedPassage {
+    pub passage: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub number: Option<u32>,
+}
+
+/// The cache names a paper's PDF by its key's hash, which every path to that
+/// cached PDF shares.
+fn cited_key(pdf: &Path) -> String {
+    pdf.file_stem().map_or_else(
+        || pdf.to_string_lossy().into_owned(),
+        |stem| stem.to_string_lossy().into_owned(),
+    )
 }
 
 /// Tauri uses the app bundle identifier under the system cache directory.
@@ -204,6 +228,56 @@ impl PaperStore {
         }
         let bytes = serde_json::to_vec(&entries).map_err(|error| error.to_string())?;
         self.write_bytes(&self.json_path(SOURCES_KEY), &bytes)
+    }
+
+    /// Notes that an answer cited `passage` from the PDF at `pdf`, as
+    /// citation `number` there. False when nothing had to be written.
+    pub fn record_cited(
+        &self,
+        pdf: &Path,
+        passage: &str,
+        number: Option<u32>,
+    ) -> Result<bool, String> {
+        let passage = passage.trim();
+        if passage.chars().count() < CITED_MIN_CHARS {
+            return Ok(false);
+        }
+        let paper = cited_key(pdf);
+        let _guard = WRITE_LOCK.lock().map_err(|_| "The paper cache is busy.")?;
+        let mut all: Vec<(String, Vec<CitedPassage>)> =
+            self.read_json(CITED_KEY)?.unwrap_or_default();
+        let at = all.iter().position(|(key, _)| *key == paper);
+        let mut kept = at.map(|at| all.remove(at).1).unwrap_or_default();
+        match kept.iter_mut().find(|entry| entry.passage == passage) {
+            Some(same) if number.is_none() || same.number == number => return Ok(false),
+            Some(same) => same.number = number,
+            None => kept.push(CitedPassage {
+                passage: passage.to_owned(),
+                number,
+            }),
+        }
+        if kept.len() > CITED_PER_PAPER {
+            kept.drain(..kept.len() - CITED_PER_PAPER);
+        }
+        // The paper goes last, so the least recently cited ones are dropped.
+        all.push((paper, kept));
+        if all.len() > CITED_PAPERS {
+            all.drain(..all.len() - CITED_PAPERS);
+        }
+        let bytes = serde_json::to_vec(&all).map_err(|error| error.to_string())?;
+        self.write_bytes(&self.json_path(CITED_KEY), &bytes)?;
+        Ok(true)
+    }
+
+    /// Every passage cited from the PDF at `pdf` so far, oldest first.
+    pub fn cited(&self, pdf: &Path) -> Result<Vec<CitedPassage>, String> {
+        let paper = cited_key(pdf);
+        let all: Vec<(String, Vec<CitedPassage>)> = self.read_json(CITED_KEY)?.unwrap_or_default();
+        Ok(all
+            .into_iter()
+            .find(|(key, _)| *key == paper)
+            .map(|(_, passages)| passages)
+            .unwrap_or_default())
     }
 
     pub fn source_paper(&self, source: &str) -> Result<Option<String>, String> {

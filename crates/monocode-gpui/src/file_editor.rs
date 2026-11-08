@@ -91,6 +91,14 @@ pub(crate) struct OpenPaper {
     pub title: String,
 }
 
+/// A cited paper the app knows only by its record: authors and abstract.
+#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[action(namespace = file_editor, no_json)]
+pub(crate) struct OpenPaperRecord {
+    pub url: String,
+    pub passage: Option<String>,
+}
+
 /// File links may include a one-based line and column (`:12:4` or `#L12`).
 pub(crate) fn file_location(raw: &str, cwd: &str) -> (String, Option<(usize, usize)>) {
     let mut path = raw.strip_prefix("file://").unwrap_or(raw).to_owned();
@@ -358,6 +366,10 @@ impl FileEditor {
     pub(crate) fn navigate(&mut self, line: usize, column: usize, cx: &mut Context<Self>) {
         self.navigation = Some((line, column));
         self.apply_navigation(cx);
+    }
+
+    pub(crate) fn pdf_path(&self, cx: &App) -> Option<String> {
+        Some(self.pdf.as_ref()?.read(cx).path().to_owned())
     }
 
     pub(crate) fn focus_paper(
