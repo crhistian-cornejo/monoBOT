@@ -17,7 +17,7 @@ desktop app is no longer part of MonoBOT.
 ## Before you install
 
 - macOS is the main verified platform. Linux and Windows packages still need
-  wider runtime testing; see [preview limitations](parity.md).
+  wider runtime testing; see [preview limitations](../in-progress/limitations.md).
 - Updates are signed with MonoBOT's own update key. Builds signed with the old
   Tauri key cannot update to this release; install it fresh.
 

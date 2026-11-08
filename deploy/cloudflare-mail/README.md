@@ -123,7 +123,7 @@ Current deployment: `monobot-inbound-mail` runs at
 `https://monobot-inbound-mail.getecho.workers.dev` with `workers_dev = true`,
 because the account has no domain yet. Its `ALLOWED_RECIPIENTS` is a
 placeholder, so it accepts no mail until a domain is added and the route below
-is configured. See [mail workspace](../../docs/native/mail-workspace.md).
+is configured. See [mail workspace](../../docs/in-progress/mail-workspace.md).
 
 Prerequisites: a Cloudflare account, a domain on Cloudflare DNS, stable Rust
 with the `wasm32-unknown-unknown` target, `worker-build` and Node 22+ (only
@@ -223,7 +223,7 @@ reuse, retention, and log hygiene.
 
 ## Source references
 
-- Integration guide and all remaining account/deployment work: [MonoBOT mail workspace](../../docs/native/mail-workspace.md).
+- Integration guide and all remaining account/deployment work: [MonoBOT mail workspace](../../docs/in-progress/mail-workspace.md).
 - Reference project (used through its public MCP interface, not copied): https://github.com/hieunc229/mailflare
 
 - Email Workers runtime API (`email()` handler, `from`, `to`, `raw`, `rawSize`, `setReject`): https://developers.cloudflare.com/email-routing/email-workers/runtime-api/

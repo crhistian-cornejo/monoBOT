@@ -10,7 +10,7 @@ App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay R
 | `mobile/` | App Expo (iOS/Android). Proyecto pnpm propio con su lockfile; tiene su propio `AGENTS.md`. |
 | `host/` | Host remoto en Node (`monocode-host`) que instala la app por SSH. |
 | `deploy/cloudflare-mail/` | Worker opcional de correo entrante en Rust → WebAssembly (Cloudflare Email Routing → R2 + D1). Crate aparte, no está en el workspace. |
-| `vendor/gpui-pre*/` | GPUI fijado y parcheado. No lo actualices sin leer `docs/native/migration.md`. |
+| `vendor/gpui-pre*/` | GPUI fijado y parcheado. No lo actualices sin leer `docs/done/architecture.md`. |
 | `xtask/` | Herramientas del escritorio en Rust (`cargo xtask`): runner de desarrollo, build, `.app`, instaladores, firma y publicación de actualizaciones. |
 | `scripts/` | Solo lo que no puede ser Rust: `generators/` (fuentes JS de los bundles que la app ejecuta en QuickJS) y `perf/` (el `claude` simulado para perfilar). |
 
@@ -49,4 +49,4 @@ El escritorio no necesita Node ni Bun. Antes de hacer commit: `cargo fmt --all` 
 
 ## Documentación
 
-Empieza por `docs/native/README.md`. El estado y lo pendiente están en `docs/native/parity.md`, `docs/native/monobot-port.md` y `docs/native/tauri-gap-audit.md`. El correo y Cloudflare, en `docs/native/mail-workspace.md`.
+La documentación está en `docs/`, ordenada por estado (índice en `docs/README.md`): `docs/done/` describe lo que ya funciona (empieza por `docs/done/desktop.md` y `docs/done/architecture.md`), `docs/in-progress/` lo que está en marcha o pendiente (`tauri-gap-audit.md`, `port-plan.md`, `limitations.md`, `mail-workspace.md`) y `docs/old/` el historial. Al terminar algo, mueve o actualiza su documento.

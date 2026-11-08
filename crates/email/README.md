@@ -1,8 +1,8 @@
-> **monobot-email**: portado de `crates/email` de Echo (MIT, Echo contributors). En MonoBOT lo usan `src-tauri/src/mail.rs` (comandos) y `src/features/mail` (la pestaña Email del Inbox). Lo que sigue describe el crate tal como era en Echo.
+> **monobot-email**: portado de `crates/email` de Echo (MIT, Echo contributors). En MonoBOT lo usa `monocode-core` (`src/inbox/mail.rs` y el espacio de correo en `src/inbox/workspace/`), y la app nativa lo muestra en Inbox › Email.
 
-# echo-email
+# monobot-email
 
-El correo del dueño dentro de Echo, por IMAP con una contraseña de aplicación: Gmail, iCloud o cualquier servidor. Lee las cuentas juntas, ordena cada mensaje por reglas (prioridad, rutina, en espera), hace lo que el dueño pide sobre uno (leer, destacar, archivar) y guarda una respuesta como borrador. **Nunca envía, nunca borra y nunca ejecuta lo que dice un mensaje**: su texto es información, no instrucciones. Al abrir uno, su HTML se muestra limpio (`sanitize.rs`) en un marco que no ejecuta nada y no carga nada por su cuenta.
+El correo del dueño dentro de MonoBOT, por IMAP con una contraseña de aplicación: Gmail, iCloud o cualquier servidor. Lee las cuentas juntas, ordena cada mensaje por reglas (prioridad, rutina, en espera), hace lo que el dueño pide sobre uno (leer, destacar, archivar) y guarda una respuesta como borrador. **Nunca envía, nunca borra y nunca ejecuta lo que dice un mensaje**: su texto es información, no instrucciones. Al abrir uno, su HTML se muestra limpio (`sanitize.rs`) en un marco que no ejecuta nada y no carga nada por su cuenta.
 
 ## Qué hay aquí
 
@@ -20,24 +20,19 @@ El correo del dueño dentro de Echo, por IMAP con una contraseña de aplicación
 | `search.rs` | La búsqueda de solo lectura de una cuenta con las palabras del buscador de Gmail (`from:`, `subject:`, `after:`, `before:`, `{…}`): en Gmail va tal cual (`X-GM-RAW`, sobre «Todos»); en otro servidor se convierte en criterios IMAP y lo que no se puede preguntar (palabras con tildes, el segundo exacto) se comprueba aquí. Nada se marca como leído |
 | `service.rs` | `Mail`: lectura de las cuentas en paralelo (el Inbox primero; las carpetas especiales se buscan una vez), acciones, borradores y la búsqueda (`Mail::search`); recuerda qué mensaje del servidor es cada id de la última lectura, la restaura de lo que el núcleo guardó (`restore`) y suma lo que llega (`arrived`) |
 | `watch.rs` | La escucha de cada bandeja de entrada: una conexión `IDLE` por cuenta que dice qué llegó en cuanto el servidor lo avisa, de solo lectura (`EXAMINE`), con espera creciente si se corta |
-| `model.rs` | Lo que recibe la página (`apps/desktop/src/features/mail/model/types.ts`) |
+| `model.rs` | Lo que recibe la app (los tipos que usa `monocode-core/src/inbox/mail.rs`) |
 
-Los datos que Echo guarda (qué cuentas están conectadas, qué remitentes interesan y en qué mensajes se permitieron las imágenes) son del núcleo, no de este crate. Este crate no escribe mensajes a disco: lo que se reutiliza (la última lectura, los mensajes abiertos, las imágenes) vive en `cache.rs`, en memoria, y se pierde al cerrar la app. El núcleo guarda aparte un resumen ligero de la última lectura (remitente, asunto, vista previa, fecha, estado y las primeras líneas del texto; nunca el HTML ni las imágenes) para que Correo se pinte al abrir; se borra al quitar la cuenta. Abrir un mensaje o cambiar de ventana no vuelve a conectarse al servidor mientras la memoria lo tenga.
+Los datos que MonoBOT guarda (qué cuentas están conectadas, qué remitentes interesan y en qué mensajes se permitieron las imágenes) son del núcleo, no de este crate. Este crate no escribe mensajes a disco: lo que se reutiliza (la última lectura, los mensajes abiertos, las imágenes) vive en `cache.rs`, en memoria, y se pierde al cerrar la app. El núcleo guarda aparte un resumen ligero de la última lectura (remitente, asunto, vista previa, fecha, estado y las primeras líneas del texto; nunca el HTML ni las imágenes) para que Correo se pinte al abrir; se borra al quitar la cuenta. Abrir un mensaje o cambiar de ventana no vuelve a conectarse al servidor mientras la memoria lo tenga.
 
 ## Cómo se une al resto
 
-Solo hay un punto de unión: `crates/core/src/surfaces/mail.rs`, con los comandos `mail_overview`, `mail_add_account`, `mail_remove_account`, `mail_act`, `mail_open`, `mail_image`, `mail_draft`, `mail_check` (qué tan seguro parece un correo, por reglas de `echo_rules::mailbrief`) y `mail_summary` (su resumen, que escribe el modelo más barato al pulsar «Resumir»; ver [el documento](../../docs/on%20board/10-27-2026-correo-resumen-y-verificacion.md)), los hábitos de correos recurrentes (`mail_habits`, `mail_habit_decide`, `mail_habit_remove` y `mail_reply_suggestion`, con las reglas de `echo_rules::mailhabits`; lo aprendido es el ajuste `email.habits` y se borra con la cuenta), y los de Ajustes › Finanzas `finance_correo_accounts` y `finance_set_correo` (qué cuentas puede leer el agente de finanzas, que las busca con `Mail::search`). La página que los usa es `apps/desktop/src/features/mail`.
+`monocode-core` es el único que lo usa: `src/inbox/mail.rs` (cuentas, lectura, acciones, borradores y envío) y `src/inbox/workspace/` (transportes HTTP, correo entrante del Worker y Mailflare). La app GPUI no depende de este crate: habla con el core.
 
 ## Cómo quitarlo
 
-Es un crate aparte para poder quitarlo sin rastro:
-
-1. Borrar la carpeta `crates/email`.
-2. En la raíz: quitar `"crates/email"` de `members` y `echo-email` de `[workspace.dependencies]` en `Cargo.toml`.
-3. En `crates/core`: quitar `echo-email.workspace = true` de `Cargo.toml`, `pub mod mail;` de `src/lib.rs`, los comandos `mail_*`, `finance_correo_accounts` y `finance_set_correo` de `src/door.rs`, borrar `src/surfaces/mail.rs` y, en `src/integrations/finance.rs`, las dos llamadas a `surfaces::mail` (`inboxes` y `LiveInboxes::find`: las cuentas de Correo dejan de ser bandejas de finanzas; las vigiladas siguen).
-4. En `assets/page-scopes.json`: quitar `"mail_*"` de la ventana `code`.
-5. Opcional: la página (`apps/desktop/src/features/mail`) y su fila «Correos» en la barra lateral de Code; sin los comandos muestra «Aún no hay cuentas conectadas».
-6. Las contraseñas que guardó siguen en el almacén del sistema con el nombre `email-imap-…`: se quitan desde la página con «Quitar» antes de borrar el crate, o a mano desde Credential Manager / Keychain.
+1. Borrar la carpeta `crates/email` y quitarla de `members` en el `Cargo.toml` de la raíz.
+2. En `crates/monocode-core`: quitar la dependencia `monobot-email` y los módulos de `src/inbox/` que la usan.
+3. Las contraseñas guardadas siguen en el almacén del sistema con el nombre `email-imap-…`: quítalas desde Inbox › Email con «Quitar» antes de borrar el crate, o a mano desde Keychain / Credential Manager.
 
 ## Lo que no hace (todavía)
 
@@ -51,5 +46,5 @@ Es un crate aparte para poder quitarlo sin rastro:
 - Guardar en disco el HTML, las imágenes o el texto entero de los mensajes: no se hace; solo el resumen ligero del núcleo (véase arriba).
 
 ```bash
-cargo test -p echo-email
+cargo test -p monobot-email
 ```

@@ -4,7 +4,7 @@ A small Node service that runs on a remote machine (installed by the desktop
 app over SSH, or started by hand). It runs the provider CLIs there and serves
 sessions, files and Git to the desktop over an authenticated loopback API. It
 is not part of the desktop app itself, which is Rust; see
-[remote access](../docs/remote-access.md) for setup and the protocol limits.
+[remote access](../docs/done/remote-access.md) for setup and the protocol limits.
 
 ## Layout
 

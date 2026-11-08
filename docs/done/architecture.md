@@ -1,7 +1,7 @@
 # Native architecture
 
 The GPUI app is MonoBOT's only desktop app. The React/Tauri app it replaced was
-removed from the repository; [tauri-gap-audit.md](tauri-gap-audit.md) lists the
+removed from the repository; [tauri-gap-audit.md](../in-progress/tauri-gap-audit.md) lists the
 behavior it had that the native app still lacks. CI, releases and the updater
 feed build the native app.
 
@@ -19,7 +19,7 @@ feed build the native app.
 `monocode-core` has no Tauri or GPUI dependency. Keep provider and storage
 behavior in core services, with UI work in GPUI views. Development uses isolated
 data; release builds use the installed desktop database. See the
-[native guide](README.md#data-and-configuration) for paths and commands.
+[native guide](desktop.md#data-and-configuration) for paths and commands.
 
 Provider transports use Codex app-server, Claude stream-json, OpenCode HTTP/SSE,
 ACP for Cursor/Grok/Antigravity/fx/Hermes/Devin, and Pi/omp RPC. They reuse the
@@ -41,10 +41,10 @@ in the repository.
 
 GPUI and its platform crate are pinned to `gpui-pre` 0.3.9. Local Apple renderer
 patches cover alpha blending, font matching, backdrop blur and shadows. The
-headless Metal regression is documented in [verification](verification.md).
+headless Metal regression is documented in [verification](../old/verification.md).
 
 The vendored framework/platform crates remove the unused `zed-scap` dependency.
 The native build rejects lockfiles that reintroduce it, and the `screen-capture`
 feature remains disabled. Preserve these guards and the licenses in [NOTICE](../../NOTICE).
 
-See [preview limitations](parity.md) for current release work.
+See [preview limitations](../in-progress/limitations.md) for current release work.

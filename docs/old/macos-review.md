@@ -1,6 +1,6 @@
 # Qué revisar en macOS
 
-> Las rutas `src/` y `src-tauri/` de este documento son de la app Tauri, que ya no está en el repositorio (se conserva en la etiqueta local de git `archive/tauri-app`). Lo que falta portar está en [tauri-gap-audit.md](native/tauri-gap-audit.md).
+> Las rutas `src/` y `src-tauri/` de este documento son de la app Tauri, que ya no está en el repositorio (se conserva en la etiqueta local de git `archive/tauri-app`). Lo que falta portar está en [tauri-gap-audit.md](../in-progress/tauri-gap-audit.md).
 
 El dictado (Parakeet + Silero), las voces de las llamadas de grupo (Supertonic 3), la copia de
 modelos desde Echo y las descargas detrás de un proxy de empresa se hicieron y probaron en
@@ -70,7 +70,7 @@ MonoBOT no tenía ninguna de las dos; Echo tiene ambas (`apps/macos/Resources/In
 La frase va en inglés, como las demás del `Info.plist`.
 
 **Cómo verificar.**
-- [ ] Construir el `.app` (`pnpm tauri build`, ver [building.md](building.md)) y abrirlo desde Finder, no
+- [ ] Construir el `.app` (`pnpm tauri build`, ver [building.md](../done/building.md)) y abrirlo desde Finder, no
       desde la terminal: con `pnpm tauri dev` el permiso se le puede atribuir a la terminal y ocultar el fallo.
 - [ ] Pulsar el botón de dictado: debe salir el aviso de macOS con la frase de arriba.
 - [ ] Aceptar y dictar en español y en inglés.

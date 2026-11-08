@@ -11,7 +11,7 @@ pub(crate) fn chat() -> Transcript {
         (
             "read",
             "Read",
-            r#"{"file_path":"docs/native/migration.md"}"#,
+            r#"{"file_path":"docs/done/architecture.md"}"#,
             "",
             ToolState::Completed,
         ),
@@ -76,12 +76,12 @@ pub(crate) fn visuals() -> Transcript {
         (
             "example-dashboard",
             "Throughput explorer",
-            include_str!("../../../docs/native/examples/visual-dashboard.js"),
+            include_str!("../../../docs/assets/examples/visual-dashboard.js"),
         ),
         (
             "example-geometry",
             "Geometry explorer",
-            include_str!("../../../docs/native/examples/visual-scene.js"),
+            include_str!("../../../docs/assets/examples/visual-scene.js"),
         ),
     ] {
         let document = monocode_core::visual::VisualDocument {

@@ -91,8 +91,8 @@ pub fn notices() -> Vec<(&'static str, &'static str)> {
     vec![
         ("LICENSE", "LICENSE"),
         ("NOTICE", "NOTICE"),
-        ("docs/native/LICENSE-GPUI-APACHE", "LICENSE-GPUI-APACHE"),
-        ("docs/native/LICENSE-MERMAID-MIT", "LICENSE-MERMAID-MIT"),
+        ("docs/assets/licenses/LICENSE-GPUI-APACHE", "LICENSE-GPUI-APACHE"),
+        ("docs/assets/licenses/LICENSE-MERMAID-MIT", "LICENSE-MERMAID-MIT"),
         (
             "crates/monocode-gpui/assets/hugeicons.LICENSE",
             "hugeicons.LICENSE",

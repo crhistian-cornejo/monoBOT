@@ -29,4 +29,4 @@ Unknown fields and invalid options produce errors instead of being ignored.
 
 Orchestration workers keep their existing scoped `control` workflow and do not receive this app access.
 
-Return to the [README](../README.md) for a quick start.
+Return to the [README](../../README.md) for a quick start.

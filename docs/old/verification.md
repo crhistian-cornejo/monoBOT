@@ -6,7 +6,7 @@
 
 Status recorded on October 22, 2026, on macOS Apple Silicon. These are local
 results, not a release certification. Later dated sections supplement this
-snapshot. See [preview limitations](parity.md) for
+snapshot. See [preview limitations](../in-progress/limitations.md) for
 remaining runtime and platform work.
 
 ## Recorded results
@@ -143,7 +143,7 @@ These results cover automated fixtures and a local development-profile build.
 Preview 10 installers, signing/notarization, packaged upgrades, live heartbeat
 and background delegation behavior, and live Hermes reasoning-effort behavior
 have not been validated by these checks. Linux and Windows runtime coverage
-remains as recorded above and in [preview limitations](parity.md).
+remains as recorded above and in [preview limitations](../in-progress/limitations.md).
 
 ### Review fixes
 
@@ -271,7 +271,7 @@ These local results cover automated fixtures. Signed installers, notarization,
 package signatures, and update-feed publication are checked by the native
 release workflow. No live-provider requests, companion device tests, or manual
 packaged upgrade checks were performed in this preflight. Existing platform
-runtime limitations remain as recorded above and in [preview limitations](parity.md).
+runtime limitations remain as recorded above and in [preview limitations](../in-progress/limitations.md).
 
 ## Rust desktop tooling (`cargo xtask`) — November 8, 2026
 
@@ -341,6 +341,6 @@ cargo run --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-c
 ```
 
 For long-history interaction, use the isolated fixture from the
-[native guide](README.md#checks-and-fixtures). Check typing and scrolling while a
+[native guide](../done/desktop.md#checks-and-fixtures). Check typing and scrolling while a
 separate real session streams, then switch tabs and verify draft/viewport state,
 Stop, and saved history after relaunch. Synthetic history is not sent to providers.

@@ -30,7 +30,7 @@ cargo xtask cargo <args>          # plain cargo, with the dictation libraries fo
 ```
 
 `cargo xtask dev` rebuilds and restarts when you type `r` then Enter. See the
-[desktop guide](native/README.md) for data paths, fixtures and dictation
+[desktop guide](desktop.md) for data paths, fixtures and dictation
 libraries.
 
 ## Packages
@@ -55,7 +55,7 @@ existing build in `MonoBOT Native.app` without packaging it.
 
 ## Releases and updates
 
-Pushing a tag `native-vX.Y.Z` runs [native-release.yml](../.github/workflows/native-release.yml).
+Pushing a tag `native-vX.Y.Z` runs [native-release.yml](../../.github/workflows/native-release.yml).
 It builds all platforms, signs the update packages and the `latest.json`
 manifest (`cargo xtask release native-dist`), verifies them with the app's own
 update client (`cargo xtask verify-release native-dist`), publishes a GitHub
@@ -76,6 +76,6 @@ Repository secrets the workflow needs:
 the remote host before a release.
 
 The remote host has its own [build and packaging instructions](remote-access.md#release-packaging).
-The mobile app builds from `mobile/` ([mobile README](../mobile/README.md)).
+The mobile app builds from `mobile/` ([mobile README](../../mobile/README.md)).
 
-Read [CONTRIBUTING.md](../CONTRIBUTING.md) for contribution guidelines.
+Read [CONTRIBUTING.md](../../CONTRIBUTING.md) for contribution guidelines.

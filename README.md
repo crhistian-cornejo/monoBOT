@@ -85,13 +85,13 @@ pnpm --dir mobile android   # Android Emulator
 ├── vendor/                  # Pinned and patched GPUI framework crates
 ├── xtask/                   # `cargo xtask`: dev runner, builds, packaging, releases
 ├── scripts/                 # JavaScript generators for embedded bundles, perf replay
-└── docs/native/             # Architecture, porting notes, and native guides
+└── docs/                    # done/ (guides), in-progress/ (open work), old/ (history)
 ```
 
 ---
 
 Optional mail infrastructure, Mailflare MCP, agent inboxes and agenda:
-[setup and remaining deployment steps](docs/native/mail-workspace.md).
+[setup and remaining deployment steps](docs/in-progress/mail-workspace.md).
 
 ## License
 

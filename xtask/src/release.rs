@@ -314,8 +314,8 @@ pub fn prepare_release(
     }
     let notes = match env.get("NATIVE_RELEASE_NOTES").filter(|n| !n.is_empty()) {
         Some(notes) => notes.clone(),
-        None => fs::read_to_string(root.join("docs/native/preview-release-notes.md"))
-            .map_err(|e| format!("docs/native/preview-release-notes.md: {e}"))?,
+        None => fs::read_to_string(root.join("docs/done/release-notes.md"))
+            .map_err(|e| format!("docs/done/release-notes.md: {e}"))?,
     };
     let base_url = env
         .get("R2_PUBLIC_BASE_URL")

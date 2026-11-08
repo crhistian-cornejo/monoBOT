@@ -10,18 +10,18 @@ the repository root (`Cargo.toml`, `Cargo.lock`, output in `target/`).
 - On macOS, Xcode with macOS components.
 - Linux core checks need D-Bus headers and pkg-config (`libdbus-1-dev` and
   `pkg-config` on Debian/Ubuntu).
-- At least one installed, signed-in agent CLI. See [provider setup](../providers.md).
+- At least one installed, signed-in agent CLI. See [provider setup](providers.md).
 
 The desktop commands need no JavaScript dependencies or frontend build.
 macOS is the primary preview target. A Linux ARM64 source build has been
 smoke-tested in a VM; Linux x64 packages and Windows GUI interaction still need
-runtime testing. See [preview limitations](parity.md).
+runtime testing. See [preview limitations](../in-progress/limitations.md).
 
 Fenced `mermaid` blocks render as native diagrams in Markdown previews and
 conversations. See [Mermaid diagrams](mermaid.md) for examples and limitations.
 For interactive visuals, use `/visualize` in an idle local desktop conversation
 or ask a Mono directly. See [session visuals](visuals.md) and the
-[preview release notes](preview-release-notes.md).
+[preview release notes](release-notes.md).
 
 ## Monos
 
@@ -52,7 +52,7 @@ four hours. Recent suggestions and the last check time are saved in the Mono's
 `heartbeat.json` file to avoid repeating
 the same follow-ups after a restart. Scheduled habits take priority over
 heartbeats. Live scheduler and provider behavior still need broader testing;
-see [verification](verification.md).
+see [verification](../old/verification.md).
 
 ## Develop
 
@@ -129,11 +129,11 @@ app's webview localStorage on macOS and Linux. The Windows WebView2 reader is
 implemented and covered by synthetic fixtures on Linux; reading a real Windows
 profile remains unverified. Native preference edits are stored separately.
 Some desktop layout concepts still need native support; see
-[preview limitations](parity.md).
+[preview limitations](../in-progress/limitations.md).
 
 These readers import preferences left by the old Tauri app, if it was ever
 installed. The Windows reader always opens a temporary copy of localStorage;
-close the old app before the first launch so the copy is consistent. See [verification](verification.md) for
+close the old app before the first launch so the copy is consistent. See [verification](../old/verification.md) for
 recorded checks.
 
 To inspect the installed database without opening a window or changing it, use
@@ -160,7 +160,7 @@ cargo xtask test
 
 `check` runs Rust formatting, strict Clippy and the xtask tests; `test` runs the
 core and GPUI tests.
-See [verification](verification.md) for individual commands, optional provider
+See [verification](../old/verification.md) for individual commands, optional provider
 checks and the latest recorded results.
 
 A synthetic long-history fixture uses development data and makes no provider
@@ -175,7 +175,7 @@ you want an empty fixture store.
 
 ## Contributing
 
-See [architecture](migration.md) for the crate boundaries and renderer patches,
-and [preview limitations](parity.md) for remaining work. The
+See [architecture](architecture.md) for the crate boundaries and renderer patches,
+and [preview limitations](../in-progress/limitations.md) for remaining work. The
 [session visuals guide](visuals.md) documents the agent-facing visual API and
 examples.

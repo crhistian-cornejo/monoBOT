@@ -1,6 +1,6 @@
 # Workstreams (beta)
 
-> Las rutas `src/` y `src-tauri/` de este documento son de la app Tauri, que ya no está en el repositorio (se conserva en la etiqueta local de git `archive/tauri-app`). Lo que falta portar está en [tauri-gap-audit.md](native/tauri-gap-audit.md).
+> Las rutas `src/` y `src-tauri/` de este documento son de la app Tauri, que ya no está en el repositorio (se conserva en la etiqueta local de git `archive/tauri-app`). Lo que falta portar está en [tauri-gap-audit.md](tauri-gap-audit.md).
 
 Un workstream es para trabajo que le tomaría días a un equipo: una migración, una función que toca el front y el back, una tanda de bugs. Tú le das el objetivo a un **orquestador**. El orquestador lo divide en partes, lanza un **agente** por parte para que trabajen a la vez, y te devuelve el resultado como **pull requests**.
 
@@ -20,7 +20,7 @@ flowchart TD
   P --> T
 ```
 
-- **El orquestador** es un Mono más: tiene su chat, su memoria y sus hábitos. No escribe código; planifica, reparte y coordina. Sus instrucciones salen de `workstreamBrief` en [`workstreams.ts`](../src/features/workstreams/model/workstreams.ts).
+- **El orquestador** es un Mono más: tiene su chat, su memoria y sus hábitos. No escribe código; planifica, reparte y coordina. Sus instrucciones salen de `workstreamBrief` en `src/features/workstreams/model/workstreams.ts` (Tauri).
 - **Cada agente** es una sesión normal, abierta en un **worktree propio** del repositorio. Así nunca pisa los archivos de otro. Trabaja en la rama `ws/<nombre>/<parte>` y termina abriendo un **pull request en borrador**.
 - **La carpeta compartida** guarda lo que no es código: el plan (`plan.md`), notas, hallazgos y entregables. En Windows está en `%APPDATA%\com.monocode.desktop\workstreams\<id>`.
 - **Todo corre en tu ordenador.** Si cierras MonoBOT, el orquestador y los agentes se detienen.

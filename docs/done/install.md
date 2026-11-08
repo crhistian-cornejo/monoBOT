@@ -87,4 +87,4 @@ GDK_BACKEND=x11 ./MonoBOT_*.AppImage
 
 Older AppImages that bundled Ubuntu-built libraries aborted with `Could not create default EGL display: EGL_BAD_PARAMETER`; current builds do not.
 
-Return to the [README](../README.md) for macOS and Windows downloads.
+Return to the [README](../../README.md) for macOS and Windows downloads.

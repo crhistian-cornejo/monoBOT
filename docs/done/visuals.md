@@ -108,7 +108,7 @@ Programs have no filesystem, network, process, DOM, module loading, or timer bin
 
 ## Local examples
 
-The [dashboard example](examples/visual-dashboard.js) exercises charts, tabs, stats, sliders, switches, and tables. The [geometry example](examples/visual-scene.js) exercises 3D primitives, orbiting, geometry controls, and 2D drawing. Both examples are checked against the real interpreter in tests.
+The [dashboard example](../assets/examples/visual-dashboard.js) exercises charts, tabs, stats, sliders, switches, and tables. The [geometry example](../assets/examples/visual-scene.js) exercises 3D primitives, orbiting, geometry controls, and 2D drawing. Both examples are checked against the real interpreter in tests.
 
 To seed them into an isolated development conversation:
 

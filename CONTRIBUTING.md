@@ -6,7 +6,7 @@ Please don’t open PRs that add a new provider right now. The existing harnesse
 
 ## Get it running
 
-You need a current stable Rust toolchain and at least one provider CLI installed and logged in. The desktop tooling is Rust too (`cargo xtask`); Node.js and pnpm are only for the mobile app and the remote host. See [provider setup](docs/providers.md) for installation and login instructions, and [building from source](docs/building.md) for platform prerequisites and packaging.
+You need a current stable Rust toolchain and at least one provider CLI installed and logged in. The desktop tooling is Rust too (`cargo xtask`); Node.js and pnpm are only for the mobile app and the remote host. See [provider setup](docs/done/providers.md) for installation and login instructions, and [building from source](docs/done/building.md) for platform prerequisites and packaging.
 
 ```bash
 cargo xtask dev
@@ -20,7 +20,7 @@ cargo xtask dev
 - `crates/monocode-gpui/` - the desktop app: shell, composer, transcript, editor, settings and platform integration. All Rust crates share the root Cargo workspace and lockfile.
 - `crates/{mobile-link,email,http,dictation,voice,visual}/` - shared crates used by core and the app.
 - `mobile/` - the Expo companion app.
-- `host/` - the remote host installed over SSH ([remote access](docs/remote-access.md)).
+- `host/` - the remote host installed over SSH ([remote access](docs/done/remote-access.md)).
 - `deploy/cloudflare-mail/` - the optional inbound mail Worker.
 - `xtask/` - the desktop tooling behind `cargo xtask`: dev runner, builds, macOS bundles, installers, update signing.
 - `scripts/generators/` - JavaScript sources of the bundles the app runs in QuickJS; `scripts/perf/` - the profiling replay.
@@ -34,7 +34,7 @@ cargo xtask check
 cargo xtask test
 ```
 
-That runs what CI runs: `cargo fmt`, strict `cargo clippy`, the xtask tests and the core and GPUI tests. If it's green locally it should be green on GitHub. See [verification](docs/native/verification.md) for focused commands.
+That runs what CI runs: `cargo fmt`, strict `cargo clippy`, the xtask tests and the core and GPUI tests. If it's green locally it should be green on GitHub. See [verification](docs/old/verification.md) for focused commands.
 
 ## New providers
 

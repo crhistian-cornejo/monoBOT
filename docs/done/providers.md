@@ -20,4 +20,4 @@ One provider is enough. MonoBOT probes for each CLI at startup and disables the 
 
 Once a provider is installed and signed in, open a project folder in MonoBOT, choose that agent, and send a message. For sessions on another machine, install and authenticate the providers on the host as described in [remote access](remote-access.md).
 
-To run MonoBOT from a checkout, see [building from source](building.md). Return to the [README](../README.md) for desktop downloads.
+To run MonoBOT from a checkout, see [building from source](building.md). Return to the [README](../../README.md) for desktop downloads.

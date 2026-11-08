@@ -2,7 +2,7 @@
 
 Referencia de comportamiento: el código de la app Tauri, que ya no está en el
 repositorio (las rutas `features/...` de abajo eran suyas). La lista actualizada
-de lo que falta está en [tauri-gap-audit.md](tauri-gap-audit.md).
+de lo que falta está en [tauri-gap-audit.md](../in-progress/tauri-gap-audit.md).
 
 ## Tarjetas de agentes y noticias
 
@@ -100,6 +100,6 @@ pruebas manuales en Windows/Linux, lector de pantalla, todos los temas o un
 iPhone real. No se ha activado el conector ni se ha cambiado ninguna cuenta
 para probar las ilustraciones.
 
-La app completa conserva otros límites recogidos en [parity.md](parity.md).
+La app completa conserva otros límites recogidos en [parity.md](../in-progress/limitations.md).
 Esta entrega no declara paridad total con Tauri ni certifica a partir del código
 el comportamiento de todas sus integraciones.

@@ -2,7 +2,7 @@
 
 The native app is MonoBOT's only desktop app, still in preview. A feature being
 present in source does not establish that it was checked at runtime on every
-platform. See [verification](verification.md) for recorded checks and
+platform. See [verification](../old/verification.md) for recorded checks and
 [tauri-gap-audit.md](tauri-gap-audit.md) for behavior of the removed Tauri app
 that is still missing here.
 
@@ -47,7 +47,7 @@ approval for every edit. Native Supervised mode does not add that guarantee.
 | Automations | Scheduler, provider and recovery checks; current implementation has source review only |
 | Monos | Existing-data checks, live heartbeat and background delegation checks, native visual/document accessibility, floating-document interactions and live checks of resumed orchestration runs |
 | Remote connections | Real-machine installation/update, existing-data restoration and cross-platform checks; the existing host's feature limits still apply |
-| Poki and model welcome | Poki (iPhone connector, macOS Apple Silicon only) installs the pinned release, starts and stops its daemon and shows its folder, status and seven illustrated tutorial scenes in Settings › MCP. The scenes play once, respect reduced motion and clearly label simulated status as an example. The Astra and Opus 5.5 welcome animations are painted natively. These still need checks against a real iPhone, a real Poki install. See [UI parity follow-up](ui-parity-followup.md) |
+| Poki and model welcome | Poki (iPhone connector, macOS Apple Silicon only) installs the pinned release, starts and stops its daemon and shows its folder, status and seven illustrated tutorial scenes in Settings › MCP. The scenes play once, respect reduced motion and clearly label simulated status as an example. The Astra and Opus 5.5 welcome animations are painted natively. These still need checks against a real iPhone, a real Poki install. See [UI parity follow-up](../old/ui-parity-followup.md) |
 | Integrations | Completion/approval notifications, sounds and Dock badges; Quick Composer attachments/shortcut checks, MCP/skills checks and remaining app-control endpoints. macOS reminder delivery and click routing passed on Oct 22 |
 
 ## Platform and distribution
