@@ -1041,6 +1041,17 @@ impl Menu {
         self.width = width;
         self
     }
+    /// The labels of its action rows, in order, for tests.
+    #[cfg(test)]
+    pub(crate) fn action_labels(&self) -> Vec<SharedString> {
+        self.items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action(action) => Some(action.label.clone()),
+                _ => None,
+            })
+            .collect()
+    }
     pub(crate) fn height(mut self, height: f32) -> Self {
         self.height = Some(height);
         self

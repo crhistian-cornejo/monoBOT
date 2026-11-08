@@ -1746,6 +1746,239 @@ fn group_dialog_scrolls_and_keeps_actions_visible(cx: &mut TestAppContext) {
     assert!(visual.debug_bounds("group-dialog-habits-undo").is_some());
 }
 
+/// Turns the setup's Mono into a group of a Principal and `bots` assistants
+/// (the Principal listed last), and returns (principal, assistants).
+fn make_group(s: &Setup, bots: usize, cx: &mut TestAppContext) -> (String, Vec<String>) {
+    s.manager.update(cx, |m, cx| {
+        let root = m.root.clone();
+        let lead = m
+            .roster
+            .create_bot(&root, "principal", false)
+            .unwrap()
+            .id
+            .clone();
+        let others: Vec<String> = (0..bots)
+            .map(|_| {
+                m.roster
+                    .create_bot(&root, "assistant", false)
+                    .unwrap()
+                    .id
+                    .clone()
+            })
+            .collect();
+        let mut members = others.clone();
+        members.push(lead.clone());
+        let mono = m.roster.get_mut(&s.id).unwrap();
+        mono.kind = Some("group".into());
+        mono.group = Some(monocode_core::mono::groups::Group {
+            members,
+            ..Default::default()
+        });
+        cx.notify();
+        (lead, others)
+    })
+}
+
+fn leak(selector: String) -> &'static str {
+    Box::leak(selector.into_boxed_str())
+}
+
+#[gpui::test]
+fn group_options_menu_lists_members_instead_of_the_look_pickers(cx: &mut TestAppContext) {
+    cx.update(input::bind);
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let (lead, others) = make_group(&s, 3, cx);
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    let open = |visual: &mut gpui::VisualTestContext, id: &str| {
+        let id = id.to_string();
+        s.window
+            .update(visual, |_, w, cx| {
+                s.manager
+                    .update(cx, |m, cx| m.open_options(&id, None, w, cx))
+            })
+            .unwrap();
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+    };
+    open(visual, &s.id);
+    assert!(visual.debug_bounds("mono-options-name").is_some());
+    let list = visual
+        .debug_bounds("mono-options-members")
+        .expect("a group's menu lists its members");
+    let first = visual
+        .debug_bounds(leak(format!("mono-options-member-{lead}")))
+        .expect("the Principal is listed");
+    for id in &others {
+        let chip = visual
+            .debug_bounds(leak(format!("mono-options-member-{id}")))
+            .expect("every member is listed");
+        assert!(chip.left() >= list.left() && chip.right() <= list.right());
+        assert!(
+            chip.top() > first.top() || (chip.top() == first.top() && chip.left() > first.left()),
+            "the lead comes first"
+        );
+    }
+    for picker in ["mono-mascot-0", "mono-color-0", "mono-custom-color"] {
+        assert!(
+            visual.debug_bounds(picker).is_none(),
+            "{picker} is not shown for a group"
+        );
+    }
+    let labels = s.manager.read_with(visual, |m, cx| {
+        m.menu.as_ref().unwrap().1.read(cx).action_labels()
+    });
+    assert_eq!(
+        labels,
+        ["Group settings…", "Background image", "Delete group…"]
+    );
+
+    // A Mono that is not a group keeps its look pickers.
+    s.manager.update(visual, |m, cx| {
+        m.menu = None;
+        cx.notify();
+    });
+    open(visual, &others[0]);
+    assert!(visual.debug_bounds("mono-mascot-0").is_some());
+    assert!(visual.debug_bounds("mono-color-0").is_some());
+    assert!(visual.debug_bounds("mono-options-members").is_none());
+    let labels = s.manager.read_with(visual, |m, cx| {
+        m.menu.as_ref().unwrap().1.read(cx).action_labels()
+    });
+    assert_eq!(labels, ["Background image", "Delete mono…"]);
+}
+
+#[gpui::test]
+fn group_settings_dialog_has_what_the_desktop_dialog_has(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::{Folder, group::GROUP_MAX_MEMBERS};
+    cx.update(input::bind);
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let (lead, others) = make_group(&s, GROUP_MAX_MEMBERS, cx);
+    let context = format!("{}/brief.pdf", s.project);
+    s.manager.update(cx, |m, _| {
+        let group = m.roster.get_mut(&s.id).unwrap().group.as_mut().unwrap();
+        // The Principal and seven others: the group is full.
+        group.members = std::iter::once(lead.clone())
+            .chain(others.iter().skip(1).cloned())
+            .collect();
+        group.folders = vec![
+            Folder::new("/Users/someone/Projects/brief", true),
+            Folder::new("/usr/local/share", false),
+        ];
+        group.context = vec![context.clone()];
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.simulate_resize(gpui::size(px(1000.), px(800.)));
+    let open = |visual: &mut gpui::VisualTestContext| {
+        s.window
+            .update(visual, |_, window, cx| {
+                s.manager.update(cx, |m, cx| {
+                    m.open_group_dialog(Some(s.id.clone()), window, cx)
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+    };
+    let dialog = |visual: &mut gpui::VisualTestContext| {
+        s.manager
+            .read_with(visual, |m, _| m.group_dialog.as_ref().map(|d| d.0.clone()))
+    };
+    open(visual);
+    let view = dialog(visual).expect("Group settings… opens the dialog");
+
+    // The name takes focus, like autoFocus.
+    s.window
+        .update(visual, |_, w, cx| {
+            assert!(view.read(cx).name.focus_handle(cx).is_focused(w));
+        })
+        .unwrap();
+    // Every candidate is listed with the lead first; a full group takes no more.
+    let lead_row = visual
+        .debug_bounds(leak(format!("group-dialog-member-{lead}")))
+        .unwrap();
+    let outside = others[0].clone();
+    let extra = visual
+        .debug_bounds(leak(format!("group-dialog-member-{outside}")))
+        .unwrap();
+    assert!(extra.top() > lead_row.top());
+    visual.simulate_click(extra.center(), Default::default());
+    visual.run_until_parked();
+    view.read_with(visual, |d, _| {
+        assert_eq!(d.members.len(), GROUP_MAX_MEMBERS);
+        assert!(!d.members.contains(&outside));
+    });
+    // A system folder stays read only; the project folder may change.
+    assert!(visual.debug_bounds("group-dialog-folder-edit-0").is_some());
+    assert!(
+        visual
+            .debug_bounds("group-dialog-folder-read-only-1")
+            .is_some()
+    );
+    assert!(visual.debug_bounds("group-dialog-folder-edit-1").is_none());
+    // Icon-only controls: closing, and removing a folder or a context file.
+    assert!(visual.debug_bounds("group-dialog-close").is_some());
+    assert!(visual.debug_bounds("group-dialog-folder-del-1").is_some());
+    // The context file sits at the bottom of the scrolling body.
+    let body = visual.debug_bounds("group-dialog-body").unwrap();
+    visual.simulate_event(gpui::ScrollWheelEvent {
+        position: gpui::point(body.right() - px(4.), body.center().y),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-3000.))),
+        modifiers: Default::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let remove = visual.debug_bounds("group-dialog-context-del-0").unwrap();
+    assert!(remove.bottom() <= body.bottom());
+    visual.simulate_click(remove.center(), Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(dialog(visual).is_some(), "removing a file keeps it open");
+    assert!(visual.debug_bounds("group-dialog-context-del-0").is_none());
+
+    // The name keeps to sixty characters, and Enter saves.
+    s.window
+        .update(visual, |_, w, cx| {
+            let name = view.read(cx).name.clone();
+            name.update(cx, |f, cx| f.set_text(String::new(), cx));
+            w.focus(&name.focus_handle(cx), cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    visual.simulate_input(&"n".repeat(70));
+    visual.run_until_parked();
+    view.read_with(visual, |d, cx| {
+        assert_eq!(d.name.read(cx).content.chars().count(), 60)
+    });
+    view.update(visual, |d, cx| {
+        d.name
+            .update(cx, |f, cx| f.set_text("Design review".into(), cx))
+    });
+    visual.simulate_keystrokes("enter");
+    visual.run_until_parked();
+    assert!(dialog(visual).is_none(), "Enter saves and closes");
+    s.manager.read_with(visual, |m, _| {
+        let mono = m.roster.get(&s.id).unwrap();
+        assert_eq!(mono.name, "Design review");
+        assert!(mono.group.as_ref().unwrap().context.is_empty());
+    });
+
+    // Escape and the close button both close it without saving.
+    open(visual);
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    assert!(dialog(visual).is_none(), "Escape closes it");
+    open(visual);
+    visual.refresh().unwrap();
+    let close = visual.debug_bounds("group-dialog-close").unwrap();
+    visual.simulate_click(close.center(), Default::default());
+    visual.run_until_parked();
+    assert!(dialog(visual).is_none(), "the close button closes it");
+}
+
 #[gpui::test]
 fn long_habit_draft_keeps_fields_and_schedule_inside_the_scrolling_page(cx: &mut TestAppContext) {
     let s = setup(cx);

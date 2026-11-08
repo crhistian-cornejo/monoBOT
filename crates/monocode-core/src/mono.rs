@@ -368,6 +368,49 @@ impl Roster {
             .unwrap_or(&COLORS_MONO[self.monos.len() % COLORS_MONO.len()]);
         (mascot, color)
     }
+    /// The look a new group gets: a (mascot, color) pair from MASCOTS ×
+    /// COLORS_MONO chosen at random among those no group wears, so two
+    /// groups never look alike. Pairs whose mascot and color no other Mono
+    /// wears either come first. Only once every pair is a group's does a
+    /// look repeat, then one of the least worn.
+    pub fn next_group_look<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> (String, u32) {
+        use rand::seq::IndexedRandom;
+        let pairs: Vec<(&str, u32)> = MASCOTS
+            .iter()
+            .flat_map(|mascot| COLORS_MONO.iter().map(move |color| (*mascot, *color)))
+            .collect();
+        let worn_by_groups = |(mascot, color): (&str, u32)| {
+            self.monos
+                .iter()
+                .filter(|m| m.is_group() && m.mascot == mascot && m.color == color)
+                .count()
+        };
+        let free: Vec<(&str, u32)> = pairs
+            .iter()
+            .copied()
+            .filter(|pair| worn_by_groups(*pair) == 0)
+            .collect();
+        let pool = if free.is_empty() {
+            let least = pairs.iter().map(|p| worn_by_groups(*p)).min().unwrap_or(0);
+            pairs
+                .iter()
+                .copied()
+                .filter(|pair| worn_by_groups(*pair) == least)
+                .collect()
+        } else {
+            // How much of the pair other Monos already wear: neither, one or both.
+            let taken = |(mascot, color): (&str, u32)| {
+                usize::from(self.monos.iter().any(|m| m.mascot == mascot))
+                    + usize::from(self.monos.iter().any(|m| m.color == color))
+            };
+            let best = free.iter().map(|p| taken(*p)).min().unwrap_or(0);
+            free.into_iter()
+                .filter(|pair| taken(*pair) == best)
+                .collect::<Vec<_>>()
+        };
+        let (mascot, color) = *pool.choose(rng).unwrap_or(&pairs[0]);
+        (mascot.to_string(), color)
+    }
     pub fn create(&mut self, projects: Vec<String>) -> &Mono {
         let (mascot, color) = self.next_look();
         let mut mono = Mono {
@@ -411,7 +454,7 @@ impl Roster {
         group: groups::Group,
         instructions: Option<&str>,
     ) -> &Mono {
-        let (mascot, color) = self.next_look();
+        let (mascot, color) = self.next_group_look(&mut rand::rng());
         let mut members = group.members.clone();
         if let Some(principal) = self.monos.iter().find(|m| m.is_principal()) {
             if !members.contains(&principal.id) {

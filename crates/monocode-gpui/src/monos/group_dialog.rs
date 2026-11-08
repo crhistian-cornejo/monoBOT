@@ -2,7 +2,7 @@
 //! mirrors GroupDialog.tsx from the Tauri desktop app.
 use super::*;
 use crate::{
-    input::{Changed as InputChanged, Input},
+    input::{Changed as InputChanged, Input, Submitted as InputSubmitted},
     modal,
     theme::*,
 };
@@ -22,6 +22,12 @@ use monocode_core::mono::{
     memory,
 };
 use std::collections::HashSet;
+
+/// GroupDialog's `maxLength`s: the name, goal, instructions and memory.
+const NAME_MAX: usize = 60;
+const GOAL_MAX: usize = 500;
+const INSTRUCTIONS_MAX: usize = 8000;
+const MEMORY_MAX: usize = 4000;
 
 #[derive(Clone, Debug)]
 pub(crate) struct GroupCreate {
@@ -46,11 +52,11 @@ pub(crate) enum Event {
 pub(crate) struct GroupDialog {
     initial_id: Option<String>,
     roster: Roster,
-    name: Entity<Input>,
+    pub(super) name: Entity<Input>,
     goal: Entity<Input>,
     instructions: Entity<Input>,
     memory: Entity<Input>,
-    members: Vec<String>,
+    pub(super) members: Vec<String>,
     folders: Vec<Folder>,
     context: Vec<String>,
     add_task: bool,
@@ -121,6 +127,7 @@ impl GroupDialog {
                 content(0.35),
                 cx,
             );
+            f.set_max_chars(NAME_MAX);
             f.set_text(initial_name, cx);
             f
         });
@@ -131,29 +138,42 @@ impl GroupDialog {
                 "Shared with every member when the group brings them in.",
                 cx,
             );
+            // Two rows, like the desktop textarea, growing to four.
+            f.set_min_height(40.);
+            f.set_max_height(80.);
+            f.set_max_chars(GOAL_MAX);
             f.set_text(initial_goal, cx);
             f
         });
 
         let instructions = cx.new(|cx| {
-            Input::multiline_field(
+            let mut f = Input::multiline_field(
                 "Instructions",
                 "Answer in Spanish. Review the drawings before the reports…",
                 cx,
-            )
+            );
+            f.set_max_chars(INSTRUCTIONS_MAX);
+            f
         });
 
         let memory = cx.new(|cx| {
-            Input::multiline_field(
+            let mut f = Input::multiline_field(
                 "Memory",
                 "One fact per line: the client, the deadline, where things live…",
                 cx,
-            )
+            );
+            f.set_min_height(60.);
+            f.set_max_chars(MEMORY_MAX);
+            f
         });
 
-        let subscriptions = vec![cx.subscribe(&name, |_, _, _: &InputChanged, cx| {
-            cx.notify();
-        })];
+        let subscriptions = vec![
+            cx.subscribe(&name, |_, _, _: &InputChanged, cx| {
+                cx.notify();
+            }),
+            // Enter in the name submits the form, as in the desktop dialog.
+            cx.subscribe(&name, |this, _, _: &InputSubmitted, cx| this.submit(cx)),
+        ];
 
         Self {
             initial_id,
@@ -297,11 +317,26 @@ impl GroupDialog {
     }
 }
 
-fn pretty_file_path(path: &str) -> String {
-    std::path::Path::new(path)
-        .file_name()
-        .map(|f| f.to_string_lossy().to_string())
-        .unwrap_or_else(|| path.to_string())
+/// The small ✕ beside a folder or context file: its tooltip and label say
+/// what it removes.
+fn remove_button(id: String, shown: &str) -> gpui::Stateful<gpui::Div> {
+    let label = format!("Remove {shown}");
+    div()
+        .id(SharedString::from(id.clone()))
+        .debug_selector(move || format!("group-dialog-{id}"))
+        .role(Role::Button)
+        .aria_label(SharedString::from(label.clone()))
+        .tooltip(chrome_tip(label, None))
+        .cursor_pointer()
+        .flex_shrink_0()
+        .size(px(20.))
+        .rounded_md()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(content(0.45))
+        .hover(|s| s.bg(content(0.08)).text_color(content(1.)))
+        .child(icon("close", 12.))
 }
 
 fn check_icon(checked: bool) -> gpui::Div {
@@ -374,35 +409,7 @@ impl gpui::Render for GroupDialog {
             .flex_col()
             .text_color(content(1.))
             // Header
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .px(px(20.))
-                    .pt(px(16.))
-                    .pb(px(12.))
-                    .child(
-                        div()
-                            .text_size(px(15.))
-                            .line_height(px(20.))
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .child(if editing {
-                                "Group settings"
-                            } else {
-                                "New group"
-                            }),
-                    )
-                    .child(
-                        div()
-                            .mt_1()
-                            .text_size(px(12.))
-                            .text_color(content(0.55))
-                            .child(if editing {
-                                "Its goal, members and what they may open"
-                            } else {
-                                "Agents that work on one goal together, led by your Principal"
-                            }),
-                    ),
-            )
+            .child(self.render_header(editing, cx))
             // Scrollable Form Body
             .child(
                 div()
@@ -467,136 +474,7 @@ impl gpui::Render for GroupDialog {
                                         ),
                                     ),
                             )
-                            .child(
-                                div()
-                                    .id("group-dialog-members")
-                                    .max_h(px(160.))
-                                    .overflow_y_scroll()
-                                    .rounded_md()
-                                    .border_1()
-                                    .border_color(content(0.1))
-                                    .bg(background_base())
-                                    .flex()
-                                    .flex_col()
-                                    .children(candidates.into_iter().map(|candidate| {
-                                        let is_lead = candidate.is_principal();
-                                        let cid = candidate.id.clone();
-                                        let on = self.members.contains(&cid);
-                                        let full = self.members.len() >= GROUP_MAX_MEMBERS;
-                                        let specialty =
-                                            candidate.specialty.clone().unwrap_or_else(|| {
-                                                if is_lead {
-                                                    "Orchestrator".into()
-                                                } else {
-                                                    candidate.label()
-                                                }
-                                            });
-
-                                        if is_lead {
-                                            div()
-                                                .id(SharedString::from(format!(
-                                                    "lead-{}",
-                                                    candidate.id
-                                                )))
-                                                .h(px(32.))
-                                                .px_2()
-                                                .flex()
-                                                .items_center()
-                                                .gap_2()
-                                                .child(avatar::avatar(
-                                                    &candidate.mascot,
-                                                    candidate.color,
-                                                    "idle",
-                                                    16.,
-                                                    true,
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w_0()
-                                                        .child(
-                                                            div()
-                                                                .truncate()
-                                                                .text_size(px(13.))
-                                                                .font_weight(
-                                                                    gpui::FontWeight::MEDIUM,
-                                                                )
-                                                                .child(candidate.label()),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .truncate()
-                                                                .text_size(px(11.))
-                                                                .text_color(content(0.5))
-                                                                .child(specialty),
-                                                        ),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .px_1p5()
-                                                        .py_0p5()
-                                                        .rounded_md()
-                                                        .bg(accent_color().opacity(0.1))
-                                                        .text_color(accent_color())
-                                                        .text_size(px(11.))
-                                                        .font_weight(gpui::FontWeight::MEDIUM)
-                                                        .child("Leads"),
-                                                )
-                                                .into_any_element()
-                                        } else {
-                                            div()
-                                                .id(SharedString::from(format!(
-                                                    "member-row-{}",
-                                                    candidate.id
-                                                )))
-                                                .h(px(32.))
-                                                .px_2()
-                                                .flex()
-                                                .items_center()
-                                                .gap_2()
-                                                .cursor_pointer()
-                                                .hover(|s| s.bg(content(0.04)))
-                                                .child(avatar::avatar(
-                                                    &candidate.mascot,
-                                                    candidate.color,
-                                                    "idle",
-                                                    16.,
-                                                    true,
-                                                ))
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w_0()
-                                                        .child(
-                                                            div()
-                                                                .truncate()
-                                                                .text_size(px(13.))
-                                                                .font_weight(
-                                                                    gpui::FontWeight::MEDIUM,
-                                                                )
-                                                                .child(candidate.label()),
-                                                        )
-                                                        .child(
-                                                            div()
-                                                                .truncate()
-                                                                .text_size(px(11.))
-                                                                .text_color(content(0.5))
-                                                                .child(specialty),
-                                                        ),
-                                                )
-                                                .child(check_icon(on))
-                                                .on_click(cx.listener(move |this, _, _, cx| {
-                                                    if this.members.contains(&cid) {
-                                                        this.members.retain(|x| x != &cid);
-                                                    } else if !full {
-                                                        this.members.push(cid.clone());
-                                                    }
-                                                    cx.notify();
-                                                }))
-                                                .into_any_element()
-                                        }
-                                    })),
-                            ),
+                            .child(self.render_member_picker(candidates, cx)),
                     )
                     // Project · optional
                     .child(
@@ -687,6 +565,170 @@ impl gpui::Render for GroupDialog {
 }
 
 impl GroupDialog {
+    /// The Modal's header: its title, what it is for, and a close button.
+    fn render_header(&self, editing: bool, cx: &Context<Self>) -> AnyElement {
+        let (title, description) = if editing {
+            ("Group settings", "Its goal, members and what they may open")
+        } else {
+            (
+                "New group",
+                "Agents that work on one goal together, led by your Principal",
+            )
+        };
+        div()
+            .flex_shrink_0()
+            .flex()
+            .items_start()
+            .gap_2()
+            .px(px(20.))
+            .pt(px(16.))
+            .pb(px(12.))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(
+                        div()
+                            .text_size(px(15.))
+                            .line_height(px(20.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .mt_1()
+                            .truncate()
+                            .text_size(px(12.))
+                            .text_color(content(0.55))
+                            .child(description),
+                    ),
+            )
+            .child(
+                icon_button("group-dialog-close", "Close", "close")
+                    .debug_selector(|| "group-dialog-close".into())
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(Event::Close))),
+            )
+            .into_any_element()
+    }
+
+    /// MemberPicker: a check over every agent but other groups, up to the
+    /// group's limit. The Principal leads every group, so it is always in.
+    fn render_member_picker(&self, candidates: Vec<Mono>, cx: &Context<Self>) -> AnyElement {
+        if candidates.is_empty() {
+            return div()
+                .id("group-dialog-no-candidates")
+                .debug_selector(|| "group-dialog-no-candidates".into())
+                .text_size(px(12.))
+                .text_color(content(0.5))
+                .child("Create a bot or a Mono first; groups bring them together.")
+                .into_any_element();
+        }
+        let brief = native::members(&self.roster.monos);
+        let full = self.members.len() >= GROUP_MAX_MEMBERS;
+        div()
+            .id("group-dialog-members")
+            .debug_selector(|| "group-dialog-members".into())
+            .max_h(px(256.))
+            .overflow_y_scroll()
+            .rounded_md()
+            .border_1()
+            .border_color(content(0.1))
+            .bg(background_base())
+            .flex()
+            .flex_col()
+            .children(candidates.into_iter().map(|candidate| {
+                let lead = candidate.is_principal();
+                let cid = candidate.id.clone();
+                let on = self.members.contains(&cid);
+                let blocked = !on && full;
+                let role = brief
+                    .iter()
+                    .find(|member| member.id == cid)
+                    .map(member_role)
+                    .unwrap_or_default();
+                let row = div()
+                    .id(SharedString::from(format!("group-dialog-member-{cid}")))
+                    .debug_selector({
+                        let cid = cid.clone();
+                        move || format!("group-dialog-member-{cid}")
+                    })
+                    .min_h(px(40.))
+                    .px_2()
+                    .py_1()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .child(avatar::avatar(
+                        &candidate.mascot,
+                        candidate.color,
+                        "idle",
+                        20.,
+                        true,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(13.))
+                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .child(candidate.label()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .text_color(content(0.5))
+                                    .child(role),
+                            ),
+                    );
+                if lead {
+                    return row
+                        .child(
+                            div()
+                                .id(SharedString::from(format!("group-dialog-leads-{cid}")))
+                                .flex_shrink_0()
+                                .px_1p5()
+                                .py_0p5()
+                                .rounded_md()
+                                .bg(accent_color().opacity(0.1))
+                                .text_color(accent_color())
+                                .text_size(px(11.))
+                                .font_weight(gpui::FontWeight::MEDIUM)
+                                .tooltip(text_tip(
+                                    "The Principal leads every group and is always in it.",
+                                ))
+                                .child("Leads"),
+                        )
+                        .into_any_element();
+                }
+                row.role(Role::CheckBox)
+                    .aria_label(SharedString::from(candidate.label()))
+                    .aria_selected(on)
+                    .when(blocked, |d| {
+                        d.opacity(0.5).tooltip(text_tip(format!(
+                            "A group has at most {GROUP_MAX_MEMBERS} members"
+                        )))
+                    })
+                    .when(!blocked, |d| {
+                        d.cursor_pointer().hover(|s| s.bg(content(0.04)))
+                    })
+                    .child(check_icon(on))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        if this.members.contains(&cid) {
+                            this.members.retain(|x| x != &cid);
+                        } else if this.members.len() < GROUP_MAX_MEMBERS {
+                            this.members.push(cid.clone());
+                        }
+                        cx.notify();
+                    }))
+                    .into_any_element()
+            }))
+            .into_any_element()
+    }
+
     fn render_folders_row(&self, cx: &Context<Self>) -> AnyElement {
         let open = self.sections_open.contains("folders");
         let count = self.folders.len();
@@ -761,6 +803,44 @@ impl GroupDialog {
                         .children(self.folders.iter().enumerate().map(|(ix, folder)| {
                             let path = folder.path.clone();
                             let edit = folder.edit;
+                            let shown = super::bot_settings::pretty(&path);
+                            // A folder members may not change, such as the
+                            // home folder, stays read only (BotFolders).
+                            let control = match bot_tools::folder_problem(&path, true) {
+                                None => div()
+                                    .id(SharedString::from(format!("folder-edit-{ix}")))
+                                    .debug_selector(move || format!("group-dialog-folder-edit-{ix}"))
+                                    .role(Role::CheckBox)
+                                    .aria_label("Can change")
+                                    .aria_selected(edit)
+                                    .flex()
+                                    .items_center()
+                                    .gap_1()
+                                    .cursor_pointer()
+                                    .child(check_icon(edit))
+                                    .child(
+                                        div()
+                                            .text_size(px(11.))
+                                            .text_color(content(0.6))
+                                            .child("Can change"),
+                                    )
+                                    .on_click(cx.listener(move |this, _, _, cx| {
+                                        if let Some(f) = this.folders.get_mut(ix) {
+                                            f.edit = !edit;
+                                        }
+                                        cx.notify();
+                                    }))
+                                    .into_any_element(),
+                                Some(why) => div()
+                                    .id(SharedString::from(format!("folder-read-only-{ix}")))
+                                    .debug_selector(move || format!("group-dialog-folder-read-only-{ix}"))
+                                    .aria_label(SharedString::from(format!("Read only: {why}")))
+                                    .tooltip(text_tip(why))
+                                    .text_size(px(11.))
+                                    .text_color(content(0.4))
+                                    .child("Read only")
+                                    .into_any_element(),
+                            };
                             div()
                                 .id(SharedString::from(format!("folder-entry-{ix}")))
                                 .h(px(28.))
@@ -773,50 +853,23 @@ impl GroupDialog {
                                 .child(icon("folder-01", 14.).text_color(content(0.5)))
                                 .child(
                                     div()
+                                        .id(SharedString::from(format!("folder-path-{ix}")))
                                         .flex_1()
                                         .min_w_0()
                                         .truncate()
                                         .text_size(px(12.))
                                         .text_color(content(0.85))
-                                        .child(pretty_file_path(&path)),
+                                        .tooltip(text_tip(path.clone()))
+                                        .child(shown.clone()),
                                 )
+                                .child(control)
                                 .child(
-                                    div()
-                                        .id(SharedString::from(format!("folder-edit-{ix}")))
-                                        .flex()
-                                        .items_center()
-                                        .gap_1()
-                                        .cursor_pointer()
-                                        .child(check_icon(edit))
-                                        .child(
-                                            div()
-                                                .text_size(px(11.))
-                                                .text_color(content(0.6))
-                                                .child("Can change"),
-                                        )
-                                        .on_click(cx.listener(move |this, _, _, cx| {
-                                            if let Some(f) = this.folders.get_mut(ix) {
-                                                f.edit = !edit;
-                                            }
-                                            cx.notify();
-                                        })),
-                                )
-                                .child(
-                                    div()
-                                        .id(SharedString::from(format!("folder-del-{ix}")))
-                                        .tooltip(crate::theme::chrome_tip("Remove folder", None))
-                                        .cursor_pointer()
-                                        .size(px(20.))
-                                        .rounded_md()
-                                        .flex()
-                                        .items_center()
-                                        .justify_center()
-                                        .hover(|s| s.bg(content(0.08)))
-                                        .child(icon("close", 12.).text_color(content(0.45)))
-                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                    remove_button(format!("folder-del-{ix}"), &shown).on_click(
+                                        cx.listener(move |this, _, _, cx| {
                                             this.folders.retain(|f| f.path != path);
                                             cx.notify();
-                                        })),
+                                        }),
+                                    ),
                                 )
                         }))
                         .child(
@@ -1022,6 +1075,7 @@ impl GroupDialog {
                 d.child(div().px_3().pb_2().flex().flex_col().gap_1().children(
                     self.context.iter().enumerate().map(|(ix, path)| {
                         let path_val = path.clone();
+                        let shown = super::bot_settings::pretty(path);
                         div()
                             .id(SharedString::from(format!("context-file-{ix}")))
                             .h(px(26.))
@@ -1034,30 +1088,21 @@ impl GroupDialog {
                             .child(icon("file", 13.).text_color(content(0.5)))
                             .child(
                                 div()
+                                    .id(SharedString::from(format!("context-path-{ix}")))
                                     .flex_1()
                                     .min_w_0()
                                     .truncate()
                                     .text_size(px(12.))
                                     .text_color(content(0.85))
-                                    .child(pretty_file_path(path)),
+                                    .tooltip(text_tip(path.clone()))
+                                    .child(shown.clone()),
                             )
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!("context-del-{ix}")))
-                                    .tooltip(crate::theme::chrome_tip("Remove file", None))
-                                    .cursor_pointer()
-                                    .size(px(20.))
-                                    .rounded_md()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .hover(|s| s.bg(content(0.08)))
-                                    .child(icon("close", 12.).text_color(content(0.45)))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.context.retain(|p| p != &path_val);
-                                        cx.notify();
-                                    })),
-                            )
+                            .child(remove_button(format!("context-del-{ix}"), &shown).on_click(
+                                cx.listener(move |this, _, _, cx| {
+                                    this.context.retain(|p| p != &path_val);
+                                    cx.notify();
+                                }),
+                            ))
                     }),
                 ))
             })
@@ -1301,7 +1346,9 @@ impl Monos {
                 Event::Close => this.close_group_dialog(cx),
             },
         );
-        window.focus(&view.focus_handle(cx), cx);
+        // The name takes focus, like the desktop dialog's autoFocus.
+        let name = view.read(cx).name.focus_handle(cx);
+        window.focus(&name, cx);
         self.group_dialog = Some((view, events, window.viewport_size()));
         cx.notify();
     }

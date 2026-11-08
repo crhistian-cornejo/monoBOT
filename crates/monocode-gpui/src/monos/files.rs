@@ -250,10 +250,11 @@ impl Monos {
         self.ensure_chat(id, cx);
     }
     pub(super) fn delete_mono(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (title, detail) = delete_prompt(self.roster.get(id).is_some_and(Mono::is_group));
         let prompt = window.prompt(
             gpui::PromptLevel::Warning,
-            "Delete mono?",
-            Some("Its scheduled habits stop. Sessions and notes it created stay saved."),
+            title,
+            Some(detail),
             &["Cancel", "Delete"],
             cx,
         );
@@ -279,5 +280,32 @@ impl Monos {
             self.active = None;
         }
         self.save(cx);
+    }
+}
+
+/// What deleting asks first. A group only leaves the roster: its members
+/// are Monos of their own and stay, with their chats.
+fn delete_prompt(group: bool) -> (&'static str, &'static str) {
+    if group {
+        (
+            "Delete group?",
+            "Its members stay, each with its own chat, and its scheduled habits stop. The group chat, its members' conversations in it and its notes stay saved.",
+        )
+    } else {
+        (
+            "Delete mono?",
+            "Its scheduled habits stop. Sessions and notes it created stay saved.",
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn deleting_a_group_says_group_and_that_its_members_stay() {
+        let (title, detail) = super::delete_prompt(true);
+        assert_eq!(title, "Delete group?");
+        assert!(detail.contains("members stay"));
+        assert_eq!(super::delete_prompt(false).0, "Delete mono?");
     }
 }
