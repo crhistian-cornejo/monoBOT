@@ -959,17 +959,7 @@ impl Shell {
                         .rounded_md()
                         .border_1()
                         .border_color(content(0.08))
-                        // RailSearch's Tailwind shadow-sm, including
-                        // its tighter second layer below the border.
-                        // The vendored shader keeps it outside the
-                        // box, as CSS does.
-                        .shadow(vec![
-                            BoxShadow::new(px(0.), px(1.), rgba(0x0000001a).into())
-                                .blur_radius(px(3.)),
-                            BoxShadow::new(px(0.), px(1.), rgba(0x0000001a).into())
-                                .blur_radius(px(2.))
-                                .spread_radius(px(-1.)),
-                        ])
+                        .shadow(field_shadow())
                         .text_color(content(if self.sidebar_hover == Some("Search") {
                             1.
                         } else {
@@ -1142,7 +1132,7 @@ impl Shell {
                     && !self.session_metadata(id, cx).summary.has_messages
             })
     }
-    fn notify_navigation(&self, cx: &mut Context<Self>) {
+    pub(super) fn notify_navigation(&self, cx: &mut Context<Self>) {
         if self.workspace.classic_layout {
             self.projects_frame.update(cx, |_, cx| cx.notify());
         } else {

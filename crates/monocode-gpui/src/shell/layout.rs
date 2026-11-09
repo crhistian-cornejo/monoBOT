@@ -152,9 +152,15 @@ fn panel_button(enabled: bool, dot: bool) -> gpui::Stateful<gpui::Div> {
         )
 }
 
+/// Where the classic layout's collapsed rail sits under one title bar that
+/// spans the window, instead of the navigation floating over the rail and
+/// whatever is beside it. macOS keeps its traffic lights there and Windows
+/// its menu button, both wider than the icon rail.
+pub(super) const TITLE_SPANS_RAIL: bool = cfg!(any(target_os = "macos", target_os = "windows"));
+
 impl Shell {
     pub(super) fn classic_titlebar_spans_window(&self, cx: &gpui::App) -> bool {
-        cfg!(target_os = "macos")
+        TITLE_SPANS_RAIL
             && self.workspace.classic_layout
             && !self.workspace.project_rail_open
             && self.settings.is_none()
@@ -363,7 +369,7 @@ impl Shell {
         let footer = (!self.classic_surface_open(cx)).then(|| self.footer_row(cx));
         let spans_window = self.classic_titlebar_spans_window(cx);
         let original = self.workspace.classic_layout;
-        let compact_surface = cfg!(target_os = "macos")
+        let compact_surface = TITLE_SPANS_RAIL
             && original
             && !self.workspace.project_rail_open
             && self.settings.is_none()

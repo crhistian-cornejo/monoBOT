@@ -1690,6 +1690,11 @@ pub(crate) fn pretty_parent(path: &str) -> String {
         .parent()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // Windows' long-path prefix is the system's business, not the reader's.
+    let parent = parent
+        .strip_prefix(r"\\?\")
+        .map(str::to_owned)
+        .unwrap_or(parent);
     match std::env::var("HOME") {
         Ok(home) if !home.is_empty() && parent.starts_with(&home) => {
             format!("~{}", &parent[home.len()..])

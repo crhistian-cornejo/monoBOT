@@ -4737,6 +4737,24 @@ fn bots_open_on_their_own_overview_tabs(cx: &mut TestAppContext) {
                 ]
         );
     });
+    // A bot that writes leads with its documents.
+    s.manager.update(visual, |m, _| {
+        let root = m.root.clone();
+        let tabs = |m: &mut Monos, role: &str| {
+            let id = m.roster.create_bot(&root, role, false).unwrap().id.clone();
+            panels::overview_tabs(m.roster.get(&id).unwrap()).to_vec()
+        };
+        assert!(
+            tabs(m, "research")
+                == [
+                    OverviewTab::Documents,
+                    OverviewTab::Subagents,
+                    OverviewTab::Habits
+                ]
+        );
+        assert!(tabs(m, "writer")[0] == OverviewTab::Documents);
+        assert!(tabs(m, "planner")[0] == OverviewTab::Habits);
+    });
     // A coding Mono keeps whatever overview tab was open.
     s.manager.update(visual, |m, cx| {
         m.select_overview(OverviewTab::Documents, cx)

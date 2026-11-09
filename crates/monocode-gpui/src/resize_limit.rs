@@ -5,8 +5,8 @@
 //! drag lets go.
 use crate::theme::accent_color;
 use gpui::{
-    Bounds, BoxShadow, ContentMask, Corners, IntoElement, Styled, canvas, deferred, fill,
-    linear_color_stop, linear_gradient, point, px, size,
+    Bounds, ContentMask, Corners, IntoElement, Styled, canvas, deferred, fill, linear_color_stop,
+    linear_gradient, point, px, size,
 };
 use std::time::{Duration, Instant};
 
@@ -23,6 +23,13 @@ const FULL_STRAIN_PX: f32 = 72.;
 const FIRST_STRAIN: f32 = 0.35;
 /// How far the glow leans toward the pointer at full strength, in px.
 const MAX_PULL_PX: f32 = 4.;
+/// The light's bands: how wide across the handle, how strong, and how far
+/// each runs from the pointer along it at full strength.
+const LAYERS: [(f32, f32, f32); 3] = [(11., 0.07, 150.), (5., 0.16, 190.), (1.5, 0.95, 230.)];
+/// The room the widest band takes across the handle.
+const GLOW_ACROSS: f32 = 12.;
+/// The bead under the pointer.
+const BEAD: f32 = 5.;
 /// The release fade, the ::after's opacity transition.
 const FADE: Duration = Duration::from_millis(160);
 
@@ -82,10 +89,11 @@ impl LimitGlow {
     }
 }
 
-/// The `[data-resize-limit]::after` layer: an accent thread centred on the
-/// pointer along the handle — a bright hairline fading along its run over a
-/// soft halo — leaning a few px the way the pointer pushes. Put it inside the
-/// handle; `along` is the pointer's place along it in window px.
+/// The `[data-resize-limit]::after` layer: an accent light along the handle,
+/// brightest at the pointer and fading away from it, with a bead where the
+/// pointer holds it. It leans a few px the way the pointer pushes and runs
+/// further the harder it is pushed. Put it inside the handle; `along` is the
+/// pointer's place along it in window px.
 pub(crate) fn limit_glow(axis: Axis, glow: LimitGlow, reduce_motion: bool) -> impl IntoElement {
     deferred(
         canvas(
@@ -116,113 +124,95 @@ pub(crate) fn limit_glow(axis: Axis, glow: LimitGlow, reduce_motion: bool) -> im
                     return;
                 }
                 let accent = accent_color();
-                let mut core = accent;
-                core.a = opacity;
-                let mut halo = accent;
-                halo.a = 0.45 * opacity;
                 let mut clear = accent;
                 clear.a = 0.;
                 let center = match axis {
                     Axis::X => point(bounds.center().x + px(pull), px(glow.along)),
                     Axis::Y => point(px(glow.along), bounds.center().y + px(pull)),
                 };
-                // Clip to the ::after box (28px across, inset along the handle)
-                // so the 140px thread and 120px halo never bleed past the handle's ends.
-                let after = match axis {
+                // Kept to the handle's own run, so the light never spills
+                // past its ends.
+                let run = match axis {
                     Axis::X => Bounds::new(
-                        point(bounds.center().x - px(14.) + px(pull), bounds.top()),
-                        size(px(28.), bounds.size.height),
+                        point(center.x - px(GLOW_ACROSS / 2.), bounds.top()),
+                        size(px(GLOW_ACROSS), bounds.size.height),
                     ),
                     Axis::Y => Bounds::new(
-                        point(bounds.left(), bounds.center().y - px(14.) + px(pull)),
-                        size(bounds.size.width, px(28.)),
+                        point(bounds.left(), center.y - px(GLOW_ACROSS / 2.)),
+                        size(bounds.size.width, px(GLOW_ACROSS)),
                     ),
                 };
-                window.with_content_mask(Some(ContentMask { bounds: after }), |window| {
-                    // The 14px halo gradient as the thread's blurred silhouette.
-                    let (hw, hh) = match axis {
-                        Axis::X => (1.5, 106.),
-                        Axis::Y => (106., 1.5),
-                    };
-                    window.paint_drop_shadows(
-                        Bounds::new(
-                            center - point(px(hw / 2.), px(hh / 2.)),
-                            size(px(hw), px(hh)),
-                        ),
-                        Corners::all(px(hw.min(hh) / 2.)),
-                        &[BoxShadow {
-                            color: halo,
-                            offset: point(px(0.), px(0.)),
-                            blur_radius: px(7.),
-                            spread_radius: px(0.),
-                            inset: false,
-                        }],
-                    );
-                    // The core thread, 1.5px across and 140px along, fading at both
-                    // ends: two halves for the middle stop a two-stop gradient can't.
-                    let (w, h) = match axis {
-                        Axis::X => (1.5, 70.),
-                        Axis::Y => (70., 1.5),
-                    };
-                    let angle = match axis {
-                        Axis::X => 180.,
-                        Axis::Y => 90.,
-                    };
-                    let behind = match axis {
-                        Axis::X => Corners {
-                            top_left: px(0.75),
-                            top_right: px(0.75),
-                            ..Default::default()
-                        },
-                        Axis::Y => Corners {
-                            top_left: px(0.75),
-                            bottom_left: px(0.75),
-                            ..Default::default()
-                        },
-                    };
-                    let ahead = match axis {
-                        Axis::X => Corners {
-                            bottom_left: px(0.75),
-                            bottom_right: px(0.75),
-                            ..Default::default()
-                        },
-                        Axis::Y => Corners {
-                            top_right: px(0.75),
-                            bottom_right: px(0.75),
-                            ..Default::default()
-                        },
-                    };
-                    let first = Bounds::new(
-                        center
-                            - match axis {
-                                Axis::X => point(px(w / 2.), px(h)),
-                                Axis::Y => point(px(w), px(h / 2.)),
-                            },
-                        size(px(w), px(h)),
-                    );
-                    let second =
-                        Bounds::new(center - point(px(w / 2.), px(h / 2.)), size(px(w), px(h)));
+                let angle = match axis {
+                    Axis::X => 180.,
+                    Axis::Y => 90.,
+                };
+                window.with_content_mask(Some(ContentMask { bounds: run }), |window| {
+                    // Three nested bands, each fading out along the handle:
+                    // a wide faint one, a closer one and the bright line.
+                    // Gradients stand in for a blur, which would cost a pass
+                    // of its own on every frame of the drag.
+                    for (across, strength, reach) in LAYERS {
+                        let mut color = accent;
+                        color.a = opacity * strength;
+                        // The further past the limit, the further it runs.
+                        let reach = reach * (0.6 + 0.4 * opacity);
+                        let (first, second) = match axis {
+                            Axis::X => (
+                                Bounds::new(
+                                    center - point(px(across / 2.), px(reach)),
+                                    size(px(across), px(reach)),
+                                ),
+                                Bounds::new(
+                                    center - point(px(across / 2.), px(0.)),
+                                    size(px(across), px(reach)),
+                                ),
+                            ),
+                            Axis::Y => (
+                                Bounds::new(
+                                    center - point(px(reach), px(across / 2.)),
+                                    size(px(reach), px(across)),
+                                ),
+                                Bounds::new(
+                                    center - point(px(0.), px(across / 2.)),
+                                    size(px(reach), px(across)),
+                                ),
+                            ),
+                        };
+                        window.paint_quad(
+                            fill(
+                                first,
+                                linear_gradient(
+                                    angle,
+                                    linear_color_stop(clear, 0.),
+                                    linear_color_stop(color, 1.),
+                                ),
+                            )
+                            .corner_radii(Corners::all(px(across / 2.))),
+                        );
+                        window.paint_quad(
+                            fill(
+                                second,
+                                linear_gradient(
+                                    angle,
+                                    linear_color_stop(color, 0.),
+                                    linear_color_stop(clear, 1.),
+                                ),
+                            )
+                            .corner_radii(Corners::all(px(across / 2.))),
+                        );
+                    }
+                    // Where the pointer holds the handle: a small bead.
+                    let mut bead = accent;
+                    bead.a = opacity;
                     window.paint_quad(
                         fill(
-                            first,
-                            linear_gradient(
-                                angle,
-                                linear_color_stop(clear, 0.),
-                                linear_color_stop(core, 1.),
+                            Bounds::new(
+                                center - point(px(BEAD / 2.), px(BEAD / 2.)),
+                                size(px(BEAD), px(BEAD)),
                             ),
+                            bead,
                         )
-                        .corner_radii(behind),
-                    );
-                    window.paint_quad(
-                        fill(
-                            second,
-                            linear_gradient(
-                                angle,
-                                linear_color_stop(core, 0.),
-                                linear_color_stop(clear, 1.),
-                            ),
-                        )
-                        .corner_radii(ahead),
+                        .corner_radii(Corners::all(px(BEAD / 2.))),
                     );
                 });
             },

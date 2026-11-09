@@ -344,6 +344,12 @@ pub(crate) fn text_selection() -> Hsla {
 
 /// Light mode lifts the solid composer off the matching page with a soft
 /// two-layer drop; dark mode's frosted box needs no shadow.
+/// The lift under a field that reads as a button (the rails' Search): one
+/// faint, tight layer. Two stacked layers at a tenth of black each read as
+/// a dark smudge around the field on a light theme.
+pub(crate) fn field_shadow() -> Vec<gpui::BoxShadow> {
+    vec![gpui::BoxShadow::new(px(0.), px(1.), black(0.05)).blur_radius(px(2.))]
+}
 pub(crate) fn composer_shadow() -> Vec<gpui::BoxShadow> {
     if !is_light() {
         return Vec::new();

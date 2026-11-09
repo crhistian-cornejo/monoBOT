@@ -1,6 +1,7 @@
 // Sidebar.tsx's peek: in the inset layout a collapsed sidebar slides out over
 // the workspace while the pointer rests on the window's left edge or on the
-// sidebar toggle, and puts itself away once the pointer leaves it.
+// sidebar toggle, and puts itself away once the pointer leaves it. The
+// classic layout does not peek: its collapsed rail is already there.
 use super::Shell;
 use crate::{reveal::bezier, theme::*};
 use gpui::{
@@ -12,7 +13,7 @@ use std::time::{Duration, Instant};
 /// How close to the window's left edge the pointer peeks the sidebar out.
 const PEEK_EDGE: f32 = 6.;
 /// Grace before a peek closes, so the pointer can cross a gap to the panel.
-const PEEK_CLOSE_DELAY: Duration = Duration::from_millis(180);
+const PEEK_CLOSE_DELAY: Duration = Duration::from_millis(80);
 /// The panel's inset from the window's left and bottom edges (`left-1.5`).
 const PEEK_INSET: f32 = 6.;
 /// How far the panel drifts in from the edge.
@@ -45,7 +46,7 @@ impl SidebarPeek {
         let (duration, curve) = if self.open {
             (240., (0.16, 1., 0.3, 1.))
         } else {
-            (200., (0.4, 0., 0.2, 1.))
+            (130., (0.4, 0., 0.2, 1.))
         };
         // Shorter the less of the way there is left to go.
         let duration = duration * (to - self.from).abs();
@@ -93,6 +94,11 @@ impl Shell {
         };
         if !open {
             self.close_preview(cx);
+            // The panel leaves from under the pointer, so the row it rested
+            // on never hears that it left.
+            if self.sidebar_hover.take().is_some() {
+                self.notify_navigation(cx);
+            }
         }
         self.sidebar_peek = Some(SidebarPeek::new(open, current, cx.reduce_motion()));
         self.peek_animating = true;
@@ -107,7 +113,11 @@ impl Shell {
     }
 
     pub(super) fn hover_peek_toggle(&mut self, hovered: bool, cx: &mut Context<Self>) {
-        if hovered {
+        // Collapsing the sidebar from the toggle leaves the pointer on it;
+        // it peeks only once the pointer has come back.
+        if !hovered {
+            self.peek_muted = false;
+        } else if !self.peek_muted {
             self.set_peek(true, cx);
         }
     }

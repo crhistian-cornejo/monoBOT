@@ -249,7 +249,7 @@ impl Shell {
                 },
             )
             .into_any_element();
-        if cfg!(target_os = "macos")
+        if layout::TITLE_SPANS_RAIL
             && !self.workspace.project_rail_open
             && self.settings.is_none()
             && self.classic_surface_open(cx)
@@ -300,7 +300,7 @@ impl Shell {
                 .flex_col()
                 .items_center()
                 .overflow_hidden()
-                .when(!cfg!(target_os = "macos"), |d| d.child(header))
+                .when(!layout::TITLE_SPANS_RAIL, |d| d.child(header))
                 .child(self.project_rail_compact_actions(cx))
                 .child(div().min_h(px(8.)).flex_1())
                 .child(
@@ -627,13 +627,7 @@ impl Shell {
                         .rounded_md()
                         .border_1()
                         .border_color(content(0.08))
-                        .shadow(vec![
-                            BoxShadow::new(px(0.), px(1.), rgba(0x0000001a).into())
-                                .blur_radius(px(3.)),
-                            BoxShadow::new(px(0.), px(1.), rgba(0x0000001a).into())
-                                .blur_radius(px(2.))
-                                .spread_radius(px(-1.)),
-                        ])
+                        .shadow(field_shadow())
                         .flex()
                         .items_center()
                         .gap_2()

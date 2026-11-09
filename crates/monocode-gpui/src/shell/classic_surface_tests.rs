@@ -204,6 +204,13 @@ fn original_collapsed_picker_selects_monos_and_projects_with_search_and_keyboard
                     manager.roster.get_mut(&id).unwrap().name = name.into();
                     ids.push(id);
                 }
+                // A bot lives in the Agents zone: the Code zone's picker
+                // does not list it.
+                let bot = manager.roster.create(Vec::new()).id.clone();
+                let bot_mono = manager.roster.get_mut(&bot).unwrap();
+                bot_mono.name = "Finance".into();
+                bot_mono.kind = Some("bot".into());
+                ids.push(bot);
                 cx.notify();
                 ids
             });
@@ -224,6 +231,8 @@ fn original_collapsed_picker_selects_monos_and_projects_with_search_and_keyboard
     let alpha: &'static str = Box::leak(format!("project-picker-mono-{}", ids[0]).into_boxed_str());
     let beta: &'static str = Box::leak(format!("project-picker-mono-{}", ids[1]).into_boxed_str());
     open(visual);
+    let bot: &'static str = Box::leak(format!("project-picker-mono-{}", ids[2]).into_boxed_str());
+    assert!(visual.debug_bounds(bot).is_none());
     let alpha_row = visual.debug_bounds(alpha).unwrap();
     let beta_row = visual.debug_bounds(beta).unwrap();
     let project_row = visual.debug_bounds("project-picker-project-0").unwrap();
@@ -1178,4 +1187,51 @@ fn the_navigation_never_covers_what_it_floats_over(cx: &mut TestAppContext) {
         assert!(toggle.left() >= px(super::TRAFFIC_LIGHTS) || cfg!(target_os = "macos"));
         assert!(toggle.right() <= back.left() && back.right() <= forward.left());
     }
+}
+
+#[gpui::test]
+fn the_collapsed_rail_sits_under_one_title_bar_and_does_not_peek(cx: &mut TestAppContext) {
+    let (window, _) = setup(cx, true, false);
+    window
+        .update(cx, |shell, _, cx| {
+            shell.workspace.project_rail_open = false;
+            shell.layout_changed(cx);
+        })
+        .unwrap();
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let bar = px(crate::theme::TITLE_BAR_HEIGHT);
+    let toggle = visual.debug_bounds("toggle-sidebar").unwrap();
+    assert!(toggle.bottom() <= bar);
+    if super::layout::TITLE_SPANS_RAIL {
+        // The rail and the sidebar start below the bar, so the toggle rides
+        // on one surface instead of the seam between two columns.
+        assert_eq!(
+            visual.debug_bounds("project-rail-frame").unwrap().top(),
+            bar
+        );
+        assert!(
+            visual
+                .debug_bounds("classic-workspace-header")
+                .unwrap()
+                .top()
+                >= bar
+        );
+    }
+    // The collapsed rail is already there: resting on the toggle peeks
+    // nothing out, as it does in the inset layout.
+    visual.simulate_mouse_move(toggle.center(), None, Default::default());
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    assert!(visual.debug_bounds("sidebar-peek").is_none());
+    let rail = visual.debug_bounds("project-rail").unwrap();
+    assert!(rail.size.width < px(60.), "collapsed: {rail:?}");
+    visual.simulate_click(toggle.center(), Default::default());
+    visual.run_until_parked();
+    window
+        .read_with(visual, |shell, _| {
+            assert!(shell.workspace.project_rail_open)
+        })
+        .unwrap();
 }

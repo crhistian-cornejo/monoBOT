@@ -666,6 +666,9 @@ pub(crate) struct Shell {
     peek_animating: bool,
     peek_close: Option<gpui::Task<()>>,
     peek_toggle_bounds: AnchorSlot,
+    /// The toggle was just clicked: it does not peek again until the
+    /// pointer has left it.
+    peek_muted: bool,
     /// useTrafficLightsVisible: fullscreen hides the native buttons, so the
     /// title bar takes their room back.
     fullscreen: bool,
@@ -1084,6 +1087,7 @@ impl Shell {
             peek_animating: false,
             peek_close: None,
             peek_toggle_bounds: AnchorSlot::default(),
+            peek_muted: false,
             fullscreen: false,
             window_controls: 0.,
             right_panel_min: crate::right_panel::WIDTH_MIN,
@@ -4980,7 +4984,10 @@ impl Shell {
                 this.hover_peek_toggle(*hovered, cx)
             }
         }))
-        .on_click(cx.listener(|this, _, window, cx| this.toggle_primary_sidebar(window, cx)))
+        .on_click(cx.listener(|this, _, window, cx| {
+            this.peek_muted = true;
+            this.toggle_primary_sidebar(window, cx)
+        }))
     }
     /// Part of the card: the project tools beside the workspace, behind a
     /// hairline. Its contents keep their full width while it slides.
@@ -5878,10 +5885,13 @@ impl Shell {
                     .filter(|_| self.workspace.classic_layout && self.workspace.preferences.monos)
                     .map(|manager| {
                         let manager = manager.read(cx);
+                        // The Code zone's own Monos; bots and groups live in
+                        // the Agents zone.
                         let monos = manager
                             .roster
                             .monos
                             .iter()
+                            .filter(|mono| !mono.is_personal())
                             .map(|mono| crate::pickers::PickerMono {
                                 id: mono.id.clone(),
                                 name: mono.label(),

@@ -36,8 +36,9 @@ pub(super) enum OverviewTab {
 }
 /// MonoOverview's tab sets, in the order they show. A personal bot works in
 /// no project: no sessions to list and no code changes, but the subagents it
-/// runs in parallel; the Principal also reads every bot's news and leads the
-/// bots. Activity sits apart, beside them, since it follows the chat.
+/// runs in parallel, led by what its role makes (documents for the ones that
+/// write, habits for the ones that run on a schedule); the Principal also
+/// reads every bot's news and leads the bots. Activity sits apart, beside them, since it follows the chat.
 pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
     use OverviewTab::*;
     if mono.is_group() {
@@ -51,7 +52,13 @@ pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
         // Its pictures first; Habits stays last for images made on a schedule.
         &[Gallery, Styles, Subagents, Documents, Habits]
     } else if mono.is_bot() {
-        &[Habits, Documents, Subagents]
+        match mono.bot_role.as_deref() {
+            // It reads in parallel and leaves papers and notes.
+            Some("research") => &[Documents, Subagents, Habits],
+            // Their work is the documents they leave.
+            Some("documents" | "writer" | "analyst") => &[Documents, Habits, Subagents],
+            _ => &[Habits, Documents, Subagents],
+        }
     } else {
         &[Overview, Sessions, Documents, Habits, Changes]
     }
