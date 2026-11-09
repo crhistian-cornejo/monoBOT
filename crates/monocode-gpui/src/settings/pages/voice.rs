@@ -298,33 +298,37 @@ impl SettingsView {
             return controls;
         }
         if wants_download {
+            let download_label = if installed {
+                "Get the faster model"
+            } else {
+                "Download"
+            };
             controls.push(
                 primary_button(
                     SharedString::from(format!("voice-download-{}", model.id())),
-                    if installed {
-                        "Get the faster model"
-                    } else {
-                        "Download"
-                    },
+                    download_label,
                     busy,
                 )
+                .child(download_label)
                 .on_click(cx.listener(move |this, _, _, cx| this.voice_download(model, cx)))
                 .into_any_element(),
             );
         }
         if installed {
             let confirming = self.voice.confirming == Some(model);
+            let delete_label = if confirming {
+                "Delete from disk?"
+            } else {
+                "Delete"
+            };
             controls.push(
                 secondary_button(
                     SharedString::from(format!("voice-delete-{}", model.id())),
-                    if confirming {
-                        "Delete from disk?"
-                    } else {
-                        "Delete"
-                    },
+                    delete_label,
                     true,
                     busy,
                 )
+                .child(delete_label)
                 .on_click(cx.listener(move |this, _, _, cx| this.voice_delete(model, cx)))
                 .into_any_element(),
             );
@@ -480,6 +484,7 @@ impl SettingsView {
                     if saved { "Replace" } else { "Save" },
                     !pasted,
                 )
+                .child(if saved { "Replace" } else { "Save" })
                 .on_click(cx.listener(move |this, _, _, cx| this.voice_save_key(provider, cx)))
                 .into_any_element(),
             ];
@@ -491,6 +496,7 @@ impl SettingsView {
                         true,
                         false,
                     )
+                    .child("Remove")
                     .on_click(
                         cx.listener(move |this, _, _, cx| this.voice_remove_key(provider, cx)),
                     )

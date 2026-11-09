@@ -1300,6 +1300,13 @@ impl Monos {
             mic.phase() == MicPhase::Listening && !mic.partial().trim().is_empty()
         };
         let progress = call.progress;
+        let voices = match self.call_live_choice() {
+            Some(provider) => format!(
+                "Talks through {}. Without its key saved, this Mac's voices answer.",
+                provider.label()
+            ),
+            None => "Talks through this Mac's voices.".to_owned(),
+        };
         let content_area = div()
             .id("group-call-content")
             .debug_selector(|| "group-call-content".into())
@@ -1311,6 +1318,14 @@ impl Monos {
             .flex_col()
             .gap_3()
             .child(div().px_2().text_size(px(13.)).text_color(content(0.7)).child(status))
+            .when(!live, |view| view.child(
+                // Which voices the call uses, and where to change them.
+                div().px_2().flex().items_center().gap_2()
+                    .child(div().flex_1().min_w_0().text_size(px(12.)).text_color(content(0.5)).child(voices))
+                    .child(call_button("group-call-voice-settings", "Voice settings").on_click(|_, window, cx| {
+                        window.dispatch_action(Box::new(crate::shell::OpenVoiceSettings), cx)
+                    })),
+            ))
             .when(empty, |view| view.child(
                 div().px_2().text_size(px(12.)).text_color(content(0.5))
                     .child("Add members on the Members tab to call them."),

@@ -1,5 +1,7 @@
 //! The desktop Notes split view, backed by the same notes and image assets.
 mod preview;
+#[cfg(test)]
+mod tests;
 
 use crate::{
     explorer::DraggedFile,
@@ -255,6 +257,20 @@ impl Notes {
     }
 
     fn edited(&mut self, cx: &mut Context<Self>) {
+        // Loading a note (or none) writes into the fields too: only text
+        // that differs from the saved note is an edit. Otherwise an empty
+        // list stayed "unsaved" forever and New note did nothing.
+        let Some(draft) = self.draft(cx) else {
+            return;
+        };
+        let unchanged = self
+            .notes
+            .iter()
+            .find(|note| note.id == draft.id)
+            .is_some_and(|saved| saved.title == draft.title && saved.body == draft.body);
+        if unchanged && !self.dirty {
+            return;
+        }
         self.dirty = true;
         self.revision = self.revision.wrapping_add(1);
         self.error = None;
@@ -1032,7 +1048,7 @@ impl gpui::Render for Notes {
         let list = div().relative().w(px(self.list_width)).h_full().flex_shrink_0().min_h_0().flex().flex_col().border_r_1().border_color(content(0.07))
             .child(div().h(px(36.)).flex_shrink_0().px_2().flex().items_center().gap_1().border_b_1().border_color(content(0.07)).child(icon("search", 12.))
                 .child(div().flex_1().min_w_0().child(self.query.clone()))
-                .child(icon_button("create-note", "New note", "plus").on_click(cx.listener(|this, _, window, cx| this.create(window, cx)))))
+                .child(icon_button("create-note", "New note", "plus").debug_selector(|| "create-note".into()).on_click(cx.listener(|this, _, window, cx| this.create(window, cx)))))
             .child(div().id("notes-list").role(Role::ListBox).aria_label("Saved notes").flex_1().min_h_0().overflow_y_scroll().p(px(6.))
                 .when(visible.is_empty(), |d| d.child(div().px_1p5().py_2().text_size(px(12.)).text_color(content(0.5)).child(if self.loading { "Loading notes…" } else if !query.trim().is_empty() { "No matching notes" } else { "No notes yet. Save a turn from the transcript, or create one here." })))
                 .children(visible.iter().enumerate().map(|(ix, note)| {

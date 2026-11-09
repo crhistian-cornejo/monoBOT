@@ -173,6 +173,11 @@ impl Shell {
                 .unwrap_or_default(),
         }
     }
+    /// The Settings page that is open, if any.
+    #[cfg(test)]
+    pub(crate) fn settings_section(&self, cx: &App) -> Option<Section> {
+        self.settings.as_ref().map(|view| view.read(cx).section)
+    }
     pub(super) fn open_settings(
         &mut self,
         section: Section,

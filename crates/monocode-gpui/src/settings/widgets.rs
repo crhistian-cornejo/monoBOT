@@ -153,6 +153,9 @@ pub(crate) fn secondary_icon_button(
     secondary_button(id, label.clone(), danger, disabled).tooltip(chrome_tip(label, None))
 }
 
+/// `label` only names the button for assistive technology: it shows
+/// nothing. Every caller adds what the button shows, `.child(label)` or an
+/// icon with text, or the button is an empty pill.
 fn button_base(id: impl Into<ElementId>, label: impl Into<SharedString>) -> Stateful<Div> {
     let label = label.into();
     div()

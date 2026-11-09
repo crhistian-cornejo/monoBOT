@@ -140,6 +140,7 @@ actions!(
         NewTerminal,
         ToggleLayout,
         OpenSettings,
+        OpenVoiceSettings,
         GoToFile,
         OpenCommandPalette,
         OpenInbox,
@@ -9229,6 +9230,9 @@ impl Render for Shell {
             }))
             .on_action(cx.listener(|this, _: &OpenSettings, window, cx| {
                 this.open_settings(crate::settings::Section::General, window, cx)
+            }))
+            .on_action(cx.listener(|this, _: &OpenVoiceSettings, window, cx| {
+                this.open_settings(crate::settings::Section::Voice, window, cx)
             }))
             .on_action(cx.listener(|this, _: &OpenInbox, window, cx| this.open_inbox(window, cx)))
             .on_action(cx.listener(|this, _: &OpenNotes, window, cx| this.open_notes(window, cx)))

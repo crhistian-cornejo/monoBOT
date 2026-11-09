@@ -3976,6 +3976,21 @@ fn group_call_tab_is_visible_and_closing_the_panel_hangs_up(cx: &mut TestAppCont
     visual.run_until_parked();
     assert!(s.manager.read_with(visual, |m, _| m.call.is_none()));
     assert!(mic.calls().iter().any(|call| call == "cancel 7"));
+    // The call says which voices it talks through and opens their settings.
+    let toggle = visual.debug_bounds("toggle-right-panel").unwrap();
+    visual.simulate_click(toggle.center(), Default::default());
+    visual.run_until_parked();
+    let tab = visual.debug_bounds("mono-overview-Call").unwrap();
+    visual.simulate_click(tab.center(), Default::default());
+    visual.run_until_parked();
+    let voices = visual.debug_bounds("group-call-voice-settings").unwrap();
+    visual.simulate_click(voices.center(), Default::default());
+    visual.run_until_parked();
+    let section = s
+        .window
+        .update(visual, |shell, _, cx| shell.settings_section(cx))
+        .unwrap();
+    assert_eq!(section, Some(crate::settings::Section::Voice));
 }
 
 #[gpui::test]

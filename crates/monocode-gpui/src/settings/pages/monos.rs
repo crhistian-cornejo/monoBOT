@@ -53,6 +53,7 @@ impl SettingsView {
                     .gap_2()
                     .child(
                         secondary_button("bots-export", "Export bots", false, false)
+                            .child("Export bots")
                             .debug_selector(|| "settings-bots-export".into())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.bots_status = None;
@@ -62,6 +63,7 @@ impl SettingsView {
                     )
                     .child(
                         secondary_button("bots-import", "Import bots", false, false)
+                            .child("Import bots")
                             .debug_selector(|| "settings-bots-import".into())
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.bots_status = None;
@@ -83,6 +85,7 @@ impl SettingsView {
                 buttons = buttons
                     .child(
                         secondary_button("bots-sync-now", "Sync now", false, false)
+                            .child("Sync now")
                             .debug_selector(|| "settings-bots-sync-now".into())
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::BotSyncNow)),
@@ -90,6 +93,7 @@ impl SettingsView {
                     )
                     .child(
                         secondary_button("bots-sync-off", "Turn off", false, false)
+                            .child("Turn off")
                             .debug_selector(|| "settings-bots-sync-off".into())
                             .on_click(
                                 cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::BotSyncOff)),
@@ -107,6 +111,11 @@ impl SettingsView {
                     false,
                     false,
                 )
+                .child(if folder.is_some() {
+                    "Change folder"
+                } else {
+                    "Choose folder"
+                })
                 .debug_selector(|| "settings-bots-sync-choose".into())
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(SettingsEvent::BotSyncChoose))),
             );

@@ -700,6 +700,7 @@ impl Render for BotImportDialog {
                                     if busy { "Importing…" } else { "Import" },
                                     busy,
                                 )
+                                .child(if busy { "Importing…" } else { "Import" })
                                 .debug_selector(|| "bot-import-apply".into())
                                 .on_click(cx.listener(|this, _, _, cx| this.apply(cx))),
                             ),

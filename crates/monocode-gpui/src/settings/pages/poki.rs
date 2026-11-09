@@ -416,22 +416,24 @@ impl SettingsView {
 
         let action = match status {
             Some(Status::Stopped) if !working => {
-                secondary_button("poki-start", "Start Poki", false, false).on_click(cx.listener(
-                    move |this, _, _, cx| {
+                secondary_button("poki-start", "Start Poki", false, false)
+                    .child("Start Poki")
+                    .on_click(cx.listener(move |this, _, _, cx| {
                         let draft = this.poki_draft(cx);
                         let folder = this
                             .poki_save(&draft, cx)
                             .unwrap_or_else(|| this.poki_folder());
                         this.poki_start(folder, cx);
-                    },
-                ))
+                    }))
             }
             Some(Status::NoFolder) if !working => {
                 secondary_button("poki-install", "Install Poki", false, false)
+                    .child("Install Poki")
                     .on_click(cx.listener(|this, _, _, cx| this.poki_bring_up(cx)))
             }
-            _ => {
-                secondary_button("poki-check", "Check again", false, working).when(!working, |d| {
+            _ => secondary_button("poki-check", "Check again", false, working)
+                .child("Check again")
+                .when(!working, |d| {
                     d.on_click(cx.listener(|this, _, _, cx| {
                         let draft = this.poki_draft(cx);
                         let folder = this
@@ -440,8 +442,7 @@ impl SettingsView {
                         this.poki_check(folder, cx);
                         cx.notify();
                     }))
-                })
-            }
+                }),
         };
 
         div()
@@ -487,7 +488,8 @@ impl SettingsView {
                                     .child(folder_field),
                             )
                             .child(
-                                secondary_button("poki-choose", "Choose…", false, working).when(
+                                secondary_button("poki-choose", "Choose…", false, working)
+.child("Choose…").when(
                                     !working,
                                     |d| d.on_click(cx.listener(|this, _, _, cx| this.poki_choose(cx))),
                                 ),
@@ -550,6 +552,7 @@ impl SettingsView {
                             .child(action)
                             .child(
                                 primary_button("poki-tutorial", "How to set it up", false)
+.child("How to set it up")
                                     .debug_selector(|| "settings-poki-tutorial-open".into())
                                     .on_click(cx.listener(|this, _, _, cx| {
                                         this.poki.tutorial = Some(0);
@@ -616,15 +619,16 @@ impl SettingsView {
                     .justify_end()
                     .gap_2()
                     .child(
-                        secondary_button("poki-install-no", "Not now", false, false).on_click(
-                            cx.listener(|this, _, _, cx| {
+                        secondary_button("poki-install-no", "Not now", false, false)
+                            .child("Not now")
+                            .on_click(cx.listener(|this, _, _, cx| {
                                 this.poki.asking = None;
                                 cx.notify();
-                            }),
-                        ),
+                            })),
                     )
                     .child(
                         primary_button("poki-install-yes", "Download and install", false)
+                            .child("Download and install")
                             .on_click(cx.listener(|this, _, _, cx| this.poki_install(cx))),
                     ),
             )
@@ -777,6 +781,7 @@ impl SettingsView {
                                         false,
                                         false,
                                     )
+                                    .child(if copied { "Copied" } else { "Copy" })
                                     .on_click(
                                         cx.listener(move |this, _, _, cx| {
                                             this.poki_copy(lines, cx)
@@ -843,15 +848,14 @@ impl SettingsView {
                                     .items_center()
                                     .gap_2()
                                     .child(
-                                        secondary_button("poki-back", "Back", false, at == 0).when(
-                                            at > 0,
-                                            |d| {
+                                        secondary_button("poki-back", "Back", false, at == 0)
+                                            .child("Back")
+                                            .when(at > 0, |d| {
                                                 d.on_click(cx.listener(move |this, _, _, cx| {
                                                     this.poki.tutorial = Some(at - 1);
                                                     cx.notify();
                                                 }))
-                                            },
-                                        ),
+                                            }),
                                     )
                                     .child(
                                         primary_button(
@@ -859,6 +863,7 @@ impl SettingsView {
                                             if last { "Done" } else { "Next" },
                                             false,
                                         )
+                                        .child(if last { "Done" } else { "Next" })
                                         .on_click(
                                             cx.listener(move |this, _, _, cx| {
                                                 if last {
