@@ -35,6 +35,8 @@ const CLOSE_DELAY: Duration = Duration::from_millis(260);
 pub(crate) const SHOULDER: f32 = 4.;
 /// The notch's corners: the app's square language, softened a little.
 const RADIUS: f32 = 4.;
+/// The widest a wing can grow: the lead's words cap at 230 points.
+const WIDEST_WING: u32 = 240;
 /// How much the closed notch swells under the pointer.
 const PEEK: f32 = 14.;
 /// Room around the island while it moves, for the spring's overshoot.
@@ -714,7 +716,16 @@ impl Notch {
         window: &mut Window,
         cx: &mut App,
     ) -> Frame {
-        let wanted = match self.motion {
+        if platform::FIXED_ROOM {
+            let room = self.fixed_room(display);
+            if self.placed != Some(room) {
+                platform::place(window, cx, display, room);
+                self.placed = Some(room);
+                window.on_next_frame(|window, _| window.refresh());
+            }
+            return room;
+        }
+        let mut wanted = match self.motion {
             Some(motion) => union(
                 outer(&self.look, motion.from),
                 outer(&self.look, target),
@@ -722,16 +733,75 @@ impl Notch {
             ),
             None => outer(&self.look, target),
         };
+        // Open, the window keeps the room of its tallest page, so moving
+        // between pages never resizes it: a resized window shows black until
+        // the system draws it again.
+        if self.open {
+            let tallest = model::frame(
+                &self.look,
+                &display.screen,
+                Shape::Open {
+                    body: self.tallest_body().ceil() as u32,
+                },
+            );
+            wanted = union(wanted, outer(&self.look, tallest), MARGIN);
+        }
         let placed = match self.placed {
             // Mid-flight the room only grows; it shrinks when the island rests.
-            Some(placed) if self.motion.is_some() => union(placed, wanted, 0.),
+            Some(placed) if self.motion.is_some() || self.open => union(placed, wanted, 0.),
             _ => wanted,
         };
         if self.placed != Some(placed) {
             platform::place(window, cx, display, placed);
             self.placed = Some(placed);
+            // Draw the new size at once rather than when the next frame is
+            // asked for.
+            window.on_next_frame(|window, _| window.refresh());
+            window.request_animation_frame();
         }
         placed
+    }
+
+    /// The one room the notch moves in: its widest wings and its tallest
+    /// open page, whatever they show now, so it never has to resize.
+    fn fixed_room(&self, display: &platform::Display) -> Frame {
+        let screen = &display.screen;
+        let open = model::frame(
+            &self.look,
+            screen,
+            Shape::Open {
+                body: self.tallest_possible_body().ceil() as u32,
+            },
+        );
+        let wings = model::frame(
+            &self.look,
+            screen,
+            Shape::Busy {
+                left: WIDEST_WING,
+                right: WIDEST_WING,
+            },
+        );
+        let notice = model::frame(&self.look, screen, Shape::Notice { lines: 2 });
+        let room = union(outer(&self.look, open), outer(&self.look, wings), MARGIN);
+        union(room, outer(&self.look, notice), 0.)
+    }
+
+    /// The tallest any page can get, for the fixed room.
+    fn tallest_possible_body(&self) -> f32 {
+        (model::shelf_height(model::MAX_ROWS as usize) + CATALOG_HEIGHT + model::CELL_GAP)
+            .max(SETTINGS_HEIGHT)
+            .max(AGENTS_MAX)
+            .max(40. + 28. + CAPTION + ROW * 3. + 4.)
+    }
+
+    /// The open panel's tallest page, for the window's room.
+    fn tallest_body(&self) -> f32 {
+        let shelf =
+            model::shelf_height(self.look.shelf_rows as usize) + CATALOG_HEIGHT + model::CELL_GAP;
+        shelf
+            .max(SETTINGS_HEIGHT)
+            .max(self.agents_height())
+            .max(self.chat_height())
     }
 
     fn camera(&self, cx: &App) -> Option<model::Camera> {
@@ -970,6 +1040,26 @@ pub(crate) fn work_mark(id: &'static str, asking: bool, cx: &App) -> AnyElement 
     crate::session_mark::spinner(id, crate::pulse::Rate::Half).into_any_element()
 }
 
+/// An agent's own face, hopping while it works, or a coding session's
+/// provider.
+pub(crate) fn face_or_provider(
+    face: Option<&model::Face>,
+    provider: &str,
+    side: f32,
+    cx: &App,
+) -> AnyElement {
+    match face {
+        Some(face) => crate::monos::avatar::avatar(
+            &face.mascot,
+            face.color,
+            "working",
+            side,
+            cx.reduce_motion(),
+        ),
+        None => provider_glyph(provider, side - 2.),
+    }
+}
+
 /// One session's mark: its work, its question, or its finish.
 pub(crate) fn activity_mark(activity: &model::Activity, cx: &App) -> AnyElement {
     if activity.done {
@@ -978,6 +1068,9 @@ pub(crate) fn activity_mark(activity: &model::Activity, cx: &App) -> AnyElement 
             .into_any_element()
     } else if activity.needs_you {
         work_mark("notch-activity-ask", true, cx)
+    } else if activity.face.is_some() {
+        // An agent at work is its own face, hopping.
+        face_or_provider(activity.face.as_ref(), &activity.provider, 14., cx)
     } else {
         div()
             .id(("notch-activity", activity.id as u64))
@@ -994,7 +1087,7 @@ impl Notch {
     fn ears(&self, camera: Option<model::Camera>, wings: (f32, f32), cx: &App) -> AnyElement {
         let rest = &self.rest;
         let mut faces = div().flex().items_center();
-        for (at, provider) in rest.marks.iter().enumerate() {
+        for (at, mark) in rest.marks.iter().enumerate() {
             faces = faces.child(
                 div()
                     .when(at > 0, |face| face.ml(px(-4.)))
@@ -1003,7 +1096,12 @@ impl Notch {
                     .items_center()
                     .justify_center()
                     .bg(black(1.))
-                    .child(provider_glyph(provider, 13.)),
+                    .child(face_or_provider(
+                        mark.face.as_ref(),
+                        &mark.provider,
+                        15.,
+                        cx,
+                    )),
             );
         }
         let left = div()
@@ -1350,6 +1448,23 @@ impl Notch {
 
 impl Render for Notch {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let started = Instant::now();
+        let element = self.render_notch(window, cx);
+        if tracing() {
+            eprintln!(
+                "NOTCHTRACE {} render {:?} tab {:?} placed {:?}",
+                monocode_core::time::now_ms() % 100_000,
+                started.elapsed(),
+                self.tab,
+                self.placed
+            );
+        }
+        element
+    }
+}
+
+impl Notch {
+    fn render_notch(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::Div {
         let (display, target) = self.target(cx);
         let island = self.animate(target, window, cx);
         self.keep_responsive();
@@ -1386,13 +1501,31 @@ impl Render for Notch {
         let left = island.x - room.x - shoulder;
         let top = island.y - room.y;
         let clickable = !self.open && self.notices.current().is_none();
+        if let Some((watch, _)) = &self._pointer {
+            watch.set_area(left, top, island.width + 2. * shoulder, island.height);
+        }
+        let open = self.open;
         div()
             .size_full()
             .relative()
             .font_family(crate::fonts::UI)
+            // The room around the open panel is not the notch: a click there
+            // folds it, as outside a popover.
+            .when(open, |room| {
+                room.child(
+                    div()
+                        .id("notch-room")
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .on_click(cx.listener(|this, _, _, cx| this.set_open(false, cx))),
+                )
+            })
             .child(
                 div()
                     .id("notch")
+                    .occlude()
                     .debug_selector(|| "notch".into())
                     .role(Role::Group)
                     .aria_label("MonoBOT notch")
@@ -1452,6 +1585,13 @@ impl Handle {
         let entity = window.update(cx, |_, _, cx| cx.entity()).ok()?;
         Some(Self { entity })
     }
+}
+
+/// `MONOBOT_NOTCH_TRACE=1`: logs each render's time and walks the pages, to
+/// measure the notch without touching the pointer.
+pub(crate) fn tracing() -> bool {
+    static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TRACE.get_or_init(|| std::env::var_os("MONOBOT_NOTCH_TRACE").is_some())
 }
 
 /// Reads the system's reduced motion setting into the app, so every view

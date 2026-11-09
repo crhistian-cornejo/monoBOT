@@ -5,7 +5,7 @@
 use super::*;
 use crate::notch::{Handle, NotchEvent};
 use crate::notifications::approvals::InputKind;
-use monocode_core::notch::{self as model, Activity, Ask, Call, Feed, Recent, Upcoming};
+use monocode_core::notch::{self as model, Activity, Ask, Call, Face, Feed, Recent, Upcoming};
 
 impl Shell {
     /// Reads the saved look off the interface thread, then opens the notch.
@@ -56,6 +56,28 @@ impl Shell {
                 this.notch_event(event.clone(), cx)
             }),
         );
+        // MONOBOT_NOTCH_TRACE=1: opens the panel and walks its pages, so
+        // their timing can be read without touching the pointer.
+        if crate::notch::tracing() {
+            let entity = handle.entity.clone();
+            cx.spawn(async move |_, cx| {
+                let tabs = crate::notch::Tab::ALL;
+                for step in 0..12usize {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_millis(1500))
+                        .await;
+                    entity.update(cx, |notch, cx| {
+                        eprintln!(
+                            "NOTCHTRACE {} step {step}",
+                            monocode_core::time::now_ms() % 100_000
+                        );
+                        notch.set_open(true, cx);
+                        notch.set_tab(tabs[step % tabs.len()], cx);
+                    });
+                }
+            })
+            .detach();
+        }
         self.notch = Some(handle);
         self.sync_notch_now(cx);
     }
@@ -99,13 +121,29 @@ impl Shell {
                 needs_you: agent.needs_approval,
                 done: agent.done,
                 agent: None,
+                face: None,
             })
             .collect();
         // The agents' own chats (Monos, their habits) work outside the
         // sidebar; the notch shows them too, by the agent's name.
         if let Some(monos) = &self.monos {
             let monos = monos.read(cx);
-            for view in monos.all_notification_chats(cx) {
+            let seats = monos.notch_seats(cx);
+            let chats = monos
+                .all_notification_chats(cx)
+                .into_iter()
+                .map(|view| {
+                    let mono = monos.notification_mono(view.read(cx).summary.id);
+                    let name = mono.map(|mono| mono.label());
+                    let face = mono.map(|mono| (mono.mascot.clone(), mono.color));
+                    (view, name, face)
+                })
+                .chain(
+                    seats
+                        .into_iter()
+                        .map(|(view, name, face)| (view, Some(name), face)),
+                );
+            for (view, name, face) in chats {
                 let chat = view.read(cx);
                 let id = chat.summary.id;
                 if !chat.responding() || activities.iter().any(|a| a.id == id) {
@@ -126,14 +164,19 @@ impl Shell {
                     started_at,
                     needs_you,
                     done: false,
-                    agent: monos.notification_mono(id).map(|mono| mono.label()),
+                    agent: name,
+                    face: face.map(|(mascot, color)| Face { mascot, color }),
                     steps: transcript.live_steps(),
                 });
             }
         }
         let mut asks = Vec::new();
-        for view in self.notification_chats(cx) {
+        let seats = self.notch_seat_chats(cx);
+        for view in self.notification_chats(cx).into_iter().chain(seats) {
             let chat = view.read(cx);
+            if asks.iter().any(|ask: &Ask| ask.session == chat.summary.id) {
+                continue;
+            }
             for input in chat.pending_notification_inputs(cx) {
                 asks.push(Ask {
                     session: chat.summary.id,
@@ -194,6 +237,18 @@ impl Shell {
             .update(cx, |notch, cx| notch.update_feed(feed, cx));
     }
 
+    /// The chats of group members in their seats.
+    fn notch_seat_chats(&self, cx: &App) -> Vec<Entity<Conversation>> {
+        self.monos.as_ref().map_or_else(Vec::new, |monos| {
+            monos
+                .read(cx)
+                .notch_seats(cx)
+                .into_iter()
+                .map(|(view, _, _)| view)
+                .collect()
+        })
+    }
+
     fn notch_event(&mut self, event: NotchEvent, cx: &mut Context<Self>) {
         use crate::notifications::delivery::Target;
         match event {
@@ -208,7 +263,12 @@ impl Shell {
                 request,
                 decision,
             } => {
-                if let Some(view) = self.notification_chat(session, cx) {
+                let seat = || {
+                    self.notch_seat_chats(cx)
+                        .into_iter()
+                        .find(|view| view.read(cx).summary.id == session)
+                };
+                if let Some(view) = self.notification_chat(session, cx).or_else(seat) {
                     view.update(cx, |view, cx| {
                         view.decide_notification_request(&request, decision, cx)
                     });

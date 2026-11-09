@@ -165,14 +165,24 @@ mod mac {
         use std::cell::Cell;
         use std::ptr::NonNull;
         let ns_window = ns_window(window)?;
-        let probe: std::rc::Rc<dyn Fn() -> bool> = std::rc::Rc::new(move || {
-            let pointer = NSEvent::mouseLocation();
-            let frame = ns_window.frame();
-            pointer.x >= frame.origin.x
-                && pointer.x <= frame.origin.x + frame.size.width
-                && pointer.y >= frame.origin.y
-                && pointer.y <= frame.origin.y + frame.size.height
-        });
+        let ignore = ns_window.clone();
+        // Clicks go through until the pointer is over the notch.
+        ignore.setIgnoresMouseEvents(true);
+        let area: std::rc::Rc<Cell<Option<[f64; 4]>>> = std::rc::Rc::new(Cell::new(None));
+        let probe: std::rc::Rc<dyn Fn() -> bool> = {
+            let area = area.clone();
+            std::rc::Rc::new(move || {
+                let pointer = NSEvent::mouseLocation();
+                let frame = ns_window.frame();
+                // The pointer in the window, from its top left.
+                let x = pointer.x - frame.origin.x;
+                let y = frame.origin.y + frame.size.height - pointer.y;
+                let [left, top, width, height] =
+                    area.get()
+                        .unwrap_or([0., 0., frame.size.width, frame.size.height]);
+                x >= left && x <= left + width && y >= top && y <= top + height
+            })
+        };
         let inside = std::rc::Rc::new(Cell::new(false));
         let check = {
             let probe = probe.clone();
@@ -180,6 +190,9 @@ mod mac {
                 let now = probe();
                 if now != inside.get() {
                     inside.set(now);
+                    // The window is a fixed room larger than the notch:
+                    // outside the notch, clicks go to what is under it.
+                    ignore.setIgnoresMouseEvents(!now);
                     let _ = hovered.try_send(now);
                 }
             }
@@ -198,18 +211,29 @@ mod mac {
         // SAFETY: the handler hands every event back unchanged.
         monitors
             .extend(unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &local) });
-        Some(PointerWatch(monitors, probe))
+        Some(PointerWatch(monitors, probe, area))
     }
 
     pub(crate) struct PointerWatch(
         Vec<objc2::rc::Retained<objc2::runtime::AnyObject>>,
         std::rc::Rc<dyn Fn() -> bool>,
+        std::rc::Rc<std::cell::Cell<Option<[f64; 4]>>>,
     );
 
     impl PointerWatch {
-        /// Whether the pointer is over the notch's window right now.
+        /// Whether the pointer is over the notch right now.
         pub(crate) fn inside(&self) -> bool {
             (self.1)()
+        }
+
+        /// Where the notch is in its window, which may be larger.
+        pub(crate) fn set_area(&self, left: f32, top: f32, width: f32, height: f32) {
+            self.2.set(Some([
+                f64::from(left),
+                f64::from(top),
+                f64::from(width),
+                f64::from(height),
+            ]));
         }
     }
 
@@ -323,6 +347,12 @@ pub(crate) fn place(window: &mut Window, cx: &mut App, display: &Display, frame:
     }
 }
 
+/// Whether the window keeps one fixed room and the notch moves inside it.
+/// On macOS resizing a transparent panel stalls its frames for up to a
+/// second (AppKit briefly reports it occluded), so it never resizes there;
+/// the pointer watch lets clicks through outside the notch.
+pub(crate) const FIXED_ROOM: bool = cfg!(all(target_os = "macos", not(test)));
+
 /// Keeps the pointer watch alive; dropping it stops watching.
 #[cfg(all(target_os = "macos", not(test)))]
 pub(crate) use mac::PointerWatch;
@@ -333,6 +363,7 @@ impl PointerWatch {
     pub(crate) fn inside(&self) -> bool {
         false
     }
+    pub(crate) fn set_area(&self, _: f32, _: f32, _: f32, _: f32) {}
 }
 
 /// Where GPUI cannot see hover on its own (an inactive app's panel on

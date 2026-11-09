@@ -38,6 +38,28 @@ impl Monos {
             .cloned()
             .collect()
     }
+    /// Group members at work in their seats, for the notch: each chat with
+    /// "Member · Group" as its name.
+    pub(crate) fn notch_seats(&self, cx: &App) -> Vec<SeatChat> {
+        self.groups
+            .seats
+            .iter()
+            .filter_map(|((group, member), seat)| {
+                let view = seat.view.clone()?;
+                let name = |id: &str| self.roster.get(id).map(Mono::label);
+                let label = match (name(member), name(group)) {
+                    (Some(member), Some(group)) => format!("{member} · {group}"),
+                    (Some(member), None) => member,
+                    _ => view.read(cx).display_title().to_string(),
+                };
+                let face = self
+                    .roster
+                    .get(member)
+                    .map(|mono| (mono.mascot.clone(), mono.color));
+                Some((view, label, face))
+            })
+            .collect()
+    }
     /// The Mono a session belongs to: its own chat or one of its habit runs.
     pub(crate) fn notification_mono(&self, id: i64) -> Option<&Mono> {
         self.roster
@@ -69,7 +91,20 @@ impl Monos {
         if !self.prefs.monos {
             return false;
         }
-        let Some(mono) = self.roster.of_session(id).map(|mono| mono.id.clone()) else {
+        // A group member's seat opens its group, where the member answers.
+        let seat_group = self
+            .groups
+            .seats
+            .iter()
+            .find(|(_, seat)| {
+                seat.view
+                    .as_ref()
+                    .is_some_and(|view| view.read(cx).summary.id == id)
+            })
+            .map(|((group, _), _)| group.clone());
+        let Some(mono) =
+            seat_group.or_else(|| self.roster.of_session(id).map(|mono| mono.id.clone()))
+        else {
             return false;
         };
         self.settings = None;
@@ -78,3 +113,6 @@ impl Monos {
         true
     }
 }
+
+/// A group member's chat, its "Member · Group" name and its mascot and color.
+pub(crate) type SeatChat = (Entity<Conversation>, String, Option<(String, u32)>);

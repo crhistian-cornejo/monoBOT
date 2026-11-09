@@ -43,6 +43,12 @@ GPUI and its platform crate are pinned to `gpui-pre` 0.3.9. Local Apple renderer
 patches cover alpha blending, font matching, backdrop blur and shadows. The
 headless Metal regression is documented in [verification](../old/verification.md).
 
+On macOS a window above the menu bar (level 25 and up, as the notch's panel)
+counts as on screen whenever it is ordered in (`on_screen` in
+`vendor/gpui-pre-macos/src/window.rs`). AppKit reports such a mostly
+transparent panel occluded, which stopped its display link: frames paused for
+up to a second after a resize, or for good in a large fixed panel.
+
 The vendored framework/platform crates remove the unused `zed-scap` dependency.
 The native build rejects lockfiles that reintroduce it, and the `screen-capture`
 feature remains disabled. Preserve these guards and the licenses in [NOTICE](../../NOTICE).

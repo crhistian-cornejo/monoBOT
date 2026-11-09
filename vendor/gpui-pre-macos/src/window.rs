@@ -946,11 +946,7 @@ impl MacWindowState {
     }
 
     fn is_occlusion_visible(&self) -> bool {
-        unsafe {
-            self.native_window
-                .occlusionState()
-                .contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
-        }
+        on_screen(self.native_window)
     }
 
     /// Resubscribes a window whose frames stopped arriving, unless it should
@@ -3153,14 +3149,27 @@ extern "C" fn handle_view_event(this: &Object, _: Sel, native_event: id) {
     }
 }
 
-fn visibility(state: &MacWindowState) -> WindowVisibility {
-    let is_visible = unsafe {
-        state
-            .native_window
+/// Monocode: whether a window is on screen for drawing. AppKit's occlusion
+/// state, except that a panel floated over the menu bar (MonoBOT's notch,
+/// level 25 and up) counts as on screen whenever it is ordered in: AppKit
+/// reports such a mostly transparent panel occluded, which stopped its frames
+/// for up to a second after every resize, or for good.
+fn on_screen(native_window: id) -> bool {
+    unsafe {
+        if native_window
             .occlusionState()
             .contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
-    };
-    if is_visible {
+        {
+            return true;
+        }
+        let level: NSInteger = msg_send![native_window, level];
+        let ordered_in: BOOL = msg_send![native_window, isVisible];
+        level >= 25 && ordered_in == YES
+    }
+}
+
+fn visibility(state: &MacWindowState) -> WindowVisibility {
+    if on_screen(state.native_window) {
         WindowVisibility::Visible
     } else {
         WindowVisibility::Hidden
@@ -3202,17 +3211,11 @@ fn report_visibility(window_state: &Arc<Mutex<MacWindowState>>) {
 extern "C" fn window_did_change_occlusion_state(this: &Object, _: Sel, _: id) {
     let window_state = unsafe { get_window_state(this) };
     let mut lock = window_state.lock();
-    unsafe {
-        if lock
-            .native_window
-            .occlusionState()
-            .contains(NSWindowOcclusionState::NSWindowOcclusionStateVisible)
-        {
-            lock.move_traffic_light();
-            lock.start_display_link();
-        } else {
-            lock.stop_display_link();
-        }
+    if on_screen(lock.native_window) {
+        lock.move_traffic_light();
+        lock.start_display_link();
+    } else {
+        lock.stop_display_link();
     }
     drop(lock);
     // The only visibility source: AppKit posts this for covering, minimizing,

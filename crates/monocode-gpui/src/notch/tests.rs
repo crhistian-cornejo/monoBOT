@@ -99,6 +99,7 @@ fn working(id: i64) -> Activity {
         done: false,
         agent: None,
         steps: None,
+        face: None,
     }
 }
 

@@ -469,6 +469,23 @@ pub struct Activity {
     pub agent: Option<String>,
     /// Its task list: steps done and steps in all.
     pub steps: Option<(u32, u32)>,
+    /// The agent's own face, for a Mono's chat; a coding session shows its
+    /// provider instead.
+    pub face: Option<Face>,
+}
+
+/// A Mono's mascot and color.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Face {
+    pub mascot: String,
+    pub color: u32,
+}
+
+/// Who a wing shows: an agent's face, or a coding session's provider.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Mark {
+    pub provider: String,
+    pub face: Option<Face>,
 }
 
 impl Activity {
@@ -558,7 +575,7 @@ pub struct Rest {
     pub lead_steps: Option<(u32, u32)>,
     /// The providers of the sessions at work, longest running first, as many
     /// as the left wing shows.
-    pub marks: Vec<String>,
+    pub marks: Vec<Mark>,
     pub call: bool,
 }
 
@@ -583,17 +600,48 @@ impl Rest {
             .len()
             .max(usize::from(self.asking > 0 || self.call));
         let left = 14 + 18 * marks as u32 + if show_count && self.more() > 0 { 22 } else { 0 };
-        // The lead's words at about 6.2 points a letter, its steps and room
-        // to breathe, never wider than a third of a small screen.
+        // The lead's state word at about 6.2 points a letter and its steps.
         let right = match &self.lead_text {
-            Some(text) => {
-                let words = 6.2 * text.chars().count() as f32;
+            Some(word) => {
                 let steps = if self.lead_steps.is_some() { 30. } else { 0. };
-                (words + steps + 26.).clamp(64., 230.) as u32
+                (6.2 * word.chars().count() as f32 + steps + 24.) as u32
             }
             None => 36,
         };
-        (left.max(36), right)
+        // Both wings as wide as the wider, so the notch stays centered on
+        // the camera.
+        let side = left.max(right).max(36);
+        (side, side)
+    }
+}
+
+/// What a session is doing, in one word, from its live step ("Read
+/// src/main.rs", "Running cargo test"): the state the wings show.
+pub fn state_word(step: &str) -> &'static str {
+    let step = step.to_lowercase();
+    let has = |words: &[&str]| words.iter().any(|word| step.contains(word));
+    if has(&["need", "approval", "waiting"]) {
+        "Waiting"
+    } else if has(&["edit", "update", "patch", "replace", "apply"]) {
+        "Editing"
+    } else if has(&["write", "create", "add "]) {
+        "Writing"
+    } else if has(&["read", "view", "open", "cat "]) {
+        "Reading"
+    } else if has(&["search", "grep", "glob", "find", "list", "explor"]) {
+        "Searching"
+    } else if has(&["fetch", "web", "brows", "url", "http"]) {
+        "Browsing"
+    } else if has(&["agent", "delegat", "task", "spawn"]) {
+        "Delegating"
+    } else if has(&[
+        "run", "bash", "exec", "command", "test", "build", "shell", "terminal",
+    ]) {
+        "Running"
+    } else if has(&["done", "finish"]) {
+        "Done"
+    } else {
+        "Thinking"
     }
 }
 
@@ -610,14 +658,11 @@ pub fn rest(feed: &Feed) -> Rest {
         .first()
         .map(|ask| ask.provider.clone())
         .or_else(|| lead_activity.map(|activity| activity.provider.clone()));
+    // A state, never the whole step: "Reading", "Editing", "Waiting".
     let lead_text = match (feed.asks.first(), lead_activity) {
-        (Some(_), Some(activity)) => Some(format!("{} · Needs you", activity.who())),
-        (Some(ask), None) => Some(format!("{} · Needs you", ask.title)),
-        (None, Some(activity)) => Some(format!("{} · {}", activity.who(), activity.step)),
-        (None, None) => feed
-            .call
-            .as_ref()
-            .map(|call| format!("{} · {}", call.group, call.status)),
+        (Some(_), _) => Some("Waiting".to_owned()),
+        (None, Some(activity)) => Some(state_word(&activity.step).to_owned()),
+        (None, None) => feed.call.as_ref().map(|_| "In a call".to_owned()),
     };
     Rest {
         working: working.len(),
@@ -628,7 +673,10 @@ pub fn rest(feed: &Feed) -> Rest {
         marks: working
             .iter()
             .take(MARKS)
-            .map(|activity| activity.provider.clone())
+            .map(|activity| Mark {
+                provider: activity.provider.clone(),
+                face: activity.face.clone(),
+            })
             .collect(),
         call: feed.call.is_some(),
     }

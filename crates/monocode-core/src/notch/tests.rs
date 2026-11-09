@@ -189,6 +189,7 @@ fn working(id: i64, provider: &str, started_at: u64) -> Activity {
         done: false,
         agent: None,
         steps: None,
+        face: None,
     }
 }
 
@@ -336,6 +337,10 @@ fn the_wings_show_who_works_and_what_the_lead_does() {
     first.steps = Some((2, 6));
     let mut agent = working(2, "codex", 20);
     agent.agent = Some("Finance".into());
+    agent.face = Some(Face {
+        mascot: "robot".into(),
+        color: 0x34d399,
+    });
     let feed = Feed {
         activities: vec![
             agent,
@@ -347,33 +352,48 @@ fn the_wings_show_who_works_and_what_the_lead_does() {
     };
     let at_rest = rest(&feed);
     assert_eq!(
-        at_rest.marks,
+        at_rest
+            .marks
+            .iter()
+            .map(|mark| mark.provider.as_str())
+            .collect::<Vec<_>>(),
         ["claude", "codex", "codex"],
         "longest running first"
     );
     assert_eq!(at_rest.more(), 1);
-    assert_eq!(
-        at_rest.lead_text.as_deref(),
-        Some("Claude Code · Reading files")
-    );
+    // A Mono's chat shows its own face; coding sessions their provider.
+    assert!(at_rest.marks[0].face.is_none());
+    assert_eq!(at_rest.marks[1].face.as_ref().unwrap().mascot, "robot");
+    assert_eq!(at_rest.lead_text.as_deref(), Some("Reading"));
     assert_eq!(at_rest.lead_steps, Some((2, 6)));
     let (left, right) = at_rest.wings(true);
-    assert_eq!(left, 14 + 3 * 18 + 22);
-    // "Claude Code · Reading files" and 2/6.
-    assert_eq!(right, (6.2_f32 * 27. + 30. + 26.) as u32);
-    assert_eq!(Rest::default().wings(true).1, 36, "a mark, no words");
+    // Even wings, so the notch stays on the camera's center.
+    assert_eq!(left, right);
+    // The wider of three faces with "+1" and "Reading 2/6".
     assert_eq!(
-        at_rest.wings(false).0,
-        14 + 3 * 18,
-        "no +N without the count"
+        left,
+        (14 + 3 * 18 + 22).max((6.2_f32 * 7. + 30. + 24.) as u32)
     );
+    assert_eq!(Rest::default().wings(true), (36, 36));
     // An ask leads, and says so.
     let asked = Feed {
         asks: vec![ask(2, "r1")],
         ..feed
     };
-    assert_eq!(
-        rest(&asked).lead_text.as_deref(),
-        Some("Finance · Needs you")
-    );
+    assert_eq!(rest(&asked).lead_text.as_deref(), Some("Waiting"));
+}
+
+#[test]
+fn a_step_reads_as_one_state_word() {
+    for (step, word) in [
+        ("Read src/main.rs", "Reading"),
+        ("Edit notch.rs", "Editing"),
+        ("Running cargo test", "Running"),
+        ("Search for \"notch\"", "Searching"),
+        ("Fetch https://x.com", "Browsing"),
+        ("Need approval", "Waiting"),
+        ("Working", "Thinking"),
+    ] {
+        assert_eq!(state_word(step), word, "{step}");
+    }
 }
