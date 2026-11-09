@@ -20,7 +20,10 @@ pub struct NativeSubcommand {
 }
 
 pub fn native_invocation(kind: Kind, name: &str) -> String {
-    if matches!(name, "plan" | "compact" | "add-to-folder" | "visualize") {
+    if matches!(
+        name,
+        "plan" | "compact" | "add-to-folder" | "visualize" | "goal"
+    ) {
         format!("{}:{name}", kind.id())
     } else {
         name.into()
@@ -32,10 +35,12 @@ pub fn native_prompt(kind: Kind, text: &str) -> String {
     let body = &text[leading..];
     let end = body.find(char::is_whitespace).unwrap_or(body.len());
     let prefix = format!("/{}:", kind.id());
-    if let Some(name) = body[..end]
-        .strip_prefix(prefix.as_str())
-        .filter(|name| matches!(*name, "plan" | "compact" | "add-to-folder" | "visualize"))
-    {
+    if let Some(name) = body[..end].strip_prefix(prefix.as_str()).filter(|name| {
+        matches!(
+            *name,
+            "plan" | "compact" | "add-to-folder" | "visualize" | "goal"
+        )
+    }) {
         return format!("{}/{}{}", &text[..leading], name, &body[end..]);
     }
     text.into()

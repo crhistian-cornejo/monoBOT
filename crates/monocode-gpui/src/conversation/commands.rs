@@ -20,6 +20,9 @@ impl Conversation {
         if self.git_action_command(&text, cx) {
             return true;
         }
+        if self.goal_command(&text, cx) {
+            return true;
+        }
         if let Some(request) = monocode_core::composer::consume_command(&text, "visualize") {
             self.visualize_command(&text, request, cx);
             return true;

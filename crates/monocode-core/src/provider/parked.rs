@@ -296,6 +296,8 @@ pub(super) fn key(request: &Request) -> String {
     settings.revision = 0;
     settings.handoff = None;
     settings.pending_provider_switch = None;
+    // A goal's progress changes every turn; the process it runs in does not.
+    settings.goal = None;
     json!([
         process::owner(),
         request.kind.id(),

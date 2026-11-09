@@ -13,6 +13,7 @@ mod edit_last_turn;
 pub(crate) mod find;
 mod follow_up;
 pub(crate) mod git_actions;
+mod goal;
 mod history;
 mod mobile;
 mod mono;
@@ -197,6 +198,8 @@ pub(crate) struct Conversation {
     loaded: bool,
     /// The project brings Claude Code configuration not trusted yet.
     project_untrusted: bool,
+    /// A clean turn left the `/goal` to continue once the chat is idle.
+    goal_due: bool,
     history_unloaded: bool,
     history_actions: std::collections::VecDeque<history::HistoryAction>,
     pending_search: Option<(usize, String)>,
@@ -666,6 +669,7 @@ impl Conversation {
             status: "Loading conversation…".into(),
             loaded: false,
             project_untrusted: false,
+            goal_due: false,
             history_unloaded: false,
             history_actions: Default::default(),
             pending_search: None,
@@ -1502,6 +1506,8 @@ impl Conversation {
                             this.status = "Waiting for your answer".into();
                         }
                         if finished {
+                            // Read before the usage and retry checks restate it.
+                            let clean = !stopping && this.status == "Ready";
                             if this.is_remote() {
                                 this.settings.remote_action = None;
                                 this.remote_state.refreshing = false;
@@ -1564,6 +1570,7 @@ impl Conversation {
                             } else {
                                 this.finish_orchestration_plan(cx);
                             }
+                            this.goal_turn_ended(clean, cx);
                             this.settings.turns = this.transcript.read(cx).window_turns();
                             this.save_settings(cx);
                             this.refresh_git(cx);
@@ -1577,6 +1584,8 @@ impl Conversation {
                             cx.emit(SessionChanged);
                         }
                         this.pump_follow_ups(cx);
+                        // The user's queued messages go first.
+                        this.pump_goal(cx);
                         cx.notify();
                     })
                     .is_err()
@@ -2928,6 +2937,7 @@ impl Conversation {
             .child(self.message_queue(window, cx))
             .children(if self.is_remote() { None } else { self.auth_notice(cx) })
             .children(self.trust_notice(cx))
+            .children(self.goal_notice(cx))
             .when(self.settings.worktree_removed,|d|d.child(div().mb_2().p_3().rounded_lg().border_1().border_color(content(0.1)).flex().items_center().gap_3().text_size(px(12.)).child(div().flex_1().child("Worktree deleted. Select a branch or worktree to continue this conversation.")).child(tool_pill("reattach-worktree","Select worktree").child("Select worktree").on_click(cx.listener(|this,_,window,cx|this.open_git(GitMode::Worktree,window,cx))))))
             .when_some(self.settings.handoff.clone(), |d, handoff| {
                 d.child(

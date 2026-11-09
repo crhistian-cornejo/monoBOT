@@ -78,6 +78,7 @@ impl Choice {
             Some("stage") => (GitAction::Stage.icon(), 0xbbf7d0, 0x15803d),
             Some("commit") => (GitAction::Commit.icon(), 0xfed7aa, 0xc2410c),
             Some("visualize") => return ("command-visualize", accent_color()),
+            Some("goal") => return ("circle-dot", accent_color()),
             _ => {
                 return (
                     if self.insertion.starts_with("@note/") {
@@ -883,6 +884,11 @@ impl Completion {
                     "Visualize",
                     "Create an inline visual of this topic or a specific request",
                 ),
+                (
+                    "goal",
+                    "Goal",
+                    "Keep the agent working toward an objective over several turns",
+                ),
             ]
             .into_iter()
             .enumerate()
@@ -916,7 +922,7 @@ impl Completion {
                             builtin: Some(id),
                             mode: (!matches!(
                                 id,
-                                "compact" | "btw" | "stage" | "commit" | "visualize"
+                                "compact" | "btw" | "stage" | "commit" | "visualize" | "goal"
                             ))
                             .then_some(id),
                             file: false,
@@ -1430,6 +1436,7 @@ mod tests {
                         "/stage",
                         "/commit",
                         "/visualize",
+                        "/goal",
                         "/alpha",
                         "/zebra",
                     ]

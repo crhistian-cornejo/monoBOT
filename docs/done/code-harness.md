@@ -52,8 +52,39 @@ does not fill the conversation (`composer::attachment_excerpt`). Files over
 
 The stop reason stays as the turn's error row.
 
+## Goals
+
+`/goal <objective>` keeps the agent working toward one objective over several
+turns, so a long task runs on without you typing "continue". The logic lives in
+`monocode_core::goal`, and `conversation/goal.rs` runs it.
+
+- **The first turn** sends the objective, and its rules come after it. When a
+  turn ends cleanly without finishing, MonoBOT sends the next turn itself. The
+  chat shows that turn as "Continue the goal (2 of 8)". The agent reads the
+  objective, the turn's number and the rules.
+- **The agent ends its final message** with `GOAL: complete` when the goal is
+  done and checked, or with `GOAL: blocked: <what it needs>` when it needs you.
+  Only the last non-empty line counts.
+- **It is bounded:**
+  - It takes at most 8 automatic turns. Then it pauses.
+  - A turn that fails or that you stop pauses it. It never continues after one.
+  - A message you queued goes first, and the goal continues after it.
+  - Reaching the provider's usage limit pauses it.
+- **The notice above the composer** shows the objective, the turn and why the
+  goal paused or is blocked. It has Pause or Resume, and Clear. Resume starts a
+  fresh allowance of 8 turns.
+- **Commands**, as in T3 Code: `/goal` shows the goal, and `/goal pause`,
+  `/goal resume` and `/goal clear` act on it. Remote projects and Mono chats do
+  not have `/goal`. A provider's own `/goal`, such as Claude Code's, is still
+  available as `/claude:goal`.
+
+T3 Code hands `/goal` to the provider: Claude Code's version keeps one turn
+open with a Stop hook, and Codex's (`thread/goal/set`) starts turns of its own.
+MonoBOT runs its own loop instead. It works the same with every provider, and
+it fits its one-turn-per-message runtime, which Codex's self-started turns do
+not.
+
 ## Not done yet
 
-- `/goal`: bounded automatic continuation. See item 8 in
+- Project actions that run tests after edits. See item 5 in
   [ivy-review.md](../in-progress/ivy-review.md).
-- Project actions that run tests after edits (item 5 there).

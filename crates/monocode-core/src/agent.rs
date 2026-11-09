@@ -148,6 +148,8 @@ pub struct Settings {
     pub operator: bool,
     /// A submitted /operator grants this thread access independently of its next draft.
     pub operator_enabled: bool,
+    /// The `/goal` this conversation works toward, if any.
+    pub goal: Option<crate::goal::Goal>,
     pub orchestrator: bool,
     pub new_worktree: bool,
     pub worktree_base: Option<String>,
