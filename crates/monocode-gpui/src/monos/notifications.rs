@@ -55,7 +55,7 @@ impl Monos {
                 let face = self
                     .roster
                     .get(member)
-                    .map(|mono| (mono.mascot.clone(), mono.color));
+                    .map(|mono| (mono.face().into_owned(), mono.color));
                 Some((view, label, face))
             })
             .collect()

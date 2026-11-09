@@ -71,9 +71,14 @@ impl PhaseTile {
     }
     /// How far the glyph has turned into the chevron, eased (0 glyph, 1
     /// chevron), and whether it is still moving.
-    fn step(&mut self) -> (f32, bool) {
+    fn step(&mut self, reduced: bool) -> (f32, bool) {
         let wanted = self.open || self.hovered;
         let now = Instant::now();
+        if reduced {
+            // No morph: the glyph or the chevron, whichever it should be.
+            self.morph = wanted.then(|| (true, now - Duration::from_secs_f32(MORPH)));
+            return (if wanted { 1. } else { 0. }, false);
+        }
         let progress =
             |at: Instant| (now.saturating_duration_since(at).as_secs_f32() / MORPH).min(1.);
         match self.morph {
@@ -96,14 +101,14 @@ impl PhaseTile {
         if !on && t >= 1. {
             self.morph = None;
         }
-        let eased = crate::reveal::bezier(t, 0.22, 1., 0.36, 1.);
+        let eased = crate::motion::ease(t, crate::motion::EMPHASIZED);
         (if on { eased } else { 1. - eased }, t < 1.)
     }
 }
 
 impl Render for PhaseTile {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let (morph, moving) = self.step();
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let (morph, moving) = self.step(cx.reduce_motion());
         if moving {
             window.request_animation_frame();
         }
@@ -114,7 +119,7 @@ impl Render for PhaseTile {
                 tab_tile::Face::Neutral,
                 crate::session_mark::spinner(
                     ("phase-loader", self.group),
-                    crate::pulse::Rate::Half,
+                    crate::pulse::Rate::Smooth,
                 )
                 .into_any_element(),
                 tab_tile::tile_ink(),

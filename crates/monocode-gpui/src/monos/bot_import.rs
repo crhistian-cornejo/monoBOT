@@ -95,7 +95,7 @@ fn mascot(bot: &Bot) -> AnyElement {
         .size(px(16.))
         .flex_shrink_0()
         .child(super::avatar::avatar(
-            &bot.mascot,
+            &monocode_core::mono::persona::key(&bot.mascot, bot.bot_role.as_deref()),
             hex(&bot.color),
             "idle",
             16.,

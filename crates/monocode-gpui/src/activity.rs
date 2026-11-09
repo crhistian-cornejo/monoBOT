@@ -60,8 +60,8 @@ impl Element for Shimmer {
         window: &mut Window,
         cx: &mut App,
     ) {
-        // The sweep repaints its whole transcript, so it runs at 15fps.
-        crate::pulse::request(crate::pulse::Rate::Half, window, cx);
+        // The sweep moves on the shared clock.
+        crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
         self.text.prepaint(None, None, bounds, state, window, cx);
     }
     fn paint(

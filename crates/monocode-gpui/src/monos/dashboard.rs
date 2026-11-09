@@ -604,7 +604,7 @@ impl Monos {
                     .items_center()
                     .justify_center()
                     .child(avatar::avatar(
-                        &mono.mascot,
+                        &mono.face(),
                         mono.color,
                         state,
                         44.,

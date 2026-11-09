@@ -4,9 +4,8 @@ use crate::{
     resize_limit::{Axis, LimitGlow, limit_glow},
 };
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClipboardItem, CursorStyle, Div, FontWeight, Hsla,
-    MouseButton, Pixels, Role, SharedString, Stateful, Window, canvas, div, list, prelude::*, px,
-    rgb,
+    AnyElement, ClipboardItem, CursorStyle, Div, FontWeight, Hsla, MouseButton, Pixels, Role,
+    SharedString, Stateful, Window, canvas, div, list, prelude::*, px, rgb,
 };
 
 fn action(id: impl Into<SharedString>, label: impl Into<SharedString>) -> Stateful<Div> {
@@ -39,7 +38,6 @@ const COPIED: Hsla = Hsla {
     l: 0.56,
     a: 1.,
 };
-const COPIED_POP: Duration = Duration::from_millis(260);
 
 fn icon_action(id: impl Into<SharedString>, label: &str, name: &'static str) -> Stateful<Div> {
     icon_action_ink(id, label, name, content(0.7))
@@ -1151,10 +1149,10 @@ impl Inbox {
             Some(press) => icon_action_with(
                 "inbox-copy-link",
                 "Copied link",
-                action_icon("check", COPIED).with_animation(
+                crate::motion::pop_in(
                     ("inbox-copied-tick", press),
-                    Animation::new(COPIED_POP).with_easing(|t| 1. - (1. - t).powi(3)),
-                    |svg, t| svg.size(px(14. * (0.5 + 0.5 * t))).opacity(t),
+                    action_icon("check", COPIED),
+                    14.,
                 ),
                 COPIED,
             )

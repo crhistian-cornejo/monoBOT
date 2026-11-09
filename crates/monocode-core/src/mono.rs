@@ -17,6 +17,7 @@ pub mod heartbeat;
 pub mod memory;
 pub mod news;
 pub mod outcomes;
+pub mod persona;
 pub mod rules;
 pub mod sync;
 pub mod transfer;
@@ -205,6 +206,19 @@ impl Mono {
     /// Bots and groups live in the Agents zone, apart from the code workspace.
     pub fn is_personal(&self) -> bool {
         self.is_bot() || self.is_group()
+    }
+    /// What the avatar draws: a personal bot wears its 3D persona, dressed
+    /// for its role, and every other Mono its pixel mascot.
+    pub fn face(&self) -> std::borrow::Cow<'_, str> {
+        self.face_as(&self.mascot)
+    }
+    /// The face this Mono would wear as `mascot`, for the look picker.
+    pub fn face_as<'a>(&self, mascot: &'a str) -> std::borrow::Cow<'a, str> {
+        if self.is_bot() {
+            persona::key(mascot, self.bot_role.as_deref()).into()
+        } else {
+            mascot.into()
+        }
     }
     pub fn label(&self) -> String {
         if !self.name.trim().is_empty() {

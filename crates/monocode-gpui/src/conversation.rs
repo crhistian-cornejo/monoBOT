@@ -1267,7 +1267,7 @@ impl Conversation {
             .detach();
         cx.spawn(async move |this, cx| {
             while let Ok(update) = rx.recv().await {
-                // Land each update on the spinners' 30Hz beat: the reply then
+                // Land each update on the spinners' beat: the reply then
                 // redraws in their frames instead of adding frames of its own.
                 if !update.finished {
                     crate::pulse::beat(cx).await;

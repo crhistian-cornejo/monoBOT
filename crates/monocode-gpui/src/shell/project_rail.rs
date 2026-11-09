@@ -751,7 +751,7 @@ impl Shell {
                         .map_or("idle", |chat| chat.read(cx).mono_status());
                     (
                         mono.label(),
-                        crate::monos::avatar::avatar(&mono.mascot, mono.color, status, 16., true),
+                        crate::monos::avatar::avatar(&mono.face(), mono.color, status, 16., true),
                     )
                 })
             });

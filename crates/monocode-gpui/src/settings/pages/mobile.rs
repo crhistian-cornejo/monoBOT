@@ -9,9 +9,9 @@ use crate::{
     theme::*,
 };
 use gpui::{
-    Animation, AnimationExt, AnyElement, ClipboardItem, Context, Div, Entity, FontWeight,
-    HighlightStyle, MouseButton, Role, SharedString, Stateful, StyledText, Subscription, Task,
-    Window, canvas, div, prelude::*, px, relative, rgb,
+    AnyElement, ClipboardItem, Context, Div, Entity, FontWeight, HighlightStyle, MouseButton, Role,
+    SharedString, Stateful, StyledText, Subscription, Task, Window, canvas, div, prelude::*, px,
+    relative, rgb,
 };
 use monocode_core::mobile::Status;
 use std::{
@@ -1070,15 +1070,12 @@ fn pairing_icon_action(
         })
         .child(if copied {
             // The tick grows in as the copy lands, like the Inbox's Copy link.
-            icon(path, 14.)
-                .text_color(rgb(EMERALD))
-                .with_animation(
-                    "mobile-copied-tick",
-                    Animation::new(Duration::from_millis(260))
-                        .with_easing(|t| 1. - (1. - t).powi(3)),
-                    |svg, t| svg.size(px(14. * (0.5 + 0.5 * t))).opacity(t),
-                )
-                .into_any_element()
+            crate::motion::pop_in(
+                "mobile-copied-tick",
+                icon(path, 14.).text_color(rgb(EMERALD)),
+                14.,
+            )
+            .into_any_element()
         } else {
             icon(path, 14.)
                 .text_color(content(0.45))

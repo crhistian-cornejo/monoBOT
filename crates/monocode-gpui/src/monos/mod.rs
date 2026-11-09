@@ -666,7 +666,7 @@ impl Monos {
                 let (shown, more) = self.group_stack_members(mono);
                 avatar::group_avatar_stack(&shown, state, more, 18., false)
             } else {
-                avatar::avatar(&mono.mascot, mono.color, state, 16., state == "idle")
+                avatar::avatar(&mono.face(), mono.color, state, 16., state == "idle")
             })
             .child(
                 div()
@@ -1119,10 +1119,10 @@ impl Monos {
                 .find(|m| m.is_principal())
                 .or_else(|| self.roster.monos.iter().find(|m| m.is_principal()));
             if let Some(lead) = lead {
-                return (lead.mascot.clone(), lead.color, lead.label());
+                return (lead.face().into_owned(), lead.color, lead.label());
             }
         }
-        (mono.mascot.clone(), mono.color, mono.label())
+        (mono.face().into_owned(), mono.color, mono.label())
     }
 
     /// The people an @ mention can name when typing in this Mono's composer:
@@ -1143,7 +1143,7 @@ impl Monos {
             let (mascot, color, name) = self
                 .roster
                 .get(&lead.id)
-                .map(|m| (m.mascot.clone(), m.color, m.label()))
+                .map(|m| (m.face().into_owned(), m.color, m.label()))
                 .unwrap_or_else(|| ("principal".to_string(), 0x38bdf8, lead.name.clone()));
             people.push(crate::composer_completion::MentionPerson {
                 id: lead.id.clone(),
@@ -1157,7 +1157,7 @@ impl Monos {
             let (mascot, color, name) = self
                 .roster
                 .get(&member.id)
-                .map(|m| (m.mascot.clone(), m.color, m.label()))
+                .map(|m| (m.face().into_owned(), m.color, m.label()))
                 .unwrap_or_else(|| ("robot".to_string(), 0x38bdf8, member.name.clone()));
             people.push(crate::composer_completion::MentionPerson {
                 id: member.id.clone(),
@@ -1176,7 +1176,7 @@ impl Monos {
         let Some(group) = &mono.group else {
             return (
                 vec![avatar::StackAvatar {
-                    mascot: mono.mascot.clone(),
+                    mascot: mono.face().into_owned(),
                     color: mono.color,
                 }],
                 0,
@@ -1191,7 +1191,7 @@ impl Monos {
             let (mascot, color) = self
                 .roster
                 .get(&lead.id)
-                .map(|m| (m.mascot.clone(), m.color))
+                .map(|m| (m.face().into_owned(), m.color))
                 .unwrap_or_else(|| ("principal".to_string(), 0x38bdf8));
             members.push(avatar::StackAvatar { mascot, color });
         }
@@ -1199,7 +1199,7 @@ impl Monos {
             let (mascot, color) = self
                 .roster
                 .get(&member.id)
-                .map(|m| (m.mascot.clone(), m.color))
+                .map(|m| (m.face().into_owned(), m.color))
                 .unwrap_or_else(|| ("robot".to_string(), 0x38bdf8));
             members.push(avatar::StackAvatar { mascot, color });
         }
@@ -1207,7 +1207,7 @@ impl Monos {
         if members.is_empty() {
             return (
                 vec![avatar::StackAvatar {
-                    mascot: mono.mascot.clone(),
+                    mascot: mono.face().into_owned(),
                     color: mono.color,
                 }],
                 0,
@@ -1884,7 +1884,7 @@ impl Monos {
                             .size(px(16.))
                             .relative()
                             .flex_shrink_0()
-                            .child(avatar::avatar(&mono.mascot, mono.color, state, 16., true))
+                            .child(avatar::avatar(&mono.face(), mono.color, state, 16., true))
                             .when(original, |d| {
                                 d.child(
                                     div()
@@ -2101,7 +2101,7 @@ impl Monos {
                         .child(crate::tab_tile::mark_tile(
                             &crate::tab_tile::TAB_TILE,
                             crate::tab_tile::Face::Neutral,
-                            avatar::avatar(&mono.mascot, mono.color, "idle", 14., true),
+                            avatar::avatar(&mono.face(), mono.color, "idle", 14., true),
                         ))
                         .child(
                             div()

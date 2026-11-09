@@ -579,9 +579,6 @@ fn inverse_ink() -> Hsla {
     ink.a = 1.;
     ink
 }
-fn ease_out(t: f32) -> f32 {
-    1. - (1. - t).powi(3)
-}
 
 impl Render for QuestionCard {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
@@ -612,7 +609,7 @@ impl Render for QuestionCard {
         } else {
             page.with_animation(
                 ("question-page", self.turns),
-                Animation::new(SLIDE).with_easing(ease_out),
+                Animation::new(SLIDE).with_easing(crate::motion::cubic_out),
                 move |d, t| d.left(px(shift * (1. - t))).opacity(t),
             )
             .into_any_element()
@@ -626,7 +623,7 @@ impl Render for QuestionCard {
                 .child(self.page(from, false, cx))
                 .with_animation(
                     ("question-page-out", self.turns),
-                    Animation::new(SLIDE.mul_f32(0.7)).with_easing(ease_out),
+                    Animation::new(SLIDE.mul_f32(0.7)).with_easing(crate::motion::cubic_out),
                     move |d, t| d.left(px(-shift * t)).opacity(1. - t),
                 )
         });
@@ -743,7 +740,7 @@ impl Overlay {
             composer
                 .with_animation(
                     ("composer-under-question", self.flips),
-                    Animation::new(FADE).with_easing(ease_out),
+                    Animation::new(FADE).with_easing(crate::motion::cubic_out),
                     move |d, t| {
                         let opacity = if covered { 1. - t } else { t };
                         if covered && t >= 1. {
@@ -765,7 +762,7 @@ impl Overlay {
                     .child(card.clone())
                     .with_animation(
                         ("question-card-out", card.entity_id()),
-                        Animation::new(FADE).with_easing(ease_out),
+                        Animation::new(FADE).with_easing(crate::motion::cubic_out),
                         |d, t| d.opacity(1. - t).bottom(px(-6. * t)),
                     )
                     .into_any_element()
@@ -775,7 +772,7 @@ impl Overlay {
                     .child(card.clone())
                     .with_animation(
                         ("question-card-in", card.entity_id()),
-                        Animation::new(FADE).with_easing(ease_out),
+                        Animation::new(FADE).with_easing(crate::motion::cubic_out),
                         |d, t| d.opacity(t).bottom(px(-8. * (1. - t))),
                     )
                     .into_any_element()

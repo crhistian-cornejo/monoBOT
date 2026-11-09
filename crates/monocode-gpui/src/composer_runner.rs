@@ -3,8 +3,8 @@ use crate::{popover::AnchorSlot, transcript::TranscriptView};
 use gpui::{Context, Entity, Render, Window, canvas, div, point, prelude::*, px, size};
 use serde::Deserialize;
 use std::time::Instant;
-/// Matches the shared pulse clock's 30fps tick.
-const TICK_MS: f64 = 1000. / 30.;
+/// Matches the shared pulse clock's 60fps tick.
+const TICK_MS: f64 = 1000. / 60.;
 #[derive(Clone, Default, Deserialize)]
 struct Frame {
     active: bool,
@@ -125,8 +125,8 @@ impl Render for Runner {
                 self.frame = frame;
             }
         }
-        // It covers ground quickly, so it needs the full 30fps to read as
-        // running rather than hopping.
+        // It covers ground quickly, so it takes the clock's full rate to read
+        // as running rather than hopping.
         if self.busy || self.frame.active {
             crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
         }

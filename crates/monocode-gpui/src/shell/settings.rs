@@ -134,7 +134,7 @@ impl Shell {
                         .map(|m| crate::settings::MonoSetting {
                             id: m.id.clone(),
                             name: m.label(),
-                            mascot: m.mascot.clone(),
+                            mascot: m.face().into_owned(),
                             color: m.color,
                             projects: m.projects.iter().map(|p| self.project_label(p)).collect(),
                             show: m.show_started_sessions_in_sidebar,

@@ -227,7 +227,7 @@ impl Conversation {
             transcript.set_image_presets(images, cx)
         });
         let (mascot, color, name) =
-            speaker.unwrap_or_else(|| (mono.mascot.clone(), mono.color, mono.label()));
+            speaker.unwrap_or_else(|| (mono.face().into_owned(), mono.color, mono.label()));
         self.transcript
             .update(cx, |t, _| t.mono_mode(&mascot, color, &name));
         self.settings.environment = environment;
@@ -780,7 +780,7 @@ impl Conversation {
         // MonoHeader's greeting: it shows only before the first message.
         let body = if !self.summary.has_messages {
             let greeting = div().flex().flex_col().items_center().justify_center().px_6().py_12()
-                .child(crate::monos::avatar::avatar(&mono.mascot, mono.color, status, 56., false))
+                .child(crate::monos::avatar::avatar(&mono.face(), mono.color, status, 56., false))
                 .child(div().mt(px(-8.)).h(px(32.)).px(px(14.)).flex().items_center().rounded_full().border_1().border_color(content(0.14)).bg(content(0.06)).text_size(px(13.)).font_weight(gpui::FontWeight::SEMIBOLD).child(name))
                 .child(div().mt_3().max_w(px(384.)).text_center().text_size(px(13.)).line_height(px(21.)).text_color(content(0.5)).child(if mono.projects.is_empty(){"Add the projects I should work on in my settings, or just ask me something.".into()}else{format!("I can see every session, note and folder in {}. Ask what’s going on, or hand me work.",mono.projects.iter().map(|p|std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy()).collect::<Vec<_>>().join(", "))}));
             div()

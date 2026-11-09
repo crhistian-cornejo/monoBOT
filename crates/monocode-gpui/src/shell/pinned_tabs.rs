@@ -145,7 +145,7 @@ impl Shell {
                 match mono {
                     Some(mono) => (
                         Face::Neutral,
-                        crate::monos::avatar::avatar(&mono.mascot, mono.color, "idle", 14., true)
+                        crate::monos::avatar::avatar(&mono.face(), mono.color, "idle", 14., true)
                             .into_any_element(),
                         mono.label().into(),
                     ),

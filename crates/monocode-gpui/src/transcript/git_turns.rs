@@ -589,7 +589,7 @@ impl TranscriptView {
                     } else {
                         crate::session_mark::spinner(
                             ("git-live-loader", message_start),
-                            crate::pulse::Rate::Half,
+                            crate::pulse::Rate::Smooth,
                         )
                         .into_any_element()
                     }),

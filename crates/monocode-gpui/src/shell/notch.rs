@@ -196,7 +196,7 @@ impl Shell {
                 .map(|view| {
                     let mono = monos.notification_mono(view.read(cx).summary.id);
                     let name = mono.map(|mono| mono.label());
-                    let face = mono.map(|mono| (mono.mascot.clone(), mono.color));
+                    let face = mono.map(|mono| (mono.face().into_owned(), mono.color));
                     (view, name, face)
                 })
                 .chain(
@@ -278,7 +278,7 @@ impl Shell {
                     .is_some_and(|session| asks.iter().any(|ask| ask.session == session));
                 agents.push(Personal {
                     face: Face {
-                        mascot: mono.mascot.clone(),
+                        mascot: mono.face().into_owned(),
                         color: mono.color,
                     },
                     session: mono.session_id,

@@ -17,6 +17,8 @@ struct Setup {
 fn missing_document_uses_error_cards_without_moving_content(cx: &mut TestAppContext) {
     let s = setup(cx);
     let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    // Notices slide in from the edge; this measures where they rest.
+    visual.update(|_, cx| cx.set_reduce_motion(true));
     visual.run_until_parked();
     visual.refresh().unwrap();
     let body = visual.debug_bounds("main-pane-frame").unwrap();
@@ -4531,7 +4533,8 @@ fn the_group_speaks_with_the_principals_identity_in_its_transcript(cx: &mut Test
         m.mono_speaker(group)
     });
     assert_eq!(speaker_name, "IVY");
-    assert_eq!(speaker_mascot, "principal");
+    // The Principal is a bot: it signs with its persona.
+    assert_eq!(speaker_mascot, "3d:principal:principal");
     assert_eq!(speaker_color, 0x5a9eff);
 
     let chat = cx.update(|cx| s.manager.read(cx).chats[&s.id].clone());
@@ -4599,7 +4602,8 @@ fn group_avatar_stack_renders_lead_first_and_counts_rest(cx: &mut TestAppContext
     });
 
     assert_eq!(shown.len(), 2);
-    assert_eq!(shown[0].mascot, "principal");
+    // The lead is a bot, so the stack shows its persona.
+    assert_eq!(shown[0].mascot, "3d:principal:principal");
     assert_eq!(more, 2);
 
     let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);

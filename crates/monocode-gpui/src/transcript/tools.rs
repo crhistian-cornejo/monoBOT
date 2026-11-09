@@ -258,7 +258,7 @@ impl TranscriptView {
                         .justify_center()
                         .child(crate::session_mark::spinner(
                             gpui::SharedString::from(format!("compaction-loader:{identity}")),
-                            crate::pulse::Rate::Half,
+                            crate::pulse::Rate::Smooth,
                         ))
                         .into_any_element()
                 } else {

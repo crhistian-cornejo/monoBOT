@@ -51,7 +51,7 @@ impl Monos {
     pub(super) fn face(&self, id: &str, side: f32, cx: &App) -> AnyElement {
         match self.roster.get(id) {
             Some(mono) => {
-                avatar::avatar(&mono.mascot, mono.color, self.status_of(id, cx), side, true)
+                avatar::avatar(&mono.face(), mono.color, self.status_of(id, cx), side, true)
             }
             None => div().size(px(side)).into_any_element(),
         }
@@ -595,7 +595,7 @@ impl Monos {
                     .py_2()
                     .hover(|s| s.bg(content(0.05)))
                     .child(div().mt(px(2.)).flex_shrink_0().child(avatar::avatar(
-                        &bot.mascot,
+                        &bot.face(),
                         bot.color,
                         status,
                         16.,

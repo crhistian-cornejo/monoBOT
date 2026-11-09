@@ -659,7 +659,7 @@ impl GroupDialog {
                     .items_center()
                     .gap_2()
                     .child(avatar::avatar(
-                        &candidate.mascot,
+                        &candidate.face(),
                         candidate.color,
                         "idle",
                         20.,
@@ -1514,7 +1514,7 @@ impl Monos {
                 .items_center()
                 .gap_2()
                 .child(avatar::avatar(
-                    &mono.mascot,
+                    &mono.face(),
                     mono.color,
                     state,
                     16.,

@@ -944,6 +944,15 @@ impl Shell {
     }
 
     pub(super) fn notices_overlay(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // Each notice slides in from the window's edge as it appears.
+        fn toast(id: &'static str, notice: impl IntoElement) -> impl IntoElement {
+            crate::motion::enter(
+                id,
+                div().w_full().flex().flex_col().items_end().child(notice),
+                crate::motion::Origin::Right,
+                12.,
+            )
+        }
         let state = &self.notification_state;
         let mono_error = self.monos.as_ref().and_then(|monos| {
             monos
@@ -965,52 +974,66 @@ impl Shell {
             .gap(px(8.))
             .child(state.region.probe())
             .when_some(self.error.clone(), |stack, message| {
-                stack.child(errors::card(
-                    "app-error",
-                    message,
-                    icon_button("dismiss-error", "Dismiss error", "close")
-                        .debug_selector(|| "dismiss-error".into())
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.error = None;
-                            cx.notify();
-                        })),
+                stack.child(toast(
+                    "app-error-in",
+                    errors::card(
+                        "app-error",
+                        message,
+                        icon_button("dismiss-error", "Dismiss error", "close")
+                            .debug_selector(|| "dismiss-error".into())
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.error = None;
+                                cx.notify();
+                            })),
+                    ),
                 ))
             })
             .when_some(mono_error, |stack, (monos, message)| {
-                stack.child(errors::card(
-                    "mono-error",
-                    message,
-                    icon_button("mono-error-close", "Dismiss Mono error", "close")
-                        .debug_selector(|| "mono-error-close".into())
-                        .on_click(cx.listener(move |_, _, _, cx| {
-                            monos.update(cx, |monos, cx| monos.dismiss_error(cx));
-                        })),
+                stack.child(toast(
+                    "mono-error-in",
+                    errors::card(
+                        "mono-error",
+                        message,
+                        icon_button("mono-error-close", "Dismiss Mono error", "close")
+                            .debug_selector(|| "mono-error-close".into())
+                            .on_click(cx.listener(move |_, _, _, cx| {
+                                monos.update(cx, |monos, cx| monos.dismiss_error(cx));
+                            })),
+                    ),
                 ))
             })
             .when(state.file_error.read(cx).is_visible(), |stack| {
-                stack.child(state.file_error.clone())
+                stack.child(toast("file-error-in", state.file_error.clone()))
             })
             .when(!state.reminders.read(cx).is_empty(), |d| {
-                d.child(
+                d.child(toast(
+                    "reminders-in",
                     div()
                         .w(px(320.))
                         .max_w_full()
                         .child(state.reminders.clone()),
-                )
+                ))
             })
             .when(state.harness.read(cx).is_visible(), |d| {
-                d.child(div().w(px(340.)).max_w_full().child(state.harness.clone()))
+                d.child(toast(
+                    "harness-in",
+                    div().w(px(340.)).max_w_full().child(state.harness.clone()),
+                ))
             })
             .when(state.layout.read(cx).is_visible(), |d| {
-                d.child(div().w(px(340.)).max_w_full().child(state.layout.clone()))
+                d.child(toast(
+                    "layout-in",
+                    div().w(px(340.)).max_w_full().child(state.layout.clone()),
+                ))
             })
             .when(!state.approvals.read(cx).is_empty(), |d| {
-                d.child(
+                d.child(toast(
+                    "approvals-in",
                     div()
                         .w(px(360.))
                         .max_w_full()
                         .child(state.approvals.clone()),
-                )
+                ))
             });
         // Toasts remain actionable above dialogs, including Mono settings.
         gpui::deferred(stack).with_priority(110).into_any_element()
@@ -1382,6 +1405,8 @@ mod tests {
         let (window, _, _) = crate::shell::tests::window(cx);
         let visual = &mut VisualTestContext::from_window(window.into(), cx);
         let body = visual.debug_bounds("main-pane-frame").unwrap();
+        // Notices slide in from the edge; this measures where they rest.
+        visual.update(|_, cx| cx.set_reduce_motion(true));
         window
             .update(visual, |shell, _, cx| {
                 shell.error = Some("Could not save workspace".into());

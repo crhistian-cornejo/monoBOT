@@ -53,6 +53,7 @@ mod mobile;
 mod modal;
 mod model_welcome;
 mod monos;
+mod motion;
 mod notch;
 mod notes;
 mod notifications;

@@ -499,7 +499,7 @@ impl Monos {
                                     .size(px(14.))
                                     .flex_shrink_0()
                                     .child(avatar::avatar(
-                                        &mono.mascot,
+                                        &mono.face(),
                                         mono.color,
                                         state,
                                         14.,

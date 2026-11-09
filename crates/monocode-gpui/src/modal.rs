@@ -2,6 +2,7 @@
 //! rises into place, and the dialog buttons every modal shares. Light themes
 //! paint the card opaque. `window.prompt` renders through [`prompt_builder`],
 //! so confirmations use the same card as every other modal.
+use crate::motion;
 use crate::theme::*;
 use gpui::{
     Animation, AnimationElement, AnimationExt, App, Context, Div, ElementId, EventEmitter,
@@ -9,19 +10,13 @@ use gpui::{
     PromptHandle, PromptLevel, PromptResponse, RenderablePromptHandle, Role, SharedString,
     Stateful, Window, canvas, div, prelude::*, px,
 };
-use std::time::Duration;
 
 pub(crate) const RADIUS: f32 = 16.;
 /// Backdrop blur behind the card, in points.
 const BLUR: f32 = 24.;
-const ENTER: Duration = Duration::from_millis(200);
 const RISE: f32 = 6.;
 /// The card's rule, the same 10% hairline as popovers.
 pub(crate) const BORDER: f32 = 0.1;
-
-fn ease_out(t: f32) -> f32 {
-    1. - (1. - t).powi(3)
-}
 
 /// Dims the window just enough to separate the card while the content
 /// behind keeps its colour through the blur.
@@ -35,11 +30,15 @@ pub(crate) fn backdrop<E: Styled + IntoElement + 'static>(
     id: impl Into<ElementId>,
     scrim: E,
 ) -> AnimationElement<E> {
-    scrim.with_animation(id, Animation::new(ENTER).with_easing(ease_out), |el, t| {
-        let mut color = scrim_color();
-        color.a *= t;
-        el.bg(color)
-    })
+    scrim.with_animation(
+        id,
+        Animation::new(motion::QUICK).with_easing(motion::cubic_out),
+        |el, t| {
+            let mut color = scrim_color();
+            color.a *= t;
+            el.bg(color)
+        },
+    )
 }
 
 /// A full-window scrim layer, for a modal parent that is already
@@ -66,9 +65,7 @@ pub(crate) fn enter<E: Styled + IntoElement + 'static>(
     id: impl Into<ElementId>,
     card: E,
 ) -> AnimationElement<E> {
-    card.with_animation(id, Animation::new(ENTER).with_easing(ease_out), |el, t| {
-        el.relative().opacity(t).top(px(RISE * (1. - t)))
-    })
+    motion::enter(id, card, motion::Origin::Below, RISE)
 }
 
 /// The frosted (or, in light themes, opaque) fill painted behind a card's

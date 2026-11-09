@@ -161,13 +161,12 @@ pub(crate) fn launch(
         }),
         None => ("", "chatting", content(0.45)),
     };
-    // A working session's loader turns on the shared clock, at 15fps since
-    // each step repaints the transcript it sits in.
+    // A working session's loader turns on the shared clock.
     let mark = if glyph == "loader-03" {
         crate::pulse::looping(
             gpui::SharedString::from(format!("launch-loader-{id}")),
             std::time::Duration::from_secs(1),
-            crate::pulse::Rate::Half,
+            crate::pulse::Rate::Smooth,
             move |turn| {
                 icon(glyph, 16.)
                     .text_color(color)

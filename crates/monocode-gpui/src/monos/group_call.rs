@@ -1208,7 +1208,7 @@ impl Monos {
                         .as_ref()
                         .is_some_and(|stream| stream.member == member.id);
                     let look = self.roster.get(&member.id);
-                    let mascot = look.map_or("robot", |mono| mono.mascot.as_str());
+                    let mascot = look.map_or("robot".into(), |mono| mono.face());
                     let color = look.map_or(mono::COLORS_MONO[0], |mono| mono.color);
                     div()
                         .flex()
@@ -1218,7 +1218,7 @@ impl Monos {
                         .py_1()
                         .when(speaking, |row| row.bg(accent_color().opacity(0.1)))
                         .child(avatar::avatar(
-                            mascot,
+                            &mascot,
                             color,
                             if speaking || thinking {
                                 "working"

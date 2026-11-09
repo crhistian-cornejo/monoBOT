@@ -88,7 +88,7 @@ impl Conversation {
                     .justify_center()
                     .child(crate::session_mark::spinner(
                         "background-tasks-spinner",
-                        crate::pulse::Rate::Half,
+                        crate::pulse::Rate::Smooth,
                     )),
             )
             .child(

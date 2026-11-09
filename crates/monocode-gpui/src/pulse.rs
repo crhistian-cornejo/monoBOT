@@ -3,7 +3,7 @@
 //!
 //! A view that paints a loop leases the clock for itself. Each tick notifies
 //! every leased view together, so all loops land in one frame instead of one
-//! frame per spinner, and at 30Hz or less instead of the display's 120Hz. A
+//! frame per spinner, and at 60Hz or less instead of the display's 120Hz. A
 //! lease ends when its view was notified but did not paint a loop again, so
 //! a closed, scrolled-away or hidden spinner stops costing anything, and the
 //! clock parks once no lease is left. While no window is visible the clock
@@ -18,24 +18,23 @@ use std::{
     time::{Duration, Instant},
 };
 
-const TICK: Duration = Duration::from_millis(33);
-/// A hidden app's loops tick this many times slower.
-const BACKGROUND_STRIDE: u64 = 8;
+/// Sixty ticks a second: motion on the clock is as smooth as a 60Hz display
+/// shows it.
+const TICK: Duration = Duration::from_micros(16_667);
+/// A hidden app's loops tick this many times slower, a few times a second.
+const BACKGROUND_STRIDE: u64 = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Rate {
-    /// About 30fps: rotations and fades that must look continuous.
+    /// 60fps: whatever moves, turns or fades, so it looks continuous.
     Smooth,
-    /// About 15fps: small loaders.
-    Half,
-    /// About 7.5fps: pixel art that steps between a few poses.
+    /// 15fps: pictures that only trade one still pose for another.
     Low,
 }
 impl Rate {
     fn stride(self) -> u64 {
         match self {
             Rate::Smooth => 1,
-            Rate::Half => 2,
             Rate::Low => 4,
         }
     }
@@ -67,7 +66,7 @@ pub(crate) fn request(rate: Rate, window: &Window, cx: &mut App) -> bool {
     request_inner(rate, window, cx, None)
 }
 
-/// Stream presentation uses the same coalesced 30Hz wakeup as decorative
+/// Stream presentation uses the same coalesced 60Hz wakeup as decorative
 /// loops, advancing its state before notifying rather than spawning a timer.
 pub(crate) fn request_frame(
     rate: Rate,

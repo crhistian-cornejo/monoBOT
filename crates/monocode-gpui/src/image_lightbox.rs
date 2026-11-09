@@ -171,12 +171,9 @@ impl ImageLightbox {
         let Some((from, born)) = self.transition else {
             return self.view;
         };
-        let t = crate::reveal::bezier(
+        let t = crate::motion::ease(
             (born.elapsed().as_secs_f32() / 0.06).min(1.),
-            0.,
-            0.,
-            0.58,
-            1.,
+            crate::motion::EASE_OUT,
         );
         View {
             scale: from.scale + (self.view.scale - from.scale) * t,
@@ -188,9 +185,8 @@ impl ImageLightbox {
     fn set_view(&mut self, next: View, cx: &mut Context<Self>) {
         let next = next.clamp(self.viewport, self.image_size);
         if next != self.view {
-            self.transition = self
-                .drag
-                .is_none()
+            // Under reduced motion the view lands where it is going.
+            self.transition = (self.drag.is_none() && !cx.reduce_motion())
                 .then(|| (self.displayed_view(), Instant::now()));
             self.view = next;
             cx.notify();
@@ -470,14 +466,15 @@ impl Render for ImageLightbox {
 }
 
 pub(crate) fn overlay(view: &Entity<ImageLightbox>) -> impl IntoElement {
-    gpui::deferred(
+    gpui::deferred(crate::motion::fade_in(
+        "image-lightbox-in",
         div()
             .absolute()
             .top_0()
             .left_0()
             .size_full()
             .child(view.clone()),
-    )
+    ))
     .with_priority(100)
 }
 

@@ -1198,6 +1198,8 @@ impl TranscriptView {
         let saved = self.note_feedback.get(&turn).is_some_and(|r| r.is_ok());
         let pending = self.note_pending.contains(&turn);
         let opacity = match self.hovered_turn {
+            // No frames tick under reduced motion: the row is simply there.
+            Some((hovered, _)) if hovered == turn && cx.reduce_motion() => 1.,
             Some((hovered, since)) if hovered == turn => {
                 (since.elapsed().as_secs_f32() / HOVER_FADE).min(1.)
             }
@@ -3791,7 +3793,11 @@ impl TranscriptView {
                         .iter()
                         .rposition(|r| r.first)
                         .unwrap_or(prompt);
-                    let live = self.streaming && at >= self.live_start && self.visible;
+                    // The badge bounces in only where frames will tick.
+                    let live = self.streaming
+                        && at >= self.live_start
+                        && self.visible
+                        && !cx.reduce_motion();
                     match self.reactions.get(&prompt) {
                         Some((current, _)) if current == emoji => {}
                         _ => {
@@ -4554,7 +4560,7 @@ impl TranscriptView {
             let due = self.last_motion_frame.map(|at| at + MOTION_FRAME);
             motion_frame(cx.entity().downgrade(), due, window);
         } else if self.stream_animating(now) {
-            // Stream presentation keeps the shared 30Hz budget. Pure fade
+            // Stream presentation keeps to the shared clock. Pure fade
             // frames reuse the parsed blocks, prepared text and measured rows.
             self.frame_scheduled = true;
             let view = cx.entity().downgrade();
@@ -5385,7 +5391,7 @@ impl TranscriptView {
                                 crate::tab_tile::Face::Neutral,
                                 crate::session_mark::spinner(
                                     ("tool-loader", message_start),
-                                    crate::pulse::Rate::Half,
+                                    crate::pulse::Rate::Smooth,
                                 ),
                             )
                         } else {

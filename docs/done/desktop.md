@@ -71,6 +71,64 @@ the same follow-ups after a restart. Scheduled habits take priority over
 heartbeats. Live scheduler and provider behavior still need broader testing;
 see [verification](../old/verification.md).
 
+### Faces
+
+A coding Mono wears its pixel mascot. A personal bot wears a small 3D
+character instead, so the two kinds are told apart at a glance. Nothing new is
+stored: the bot's colour is the character's body, in the same pastel the pixel
+mascots wear, its mascot is its species (a cat's ears, a robot's screen, a
+mushroom's cap) and its role dresses it (the Principal's crown, the Inbox's
+cap, the Analyst's glasses). `Mono::face()` names what the avatar draws, and
+the look picker previews each mascot as the character it would become.
+
+One body carries every species and each role adds one prop, as
+[momo](https://github.com/mortspace/momo)'s characters do. Two rules keep
+them tidy: what a species grows on top of its head (antennae, a crest, a nose
+cone) gives way to a hat, and what a role carries (the Planner's flag, the
+Writer's quill, the Phone bot's phone) is held in the hand. Below 40 pixels
+the picture is a portrait of the head and shoulders with larger eyes, so the
+species still reads beside a name in a list. A working bot hops and trades its
+resting picture for one with its mouth open and its hands up, three times a
+second, as the pixel mascots trade frames.
+
+The character is a signed distance field marched in software
+(`monocode-core/src/mono/persona.rs`), so there is no shader and it is the same
+picture on every platform. The app renders each pose (resting, blinking,
+talking) once per size on a background thread and paints it as a picture from
+then on; the hop, the breath and the blink only move or swap that picture.
+The phone still receives the mascot name and draws its own pixel mascots.
+To look at every species and outfit, write a contact sheet:
+
+```sh
+MONOBOT_PERSONA_SHEET=sheet.png cargo xtask cargo test -p monocode-core mono::persona -- --ignored
+```
+
+## Dictation
+
+Dictation runs on this machine: the microphone feeds a Silero voice detector
+and Parakeet v3 transcribes each phrase as the detector closes it. The
+microphone opens at once. Parakeet loads on the session's own decoding thread
+(`crates/dictation/src/session.rs`), so words said while it loads are kept and
+transcribed when it is ready, and listening never waits on a phrase being
+transcribed. Spanish and English are told apart phrase by phrase: Spanish
+gets its opening «¿» and «¡» and its pauses rejoined, and English is left as
+Parakeet wrote it, also inside the same dictation.
+
+## Motion
+
+Shared timings, curves and entrances live in `crates/monocode-gpui/src/motion.rs`:
+the modal card, the notices that slide in from the window's edge, the image
+preview's fade and the tick that answers a copy all take them from there. A
+new transition picks from that file instead of adding its own numbers.
+Looping decoration keeps its clock in `pulse.rs`: one tick, 60 times a second,
+repaints every view that leased it, so spinners, loaders, mascots and bot
+faces move at 60fps and share their frames (`Rate::Low`, 15fps, is for
+pictures that only trade one still pose for another; a hidden app ticks a few
+times a second). Entrances and one-off transitions run on GPUI's own
+per-frame animations. Panes keep their spring in `pane_motion.rs` and tabs
+their widths in `tab_motion.rs`. Everything draws
+its final state under reduced motion.
+
 ## Develop
 
 From the repository root:

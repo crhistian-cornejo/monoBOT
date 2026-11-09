@@ -1299,8 +1299,7 @@ pub(crate) fn work_mark(id: &'static str, asking: bool, cx: &App) -> AnyElement 
     if cx.reduce_motion() {
         return crate::session_mark::spinner_at(0.3).into_any_element();
     }
-    // At 15fps: it shows beside any app, all the time an agent works.
-    crate::session_mark::spinner(id, crate::pulse::Rate::Half).into_any_element()
+    crate::session_mark::spinner(id, crate::pulse::Rate::Smooth).into_any_element()
 }
 
 /// An agent's own face, hopping while it works, or a coding session's

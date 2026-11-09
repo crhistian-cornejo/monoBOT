@@ -1,7 +1,15 @@
-//! PixelMascot.tsx / pixelMascots.ts rendered as native quads.
-use gpui::{AnyElement, Hsla, canvas, prelude::*, px, rgb, rgba};
+//! The face of a Mono. A coding Mono wears its pixel mascot (PixelMascot.tsx
+//! / pixelMascots.ts rendered as native quads); a personal bot wears its 3D
+//! persona (`monocode_core::mono::persona`), rendered once per pose off the
+//! interface thread and painted from then on as a picture.
+use gpui::{
+    AnyElement, App, Bounds, Corners, Hsla, Pixels, RenderImage, Window, canvas, point, prelude::*,
+    px, rgb, rgba, size,
+};
+use monocode_core::mono::persona::{self, Look, Pose};
 use serde::Deserialize;
-use std::sync::LazyLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, LazyLock, Mutex};
 #[derive(Deserialize)]
 struct Sprite {
     name: String,
@@ -40,7 +48,159 @@ fn material(name: &str, x: usize, y: usize, base: Hsla) -> Hsla {
         _ => base,
     }
 }
+/// The badge a Mono that waits on the user wears at its top right corner.
+fn needs_you_badge(bounds: Bounds<Pixels>, window: &mut Window) {
+    let unit = bounds.size.width / 16.;
+    for (x, y, w, h, color) in [
+        (12.5, -2.5, 3., 3., 0xffd24a),
+        (13.25, 0.5, 1.5, 1., 0x8c8680),
+    ] {
+        window.paint_quad(gpui::fill(
+            Bounds::new(
+                bounds.origin + point(unit * x, unit * y),
+                size(unit * w, unit * h),
+            ),
+            rgb(color),
+        ));
+    }
+}
+
+type FrameKey = (Look, Pose, u32);
+
+/// Persona pictures already rendered, and the ones on their way.
+#[derive(Default)]
+struct Frames {
+    ready: HashMap<FrameKey, Arc<RenderImage>>,
+    rendering: HashSet<FrameKey>,
+}
+
+static FRAMES: LazyLock<Mutex<Frames>> = LazyLock::new(Default::default);
+
+/// Pictures kept before the cache starts over: every bot at every size the
+/// app draws, in each pose, is a few hundred.
+const KEPT_FRAMES: usize = 600;
+
+/// The persona's picture in `pose` at `pixels` a side. One not rendered yet
+/// starts on a background thread and the windows redraw when it lands;
+/// meanwhile its resting picture stands in, or nothing the first time.
+fn frame(look: Look, pose: Pose, pixels: u32, cx: &mut App) -> Option<Arc<RenderImage>> {
+    let key = (look, pose, pixels);
+    let mut frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(image) = frames.ready.get(&key) {
+        return Some(image.clone());
+    }
+    if frames.rendering.insert(key) {
+        let rendered = cx.background_executor().spawn(async move {
+            let mut bgra = persona::render(look, pose, pixels);
+            for pixel in bgra.as_chunks_mut::<4>().0 {
+                pixel.swap(0, 2);
+            }
+            image::RgbaImage::from_raw(pixels, pixels, bgra)
+        });
+        cx.spawn(async move |cx| {
+            let image = rendered.await;
+            let mut frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+            frames.rendering.remove(&key);
+            if let Some(image) = image {
+                if frames.ready.len() >= KEPT_FRAMES {
+                    frames.ready.clear();
+                }
+                let image = RenderImage::new(vec![image::Frame::new(image)]);
+                frames.ready.insert(key, Arc::new(image));
+            }
+            drop(frames);
+            cx.update(|cx| cx.refresh_windows());
+        })
+        .detach();
+    }
+    frames.ready.get(&(look, Pose::Rest, pixels)).cloned()
+}
+
+/// A personal bot's 3D persona. It breathes at rest and blinks on its own
+/// beat. While it works it hops and, three times a second, trades its
+/// resting picture for the one with its mouth open and its hands up, as the
+/// pixel mascots trade frames. Under reduced motion it stands still.
+fn persona_avatar(look: Look, status: &str, side: f32, still: bool) -> AnyElement {
+    let status = status.to_string();
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx| {
+            let working = status == "working";
+            let moves = working || (!still && status != "needs-you");
+            let animate = moves && crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+            let t = crate::pulse::elapsed(cx).as_secs_f32();
+            let beat = (look.color % 89) as f32 * 0.21;
+            let pose = if animate && working && (t * 3.).floor() as u64 % 2 == 1 {
+                Pose::Talk
+            } else if animate && (t + beat) % 5.2 > 5.05 {
+                Pose::Blink
+            } else {
+                Pose::Rest
+            };
+            // How far it is off the ground and how much taller it stretches,
+            // as parts of its height: a hop while working, a breath at rest.
+            let (rise, stretch) = match (animate, working) {
+                (false, _) => (0., 0.),
+                (true, true) => {
+                    let hop = (t * 9.).sin().abs();
+                    (hop * 0.08, hop * 0.06)
+                }
+                (true, false) => {
+                    let breath = (t * 2.5).sin();
+                    (breath * 0.012, breath * 0.012)
+                }
+            };
+            let width = bounds.size.width * (1. - stretch * 0.6);
+            let height = bounds.size.height * (1. + stretch);
+            let drawn = Bounds::new(
+                point(
+                    bounds.origin.x + (bounds.size.width - width) / 2.,
+                    bounds.origin.y + bounds.size.height * (1. - rise) - height,
+                ),
+                size(width, height),
+            );
+            let pixels = (side * window.scale_factor()).round() as u32;
+            let pixels = pixels.clamp(8, persona::MAX_SIDE);
+            match frame(look, pose, pixels, cx) {
+                Some(image) => {
+                    let _ = window.paint_image(drawn, drawn, Corners::default(), image, 0, false);
+                }
+                None => {
+                    // Its colour as a soft dot until the first picture lands.
+                    let dot = bounds.size.width * 0.56;
+                    let mut color: Hsla = rgb(look.color).into();
+                    color.a = 0.5;
+                    let origin = bounds.origin
+                        + point(
+                            (bounds.size.width - dot) / 2.,
+                            (bounds.size.height - dot) / 2.,
+                        );
+                    window.paint_quad(
+                        gpui::fill(Bounds::new(origin, size(dot, dot)), color)
+                            .corner_radii(dot / 2.),
+                    );
+                }
+            }
+            if status == "needs-you" {
+                needs_you_badge(bounds, window);
+            }
+        },
+    )
+    .size(px(side))
+    .flex_shrink_0()
+    .into_any_element()
+}
+
+/// `name` is a pixel mascot's name or a bot's persona (`Mono::face`).
 pub(crate) fn avatar(name: &str, color: u32, status: &str, side: f32, still: bool) -> AnyElement {
+    if let Some((species, outfit)) = persona::parse(name) {
+        let look = Look {
+            species,
+            outfit,
+            color: color & 0xffffff,
+        };
+        return persona_avatar(look, status, side, still);
+    }
     let index = SPRITES.iter().position(|m| m.name == name).unwrap_or(1);
     let status = status.to_string();
     canvas(
@@ -49,13 +209,9 @@ pub(crate) fn avatar(name: &str, color: u32, status: &str, side: f32, still: boo
             // "needs-you" holds still, so it must not keep the clock running.
             let working = status == "working";
             let moves = working || (!still && status != "needs-you");
-            // Pixel art reads fine at a low frame rate; a working hop is faster.
-            let rate = if working {
-                crate::pulse::Rate::Half
-            } else {
-                crate::pulse::Rate::Low
-            };
-            let animate = moves && crate::pulse::request(rate, window, cx);
+            // Its poses trade a few times a second, but the hop and the bob
+            // between them move every frame.
+            let animate = moves && crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
             let t = crate::pulse::elapsed(cx).as_secs_f32();
             let talk = animate && status == "working" && (t * 3.).floor() as u64 % 2 == 1;
             let sprite = &SPRITES[index];
@@ -184,8 +340,7 @@ pub(crate) fn avatar(name: &str, color: u32, status: &str, side: f32, still: boo
                 }
             }
             if status == "needs-you" {
-                draw(12.5, -2.5, 3., 3., rgb(0xffd24a).into(), window);
-                draw(13.25, 0.5, 1.5, 1., rgb(0x8c8680).into(), window);
+                needs_you_badge(bounds, window);
             }
         },
     )
@@ -324,4 +479,47 @@ pub(crate) fn group_avatar_stack(
     }
 
     stack.into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::{TestAppContext, VisualTestContext};
+
+    fn rendered(color: u32) -> Vec<(Pose, Arc<RenderImage>)> {
+        let frames = FRAMES.lock().unwrap_or_else(|e| e.into_inner());
+        frames
+            .ready
+            .iter()
+            .filter(|((look, ..), _)| look.color == color)
+            .map(|((_, pose, _), image)| (*pose, image.clone()))
+            .collect()
+    }
+
+    fn draw(face: &str, color: u32, window: &mut VisualTestContext) {
+        window.draw(point(px(0.), px(0.)), size(px(40.), px(40.)), |_, _| {
+            avatar(face, color, "idle", 32., true)
+        });
+    }
+
+    #[gpui::test]
+    fn a_bot_wears_its_persona_once_it_is_rendered(cx: &mut TestAppContext) {
+        // Colours no other test draws, so the shared cache tells them apart.
+        let (bot, coder) = (0x12ab34, 0x12ab35);
+        let window = cx.add_empty_window();
+        let face = persona::key("cat", Some("writer"));
+        draw(&face, bot, window);
+        // The first paint only asks for the picture.
+        window.run_until_parked();
+        let frames = rendered(bot);
+        assert_eq!(frames.len(), 1);
+        let (pose, image) = &frames[0];
+        assert_eq!(*pose, Pose::Rest);
+        draw(&face, bot, window);
+        assert!(window.update(|window, _| window.has_image_atlas_entry(image)));
+        // A coding Mono stays pixel art: nothing is rendered for it.
+        draw("cat", coder, window);
+        window.run_until_parked();
+        assert!(rendered(coder).is_empty());
+    }
 }

@@ -640,7 +640,7 @@ impl gpui::Render for LookEditor {
                                     })
                                     .when(!selected, |d| d.hover(|s| s.bg(content(0.06))))
                                     .child(avatar::avatar(
-                                        name,
+                                        &self.mono.face_as(name),
                                         self.mono.color,
                                         "idle",
                                         20.,
@@ -864,7 +864,7 @@ impl LookEditor {
                                     })
                                     .hover(|d| d.bg(content(0.06)))
                                     .child(avatar::avatar(
-                                        name,
+                                        &self.mono.face_as(name),
                                         self.mono.color,
                                         "idle",
                                         32.,
@@ -2041,7 +2041,7 @@ impl Monos {
                         .items_center()
                         .gap_2()
                         .child(avatar::avatar(
-                            &member.mascot,
+                            &member.face(),
                             member.color,
                             state,
                             16.,
@@ -2475,7 +2475,7 @@ impl Monos {
                     .flex().items_center().justify_center().rounded_2xl().border_1().border_color(content(0.04))
                     .bg(content(0.04)).hover(|s|s.bg(content(0.08)))
                     .child(self.settings_anchor.probe())
-                    .child(avatar::avatar(&mono.mascot, mono.color, "idle", 48., false))
+                    .child(avatar::avatar(&mono.face(), mono.color, "idle", 48., false))
                     .on_click(cx.listener(move |this, _, w, cx|this.open_settings_look(&look,w,cx)))))
                 .child(div().id("mono-name-field").debug_selector(||"mono-name-field".into()).mt_3().h(px(32.)).w(px(256.)).max_w_full().px_2().py_1p5()
                     .rounded_md().font_weight(FontWeight::MEDIUM).hover(|s|s.bg(content(0.05))).child(name))
