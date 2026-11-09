@@ -13,23 +13,59 @@ pub(super) const LEVEL_WING: u32 = 104;
 impl Notch {
     /// Starts reading the system's levels (macOS only, never in tests).
     pub(super) fn watch_levels(&mut self, cx: &mut Context<Self>) {
-        if cfg!(test) || !cfg!(target_os = "macos") {
+        if cfg!(test) || !cfg!(any(target_os = "macos", target_os = "windows")) {
             return;
         }
         let (sender, levels) = async_channel::unbounded();
-        if monocode_core::notch::system::watch(move |level| {
-            let _ = sender.try_send(level);
+        let watched = sender.clone();
+        if platform::watch_levels(move |level| {
+            let _ = watched.try_send(level);
         })
         .is_err()
         {
             return;
         }
+        self.level_sender = Some(sender);
         self.level_task = Some(cx.spawn(async move |this, cx| {
             while let Ok(level) = levels.recv().await {
                 if this
                     .update(cx, |this, cx| this.show_level(level, cx))
                     .is_err()
                 {
+                    break;
+                }
+            }
+        }));
+        if self.look.system_keys {
+            self.take_system_keys(cx);
+        }
+    }
+
+    /// Answers the volume and brightness keys instead of the system's
+    /// indicator. macOS asks once for Accessibility; until it is on the
+    /// notch tries again every few seconds, and the keys stay the system's.
+    pub(super) fn take_system_keys(&mut self, cx: &mut Context<Self>) {
+        platform::set_system_keys(true);
+        let Some(sender) = self.level_sender.clone() else {
+            return;
+        };
+        if self.keys_task.is_some() || platform::take_system_keys(sender.clone()) {
+            return;
+        }
+        platform::ask_for_system_keys();
+        self.keys_task = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(3)).await;
+                let Ok(wanted) = this.update(cx, |this, _| this.look.system_keys) else {
+                    break;
+                };
+                if !wanted {
+                    continue;
+                }
+                // The tap is made on the main thread, where its run loop is.
+                let taken = cx.update(|_| platform::take_system_keys(sender.clone()));
+                if taken {
+                    let _ = this.update(cx, |this, _| this.keys_task = None);
                     break;
                 }
             }

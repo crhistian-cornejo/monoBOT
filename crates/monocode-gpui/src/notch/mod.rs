@@ -243,6 +243,10 @@ pub(crate) struct Notch {
     /// When the level last changed, for the edge's light.
     level_at: Option<Instant>,
     level_task: Option<Task<()>>,
+    /// Where the system's levels and the taken keys report.
+    level_sender: Option<async_channel::Sender<monocode_core::notch::system::Level>>,
+    /// Tries again to take the keys while the system does not allow it yet.
+    keys_task: Option<Task<()>>,
 }
 
 impl EventEmitter<NotchEvent> for Notch {}
@@ -376,6 +380,8 @@ impl Notch {
             level_clear: None,
             level_at: None,
             level_task: None,
+            level_sender: None,
+            keys_task: None,
         }
     }
 
@@ -488,7 +494,15 @@ impl Notch {
         if look == self.look {
             return;
         }
+        let keys_changed = look.system_keys != self.look.system_keys;
         self.look = look;
+        if keys_changed {
+            if self.look.system_keys {
+                self.take_system_keys(cx);
+            } else {
+                platform::set_system_keys(false);
+            }
+        }
         (self.save)(model::to_json(&self.look), cx);
         cx.notify();
     }

@@ -291,6 +291,20 @@ impl Notch {
                 toggle(cx, "notch-edge", look.edge, |look, on| look.edge = on),
             ))
             .child(row(
+                "Volume and brightness",
+                if cfg!(target_os = "macos") {
+                    "The notch answers the keys (needs Accessibility)"
+                } else {
+                    "The notch answers the volume keys"
+                },
+                segments([
+                    segment("notch-keys-notch", "Notch", look.system_keys)
+                        .on_click(choose(cx, |look| look.system_keys = true)),
+                    segment("notch-keys-system", "System", !look.system_keys)
+                        .on_click(choose(cx, |look| look.system_keys = false)),
+                ]),
+            ))
+            .child(row(
                 "Count at rest",
                 "How many agents work, by the camera",
                 toggle(cx, "notch-count", look.show_count, |look, on| {

@@ -413,10 +413,11 @@ fn several_agents_spread_the_wings_with_the_leads_progress(cx: &mut TestAppConte
         .update(visual, |notch, _, cx| notch.update_feed(feed, cx))
         .unwrap();
     leave(visual);
-    // Three faces and "+1" on the left; the lead's words and 2/6 on the right,
-    // the camera kept in the middle by the wider wing.
+    // Four Claude Code sessions: one Claude mark and "+3" on the left; the
+    // lead's state and 2/6 on the right, the wings even about the camera.
     let (left, right) = rest.wings(true);
-    assert_eq!(rest.more(), 1);
+    assert_eq!(rest.marks.len(), 1);
+    assert_eq!(rest.more(), 3);
     assert_eq!(
         size(opened.window, visual),
         (186. + (left + right) as f32 + 2. * SHOULDER, 37.)

@@ -397,3 +397,14 @@ fn a_step_reads_as_one_state_word() {
         assert_eq!(state_word(step), word, "{step}");
     }
 }
+
+#[test]
+fn sessions_of_one_kind_share_a_mark_and_count_the_rest() {
+    let feed = Feed {
+        activities: vec![working(1, "claude", 10), working(2, "claude", 20)],
+        ..Feed::default()
+    };
+    let at_rest = rest(&feed);
+    assert_eq!(at_rest.marks.len(), 1, "one Claude mark");
+    assert_eq!(at_rest.more(), 1, "and +1");
+}

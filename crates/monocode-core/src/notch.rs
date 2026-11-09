@@ -117,6 +117,9 @@ pub struct Look {
     pub edge: bool,
     /// The count of agents at work beside the camera.
     pub show_count: bool,
+    /// The volume and brightness keys answered by the notch instead of the
+    /// system's own indicator.
+    pub system_keys: bool,
     /// The shelf's rows of widgets (1 to 3).
     pub shelf_rows: u32,
     /// What the shelf shows, in order, and how wide each one is.
@@ -133,6 +136,7 @@ impl Default for Look {
             width: "regular".into(),
             edge: true,
             show_count: true,
+            system_keys: true,
             shelf_rows: 2,
             shelf: vec![
                 Widget::new("agents", 2),
@@ -673,13 +677,22 @@ pub fn rest(feed: &Feed) -> Rest {
         lead,
         lead_text,
         lead_steps: lead_activity.and_then(|activity| activity.steps),
+        // One mark per kind of session: two Claude Code chats are one Claude
+        // mark and "+1", as the sidebar's group faces count the rest.
         marks: working
             .iter()
-            .take(MARKS)
             .map(|activity| Mark {
                 provider: activity.provider.clone(),
                 face: activity.face.clone(),
             })
+            .fold(Vec::<Mark>::new(), |mut marks, mark| {
+                if !marks.contains(&mark) {
+                    marks.push(mark);
+                }
+                marks
+            })
+            .into_iter()
+            .take(MARKS)
             .collect(),
         call: feed.call.is_some(),
     }

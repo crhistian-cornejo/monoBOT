@@ -45,6 +45,15 @@ pub fn changes(before: &Levels, now: &Levels) -> Vec<Level> {
 /// Reads the levels on a thread of its own and hands each change to
 /// `on_change`. The first reading is the baseline, not a change.
 pub fn watch(on_change: impl Fn(Level) + Send + 'static) -> std::io::Result<()> {
+    watch_with(read, on_change)
+}
+
+/// [`watch`] with another reader, for a system whose levels the app reads
+/// itself (Windows' audio endpoint).
+pub fn watch_with(
+    read: fn() -> Levels,
+    on_change: impl Fn(Level) + Send + 'static,
+) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("notch-levels".into())
         .spawn(move || {
@@ -59,6 +68,60 @@ pub fn watch(on_change: impl Fn(Level) + Send + 'static) -> std::io::Result<()> 
             }
         })
         .map(|_| ())
+}
+
+/// A volume or brightness key the notch answers instead of the system.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Key {
+    VolumeUp,
+    VolumeDown,
+    Mute,
+    BrightnessUp,
+    BrightnessDown,
+}
+
+/// The system's step: sixteen to the full range, or sixty-four with Option
+/// and Shift held (`fine`), as macOS steps them.
+pub fn stepped(value: f32, up: bool, fine: bool) -> f32 {
+    let steps = if fine { 64. } else { 16. };
+    let at = (value * steps).round();
+    let next = if up { at + 1. } else { at - 1. };
+    (next / steps).clamp(0., 1.)
+}
+
+/// What a key makes of the levels: the new value to write, as a level.
+/// Raising a muted volume unmutes it, as the system does.
+pub fn after(key: Key, now: &Levels, fine: bool) -> Option<Level> {
+    match key {
+        Key::VolumeUp | Key::VolumeDown => {
+            let (volume, muted) = now.volume?;
+            let up = key == Key::VolumeUp;
+            let volume = stepped(volume, up, fine);
+            Some(Level::Volume(volume, muted && !up && volume > 0.))
+        }
+        Key::Mute => now
+            .volume
+            .map(|(volume, muted)| Level::Volume(volume, !muted)),
+        Key::BrightnessUp | Key::BrightnessDown => now
+            .brightness
+            .map(|value| Level::Brightness(stepped(value, key == Key::BrightnessUp, fine))),
+    }
+}
+
+/// Answers a key on this Mac: reads, writes the new level and returns it;
+/// `None` when the level cannot be written here, so the key goes on to the
+/// system untouched.
+pub fn press(key: Key, fine: bool) -> Option<Level> {
+    #[cfg(target_os = "macos")]
+    {
+        let level = after(key, &read(), fine)?;
+        mac::write(level).then_some(level)
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (key, fine);
+        None
+    }
 }
 
 pub fn read() -> Levels {
@@ -169,6 +232,77 @@ mod mac {
         (status == 0).then_some(value.clamp(0., 1.))
     }
 
+    #[link(name = "CoreAudio", kind = "framework")]
+    unsafe extern "C" {
+        fn AudioObjectSetPropertyData(
+            object: u32,
+            address: *const Address,
+            qualifier_size: u32,
+            qualifier: *const c_void,
+            size: u32,
+            data: *const c_void,
+        ) -> i32;
+    }
+
+    fn set_property<T>(object: u32, selector: u32, scope: u32, value: T) -> bool {
+        let address = Address {
+            selector,
+            scope,
+            element: 0,
+        };
+        // SAFETY: `value` is a plain number of its own size.
+        unsafe {
+            AudioObjectSetPropertyData(
+                object,
+                &address,
+                0,
+                std::ptr::null(),
+                std::mem::size_of::<T>() as u32,
+                (&value as *const T).cast(),
+            ) == 0
+        }
+    }
+
+    type SetBrightness = unsafe extern "C" fn(display: u32, brightness: f32) -> i32;
+
+    fn set_brightness() -> Option<SetBrightness> {
+        static FUNCTION: OnceLock<Option<usize>> = OnceLock::new();
+        let loaded = FUNCTION.get_or_init(|| {
+            let path =
+                c"/System/Library/PrivateFrameworks/DisplayServices.framework/DisplayServices";
+            // SAFETY: dlopen and dlsym with constant, NUL-terminated names.
+            unsafe {
+                let library = libc::dlopen(path.as_ptr(), libc::RTLD_LAZY);
+                if library.is_null() {
+                    return None;
+                }
+                let symbol = libc::dlsym(library, c"DisplayServicesSetBrightness".as_ptr());
+                (!symbol.is_null()).then_some(symbol as usize)
+            }
+        });
+        let address = (*loaded)?;
+        // SAFETY: the symbol's C signature is `int (CGDirectDisplayID, float)`.
+        Some(unsafe { std::mem::transmute::<usize, SetBrightness>(address) })
+    }
+
+    /// Writes a level; false when this Mac does not take it.
+    pub(super) fn write(level: super::Level) -> bool {
+        match level {
+            super::Level::Volume(volume, muted) => {
+                let Some(device) = property::<u32>(SYSTEM_OBJECT, DEFAULT_OUTPUT, GLOBAL) else {
+                    return false;
+                };
+                let wrote = set_property(device, MAIN_VOLUME, OUTPUT, volume);
+                // Not every output can be muted; the volume still went.
+                let _ = set_property(device, MUTE, OUTPUT, u32::from(muted));
+                wrote
+            }
+            super::Level::Brightness(value) => set_brightness()
+                // SAFETY: a display id and a level from 0 to 1.
+                .is_some_and(|set| unsafe { set(CGMainDisplayID(), value) } == 0),
+        }
+    }
+
     pub(super) fn read() -> Levels {
         Levels {
             volume: volume(),
@@ -210,6 +344,37 @@ mod tests {
         assert_eq!(changes(&before, &dimmer), [Level::Brightness(0.4)]);
         // Unknown before or now says nothing.
         assert!(changes(&Levels::default(), &louder).is_empty());
+    }
+
+    #[test]
+    fn keys_step_as_the_system_does() {
+        assert_eq!(stepped(0.5, true, false), 9. / 16.);
+        assert_eq!(stepped(0.5, false, true), 31. / 64.);
+        assert_eq!(stepped(1., true, false), 1.);
+        assert_eq!(stepped(0.01, false, false), 0.);
+        let now = Levels {
+            volume: Some((0.5, true)),
+            brightness: Some(0.25),
+        };
+        assert_eq!(
+            after(Key::VolumeUp, &now, false),
+            Some(Level::Volume(9. / 16., false)),
+            "unmutes"
+        );
+        assert_eq!(
+            after(Key::VolumeDown, &now, false),
+            Some(Level::Volume(7. / 16., true))
+        );
+        assert_eq!(
+            after(Key::Mute, &now, false),
+            Some(Level::Volume(0.5, false))
+        );
+        assert_eq!(
+            after(Key::BrightnessDown, &now, false),
+            Some(Level::Brightness(3. / 16.))
+        );
+        // A level the system does not report is left to the system.
+        assert_eq!(after(Key::BrightnessUp, &Levels::default(), false), None);
     }
 
     #[cfg(target_os = "macos")]
