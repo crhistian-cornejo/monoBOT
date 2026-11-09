@@ -3,7 +3,7 @@ name = "monobot-dictation"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Local speech-to-text for MonoBOT's composer: the microphone, voice activity (Silero) and Parakeet v3 through sherpa-onnx."
+description = "Local speech-to-text for MonoBOT's composer: the microphone, voice activity (Silero) and Parakeet v3, on the Neural Engine through Core ML on Apple silicon and on the CPU through sherpa-onnx elsewhere."
 
 [dependencies]
 # Pinned with the model files below; the same release Echo ships.
@@ -19,4 +19,14 @@ bzip2 = "0.4"
 monobot-http = { path = "../http" }
 thiserror.workspace = true
 serde.workspace = true
+serde_json.workspace = true
+# Smart Turn (`smart_turn.rs`), pure Rust as IVY runs it.
+tract-onnx = "0.23.9"
+rustfft = "6"
+
+# Parakeet on the Neural Engine (`neural.rs`), straight from Rust.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSString", "NSValue", "NSURL", "NSError", "NSObject"] }
+objc2-core-ml = { version = "0.3", default-features = false, features = ["std", "MLModel", "MLModelConfiguration", "MLMultiArray", "MLFeatureValue", "MLFeatureProvider", "MLDictionaryFeatureProvider"] }
 

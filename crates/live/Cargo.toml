@@ -1,0 +1,12 @@
+[package]
+name = "monobot-live"
+version.workspace = true
+edition = "2024"
+license.workspace = true
+description = "Live voice for MonoBOT's calls: Gemini Live and Phonic speech-to-speech over a WebSocket, with the tools that reach the user's agents. No interface; the app paints and connects."
+
+[dependencies]
+serde_json.workspace = true
+base64 = "0.22"
+# A blocking WebSocket on its own thread, as the rest of the app's I/O runs.
+tungstenite = { version = "0.30", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }

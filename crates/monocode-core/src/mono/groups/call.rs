@@ -13,7 +13,7 @@ pub const MAX_SPEAKERS: usize = 4;
 /// The pause after the voice detector closes a phrase.
 pub const TURN_GAP_MS: u64 = 600;
 
-fn words(text: &str) -> String {
+pub(crate) fn words(text: &str) -> String {
     let folded: String = text
         .nfd()
         .filter(|c| !is_combining_mark(*c))
@@ -44,6 +44,103 @@ pub fn addressed_members<T: Named>(members: &[T], said: &str) -> Vec<String> {
         .into_iter()
         .map(|(_, member)| member.id().to_owned())
         .collect()
+}
+
+/// How a Spanish speaker's ear writes a word, so a name can be told from its
+/// misheard forms («Jarvis» is said «Yarbis» and written «yares»): accents
+/// and «h» go, «j» is «y», «v» and «w» are «b», «z» and a soft «c» are «s»,
+/// a hard «c», «q» and «k» are «k», a soft «g» is «y», and doubles collapse.
+fn sound(word: &str) -> String {
+    let folded: Vec<char> = words(word).chars().filter(|c| c.is_alphabetic()).collect();
+    let mut out = String::new();
+    for (at, &c) in folded.iter().enumerate() {
+        let next = folded.get(at + 1).copied();
+        let mapped = match c {
+            'h' => continue,
+            'j' => 'y',
+            'v' | 'w' => 'b',
+            'z' => 's',
+            'c' if matches!(next, Some('e' | 'i')) => 's',
+            'c' | 'q' | 'k' => 'k',
+            'g' if matches!(next, Some('e' | 'i')) => 'y',
+            other => other,
+        };
+        if !out.ends_with(mapped) {
+            out.push(mapped);
+        }
+    }
+    out
+}
+
+/// The edit distance between two words as the ear writes them, over the
+/// longer one's length: 0 the same, 1 nothing alike.
+pub(crate) fn nearness(a: &str, b: &str) -> f32 {
+    let (a, b): (Vec<char>, Vec<char>) = (sound(a).chars().collect(), sound(b).chars().collect());
+    if a.is_empty() || b.is_empty() {
+        return 1.0;
+    }
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, &x) in a.iter().enumerate() {
+        let mut diagonal = row[0];
+        row[0] = i + 1;
+        for (j, &y) in b.iter().enumerate() {
+            let above = row[j + 1];
+            row[j + 1] = (row[j + 1] + 1)
+                .min(row[j] + 1)
+                .min(diagonal + usize::from(x != y));
+            diagonal = above;
+        }
+    }
+    row[b.len()] as f32 / a.len().max(b.len()) as f32
+}
+
+/// Words that open a turn without being anyone's name.
+const OPENERS: [&str; 10] = [
+    "hola", "oye", "oiga", "ey", "hey", "buenas", "dime", "dinos", "veamos", "hi",
+];
+const NOT_NAMES: [&str; 14] = [
+    "como", "cuando", "donde", "quien", "para", "pero", "bueno", "buenos", "gracias", "dime",
+    "cual", "porque", "what", "where",
+];
+
+/// A turn that calls a member by a name the recognizer wrote wrong («Hola
+/// yares, ¿cómo está?» for «Hola, Jarvis…»), rewritten as «Jarvis, ¿cómo
+/// está?» so it reaches that member as if it had been written right. None
+/// when nobody is called, when the name was heard right, or when nothing
+/// follows it. Only the first two words after a greeting count, as IVY does.
+pub fn spoken_address<T: Named>(members: &[T], said: &str) -> Option<String> {
+    let mut rest = said.trim();
+    let first = rest
+        .char_indices()
+        .find(|(_, c)| !c.is_alphanumeric())
+        .map_or(rest.len(), |(at, _)| at);
+    if OPENERS.contains(&words(&rest[..first]).trim()) {
+        rest = rest[first..].trim_start_matches([',', ' ', '.', '!', '¡']);
+    }
+    for _ in 0..2 {
+        let end = rest.find([',', ' ', ':']).unwrap_or(rest.len());
+        let word = rest[..end].trim_matches(|c: char| !c.is_alphanumeric());
+        let after = rest[end..].trim_start_matches([',', ' ', ':', '.']).trim();
+        let folded = words(word).trim().to_owned();
+        if folded.chars().count() >= 4 && !NOT_NAMES.contains(&folded.as_str()) && !after.is_empty()
+        {
+            let best = members
+                .iter()
+                .filter(|member| !member.name().trim().is_empty())
+                .map(|member| (nearness(word, member.name()), member.name()))
+                .min_by(|a, b| a.0.total_cmp(&b.0));
+            if let Some((distance, name)) = best {
+                if distance <= 0.34 {
+                    return (words(name).trim() != folded).then(|| format!("{name}, {after}"));
+                }
+            }
+        }
+        if end >= rest.len() {
+            break;
+        }
+        rest = rest[end..].trim_start_matches([',', ' ', ':', '.']);
+    }
+    None
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -446,6 +543,42 @@ mod tests {
         .into_iter()
         .map(|(id, name)| Person::new(id, name))
         .collect()
+    }
+
+    #[test]
+    fn a_misheard_name_at_the_start_reaches_its_member() {
+        let people: Vec<Person> = [
+            ("m-jarvis", "Jarvis"),
+            ("m-edith", "Edith"),
+            ("m-pepers", "Pepers"),
+        ]
+        .into_iter()
+        .map(|(id, name)| Person::new(id, name))
+        .collect();
+        assert_eq!(
+            spoken_address(&people, "Hola yares, cómo está").as_deref(),
+            Some("Jarvis, cómo está")
+        );
+        assert_eq!(
+            spoken_address(&people, "Oye, Edit, qué opinas?").as_deref(),
+            Some("Edith, qué opinas?")
+        );
+        // Heard right, nobody called, or nothing after the name: as it was.
+        assert_eq!(spoken_address(&people, "Hola Jarvis, cómo está"), None);
+        assert_eq!(spoken_address(&people, "Hola, cómo están todos"), None);
+        assert_eq!(spoken_address(&people, "Yarbis"), None);
+        assert_eq!(spoken_address(&people, "Gracias por todo"), None);
+        // The rewritten turn is addressed as usual.
+        let fixed = spoken_address(&people, "Hola yares, cómo está").unwrap();
+        assert_eq!(turn_order(&people, &fixed, None).order, ["m-jarvis"]);
+    }
+
+    #[test]
+    fn the_ear_folds_what_sounds_alike() {
+        assert_eq!(sound("Jarvis"), sound("yarbis"));
+        assert_eq!(sound("Cecilia"), sound("sesilia"));
+        assert!(nearness("yares", "Jarvis") <= 0.34);
+        assert!(nearness("Mateo", "Jarvis") > 0.34);
     }
 
     #[test]

@@ -24,8 +24,11 @@ pub struct Style {
 /// A named picture shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Format {
-    /// The slash command (`/{id}`).
+    /// The slash command (`/{id}`): the format's own name, lowercased.
     pub id: &'static str,
+    /// Older slash words that still mean this format, so prompts written
+    /// with them keep working (`/cinema` before `/ultrawide`).
+    pub aliases: &'static [&'static str],
     pub name: &'static str,
     /// The ratio `images.generate` takes.
     pub aspect: &'static str,
@@ -151,48 +154,56 @@ pub const STYLES: &[Style] = &[
 pub const FORMATS: &[Format] = &[
     Format {
         id: "square",
+        aliases: &[],
         name: "Square",
         aspect: "1:1",
         use_for: "Instagram post, avatar, icon",
     },
     Format {
         id: "portrait",
+        aliases: &[],
         name: "Portrait",
         aspect: "4:5",
         use_for: "Instagram portrait post",
     },
     Format {
         id: "story",
+        aliases: &[],
         name: "Story",
         aspect: "9:16",
         use_for: "Stories, Reels, TikTok, phone wallpaper",
     },
     Format {
         id: "poster",
+        aliases: &[],
         name: "Poster",
         aspect: "2:3",
         use_for: "Posters, book covers, Pinterest",
     },
     Format {
         id: "classic",
+        aliases: &[],
         name: "Classic",
         aspect: "3:2",
         use_for: "Camera photo, blog header",
     },
     Format {
         id: "standard",
+        aliases: &[],
         name: "Standard",
         aspect: "4:3",
         use_for: "Slides, tablets, prints",
     },
     Format {
         id: "landscape",
+        aliases: &[],
         name: "Landscape",
         aspect: "16:9",
         use_for: "YouTube thumbnail, slides, desktop wallpaper",
     },
     Format {
-        id: "cinema",
+        id: "ultrawide",
+        aliases: &["cinema"],
         name: "Ultrawide",
         aspect: "21:9",
         use_for: "Banners and wide headers",
@@ -207,12 +218,24 @@ pub fn style(id: &str) -> Option<&'static Style> {
         .find(|style| style.id.eq_ignore_ascii_case(id))
 }
 
-/// A format by id, ignoring case and a leading slash.
+/// A format by id or one of its older aliases, ignoring case and a leading
+/// slash.
 pub fn format(id: &str) -> Option<&'static Format> {
     let id = id.trim().trim_start_matches('/');
-    FORMATS
-        .iter()
-        .find(|format| format.id.eq_ignore_ascii_case(id))
+    FORMATS.iter().find(|format| {
+        format.id.eq_ignore_ascii_case(id)
+            || format
+                .aliases
+                .iter()
+                .any(|alias| alias.eq_ignore_ascii_case(id))
+    })
+}
+
+/// The catalogue id of a style or format word (`/Cinema` → `ultrawide`).
+pub fn preset_id(word: &str) -> Option<&'static str> {
+    style(word)
+        .map(|style| style.id)
+        .or_else(|| format(word).map(|format| format.id))
 }
 
 /// The named format of a ratio, when it has one.
@@ -279,7 +302,8 @@ pub fn with_preset(text: &str, id: &str) -> Option<String> {
                 .is_some_and(|w| style(w).is_some() || format(w).is_some())
         })
         .count();
-    let token = format!("/{}", id.trim_start_matches('/').to_ascii_lowercase());
+    // Always the catalogue's own word, even when an older alias was given.
+    let token = format!("/{}", preset_id(id)?);
     let at = if is_style { 0 } else { presets };
     words.insert(at, &token);
     let mut joined = words.join(" ");
@@ -369,7 +393,17 @@ pub fn catalog_rules() -> String {
         .join("; ");
     let formats = FORMATS
         .iter()
-        .map(|format| format!("/{} = {} ({})", format.id, format.aspect, format.use_for))
+        .map(|format| {
+            let aliases: String = format
+                .aliases
+                .iter()
+                .map(|alias| format!(", also /{alias}"))
+                .collect();
+            format!(
+                "/{} = {} ({}{aliases})",
+                format.id, format.aspect, format.use_for
+            )
+        })
         .collect::<Vec<_>>()
         .join("; ");
     format!(
@@ -387,11 +421,12 @@ mod tests {
             .iter()
             .map(|s| s.id)
             .chain(FORMATS.iter().map(|f| f.id))
+            .chain(FORMATS.iter().flat_map(|f| f.aliases.iter().copied()))
             .collect();
         let count = ids.len();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), count, "a style and a format share an id");
+        assert_eq!(ids.len(), count, "two styles or formats share a word");
         for id in ids {
             assert!(
                 id.chars()
@@ -495,5 +530,38 @@ mod tests {
             assert!(rules.contains(&format!("/{} (", style.id)), "{}", style.id);
         }
         assert!(rules.contains("/portrait = 4:5"));
+        assert!(rules.contains("/ultrawide = 21:9 (Banners and wide headers, also /cinema)"));
+    }
+
+    #[test]
+    fn formats_are_named_after_themselves() {
+        for format in FORMATS {
+            assert_eq!(format.id, format.name.to_ascii_lowercase());
+        }
+    }
+
+    #[test]
+    fn an_old_format_word_still_means_the_same_ratio() {
+        let old = format("/cinema").unwrap();
+        assert_eq!(old.id, "ultrawide");
+        assert_eq!(old.aspect, "21:9");
+        assert_eq!(format("Cinema"), format("ultrawide"));
+        assert_eq!(preset_id("/cinema"), Some("ultrawide"));
+        assert_eq!(preset_id("cinematic"), Some("cinematic"));
+        assert_eq!(preset_id("plan"), None);
+        // Typed in a prompt, it is still a preset word and still names the format.
+        let text = "/pixel /cinema a pink lake";
+        let found: Vec<&str> = preset_ranges(text).into_iter().map(|r| &text[r]).collect();
+        assert_eq!(found, ["/pixel", "/cinema"]);
+        assert_eq!(picked(text)[1].name, "Ultrawide 21:9");
+        // Picking a format switches the old word for the new one.
+        assert_eq!(
+            with_preset(text, "landscape").unwrap(),
+            "/pixel /landscape a pink lake "
+        );
+        assert_eq!(
+            with_preset("a pink lake", "/cinema").unwrap(),
+            "/ultrawide a pink lake "
+        );
     }
 }

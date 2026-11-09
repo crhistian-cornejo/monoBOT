@@ -42,6 +42,28 @@ pub fn installed(dir: &Path) -> bool {
             .all(|name| fs::metadata(dir.join(name)).is_ok_and(|meta| meta.len() > 0))
 }
 
+/// Deletes the model: the marker first, so a half-deleted folder never reads
+/// as installed.
+pub fn remove(dir: &Path) -> Result<(), Error> {
+    for name in std::iter::once(MARKER).chain(FILES) {
+        match fs::remove_file(dir.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(())
+}
+
+/// What the model files take on disk, in bytes.
+pub fn disk_bytes(dir: &Path) -> u64 {
+    FILES
+        .iter()
+        .filter_map(|name| fs::metadata(dir.join(name)).ok())
+        .map(|meta| meta.len())
+        .sum()
+}
+
 pub fn path(dir: &Path, name: &str) -> Result<String, Error> {
     let path = dir.join(name);
     path.to_str()
@@ -178,6 +200,13 @@ mod tests {
         assert!(!installed(&dir));
         fs::write(dir.join(MARKER), ARCHIVE.sha256).unwrap();
         assert!(installed(&dir));
+        assert_eq!(disk_bytes(&dir), 5 * FILES.len() as u64);
+        // Removing deletes the model and its marker, and can run twice.
+        remove(&dir).unwrap();
+        assert!(!installed(&dir));
+        assert!(!dir.join(MARKER).exists());
+        assert_eq!(disk_bytes(&dir), 0);
+        remove(&dir).unwrap();
         fs::remove_dir_all(&dir).unwrap();
     }
 

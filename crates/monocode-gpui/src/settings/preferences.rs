@@ -81,6 +81,11 @@ pub(crate) struct Preferences {
     pub show_remaining_usage: bool,
     pub mask_emails: bool,
     pub idle_agents: u32,
+    /// How a call talks: "local" (Parakeet and Supertonic on this machine),
+    /// "gemini" (Gemini Live) or "phonic", with the key in the keychain.
+    pub voice_live: String,
+    /// How long a call waits before it answers: "patient", "normal" or "quick".
+    pub voice_pace: String,
     pub claude_hooks: bool,
     /// Experimental: report MonoBOT instead of `sdk-cli` as Claude's entrypoint.
     pub claude_entrypoint: bool,
@@ -172,6 +177,8 @@ impl Default for Preferences {
             show_remaining_usage: false,
             mask_emails: true,
             idle_agents: 3,
+            voice_live: "local".into(),
+            voice_pace: "normal".into(),
             claude_hooks: true,
             claude_entrypoint: false,
             binary_paths: HashMap::new(),
@@ -212,10 +219,11 @@ impl Preferences {
     }
 
     pub(crate) fn apply_workspace_theme(&mut self, id: String) {
-        let color: gpui::Hsla = gpui::rgb(super::palette(&id, false).surface).into();
-        self.theme_hue = (color.h * 360.).round() as u32;
-        self.theme_saturation = (color.s * 100.).round() as u32;
-        self.theme_dark_lightness = ((color.l * 100.).round() as u32).min(30);
+        (
+            self.theme_hue,
+            self.theme_saturation,
+            self.theme_dark_lightness,
+        ) = super::preset_tint(&id);
         self.workspace_theme = id;
     }
 

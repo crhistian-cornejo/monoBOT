@@ -12,7 +12,9 @@ mod pages;
 mod palettes;
 mod preferences;
 mod skill_document;
-pub(crate) use palettes::{PALETTES, palette};
+#[cfg(test)]
+mod voice_tests;
+pub(crate) use palettes::{PALETTES, is_preset_tint, palette, preset_tint};
 pub(crate) mod widgets;
 
 pub(crate) use keymap::apply as apply_keybindings;
@@ -292,6 +294,7 @@ pub(crate) struct SettingsView {
     accent_anchor: AnchorSlot,
     mobile: pages::MobileState,
     poki: pages::PokiState,
+    voice: pages::VoiceState,
     /// The last export or import, for the line under its buttons.
     bots_status: Option<(String, bool)>,
     _subscriptions: Vec<Subscription>,
@@ -446,6 +449,7 @@ impl SettingsView {
             accent_anchor: AnchorSlot::default(),
             mobile: pages::MobileState::default(),
             poki: pages::PokiState::default(),
+            voice: pages::VoiceState::default(),
             bots_status: None,
             _subscriptions: subscriptions,
         };

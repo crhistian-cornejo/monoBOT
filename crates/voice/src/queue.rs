@@ -1,5 +1,7 @@
-//! A call's ordered voice queue. Cancellation invalidates both a sentence
-//! being played and the work still waiting behind it.
+//! A call's ordered voice queue. One thread synthesizes and another plays,
+//! so the next sentence is ready while the current one is heard, with no
+//! pause between them. Cancellation invalidates both a sentence being played
+//! and the work still waiting behind it.
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -27,10 +29,14 @@ pub enum Event {
     },
 }
 
-/// Synthesis and playback used by a call's queue.
-pub trait Backend: Send + 'static {
+/// Synthesis and playback used by a call's queue. Synthesis runs on one
+/// thread and playback on another, each in order.
+pub trait Backend: Send + Sync + 'static {
     fn synthesize(&self, text: &str, language: &str, speaker: i32) -> Result<Vec<u8>, String>;
     fn play(&self, audio: &[u8], stop: Arc<AtomicBool>) -> Result<(), String>;
+    /// After a round's last sentence: waits for it to be heard out and for
+    /// the room to fall quiet, so the microphone does not hear the voice.
+    fn settle(&self, _stop: &AtomicBool) {}
 }
 
 impl Backend for Arc<Voice> {
@@ -42,6 +48,10 @@ impl Backend for Arc<Voice> {
     fn play(&self, audio: &[u8], stop: Arc<AtomicBool>) -> Result<(), String> {
         player::play(audio, stop)
     }
+
+    fn settle(&self, stop: &AtomicBool) {
+        player::settle(stop);
+    }
 }
 
 enum Command {
@@ -51,6 +61,20 @@ enum Command {
         text: String,
         language: String,
         speaker: i32,
+        stop: Arc<AtomicBool>,
+    },
+    Drain {
+        round: u64,
+        stop: Arc<AtomicBool>,
+    },
+}
+
+/// What the synthesizer hands the player, in the order it was asked.
+enum Ready {
+    Say {
+        round: u64,
+        member: String,
+        audio: Result<Vec<u8>, String>,
         stop: Arc<AtomicBool>,
     },
     Drain {
@@ -76,11 +100,16 @@ impl Queue {
         event: impl Fn(Event) + Send + 'static,
     ) -> std::io::Result<Self> {
         let (commands, incoming) = mpsc::channel();
+        // One sentence waits ready while another plays: the synthesizer stays
+        // a sentence ahead, never a whole reply an interruption would waste.
+        let (ready, playable) = mpsc::sync_channel::<Ready>(1);
+        let backend = Arc::new(backend);
+        let synthesizer = backend.clone();
         thread::Builder::new()
-            .name("group-call-voice".into())
+            .name("group-call-synth".into())
             .spawn(move || {
                 while let Ok(command) = incoming.recv() {
-                    match command {
+                    let next = match command {
                         Command::Say {
                             round,
                             member,
@@ -92,11 +121,39 @@ impl Queue {
                             if stop.load(Ordering::Acquire) {
                                 continue;
                             }
-                            let result = backend.synthesize(&text, &language, speaker);
+                            let audio = synthesizer.synthesize(&text, &language, speaker);
                             if stop.load(Ordering::Acquire) {
                                 continue;
                             }
-                            let result = result.and_then(|audio| {
+                            Ready::Say {
+                                round,
+                                member,
+                                audio,
+                                stop,
+                            }
+                        }
+                        Command::Drain { round, stop } => Ready::Drain { round, stop },
+                    };
+                    if ready.send(next).is_err() {
+                        return;
+                    }
+                }
+            })?;
+        thread::Builder::new()
+            .name("group-call-voice".into())
+            .spawn(move || {
+                while let Ok(next) = playable.recv() {
+                    match next {
+                        Ready::Say {
+                            round,
+                            member,
+                            audio,
+                            stop,
+                        } => {
+                            if stop.load(Ordering::Acquire) {
+                                continue;
+                            }
+                            let result = audio.and_then(|audio| {
                                 event(Event::Speaking {
                                     round,
                                     member: member.clone(),
@@ -111,7 +168,11 @@ impl Queue {
                                 });
                             }
                         }
-                        Command::Drain { round, stop } => {
+                        Ready::Drain { round, stop } => {
+                            if stop.load(Ordering::Acquire) {
+                                continue;
+                            }
+                            backend.settle(&stop);
                             if !stop.load(Ordering::Acquire) {
                                 event(Event::Drained { round });
                             }
@@ -267,9 +328,93 @@ mod tests {
         assert!(queue.drain(next).is_ok());
     }
 
+    /// Synthesis of the second sentence starts while the first still plays.
+    #[test]
+    fn the_next_sentence_is_synthesized_while_one_plays() {
+        struct Slow {
+            synthesized: Sender<String>,
+            playing: std::sync::Mutex<mpsc::Receiver<()>>,
+        }
+        impl Backend for Slow {
+            fn synthesize(&self, text: &str, _: &str, _: i32) -> Result<Vec<u8>, String> {
+                self.synthesized.send(text.into()).unwrap();
+                Ok(text.as_bytes().to_vec())
+            }
+            fn play(&self, _: &[u8], _: Arc<AtomicBool>) -> Result<(), String> {
+                // Plays until the test lets it finish.
+                let _ = self
+                    .playing
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(Duration::from_secs(2));
+                Ok(())
+            }
+        }
+        let (synthesized, made) = mpsc::channel();
+        let (finish, playing) = mpsc::channel();
+        let mut queue = Queue::with_backend(
+            Slow {
+                synthesized,
+                playing: std::sync::Mutex::new(playing),
+            },
+            |_| {},
+        )
+        .unwrap();
+        let round = queue.begin_round();
+        queue.say(round, "ana", "First.", "es", 0).unwrap();
+        queue.say(round, "ana", "Second.", "es", 0).unwrap();
+        let wait = Duration::from_secs(2);
+        assert_eq!(made.recv_timeout(wait).unwrap(), "First.");
+        // "First." is playing and has not finished: "Second." is made anyway.
+        assert_eq!(made.recv_timeout(wait).unwrap(), "Second.");
+        finish.send(()).unwrap();
+        finish.send(()).unwrap();
+    }
+
+    /// The round ends only after the backend settled the echo.
+    #[test]
+    fn drained_waits_for_the_echo_to_settle() {
+        struct Settling {
+            settled: Arc<AtomicBool>,
+        }
+        impl Backend for Settling {
+            fn synthesize(&self, text: &str, _: &str, _: i32) -> Result<Vec<u8>, String> {
+                Ok(text.as_bytes().to_vec())
+            }
+            fn play(&self, _: &[u8], _: Arc<AtomicBool>) -> Result<(), String> {
+                Ok(())
+            }
+            fn settle(&self, _: &AtomicBool) {
+                std::thread::sleep(Duration::from_millis(30));
+                self.settled.store(true, Ordering::Release);
+            }
+        }
+        let settled = Arc::new(AtomicBool::new(false));
+        let (events, received) = mpsc::channel();
+        let mut queue = Queue::with_backend(
+            Settling {
+                settled: settled.clone(),
+            },
+            move |event| {
+                events.send(event).unwrap();
+            },
+        )
+        .unwrap();
+        let round = queue.begin_round();
+        queue.say(round, "ana", "Hola.", "es", 0).unwrap();
+        queue.drain(round).unwrap();
+        loop {
+            let event = received.recv_timeout(Duration::from_secs(2)).unwrap();
+            if event == (Event::Drained { round }) {
+                assert!(settled.load(Ordering::Acquire));
+                break;
+            }
+        }
+    }
+
     struct Blocking {
         started: Sender<()>,
-        release: mpsc::Receiver<()>,
+        release: std::sync::Mutex<mpsc::Receiver<()>>,
         played: Sender<String>,
         first: AtomicBool,
     }
@@ -279,6 +424,8 @@ mod tests {
             if self.first.swap(false, Ordering::AcqRel) {
                 self.started.send(()).unwrap();
                 self.release
+                    .lock()
+                    .unwrap()
                     .recv_timeout(Duration::from_secs(2))
                     .map_err(|error| error.to_string())?;
             }
@@ -302,7 +449,7 @@ mod tests {
         let mut queue = Queue::with_backend(
             Blocking {
                 started,
-                release: released,
+                release: std::sync::Mutex::new(released),
                 played,
                 first: AtomicBool::new(true),
             },

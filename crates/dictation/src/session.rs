@@ -7,12 +7,10 @@ use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
-use sherpa_onnx::{
-    LinearResampler, OfflineRecognizer, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
-};
+use sherpa_onnx::{LinearResampler, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector};
 
 use crate::capture::Microphone;
-use crate::{model, text, Error};
+use crate::{model, text, Ear, Error};
 
 const RATE: i32 = 16_000;
 /// Kept ahead of each phrase the detector reports, so first consonants are
@@ -33,7 +31,22 @@ pub enum Event {
     /// The microphone went away (unplugged, say). The session ends after
     /// this, and stop still returns what was heard.
     Lost(String),
+    /// Sent once by a call's session: it decides when each turn ends.
+    DecidesTurns,
+    /// A call turn ended, with all that was said in it.
+    TurnEnd(String),
 }
+
+/// What a call's session needs to tell when a turn ends.
+#[derive(Clone)]
+pub struct CallMode {
+    /// "patient", "normal" or "quick".
+    pub pace: String,
+    pub smart_turn: Option<Arc<crate::smart_turn::Model>>,
+}
+
+/// How long the voice detector waits before it reports quiet.
+const MIN_SILENCE_MS: u32 = 450;
 
 pub struct Session {
     stop: Arc<AtomicBool>,
@@ -44,12 +57,18 @@ pub struct Session {
 impl Session {
     pub(crate) fn start(
         dir: &Path,
-        recognizer: Arc<OfflineRecognizer>,
+        recognizer: Arc<Ear>,
+        call: Option<CallMode>,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Self, Error> {
-        let vad =
-            VoiceActivityDetector::create(&silero(model::path(dir, "silero_vad.onnx")?), 30.0)
-                .ok_or(Error::Load)?;
+        let vad = VoiceActivityDetector::create(
+            &silero(
+                model::path(dir, "silero_vad.onnx")?,
+                recognizer.longest_phrase(),
+            ),
+            30.0,
+        )
+        .ok_or(Error::Load)?;
         let mic = Microphone::open()?;
         let resampler = (mic.sample_rate as i32 != RATE)
             .then(|| LinearResampler::create(mic.sample_rate as i32, RATE).ok_or(Error::Load))
@@ -71,7 +90,18 @@ impl Session {
                         delivered: 0,
                         phrases: Vec::new(),
                         speaking: false,
+                        turn: call.map(|call| {
+                            (
+                                crate::turn::Tracker::new(&call.pace, MIN_SILENCE_MS),
+                                call.smart_turn,
+                            )
+                        }),
+                        turn_audio_from: 0,
+                        clock: 0,
                     };
+                    if run.turn.is_some() {
+                        on_event(Event::DecidesTurns);
+                    }
                     run.go(mic, &stop, &cancel, &on_event)
                 })?
         };
@@ -109,7 +139,7 @@ impl Drop for Session {
 }
 
 struct Run {
-    recognizer: Arc<OfflineRecognizer>,
+    recognizer: Arc<Ear>,
     vad: VoiceActivityDetector,
     resampler: Option<LinearResampler>,
     /// Every 16 kHz sample heard, for the pre-roll ahead of a phrase.
@@ -121,6 +151,12 @@ struct Run {
     phrases: Vec<String>,
     /// Whether the detector was hearing speech at the last check.
     speaking: bool,
+    /// A call's turn, and Smart Turn when it is installed.
+    turn: Option<(crate::turn::Tracker, Option<Arc<crate::smart_turn::Model>>)>,
+    /// Where the current turn's audio starts, in heard samples.
+    turn_audio_from: usize,
+    /// Milliseconds of audio heard at the last turn check.
+    clock: u64,
 }
 
 impl Run {
@@ -167,7 +203,40 @@ impl Run {
                 on_event(Event::Speech(speaking));
             }
             self.drain(on_event);
+            self.follow_turn(on_event);
         }
+    }
+
+    /// A call's turn: ends it after its pause, asking Smart Turn first.
+    fn follow_turn(&mut self, on_event: &impl Fn(Event)) {
+        let now = self.seen as u64 * 1_000 / RATE as u64;
+        let ms = now.saturating_sub(self.clock) as u32;
+        self.clock = now;
+        let speaking = self.speaking;
+        let seen = self.seen;
+        let oldest = seen.saturating_sub(self.history.len());
+        let Some((tracker, model)) = self.turn.as_mut() else {
+            return;
+        };
+        if speaking && !tracker.in_turn() {
+            self.turn_audio_from =
+                seen.saturating_sub(PRE_ROLL + ms as usize * RATE as usize / 1_000);
+        }
+        tracker.heard(now, ms, speaking);
+        if tracker.should_ask(now) {
+            let verdict = model.as_ref().and_then(|model| {
+                let from = self.turn_audio_from.max(oldest) - oldest;
+                model.complete(&self.history[from..]).ok()
+            });
+            // Without the model, or when it fails, the words decide alone.
+            tracker.verdict(verdict.unwrap_or(crate::turn::COMPLETE_AT));
+        }
+        let partial = text::join(&self.phrases);
+        if !tracker.done(now, &partial) {
+            return;
+        }
+        tracker.reset();
+        on_event(Event::TurnEnd(partial));
     }
 
     fn feed(&mut self, chunk: &[f32], flush: bool) {
@@ -197,7 +266,7 @@ impl Run {
             audio.extend_from_slice(segment.samples());
             self.delivered = start + segment.samples().len();
             self.vad.pop();
-            let heard = transcribe(&self.recognizer, &audio);
+            let heard = self.recognizer.transcribe(&audio);
             if !heard.trim().is_empty() {
                 self.phrases.push(heard);
                 changed = true;
@@ -220,28 +289,15 @@ impl Run {
     }
 }
 
-fn transcribe(recognizer: &OfflineRecognizer, samples: &[f32]) -> String {
-    if samples.is_empty() {
-        return String::new();
-    }
-    let stream = recognizer.create_stream();
-    stream.accept_waveform(RATE, samples);
-    recognizer.decode(&stream);
-    stream
-        .get_result()
-        .map(|result| result.text)
-        .unwrap_or_default()
-}
-
-fn silero(model: String) -> VadModelConfig {
+fn silero(model: String, longest_phrase: f32) -> VadModelConfig {
     VadModelConfig {
         silero_vad: SileroVadModelConfig {
             model: Some(model),
             threshold: 0.4,
-            min_silence_duration: 0.45,
+            min_silence_duration: MIN_SILENCE_MS as f32 / 1_000.0,
             min_speech_duration: 0.15,
             window_size: 512,
-            max_speech_duration: 20.0,
+            max_speech_duration: longest_phrase,
         },
         sample_rate: RATE,
         num_threads: 1,

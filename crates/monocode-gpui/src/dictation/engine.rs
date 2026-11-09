@@ -9,11 +9,16 @@ use std::sync::{
 };
 use std::time::Duration;
 
-/// How long Parakeet stays in memory after the last dictation. It holds over
-/// half a gigabyte, so it is loaded on the first dictation and let go once
-/// the user has not dictated for a while; dictating a few messages in a row
-/// still loads it once.
-const IDLE: Duration = Duration::from_secs(3 * 60);
+/// How long Parakeet stays in memory after the last dictation. The CPU build
+/// holds over half a gigabyte and takes seconds to load, so it is kept while
+/// the user dictates a few messages in a row. The Neural build holds about
+/// 70 MB and loads in a fraction of a second, so it goes sooner.
+fn idle(engine: Option<monobot_dictation::Engine>) -> Duration {
+    match engine {
+        Some(monobot_dictation::Engine::Neural) => Duration::from_secs(45),
+        _ => Duration::from_secs(3 * 60),
+    }
+}
 
 /// `dictation_status`, with the download's progress for a composer that
 /// follows a setup it did not start.
@@ -25,6 +30,10 @@ pub(crate) struct Status {
     pub bytes: u64,
     pub done: u64,
     pub total: u64,
+    /// What the model takes on disk now.
+    pub on_disk: u64,
+    /// The model on disk runs on the Neural Engine.
+    pub neural: bool,
 }
 
 /// What the composers dictate with; tests stand in for the microphone.
@@ -38,11 +47,19 @@ pub(crate) trait Engine: Send + Sync {
     /// `dictation_start`: opens the microphone, ending any other dictation.
     /// The ticket names this one for stop and cancel.
     fn start(&self, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String>;
+    /// A call's dictation: the session ends each turn at `pace`. Engines
+    /// that cannot tell dictate as usual, and the call times the pauses.
+    fn start_call(&self, _pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+        self.start(on_event)
+    }
     /// `dictation_stop`: the whole transcript, or nothing once another
     /// dictation took the microphone.
     fn stop(&self, ticket: u64) -> String;
     /// `dictation_cancel`: stops listening and drops what was said.
     fn cancel(&self, ticket: u64);
+    /// Settings › Voice: deletes the model, never while dictating or
+    /// downloading.
+    fn remove(&self) -> Result<(), String>;
 }
 
 /// The app's one engine.
@@ -63,10 +80,51 @@ struct Local {
     /// Counts dictations, so a release scheduled after one is skipped when
     /// another started before it ran.
     uses: Arc<AtomicU64>,
-    idle: Duration,
 }
 
 impl Local {
+    fn open(&self, pace: Option<&str>, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+        let previous = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some((_, previous)) = previous {
+            previous.cancel();
+        }
+        // Keep Parakeet loaded while the microphone is open: this cancels a
+        // release already waiting.
+        self.uses.fetch_add(1, Ordering::AcqRel);
+        let opened = (|| {
+            // A missing model fails here, before anything asks for the microphone.
+            self.engine.prepare().map_err(|e| e.to_string())?;
+            super::permission::microphone()?;
+            match pace {
+                Some(pace) => self.engine.start_call(pace, on_event),
+                None => self.engine.start(on_event),
+            }
+            .map_err(|e| e.to_string())
+        })();
+        let session = match opened {
+            Ok(session) => session,
+            Err(err) => {
+                // A failed start (no microphone, say) must not pin the model.
+                self.release_when_idle();
+                return Err(err);
+            }
+        };
+        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed) + 1;
+        let replaced = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace((ticket, session));
+        if let Some((_, replaced)) = replaced {
+            replaced.cancel();
+        }
+        Ok(ticket)
+    }
+
     fn new(dir: std::path::PathBuf) -> Self {
         Self {
             engine: Arc::new(Dictation::new(dir)),
@@ -76,7 +134,6 @@ impl Local {
             done: AtomicU64::new(0),
             total: AtomicU64::new(0),
             uses: Arc::new(AtomicU64::new(0)),
-            idle: IDLE,
         }
     }
 
@@ -85,7 +142,7 @@ impl Local {
         let this_use = self.uses.fetch_add(1, Ordering::AcqRel) + 1;
         let uses = self.uses.clone();
         let engine = self.engine.clone();
-        let idle = self.idle;
+        let idle = idle(engine.engine());
         let _ = std::thread::Builder::new()
             .name("dictation-idle".into())
             .spawn(move || {
@@ -114,13 +171,22 @@ impl Engine for Local {
             bytes: monobot_dictation::model::total_bytes(),
             done: self.done.load(Ordering::Relaxed),
             total: self.total.load(Ordering::Relaxed),
+            on_disk: self.engine.disk_bytes(),
+            neural: self.engine.engine() == Some(monobot_dictation::Engine::Neural),
         }
     }
 
     fn prepare(&self) {
-        if !self.engine.installed() {
-            // When it cannot (no network, say) the composer offers it again.
+        // The first run fetches the model; a Mac that still has only the CPU
+        // build fetches the Neural one, dictating with the CPU meanwhile and
+        // deleting it after. When it cannot (no network, say) the composer
+        // offers it again.
+        if self.engine.wants_upgrade() {
             let _ = self.install(&mut |_, _| {});
+        }
+        // Calls' end-of-turn detector, 32 MB; without it the words decide.
+        if self.engine.installed() {
+            let _ = self.engine.install_turn();
         }
     }
 
@@ -143,41 +209,11 @@ impl Engine for Local {
     }
 
     fn start(&self, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
-        let previous = self
-            .session
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        if let Some((_, previous)) = previous {
-            previous.cancel();
-        }
-        // Keep Parakeet loaded while the microphone is open: this cancels a
-        // release already waiting.
-        self.uses.fetch_add(1, Ordering::AcqRel);
-        let opened = (|| {
-            // A missing model fails here, before anything asks for the microphone.
-            self.engine.prepare().map_err(|e| e.to_string())?;
-            super::permission::microphone()?;
-            self.engine.start(on_event).map_err(|e| e.to_string())
-        })();
-        let session = match opened {
-            Ok(session) => session,
-            Err(err) => {
-                // A failed start (no microphone, say) must not pin the model.
-                self.release_when_idle();
-                return Err(err);
-            }
-        };
-        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed) + 1;
-        let replaced = self
-            .session
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .replace((ticket, session));
-        if let Some((_, replaced)) = replaced {
-            replaced.cancel();
-        }
-        Ok(ticket)
+        self.open(None, on_event)
+    }
+
+    fn start_call(&self, pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+        self.open(Some(pace), on_event)
     }
 
     fn stop(&self, ticket: u64) -> String {
@@ -194,6 +230,21 @@ impl Engine for Local {
             session.cancel();
             self.release_when_idle();
         }
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        if self.installing.load(Ordering::Acquire) {
+            return Err("The speech model is downloading.".into());
+        }
+        let dictating = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        if dictating {
+            return Err("Stop dictating before deleting the speech model.".into());
+        }
+        self.engine.remove().map_err(|error| error.to_string())
     }
 }
 
@@ -215,6 +266,10 @@ mod tests {
         );
         assert_eq!(engine.stop(1), "");
         engine.cancel(1);
+        assert_eq!(status.on_disk, 0);
+        assert!(!status.neural);
+        // Deleting a model that is not there is fine.
+        assert_eq!(engine.remove(), Ok(()));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -265,16 +320,11 @@ mod tests {
             engine.installed(),
             "the speech model is in the desktop app's folder"
         );
+        assert_eq!(rate, 16_000, "a 16 kHz recording");
         let started = std::time::Instant::now();
-        let recognizer = engine.prepare().unwrap();
-        eprintln!("loaded in {:?}", started.elapsed());
-        let stream = recognizer.create_stream();
-        stream.accept_waveform(rate as i32, &samples);
-        recognizer.decode(&stream);
-        let heard = stream
-            .get_result()
-            .map(|result| result.text)
-            .unwrap_or_default();
+        let ear = engine.prepare().unwrap();
+        eprintln!("loaded {:?} in {:?}", ear.engine(), started.elapsed());
+        let heard = ear.transcribe(&samples);
         eprintln!("heard {:.1}s: {heard}", samples.len() as f32 / rate as f32);
         if let Ok(expected) = expected {
             let words = |text: &str| {

@@ -17,14 +17,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-pub(crate) use engine::Engine;
+pub(crate) use engine::{Engine, Status};
 
 /// The engine the composers dictate with; tests put a stand-in here.
 #[derive(Clone)]
 pub(crate) struct Engines(pub Arc<dyn Engine>);
 impl Global for Engines {}
 
-fn engine(cx: &App) -> Arc<dyn Engine> {
+pub(crate) fn engine(cx: &App) -> Arc<dyn Engine> {
     cx.try_global::<Engines>()
         .map_or_else(engine::local, |engines| engines.0.clone())
 }
@@ -68,6 +68,11 @@ pub(crate) struct Dictation {
     generation: u64,
     task: Option<Task<()>>,
     events: Option<Task<()>>,
+    /// A call's mic: its pace, and the session ends each turn itself.
+    call_pace: Option<String>,
+    /// The session said it decides turns, and the last turn it ended.
+    decides_turns: bool,
+    turn_ended: bool,
 }
 
 impl Dictation {
@@ -88,7 +93,27 @@ impl Dictation {
             generation: 0,
             task: None,
             events: None,
+            call_pace: None,
+            decides_turns: false,
+            turn_ended: false,
         }
+    }
+
+    /// A call's mic, whose session ends each turn at `pace`.
+    pub(crate) fn for_call(input: &Entity<Input>, pace: &str, cx: &mut Context<Self>) -> Self {
+        let mut mic = Self::new(input, cx);
+        mic.call_pace = Some(pace.to_owned());
+        mic
+    }
+
+    /// The session decides when a turn ends (`turn_ended`).
+    pub(crate) fn decides_turns(&self) -> bool {
+        self.decides_turns
+    }
+
+    /// Whether a turn ended since this was last asked.
+    pub(crate) fn take_turn_end(&mut self) -> bool {
+        std::mem::take(&mut self.turn_ended)
     }
 
     pub(crate) fn phase(&self) -> Phase {
@@ -139,12 +164,14 @@ impl Dictation {
             let status = status.await;
             let _ = this.update(cx, |this, cx| {
                 this.model_bytes = status.bytes;
-                if status.installing {
-                    this.follow(cx);
-                } else if !status.installed {
-                    this.set_phase(Phase::NeedsModel, cx);
-                } else {
+                // A model on disk dictates at once, even while a faster
+                // build downloads behind it.
+                if status.installed {
                     this.start(cx);
+                } else if status.installing {
+                    this.follow(cx);
+                } else {
+                    this.set_phase(Phase::NeedsModel, cx);
                 }
             });
         }));
@@ -174,12 +201,19 @@ impl Dictation {
             });
         }));
         let engine = self.engine.clone();
+        self.decides_turns = false;
+        self.turn_ended = false;
+        let pace = self.call_pace.clone();
         let started = cx.background_executor().spawn({
             let engine = engine.clone();
             async move {
-                engine.start(Box::new(move |event| {
+                let on_event = Box::new(move |event| {
                     let _ = heard.try_send(event);
-                }))
+                });
+                match pace {
+                    Some(pace) => engine.start_call(&pace, on_event),
+                    None => engine.start(on_event),
+                }
             }
         });
         // Detached, so a microphone that opens after a cancel, or after the
@@ -231,6 +265,11 @@ impl Dictation {
                     self.speaking = speaking;
                     cx.notify();
                 }
+            }
+            Event::DecidesTurns => self.decides_turns = true,
+            Event::TurnEnd(_) => {
+                self.turn_ended = true;
+                cx.notify();
             }
             // The microphone went away: keep what was heard and say why, so
             // nothing waits on a microphone that will never speak again.

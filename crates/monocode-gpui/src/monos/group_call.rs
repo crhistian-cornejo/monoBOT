@@ -93,6 +93,51 @@ fn local_voice() -> Arc<Voice> {
         .clone()
 }
 
+/// The call voice as Settings › Voice manages it: the same model, the same
+/// download guard and the same holds the calls use.
+pub(crate) mod model {
+    use super::*;
+
+    pub(crate) fn installed() -> bool {
+        local_voice().installed()
+    }
+
+    pub(crate) fn installing() -> bool {
+        VOICE_INSTALLING.load(Ordering::Acquire)
+    }
+
+    pub(crate) fn disk_bytes() -> u64 {
+        local_voice().disk_bytes()
+    }
+
+    /// Downloads the voice unless a call or Settings already is. Blocks; run
+    /// it off the interface thread.
+    pub(crate) fn install(progress: impl FnMut(u64, u64)) -> Result<(), String> {
+        if VOICE_INSTALLING
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return Err("The voices are already downloading.".into());
+        }
+        let _installing = InstallingVoice;
+        local_voice()
+            .install(progress)
+            .map_err(|error| error.to_string())
+    }
+
+    /// Deletes the voice, never under a live call.
+    pub(crate) fn remove() -> Result<(), String> {
+        remove_from(&VOICE_USES, &local_voice())
+    }
+
+    pub(in crate::monos) fn remove_from(uses: &VoiceUses, voice: &Voice) -> Result<(), String> {
+        if uses.holds.load(Ordering::Acquire) > 0 || installing() {
+            return Err("Hang up the call before deleting its voice.".into());
+        }
+        voice.remove().map_err(|error| error.to_string())
+    }
+}
+
 struct InstallingVoice;
 impl Drop for InstallingVoice {
     fn drop(&mut self) {
@@ -165,11 +210,35 @@ pub(super) struct CallState {
     earlier: Vec<(String, String)>,
     stream: Option<Stream>,
     speaking: Option<String>,
+    /// Set while the call talks through a live model instead of this Mac.
+    live: Option<live::LiveCall>,
+    /// The voice goes into the user's ears, so the mic can stay open while
+    /// the members answer and the user can cut in.
+    in_ears: bool,
 }
 
 impl CallState {
     fn live(&self) -> bool {
         self.phase.live()
+    }
+
+    /// The mic stays open while members answer: only with the voice in the
+    /// user's ears, so it never hears them, and never in a live call.
+    fn overhears(&self) -> bool {
+        self.in_ears
+            && self.live.is_none()
+            && matches!(self.phase, Phase::Answering | Phase::Draining)
+    }
+
+    /// What the members said this round, to tell their echo from the user.
+    fn said_lately(&self) -> String {
+        self.lines
+            .iter()
+            .rev()
+            .take_while(|line| line.value.who != "user")
+            .map(|line| line.value.text.as_str())
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 }
 
@@ -213,7 +282,8 @@ impl Monos {
         self.call_hang_up(cx);
         let input = cx.new(|cx| Input::field("Say something", "Say something", content(0.35), cx));
         let dictated = cx.new(Input::session_composer);
-        let mic = cx.new(|cx| Dictation::new(&dictated, cx));
+        let pace = self.prefs.voice_pace.clone();
+        let mic = cx.new(|cx| Dictation::for_call(&dictated, &pace, cx));
         let id = group.id.clone();
         let mic_events = cx.observe(&mic, move |this, _, cx| this.call_mic_changed(&id, cx));
         let id = group.id.clone();
@@ -252,10 +322,26 @@ impl Monos {
             earlier: Vec::new(),
             stream: None,
             speaking: None,
+            live: None,
+            in_ears: false,
         });
+        let group = group.id.clone();
+        let ears = cx
+            .background_executor()
+            .spawn(async move { monobot_dictation::devices::in_ears() });
+        cx.spawn(async move |this, cx| {
+            let in_ears = ears.await;
+            let _ = this.update(cx, |this, _| {
+                if let Some(call) = this.call.as_mut().filter(|call| call.group == group) {
+                    call.in_ears = in_ears;
+                }
+            });
+        })
+        .detach();
     }
 
     fn call_start(&mut self, cx: &mut Context<Self>) {
+        let choice = self.call_live_choice();
         let Some(call) = self.call.as_mut() else {
             return;
         };
@@ -264,6 +350,18 @@ impl Monos {
         }
         call.error = None;
         call.lines.clear();
+        if let Some(provider) = choice {
+            self.call_start_live(provider, cx);
+            return;
+        }
+        self.call_start_local(cx);
+    }
+
+    /// Starts the call with this Mac's voices.
+    fn call_start_local(&mut self, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_mut() else {
+            return;
+        };
         if !call.voice.installed() {
             call.phase = Phase::NeedsVoice;
             cx.notify();
@@ -445,6 +543,10 @@ impl Monos {
         if let Some(stream) = call.stream.take() {
             self.cancel_call_seat(&call.group, &stream.member, &stream.request, cx);
         }
+        if let Some(live_call) = call.live.take() {
+            self.call_live_end(live_call, &call.group.clone(), cx);
+        }
+        let live = live || call.lines.iter().any(|line| line.value.who == "live");
         if live {
             let lines: Vec<_> = call.lines.into_iter().map(|line| line.value).collect();
             let date = chrono::DateTime::from_timestamp_millis(call.started_at as i64)
@@ -498,7 +600,7 @@ impl Monos {
         let Some(call) = self.call.as_ref() else {
             return;
         };
-        if call.phase != Phase::Listening || call.muted {
+        if call.muted || !(call.phase == Phase::Listening || call.overhears()) {
             return;
         }
         let mic = call.mic.clone();
@@ -521,15 +623,51 @@ impl Monos {
         };
         if call.muted || call.phase != Phase::Listening {
             let mic = call.mic.clone();
+            if !call.muted && call.overhears() {
+                // The user cuts in: real words, not a backchannel and not
+                // the members' own voice heard back.
+                let ended = mic.update(cx, |mic, _| mic.take_turn_end());
+                let heard = mic.read(cx).partial().trim().to_owned();
+                if ended
+                    && monobot_dictation::turn::cuts_in(&heard)
+                    && !monobot_dictation::turn::echo_of(&heard, &call.said_lately())
+                {
+                    self.call_say(heard, cx);
+                } else if ended {
+                    // A backchannel: listen on for the next turn.
+                    mic.update(cx, |mic, cx| mic.cancel(cx));
+                } else if mic.read(cx).phase() == MicPhase::Idle {
+                    self.call_listen(cx);
+                }
+                return;
+            }
             if mic.read(cx).phase().cancellable() {
                 mic.update(cx, |mic, cx| mic.cancel(cx));
             }
             return;
         }
-        let (phase, speaking, partial) = {
+        let (phase, speaking, partial, decides) = {
             let mic = call.mic.read(cx);
-            (mic.phase(), mic.speaking(), mic.partial().to_owned())
+            (
+                mic.phase(),
+                mic.speaking(),
+                mic.partial().to_owned(),
+                mic.decides_turns(),
+            )
         };
+        // The session ended the turn (its pause, its words, Smart Turn).
+        let mic = call.mic.clone();
+        if decides && mic.update(cx, |mic, _| mic.take_turn_end()) {
+            if phase == MicPhase::Listening && !partial.trim().is_empty() {
+                // What the mic hands back when it stops is this turn.
+                if let Some(call) = self.call.as_mut() {
+                    call.transcribing = true;
+                }
+                mic.update(cx, |mic, cx| mic.toggle(cx));
+            }
+            cx.notify();
+            return;
+        }
         if phase == MicPhase::Finishing {
             call.transcribing = true;
         }
@@ -550,7 +688,9 @@ impl Monos {
             self.call_listen(cx);
             return;
         }
-        let quiet = phase == MicPhase::Listening && !speaking && !partial.trim().is_empty();
+        // Without a session that decides, a fixed pause ends the turn.
+        let quiet =
+            !decides && phase == MicPhase::Listening && !speaking && !partial.trim().is_empty();
         if quiet && call.pause_text.as_deref() != Some(&partial) {
             call.pause_epoch = next_generation();
             call.pause_text = Some(partial);
@@ -693,6 +833,8 @@ impl Monos {
         };
         call.error = None;
         call.members = members;
+        // «Hola yares…» calls Jarvis as if his name had been heard right.
+        let text = call::spoken_address(&call.members, &text).unwrap_or(text);
         let order = call::turn_order(&call.members, &text, call.previous_first.as_deref());
         if !order.addressed {
             call.previous_first = order.order.first().cloned();
@@ -939,6 +1081,9 @@ impl Monos {
         });
         if current {
             self.call_progress(cx);
+        }
+        if self.call_live_asking(&key.1) {
+            self.call_live_progress(&key.1, cx);
         }
     }
 
@@ -1327,6 +1472,20 @@ impl Monos {
     }
 
     #[cfg(test)]
+    pub(super) fn call_test_in_ears(&mut self, in_ears: bool) {
+        if let Some(call) = self.call.as_mut() {
+            call.in_ears = in_ears;
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn call_test_answering(&self) -> bool {
+        self.call
+            .as_ref()
+            .is_some_and(|call| matches!(call.phase, Phase::Answering | Phase::Draining))
+    }
+
+    #[cfg(test)]
     pub(super) fn call_test_say(&mut self, text: &str, cx: &mut Context<Self>) {
         self.call_say(text.into(), cx);
     }
@@ -1410,4 +1569,13 @@ impl Monos {
             call.lines.iter().map(|line| line.value.clone()).collect()
         })
     }
+}
+
+#[path = "group_call_live.rs"]
+mod live;
+
+#[cfg(test)]
+pub(super) mod live_test {
+    pub(in crate::monos) use super::live::Message;
+    pub(in crate::monos) use monobot_live::session::State;
 }

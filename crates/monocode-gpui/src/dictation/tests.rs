@@ -42,12 +42,15 @@ impl Fake {
 
 impl Engine for Fake {
     fn status(&self) -> Status {
+        let installed = *self.installed.lock().unwrap();
         Status {
-            installed: *self.installed.lock().unwrap(),
+            installed,
             installing: *self.installing.lock().unwrap(),
             bytes: 671_122_626,
             done: 300,
             total: 1_200,
+            on_disk: if installed { 460_000_000 } else { 0 },
+            neural: installed,
         }
     }
 
@@ -79,6 +82,12 @@ impl Engine for Fake {
     fn cancel(&self, ticket: u64) {
         self.call(format!("cancel {ticket}"));
         self.hearing.lock().unwrap().take();
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        self.call("remove");
+        *self.installed.lock().unwrap() = false;
+        Ok(())
     }
 }
 
@@ -252,6 +261,19 @@ fn follows_the_setup_the_app_started(cx: &mut TestAppContext) {
     cx.executor().advance_clock(Duration::from_millis(600));
     cx.run_until_parked();
     assert_eq!(phase(&dictation, cx), Phase::Listening);
+}
+
+/// A Mac with the CPU build fetches the Neural one at launch; the mic does
+/// not wait for it.
+#[gpui::test]
+fn dictates_with_the_model_on_disk_while_a_faster_one_downloads(cx: &mut TestAppContext) {
+    let fake = Fake::installed("");
+    *fake.installing.lock().unwrap() = true;
+    let (_, dictation) = dictation(&fake, "", cx);
+    dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Listening);
+    assert_eq!(fake.calls(), ["start"]);
 }
 
 #[gpui::test]

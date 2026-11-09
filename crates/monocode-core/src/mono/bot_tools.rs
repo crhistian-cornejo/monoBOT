@@ -9,7 +9,7 @@ use std::collections::HashSet;
 /// The services a bot can be given (BOT_SERVICES).
 pub const SERVICES: [&str; 3] = ["gmail", "drive", "notion"];
 /// Claude Code's own tools a bot may use (BOT_ACCESS).
-pub const ACCESS: [&str; 4] = ["web", "read", "edit", "images"];
+pub const ACCESS: [&str; 5] = ["web", "read", "edit", "images", "computer"];
 /// Web and reading files, unless its role says otherwise (DEFAULT_ACCESS).
 pub const DEFAULT_ACCESS: [&str; 2] = ["web", "read"];
 pub const FOLDERS_MAX: usize = 20;

@@ -138,14 +138,54 @@ pub(crate) struct Completion {
     _observe: Subscription,
 }
 impl EventEmitter<ModePicked> for Completion {}
-/// `/{id}` for every image style and format.
+/// `/{id}` for every image style and format, and the formats' older words
+/// (`/cinema`), so prompts written with them still read as presets.
 fn image_preset_tokens() -> impl Iterator<Item = String> {
     use monocode_core::images::styles::{FORMATS, STYLES};
     STYLES
         .iter()
         .map(|style| style.id)
-        .chain(FORMATS.iter().map(|format| format.id))
+        .chain(
+            FORMATS.iter().flat_map(|format| {
+                std::iter::once(format.id).chain(format.aliases.iter().copied())
+            }),
+        )
         .map(|id| format!("/{id}"))
+}
+/// `/format` lists only the picture shapes, in catalogue order.
+fn is_format_menu(query: &str) -> bool {
+    query.eq_ignore_ascii_case("format") || query.eq_ignore_ascii_case("formats")
+}
+/// An image style for the slash menu.
+fn style_choice(style: &'static monocode_core::images::styles::Style) -> Choice {
+    preset_choice(
+        style.id,
+        style.name,
+        format!("Style · {}", style.blurb),
+        "palette",
+    )
+}
+/// An image format for the slash menu; picking it writes its own name.
+fn format_choice(format: &'static monocode_core::images::styles::Format) -> Choice {
+    preset_choice(
+        format.id,
+        format.name,
+        format!("Format {} · {}", format.aspect, format.use_for),
+        "image-01",
+    )
+}
+fn preset_choice(id: &str, label: &str, detail: String, glyph: &'static str) -> Choice {
+    Choice {
+        label: label.into(),
+        detail,
+        insertion: format!("/{id}"),
+        builtin: None,
+        mode: None,
+        file: false,
+        server: None,
+        person: None,
+        preset: Some(glyph),
+    }
 }
 /// Composer.tsx's `buildMentionIndex`: a name is a label only when it is
 /// unique and needs no quoting.
@@ -793,6 +833,14 @@ impl Completion {
                 preset: None,
             }));
             self.choices = choices;
+        } else if self.image_presets
+            && is_format_menu(&token.query)
+            && !self.has_user_command(&token.query)
+        {
+            self.choices = monocode_core::images::styles::FORMATS
+                .iter()
+                .map(format_choice)
+                .collect();
         } else {
             let mut choices = Vec::new();
             for (order, (id, label, detail)) in [
@@ -883,49 +931,24 @@ impl Completion {
                 use monocode_core::images::styles::{FORMATS, STYLES};
                 let presets = STYLES
                     .iter()
-                    .map(|style| {
-                        (
-                            style.id,
-                            style.name,
-                            format!("Style · {}", style.blurb),
-                            "palette",
-                        )
-                    })
-                    .chain(FORMATS.iter().map(|format| {
-                        (
-                            format.id,
-                            format.name,
-                            format!("Format {} · {}", format.aspect, format.use_for),
-                            "image-01",
-                        )
-                    }));
-                for (order, (id, label, detail, glyph)) in presets.enumerate() {
+                    .map(style_choice)
+                    .chain(FORMATS.iter().map(format_choice));
+                for (order, choice) in presets.enumerate() {
+                    let id = choice.insertion.trim_start_matches('/');
                     if self.has_user_command(id) {
                         continue;
                     }
-                    if let Some(score) =
-                        composer::score(&token.query, &format!("{id} {label} {detail}"))
-                    {
+                    if let Some(score) = composer::score(
+                        &token.query,
+                        &format!("{id} {} {}", choice.label, choice.detail),
+                    ) {
                         // In the bare menu the looks come first, in catalogue order.
                         let priority = if token.query.is_empty() {
                             200 - order as i64
                         } else {
                             90
                         };
-                        choices.push((
-                            score + priority,
-                            Choice {
-                                label: label.into(),
-                                detail,
-                                insertion: format!("/{id}"),
-                                builtin: None,
-                                mode: None,
-                                file: false,
-                                server: None,
-                                person: None,
-                                preset: Some(glyph),
-                            },
-                        ));
+                        choices.push((score + priority, choice));
                     }
                 }
             }
@@ -1496,6 +1519,58 @@ mod tests {
             })
             .unwrap();
         assert_eq!(submitted.get(), 0);
+    }
+    #[gpui::test]
+    fn format_lists_every_picture_shape_and_writes_its_name(cx: &mut TestAppContext) {
+        use monocode_core::images::styles::FORMATS;
+        let window = window(cx);
+        window
+            .update(cx, |view, _, cx| {
+                view.set_image_presets(true, cx);
+                view.input.update(cx, |input, cx| {
+                    input.set_text("a pink lake /format".into(), cx)
+                });
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, _| {
+                let listed: Vec<_> = view
+                    .choices
+                    .iter()
+                    .map(|c| (c.insertion.as_str(), c.detail.as_str()))
+                    .collect();
+                let expected: Vec<_> = FORMATS.iter().map(|f| format!("/{}", f.id)).collect();
+                assert_eq!(
+                    listed
+                        .iter()
+                        .map(|(insertion, _)| *insertion)
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                assert_eq!(listed[7].1, "Format 21:9 · Banners and wide headers");
+            })
+            .unwrap();
+        // The last one is Ultrawide: it writes `/ultrawide`, not `/cinema`.
+        cx.simulate_keystrokes(window.into(), "up enter");
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, cx| {
+                assert_eq!(view.input.read(cx).content, "a pink lake /ultrawide ");
+                // An older word still reads as a preset in the text.
+                assert!(view.known.contains("/cinema"));
+                // Without the image bot, `/format` is just a word.
+                view.set_image_presets(false, cx);
+                view.input
+                    .update(cx, |input, cx| input.set_text("/format".into(), cx));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, _| {
+                assert!(view.choices.iter().all(|c| c.preset.is_none()));
+            })
+            .unwrap();
     }
     #[gpui::test]
     fn visualize_completion_inserts_a_command_without_selecting_a_mode(cx: &mut TestAppContext) {

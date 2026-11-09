@@ -1,5 +1,8 @@
-//! Interruptible local playback for the synthesizer's mono PCM WAV.
+//! Interruptible local playback for the synthesizer's mono PCM WAV, through
+//! one output stream that stays open while a call speaks.
 use std::{
+    cell::RefCell,
+    collections::VecDeque,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -76,121 +79,265 @@ fn next_sample(samples: &[f32], position: &mut f64, step: f64) -> Option<f32> {
     Some(first + (second - first) * fraction)
 }
 
-/// Plays one synthesized sentence on a background thread. Set `stop` to stop
-/// promptly; the caller owns the flag so an interrupt can also cancel queued
-/// work before playback begins.
+/// After a round's last sentence, how long the room keeps ringing before the
+/// microphone may listen again: speakers reverberate (IVY waits 400 ms too),
+/// headphones do not.
+pub fn echo_tail(in_ears: bool) -> Duration {
+    Duration::from_millis(if in_ears { 120 } else { 400 })
+}
+
+/// Silence ahead of the first sentence on a freshly opened output, so a
+/// Bluetooth link that wakes with the stream does not clip it.
+const LEAD_IN: Duration = Duration::from_millis(150);
+/// `play` returns with this much still queued, so the next sentence follows
+/// without a gap.
+const OVERLAP: Duration = Duration::from_millis(20);
+
+/// One output stream, open for as long as the thread that plays keeps
+/// playing: a call's player thread, from its first sentence to hang-up.
+/// Reopening the device for every sentence flipped Bluetooth headsets
+/// between profiles and clipped sentence starts.
+struct Output {
+    _stream: cpal::Stream,
+    device: String,
+    rate: u32,
+    pending: Arc<Mutex<VecDeque<f32>>>,
+    failure: Arc<Mutex<Option<String>>>,
+    in_ears: bool,
+}
+
+thread_local! {
+    static OUTPUT: RefCell<Option<Output>> = const { RefCell::new(None) };
+}
+
+fn default_device() -> Result<(cpal::Device, String), String> {
+    let device = cpal::default_host()
+        .default_output_device()
+        .ok_or("No audio output device found")?;
+    let id = device.id().map(|id| id.to_string()).unwrap_or_default();
+    Ok((device, id))
+}
+
+impl Output {
+    fn open() -> Result<Self, String> {
+        let (device, id) = default_device()?;
+        let supported = device
+            .default_output_config()
+            .map_err(|error| format!("Could not read the audio output format: {error}"))?;
+        let format = supported.sample_format();
+        let config: cpal::StreamConfig = supported.into();
+        if config.channels == 0 || !(8_000..=192_000).contains(&config.sample_rate) {
+            return Err("Unsupported audio output format".into());
+        }
+        let pending = Arc::new(Mutex::new(VecDeque::new()));
+        let failure = Arc::new(Mutex::new(None));
+        let (p, f) = (&pending, &failure);
+        let stream = match format {
+            cpal::SampleFormat::F32 => output::<f32>(&device, &config, p, f),
+            cpal::SampleFormat::F64 => output::<f64>(&device, &config, p, f),
+            cpal::SampleFormat::I16 => output::<i16>(&device, &config, p, f),
+            cpal::SampleFormat::I32 => output::<i32>(&device, &config, p, f),
+            cpal::SampleFormat::U16 => output::<u16>(&device, &config, p, f),
+            cpal::SampleFormat::I8 => output::<i8>(&device, &config, p, f),
+            cpal::SampleFormat::U8 => output::<u8>(&device, &config, p, f),
+            other => return Err(format!("Unsupported audio sample format {other}")),
+        }?;
+        stream
+            .play()
+            .map_err(|error| format!("Could not play voice audio: {error}"))?;
+        let rate = config.sample_rate;
+        pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(std::iter::repeat_n(0.0, samples_in(LEAD_IN, rate)));
+        Ok(Self {
+            _stream: stream,
+            device: id,
+            rate,
+            pending,
+            failure,
+            in_ears: monobot_dictation::devices::in_ears(),
+        })
+    }
+
+    /// Still usable: nothing failed and the user did not switch outputs.
+    fn current(&self) -> bool {
+        self.failure
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_none()
+            && default_device().is_ok_and(|(_, id)| id == self.device)
+    }
+
+    fn queued(&self) -> usize {
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    fn failed(&self) -> Option<String> {
+        self.failure
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn clear(&self) {
+        self.pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+    }
+}
+
+fn samples_in(duration: Duration, rate: u32) -> usize {
+    (duration.as_secs_f64() * f64::from(rate)) as usize
+}
+
+/// The thread's output, reopened when it failed or the default device changed.
+fn with_output<T>(work: impl FnOnce(&Output) -> Result<T, String>) -> Result<T, String> {
+    OUTPUT.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        if !slot.as_ref().is_some_and(Output::current) {
+            *slot = None;
+            *slot = Some(Output::open()?);
+        }
+        work(slot.as_ref().expect("opened above"))
+    })
+}
+
+/// Plays one synthesized sentence on this thread's output and returns as it
+/// ends. Set `stop` to cut it short; the caller owns the flag so an interrupt
+/// can also cancel queued work before playback begins.
 pub fn play(wav: &[u8], stop: Arc<AtomicBool>) -> Result<(), String> {
     if stop.load(Ordering::Acquire) {
         return Ok(());
     }
     let audio = decode(wav)?;
-    let device = cpal::default_host()
-        .default_output_device()
-        .ok_or("No audio output device found")?;
-    let supported = device
-        .default_output_config()
-        .map_err(|error| format!("Could not read the audio output format: {error}"))?;
-    let format = supported.sample_format();
-    let config: cpal::StreamConfig = supported.into();
-    if config.channels == 0 || !(8_000..=192_000).contains(&config.sample_rate) {
-        return Err("Unsupported audio output format".into());
-    }
-    let done = Arc::new(AtomicBool::new(false));
-    let error = Arc::new(Mutex::new(None));
-    let timeout = Duration::from_secs_f64(audio.samples.len() as f64 / f64::from(audio.rate))
-        .saturating_add(Duration::from_secs(5));
-    let samples = Arc::new(audio.samples);
-    let step = f64::from(audio.rate) / f64::from(config.sample_rate);
-    let stream = match format {
-        cpal::SampleFormat::F32 => {
-            output::<f32>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        cpal::SampleFormat::F64 => {
-            output::<f64>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        cpal::SampleFormat::I16 => {
-            output::<i16>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        cpal::SampleFormat::I32 => {
-            output::<i32>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        cpal::SampleFormat::U16 => {
-            output::<u16>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        cpal::SampleFormat::I8 => {
-            output::<i8>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        cpal::SampleFormat::U8 => {
-            output::<u8>(&device, &config, samples, step, &stop, &done, &error)
-        }
-        other => return Err(format!("Unsupported audio sample format {other}")),
-    }?;
-    stream
-        .play()
-        .map_err(|error| format!("Could not play voice audio: {error}"))?;
-    let started = Instant::now();
-    let mut finished_at = None;
-    while !stop.load(Ordering::Acquire) {
-        if error.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
-            break;
-        }
-        if done.load(Ordering::Acquire) {
-            let since = finished_at.get_or_insert_with(Instant::now);
-            if since.elapsed() >= Duration::from_millis(100) {
-                break;
+    with_output(|output| {
+        let step = f64::from(audio.rate) / f64::from(output.rate);
+        let mut position = 0.0;
+        let resampled: Vec<f32> =
+            std::iter::from_fn(|| next_sample(&audio.samples, &mut position, step)).collect();
+        let timeout = Duration::from_secs_f64(resampled.len() as f64 / f64::from(output.rate))
+            .saturating_add(Duration::from_secs(5));
+        output
+            .pending
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend(resampled);
+        let left = samples_in(OVERLAP, output.rate);
+        let started = Instant::now();
+        loop {
+            if stop.load(Ordering::Acquire) {
+                output.clear();
+                return Ok(());
             }
+            if let Some(error) = output.failed() {
+                output.clear();
+                return Err(error);
+            }
+            if output.queued() <= left {
+                return Ok(());
+            }
+            if started.elapsed() > timeout {
+                output.clear();
+                return Err("Audio output did not finish in time".into());
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-        if started.elapsed() > timeout {
-            return Err("Audio output did not finish in time".into());
+    })
+}
+
+/// Queues raw speech (mono, at `rate`) on this thread's output without
+/// waiting, for a live call that streams as it arrives. Returns how long is
+/// queued now.
+pub fn feed(samples: &[f32], rate: u32) -> Result<Duration, String> {
+    with_output(|output| {
+        let step = f64::from(rate) / f64::from(output.rate);
+        let mut position = 0.0;
+        let resampled = std::iter::from_fn(|| next_sample(samples, &mut position, step));
+        let mut pending = output.pending.lock().unwrap_or_else(|e| e.into_inner());
+        pending.extend(resampled);
+        Ok(Duration::from_secs_f64(
+            pending.len() as f64 / f64::from(output.rate),
+        ))
+    })
+}
+
+/// Drops whatever this thread's output still has queued: the user talked
+/// over it.
+pub fn flush() {
+    OUTPUT.with(|slot| {
+        if let Some(output) = slot.borrow().as_ref() {
+            output.clear();
         }
+    });
+}
+
+/// How long this thread's output still has queued.
+pub fn queued() -> Duration {
+    OUTPUT.with(|slot| {
+        slot.borrow().as_ref().map_or(Duration::ZERO, |output| {
+            Duration::from_secs_f64(output.queued() as f64 / f64::from(output.rate))
+        })
+    })
+}
+
+/// Whether this thread's output goes into the user's ears.
+pub fn in_ears() -> bool {
+    OUTPUT.with(|slot| slot.borrow().as_ref().is_some_and(|output| output.in_ears))
+}
+
+/// Waits for what is still playing on this thread's output, then for the
+/// echo tail, so the microphone that opens next does not hear the voice.
+pub fn settle(stop: &AtomicBool) {
+    let in_ears = OUTPUT.with(|slot| {
+        let slot = slot.borrow();
+        let output = slot.as_ref()?;
+        while output.queued() > 0 && output.failed().is_none() && !stop.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Some(output.in_ears)
+    });
+    let Some(in_ears) = in_ears else {
+        return;
+    };
+    let until = Instant::now() + echo_tail(in_ears);
+    while Instant::now() < until && !stop.load(Ordering::Acquire) {
         std::thread::sleep(Duration::from_millis(10));
-    }
-    drop(stream);
-    let result = error.lock().unwrap_or_else(|e| e.into_inner()).take();
-    match result {
-        Some(error) => Err(error),
-        None => Ok(()),
     }
 }
 
 fn output<T>(
     device: &cpal::Device,
     config: &cpal::StreamConfig,
-    samples: Arc<Vec<f32>>,
-    step: f64,
-    stop: &Arc<AtomicBool>,
-    done: &Arc<AtomicBool>,
-    error: &Arc<Mutex<Option<String>>>,
+    pending: &Arc<Mutex<VecDeque<f32>>>,
+    failure: &Arc<Mutex<Option<String>>>,
 ) -> Result<cpal::Stream, String>
 where
     T: cpal::SizedSample + cpal::FromSample<f32>,
 {
     let channels = config.channels as usize;
-    let stop = stop.clone();
-    let done = done.clone();
-    let error = error.clone();
-    let mut position = 0.0;
+    let pending = pending.clone();
+    let failure = failure.clone();
     device
         .build_output_stream(
             config,
             move |data: &mut [T], _| {
+                let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
                 for frame in data.chunks_mut(channels) {
-                    let sample = if stop.load(Ordering::Acquire) {
-                        0.0
-                    } else if let Some(sample) = next_sample(&samples, &mut position, step) {
-                        sample
-                    } else {
-                        done.store(true, Ordering::Release);
-                        0.0
-                    };
+                    // Silence between sentences keeps the device awake.
+                    let sample = pending.pop_front().unwrap_or(0.0);
                     for value in frame {
                         *value = T::from_sample_(sample);
                     }
                 }
             },
             move |reason| {
-                *error.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some(format!("Audio output failed: {reason}"));
+                if matches!(reason, cpal::StreamError::BufferUnderrun) {
+                    return;
+                }
+                let mut failure = failure.lock().unwrap_or_else(|e| e.into_inner());
+                failure.get_or_insert_with(|| format!("Audio output failed: {reason}"));
             },
             None,
         )
@@ -221,6 +368,40 @@ mod tests {
         assert_eq!(next_sample(&samples, &mut position, 0.5), Some(0.5));
         position = 3.0;
         assert_eq!(next_sample(&samples, &mut position, 0.5), None);
+    }
+
+    #[test]
+    fn speakers_wait_longer_for_the_room_than_headphones() {
+        assert!(echo_tail(false) >= Duration::from_millis(400));
+        assert!(echo_tail(true) < echo_tail(false));
+    }
+
+    #[test]
+    fn settling_without_an_output_returns_at_once() {
+        let started = Instant::now();
+        settle(&AtomicBool::new(false));
+        assert!(started.elapsed() < Duration::from_millis(50));
+    }
+
+    /// Plays two sentences back to back through this computer's output,
+    /// one stream for both: `cargo test -p monobot-voice --features playback
+    /// -- --ignored --nocapture plays_on_this_computer`.
+    #[test]
+    #[ignore]
+    fn plays_on_this_computer() {
+        let tone: Vec<f32> = (0..12_000)
+            .map(|i| (i as f32 * 440.0 * std::f32::consts::TAU / 24_000.0).sin() * 0.2)
+            .collect();
+        let wav = crate::wav::encode(&tone, 24_000);
+        let started = Instant::now();
+        play(&wav, Arc::new(AtomicBool::new(false))).unwrap();
+        play(&wav, Arc::new(AtomicBool::new(false))).unwrap();
+        settle(&AtomicBool::new(false));
+        eprintln!(
+            "two half-second sentences and the tail in {:?}",
+            started.elapsed()
+        );
+        assert!(started.elapsed() >= Duration::from_millis(1_000));
     }
 
     #[test]

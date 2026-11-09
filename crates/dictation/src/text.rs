@@ -1,7 +1,20 @@
-//! The transcript as the composer receives it: Parakeet already writes
-//! capitals and punctuation, so phrases only need joining cleanly.
+//! The transcript as the composer receives it. Parakeet already writes
+//! capitals and punctuation, so phrases mostly need joining cleanly. Spanish
+//! also gets what a phrase-by-phrase recognizer misses, as IVY's dictation
+//! does: «¿» and «¡» opening what «?» and «!» close, and a full stop at a
+//! pause before a word that goes on («… el informe. y luego …») becoming a
+//! comma.
 
 pub fn join(phrases: &[String]) -> String {
+    let joined = squeeze(phrases);
+    if spanish(&joined) {
+        tidy(&rejoin_pauses(&joined))
+    } else {
+        joined
+    }
+}
+
+fn squeeze(phrases: &[String]) -> String {
     let joined = phrases
         .iter()
         .map(|phrase| phrase.trim())
@@ -25,9 +38,150 @@ pub fn join(phrases: &[String]) -> String {
     out.trim().to_owned()
 }
 
+/// Whether the text reads as Spanish: its accented letters and common words
+/// outweigh English's. English is left exactly as Parakeet wrote it.
+fn spanish(text: &str) -> bool {
+    const SPANISH: [&str; 32] = [
+        "el", "la", "los", "las", "que", "de", "del", "y", "en", "un", "una", "por", "para", "con",
+        "es", "pero", "muy", "lo", "se", "su", "al", "como", "hola", "gracias", "porque", "cuando",
+        "yo", "esto", "eso", "hay", "ahora", "vamos",
+    ];
+    const ENGLISH: [&str; 24] = [
+        "the", "and", "is", "are", "you", "to", "of", "it", "that", "this", "with", "for", "what",
+        "i", "we", "have", "not", "but", "so", "can", "will", "my", "your", "they",
+    ];
+    let lower = text.to_lowercase();
+    let mut score = lower
+        .chars()
+        .filter(|c| matches!(c, 'ñ' | '¿' | '¡' | 'á' | 'é' | 'í' | 'ó' | 'ú'))
+        .count() as i32
+        * 2;
+    for word in lower.split(|c: char| !c.is_alphabetic()) {
+        score += i32::from(SPANISH.contains(&word));
+        score -= i32::from(ENGLISH.contains(&word));
+    }
+    score > 0
+}
+
+/// Words that carry a sentence on: a full stop before one was a pause.
+const GOES_ON: [&str; 25] = [
+    "y", "e", "o", "u", "ni", "pero", "porque", "que", "si", "de", "del", "en", "con", "para",
+    "por", "a", "al", "cuando", "como", "aunque", "sino", "entonces", "pues", "donde", "mientras",
+];
+
+/// «… el informe. Y luego …» → «… el informe, y luego …».
+fn rejoin_pauses(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(". ") {
+        let (before, after) = (&rest[..at], &rest[at + 2..]);
+        let word: String = after.chars().take_while(|c| c.is_alphabetic()).collect();
+        let goes_on = !word.is_empty()
+            && word.chars().skip(1).all(char::is_lowercase)
+            && GOES_ON.contains(&word.to_lowercase().as_str());
+        out.push_str(before);
+        if goes_on {
+            out.push_str(", ");
+            let mut letters = after.chars();
+            out.extend(letters.next().into_iter().flat_map(char::to_lowercase));
+            rest = letters.as_str();
+        } else {
+            out.push_str(". ");
+            rest = after;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Opening «¿» and «¡» where Spanish needs them, and a capital at each
+/// sentence start. A full stop ends a sentence only before a space, so
+/// «informe.pdf» and «3.50» go on.
+fn tidy(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut start = 0;
+    let (mut asked, mut exclaimed) = (false, false);
+    let mut capital = true;
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '¿' => asked = true,
+            '¡' => exclaimed = true,
+            _ => {}
+        }
+        if capital && c.is_alphabetic() {
+            out.extend(c.to_uppercase());
+            capital = false;
+            continue;
+        }
+        if capital && c.is_numeric() {
+            capital = false;
+        }
+        out.push(c);
+        if matches!(c, '?' | '!') {
+            let (opened, mark) = if c == '?' {
+                (asked, '¿')
+            } else {
+                (exclaimed, '¡')
+            };
+            if !opened {
+                let at = start + out[start..].len() - out[start..].trim_start().len();
+                out.insert(at, mark);
+            }
+        }
+        let ends = matches!(c, '?' | '!' | '…' | '\n')
+            || (c == '.' && chars.peek().is_none_or(|next| next.is_whitespace()));
+        if ends {
+            start = out.len();
+            (asked, exclaimed, capital) = (false, false, true);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::join;
+    use super::*;
+
+    #[test]
+    fn spanish_reads_as_written() {
+        let said = |text: &str| join(&[text.to_owned()]);
+        assert_eq!(
+            said("hola. cuánto voy gastando este mes? qué bueno!"),
+            "Hola. ¿Cuánto voy gastando este mes? ¡Qué bueno!"
+        );
+        assert_eq!(said("¿Ya está? sí, gracias"), "¿Ya está? Sí, gracias");
+        assert_eq!(
+            said("son 3.50 soles para el café"),
+            "Son 3.50 soles para el café"
+        );
+        assert_eq!(
+            said("abre el archivo informe.pdf y dime qué dice"),
+            "Abre el archivo informe.pdf y dime qué dice"
+        );
+    }
+
+    #[test]
+    fn a_pause_before_a_word_that_goes_on_is_a_comma() {
+        let phrases = [
+            "Revisa el informe.".to_owned(),
+            "Y luego mándalo a Ana.".to_owned(),
+        ];
+        assert_eq!(join(&phrases), "Revisa el informe, y luego mándalo a Ana.");
+        let phrases = [
+            "Ya terminé el informe.".to_owned(),
+            "Mañana lo vemos.".to_owned(),
+        ];
+        assert_eq!(join(&phrases), "Ya terminé el informe. Mañana lo vemos.");
+    }
+
+    #[test]
+    fn english_is_left_as_parakeet_wrote_it() {
+        let phrases = ["How are you?".to_owned(), "A dog barked.".to_owned()];
+        assert_eq!(join(&phrases), "How are you? A dog barked.");
+        let phrases = ["I went home.".to_owned(), "And then I slept.".to_owned()];
+        assert_eq!(join(&phrases), "I went home. And then I slept.");
+    }
 
     #[test]
     fn joins_phrases_with_single_spaces() {

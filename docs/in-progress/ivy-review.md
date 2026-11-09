@@ -109,11 +109,11 @@ Problems found, most important first:
 1. **Fixed: the voice model could unload mid-call.** Every hang-up released Supertonic 120 s later with no use count, so a new call started within those two minutes lost the model between sentences. `VoiceUses` in `monos/group_call.rs` now counts holds and uses, and a release runs only when no call holds the voices and none started since.
 2. **Fixed: a disconnected microphone hung the session.** Stream errors were ignored. `dictation/src/capture.rs` now records the first fatal error (an underrun is only a glitch), lets the stream go, and the session sends `Event::Lost`. The dictation keeps what was heard and shows why.
 3. **Fixed: painting another group hung up the live call.** `call_panel` now shows "You are in a call with …" with Hang up for any other group, and only hanging up ends the call.
-4. **Echo tail.** Calls are half duplex, so there is no echo, but the mic reopens only 100 ms after playback drains (`voice/src/player.rs:139`). IVY waits 400 ms, which matters on Bluetooth and in rooms with reverb.
-5. **AirPods.** The microphone and the output reopen on every turn, which flips Bluetooth between A2DP and HFP and clips the start of sentences.
-6. **Gaps between sentences.** `voice/src/queue.rs:95` synthesizes the next sentence only after the current one finishes playing; synthesizing one ahead removes the pause.
+4. **Fixed: echo tail** (see [voice-and-hands.md](voice-and-hands.md), phase 1). Calls are half duplex, so there is no echo, but the mic reopens only 100 ms after playback drains (`voice/src/player.rs:139`). IVY waits 400 ms, which matters on Bluetooth and in rooms with reverb.
+5. **Fixed: AirPods** (built-in mic with a headset on, one output stream per call). The microphone and the output reopen on every turn, which flips Bluetooth between A2DP and HFP and clips the start of sentences.
+6. **Fixed: gaps between sentences** (synthesis one ahead). `voice/src/queue.rs:95` synthesizes the next sentence only after the current one finishes playing; synthesizing one ahead removes the pause.
 7. **Turn end of at least 1.1 s** (0.45 s VAD silence plus `TURN_GAP_MS` 600 ms, plus transcription). A pause mid-sentence ends the turn. IVY uses Smart Turn for this.
-8. **Text cleanup is minimal.** There is only `text::join`. IVY's `tidy` adds the opening «¿¡», capitals at sentence start, and fillers.
+8. **Fixed: text cleanup** (¿¡, capitals, pauses, misheard names; fillers not yet). There is only `text::join`. IVY's `tidy` adds the opening «¿¡», capitals at sentence start, and fillers.
 9. **Stale docs.** `port-plan.md:277` still lists group call voices as missing, and `dictation/engine.rs:1-2` mentions Tauri.
 
 ## Live calls with Gemini

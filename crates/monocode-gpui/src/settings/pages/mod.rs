@@ -12,6 +12,7 @@ mod monos;
 mod poki;
 mod providers;
 mod skills;
+mod voice;
 mod worktrees;
 
 pub(super) use appearance::parse_hex;
@@ -20,6 +21,9 @@ pub(super) use connections::ConnectionsState;
 pub(crate) use keybindings::command_shortcut;
 pub(super) use mobile::MobileState;
 pub(super) use poki::PokiState;
+pub(super) use voice::VoiceState;
+#[cfg(test)]
+pub(super) use voice::{Model as VoiceModel, Snapshot as VoiceSnapshot};
 
 use super::{Section, SettingsView};
 use gpui::{AnyElement, Context, Window};
@@ -36,6 +40,7 @@ impl SettingsView {
                 page
             }
             Section::Appearance => self.appearance_page(window, cx),
+            Section::Voice => self.voice_page(cx),
             Section::Keybindings => self.keybindings_page(cx),
             Section::Chat => self.chat_page(cx),
             Section::Providers => self.providers_page(cx),

@@ -782,18 +782,18 @@ fn original_app_surfaces_keep_icon_rail_and_remember_closed_sessions(cx: &mut Te
                                 && quad.content_mask.bounds.contains(&point)
                         })
                     };
-                    assert_ne!(shell_fill(), pane_fill());
+                    assert_ne!(shell_fill(), main_pane_fill());
                     // Test the actual wash on both sides of the rail edge, which
                     // passes between the native traffic lights at x=48.
                     for x in [24., 60.] {
                         assert!(painted_at(shell_fill(), x, 20.));
                         assert!(
-                            !painted_at(pane_fill(), x, 20.),
+                            !painted_at(main_pane_fill(), x, 20.),
                             "{surface:?} paints content tint behind the traffic lights"
                         );
                     }
                     assert!(
-                        painted_at(pane_fill(), 60., 50.),
+                        painted_at(main_pane_fill(), 60., 50.),
                         "the destination body retains its content tint"
                     );
                 })
@@ -1053,4 +1053,69 @@ fn settings_back_and_sidebar_toggle_in_new_layout(cx: &mut TestAppContext) {
 #[gpui::test]
 fn settings_back_and_sidebar_toggle_in_original_layout(cx: &mut TestAppContext) {
     assert_settings_navigation(true, cx);
+}
+
+/// Boxy and original layouts once painted the sidebar and the main column the
+/// same shell color, so every theme looked alike. Each now paints the theme's
+/// own pair: the sidebar's chrome wash beside the main pane's color.
+#[gpui::test]
+fn boxy_layouts_set_the_sidebar_apart_from_the_main_column(cx: &mut TestAppContext) {
+    // One window: theme colors are app-wide, so two windows with different
+    // themes would keep repainting each other's colors.
+    let (window, _) = setup(cx, false, true);
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    for classic in [false, true] {
+        for theme in ["light", "dark"] {
+            window
+                .update(visual, |shell, _, cx| {
+                    shell.workspace.classic_layout = classic;
+                    shell.layout_changed(cx);
+                    let p = &mut shell.workspace.preferences;
+                    p.apply_workspace_theme("solarized".into());
+                    p.theme = theme.into();
+                    p.body_glass = false;
+                    cx.notify();
+                })
+                .unwrap();
+            visual.run_until_parked();
+            visual.refresh().unwrap();
+            let sidebar = visual.debug_bounds("sidebar-frame").unwrap();
+            let main = visual.debug_bounds("main-pane-frame").unwrap();
+            window
+                .update(visual, |_, window, _| {
+                    let scale = window.scale_factor();
+                    let quads = window.painted_quads();
+                    let painted_at = |color: gpui::Hsla, at: gpui::Point<Pixels>| {
+                        let point = gpui::point(
+                            gpui::ScaledPixels(f32::from(at.x) * scale),
+                            gpui::ScaledPixels(f32::from(at.y) * scale),
+                        );
+                        quads.iter().any(|quad| {
+                            quad.background == color.into()
+                                && quad.bounds.contains(&point)
+                                && quad.content_mask.bounds.contains(&point)
+                        })
+                    };
+                    let main_color: gpui::Hsla =
+                        gpui::rgb(if theme == "light" { 0xfdf6e3 } else { 0x00212b }).into();
+                    assert_eq!(main_pane_fill(), main_color, "{theme} classic={classic}");
+                    assert!(
+                        painted_at(inset_chrome_wash(), sidebar.center()),
+                        "{theme} classic={classic}: the sidebar lost its chrome wash"
+                    );
+                    assert!(
+                        !painted_at(main_pane_fill(), sidebar.center()),
+                        "{theme} classic={classic}: the sidebar paints the main color"
+                    );
+                    assert!(
+                        painted_at(
+                            main_pane_fill(),
+                            main.bottom_left() + gpui::point(px(4.), px(-40.))
+                        ),
+                        "{theme} classic={classic}: the main column lost the theme's main color"
+                    );
+                })
+                .unwrap();
+        }
+    }
 }

@@ -15,7 +15,7 @@ mod filters;
 mod floating;
 pub(crate) use floating::is_floating_window;
 mod gallery;
-mod group_call;
+pub(crate) mod group_call;
 mod group_dialog;
 mod groups;
 mod host;

@@ -773,6 +773,7 @@ mod tests {
             "settings-nav-general",
             "settings-nav-connections",
             "settings-nav-appearance",
+            "settings-nav-voice",
             "settings-nav-keybindings",
             "settings-nav-chat",
             "settings-nav-providers",

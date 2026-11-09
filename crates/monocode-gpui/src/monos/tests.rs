@@ -5823,6 +5823,17 @@ fn the_images_bot_keeps_a_gallery_and_picks_looks_into_its_draft(cx: &mut TestAp
             .mono_draft_words(cx)
     });
     assert_eq!(words, ["cinematic", "story"]);
+    // A format writes its own name: Ultrawide is `/ultrawide`.
+    visual.refresh().unwrap();
+    let ultrawide = visual.debug_bounds("image-format-ultrawide").unwrap();
+    visual.simulate_click(ultrawide.center(), Default::default());
+    visual.run_until_parked();
+    let words = visual.update(|_, cx| {
+        s.manager.read(cx).chats[&s.id]
+            .read(cx)
+            .mono_draft_words(cx)
+    });
+    assert_eq!(words, ["cinematic", "ultrawide"]);
 }
 
 #[gpui::test]
@@ -5936,5 +5947,365 @@ fn the_background_effect_list_opens_above_the_mono_background_dialog(cx: &mut Te
     assert!(
         s.manager.read_with(visual, |m, _| m.background.is_some()),
         "choosing an effect keeps the dialog open"
+    );
+}
+
+/// A call through a live model: the host's words and the user's become
+/// lines, `ask_member` reaches the member's own seat, and the member's answer
+/// goes back to the model and into the saved transcript.
+#[gpui::test]
+fn a_live_call_asks_a_member_through_its_seat_and_answers_the_model(cx: &mut TestAppContext) {
+    use super::group_call::live_test::{Message, State};
+    use monocode_core::mono::groups::{Group, call::LineStatus, native::Mark};
+    use monocode_core::transcript::Row;
+    use monocode_core::voice::Provider;
+    let s = setup(cx);
+    let fake_mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(fake_mic)));
+    let (member, key) = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.name = "Team".into();
+        group.group = Some(Group {
+            members: vec![member.clone()],
+            ..Group::default()
+        });
+        let key = (s.id.clone(), member.clone());
+        assert!(m.ensure_seat(&key, cx));
+        (member, key)
+    });
+    cx.run_until_parked();
+    let (seat, epoch) = s.manager.update(cx, |m, cx| {
+        let seat = m.groups.seats.get_mut(&key).unwrap().view.take().unwrap();
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.overview_tab = OverviewTab::Call;
+        let epoch = m.call_test_live(&group, Provider::Gemini, cx);
+        m.call_live_message(&s.id, epoch, Message::State(State::Live), cx);
+        assert!(m.call_test_live_listening());
+        m.call_live_message(&s.id, epoch, Message::Heard("Cash, ".into()), cx);
+        m.call_live_message(&s.id, epoch, Message::Heard("¿cuánto gasté?".into()), cx);
+        m.call_live_message(
+            &s.id,
+            epoch,
+            Message::Said("Le pregunto a Cash.".into()),
+            cx,
+        );
+        m.call_live_message(&s.id, epoch, Message::TurnDone, cx);
+        let lines = m.call_test_lines();
+        assert_eq!(lines.len(), 2);
+        assert_eq!(
+            (lines[0].who.as_str(), lines[0].text.as_str()),
+            ("user", "Cash, ¿cuánto gasté?")
+        );
+        assert_eq!(
+            (lines[1].name.as_str(), lines[1].text.as_str()),
+            ("Gemini Live", "Le pregunto a Cash.")
+        );
+        (seat, epoch)
+    });
+    // The model calls ask_member on the session's tool thread.
+    let (host, incoming) = s.manager.read_with(cx, |m, _| m.call_test_live_host());
+    let call = monobot_live::ToolCall {
+        id: "c1".into(),
+        name: "ask_member".into(),
+        args: serde_json::json!({"member": "cash", "request": "¿Cuánto gasté este mes?"}),
+    };
+    let tool = std::thread::spawn(move || {
+        use monobot_live::session::Host;
+        host.tool(&call, &std::sync::atomic::AtomicBool::new(false))
+    });
+    let ask = incoming.recv_blocking().unwrap();
+    let request = s.manager.update(cx, |m, cx| {
+        m.call_live_message(&s.id, epoch, ask, cx);
+        let asks = m.call_test_live_asks();
+        assert_eq!(asks.len(), 1);
+        assert_eq!(asks[0].0, member);
+        assert!(
+            m.call_test_queued(&s.id, &member, &asks[0].1),
+            "the seat got the request"
+        );
+        let lines = m.call_test_lines();
+        assert_eq!(lines.last().unwrap().status, LineStatus::Thinking);
+        m.groups.seats.get_mut(&key).unwrap().view = Some(seat.clone());
+        asks[0].1.clone()
+    });
+    s.manager.update(cx, |m, cx| {
+        seat.update(cx, |seat, cx| {
+            seat.busy = false;
+            seat.transcript.update(cx, |transcript, cx| {
+                let start = transcript.source_rows().len();
+                transcript.patch(
+                    start,
+                    vec![
+                        Mark::GroupRequest(request.clone()).row(Some(1)),
+                        Row {
+                            role: "user".into(),
+                            text: "call prompt".into(),
+                            first: true,
+                            sent_at: Some(1),
+                        },
+                        Row {
+                            role: "assistant".into(),
+                            text: "Gastaste 120 soles.".into(),
+                            first: true,
+                            sent_at: None,
+                        },
+                    ],
+                    cx,
+                );
+            });
+        });
+        m.call_seat_changed(&key, cx);
+    });
+    let answer = tool.join().unwrap();
+    assert_eq!(answer["member"], "Cash");
+    assert_eq!(answer["answer"], "Gastaste 120 soles.");
+    s.manager.update(cx, |m, cx| {
+        assert!(m.call_test_live_asks().is_empty());
+        let lines = m.call_test_lines();
+        assert_eq!(lines.last().unwrap().text, "Gastaste 120 soles.");
+        assert_eq!(lines.last().unwrap().status, LineStatus::Said);
+        m.call_hang_up(cx);
+        let documents = &m.roster.get(&s.id).unwrap().documents;
+        assert_eq!(documents.len(), 1, "the live call's transcript is saved");
+        assert!(documents[0].body.contains("**You:** Cash, ¿cuánto gasté?"));
+        assert!(documents[0].body.contains("**Cash:** Gastaste 120 soles."));
+    });
+}
+
+/// An ask the model makes for someone not on the call is refused at once,
+/// without reaching any seat.
+#[gpui::test]
+fn a_live_ask_for_nobody_on_the_call_is_refused(cx: &mut TestAppContext) {
+    use monocode_core::mono::groups::Group;
+    use monocode_core::voice::Provider;
+    let s = setup(cx);
+    s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member],
+            ..Group::default()
+        });
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_live(&group, Provider::Phonic, cx);
+    });
+    let (host, incoming) = s.manager.read_with(cx, |m, _| m.call_test_live_host());
+    use monobot_live::session::Host;
+    let answer = host.tool(
+        &monobot_live::ToolCall {
+            id: "c1".into(),
+            name: "ask_member".into(),
+            args: serde_json::json!({"member": "Mateo", "request": "Hola"}),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+    );
+    assert!(answer["error"].as_str().unwrap().contains("Cash"));
+    assert!(
+        incoming.try_recv().is_err(),
+        "nothing reached the interface"
+    );
+    let other = host.tool(
+        &monobot_live::ToolCall {
+            id: "c2".into(),
+            name: "delete_everything".into(),
+            args: serde_json::json!({}),
+        },
+        &std::sync::atomic::AtomicBool::new(false),
+    );
+    assert!(other["error"].as_str().unwrap().contains("no tool"));
+}
+
+/// A bot without "Use this Mac" may not touch the computer, and the
+/// computer actions' fields are checked before anything runs.
+#[gpui::test]
+fn computer_actions_need_the_computer_access(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    s.manager.update(cx, |m, _| {
+        let bot = m.roster.get_mut(&s.id).unwrap();
+        bot.kind = Some("bot".into());
+        bot.bot_role = Some("finance".into());
+        bot.bot_tools = None;
+    });
+    let denied = call(&s, "r1", "media.control", json!({"command": "next"}), cx)
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(denied.unwrap_err().contains("Use this Mac"));
+    let misspelled = call(&s, "r2", "apps.open", json!({"app": "Notes"}), cx)
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(misspelled.unwrap_err().contains("does not take app"));
+    let volume = call(&s, "r3", "system.volume", json!({"level": "loud"}), cx)
+        .recv_timeout(std::time::Duration::from_secs(5))
+        .unwrap();
+    assert!(volume.is_err());
+    assert!(monocode_core::mono::bot_tools::ACCESS.contains(&"computer"));
+    assert_eq!(
+        monocode_core::mono::agents::access_label("computer").0,
+        "Use this Mac"
+    );
+}
+
+/// A group with one member, its seat taken out so no provider starts, and a
+/// local call started on the fake microphone and voice.
+fn call_with_cash(
+    s: &Setup,
+    mic: &Arc<crate::dictation::tests::Fake>,
+    cx: &mut TestAppContext,
+) -> (String, (String, String)) {
+    use monocode_core::mono::groups::Group;
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(mic.clone())));
+    let (member, key) = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        m.roster.get_mut(&member).unwrap().name = "Cash".into();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.name = "Team".into();
+        group.group = Some(Group {
+            members: vec![member.clone()],
+            ..Group::default()
+        });
+        let key = (s.id.clone(), member.clone());
+        assert!(m.ensure_seat(&key, cx));
+        (member, key)
+    });
+    cx.run_until_parked();
+    let (spoken, _heard) = mpsc::channel();
+    s.manager.update(cx, |m, cx| {
+        m.groups.seats.get_mut(&key).unwrap().view.take();
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.call_test_start(&group, CallTestVoice { spoken }, cx);
+        m.call_test_interrupt(cx);
+    });
+    cx.run_until_parked();
+    (member, key)
+}
+
+/// A session that decides turns ends the turn when it says so, without the
+/// fixed pause: the call answers at once.
+#[gpui::test]
+fn a_call_turn_ends_when_the_session_says_it_is_done(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    // Stopping hands back what was said, as the real session does.
+    let mic = crate::dictation::tests::Fake::installed("Cash, ¿cuánto gasté?");
+    let (member, _) = call_with_cash(&s, &mic, cx);
+    mic.hear(monobot_dictation::Event::DecidesTurns);
+    mic.hear(monobot_dictation::Event::Speech(true));
+    mic.hear(monobot_dictation::Event::Partial(
+        "Cash, ¿cuánto gasté?".into(),
+    ));
+    mic.hear(monobot_dictation::Event::Speech(false));
+    cx.run_until_parked();
+    s.manager.update(cx, |m, _| {
+        assert!(
+            m.call_test_lines().is_empty(),
+            "nothing ends the turn but the session"
+        );
+    });
+    mic.hear(monobot_dictation::Event::TurnEnd(
+        "Cash, ¿cuánto gasté?".into(),
+    ));
+    cx.run_until_parked();
+    s.manager.update(cx, |m, _| {
+        assert_eq!(m.call_test_lines()[0].text, "Cash, ¿cuánto gasté?");
+        assert_eq!(m.call_test_current_request().unwrap().0, member);
+    });
+    assert!(mic.calls().iter().any(|call| call == "stop 7"));
+}
+
+/// While the voice is in the user's ears, the mic stays open as Cash
+/// answers: a backchannel goes by, real words cut in and become the turn.
+#[gpui::test]
+fn with_headphones_the_user_cuts_in_and_backchannels_do_not(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let mic = crate::dictation::tests::Fake::installed("");
+    call_with_cash(&s, &mic, cx);
+    s.manager.update(cx, |m, cx| {
+        m.call_test_in_ears(true);
+        m.call_test_say("Cash, resume el mes", cx);
+        assert!(m.call_test_answering());
+    });
+    cx.run_until_parked();
+    assert!(
+        mic.calls()
+            .iter()
+            .filter(|call| call.as_str() == "start")
+            .count()
+            >= 2,
+        "the mic opened again while Cash answers: {:?}",
+        mic.calls()
+    );
+    mic.hear(monobot_dictation::Event::DecidesTurns);
+    mic.hear(monobot_dictation::Event::Partial("Ajá.".into()));
+    mic.hear(monobot_dictation::Event::TurnEnd("Ajá.".into()));
+    cx.run_until_parked();
+    s.manager.update(cx, |m, _| {
+        assert!(
+            m.call_test_answering(),
+            "a backchannel does not cut Cash off"
+        );
+        assert_eq!(
+            m.call_test_lines()
+                .iter()
+                .filter(|line| line.who == "user")
+                .count(),
+            1
+        );
+    });
+    mic.hear(monobot_dictation::Event::DecidesTurns);
+    mic.hear(monobot_dictation::Event::Partial(
+        "No, espera, solo la comida".into(),
+    ));
+    mic.hear(monobot_dictation::Event::TurnEnd(
+        "No, espera, solo la comida".into(),
+    ));
+    cx.run_until_parked();
+    s.manager.update(cx, |m, _| {
+        let users: Vec<_> = m
+            .call_test_lines()
+            .into_iter()
+            .filter(|line| line.who == "user")
+            .collect();
+        assert_eq!(users.len(), 2);
+        assert_eq!(users[1].text, "No, espera, solo la comida");
+    });
+}
+
+/// On speakers the mic never opens while a member answers: it would hear
+/// the member's voice.
+#[gpui::test]
+fn on_speakers_the_mic_stays_closed_while_members_answer(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    let mic = crate::dictation::tests::Fake::installed("");
+    call_with_cash(&s, &mic, cx);
+    let before = mic.calls().len();
+    s.manager.update(cx, |m, cx| {
+        m.call_test_in_ears(false);
+        m.call_test_say("Cash, resume el mes", cx);
+    });
+    cx.run_until_parked();
+    assert!(
+        !mic.calls()[before..].iter().any(|call| call == "start"),
+        "{:?}",
+        &mic.calls()[before..]
     );
 }
