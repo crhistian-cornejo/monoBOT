@@ -16,7 +16,7 @@ pub(super) const MEDIA_WING: u32 = 150;
 /// The player at the top of Home.
 pub(super) const PLAYER_HEIGHT: f32 = 112.;
 /// The right wing's extra room for the music badge while an agent works.
-pub(super) const MUSIC_BADGE: u32 = 46;
+pub(super) const MUSIC_BADGE: u32 = 62;
 /// How often the open player's line and progress catch up.
 const TICK: Duration = Duration::from_millis(250);
 /// The title's glide: points a second, the pause at its start, the gap
@@ -869,42 +869,53 @@ fn source_mark(source: Source, side: f32) -> AnyElement {
     }
 }
 
-/// Four bars in the accent that bob while something plays, flat when it
-/// stops; still under reduced motion.
+/// The waveform's bars: how wide each is and the gap between two.
+const WAVE_BAR: f32 = 2.;
+const WAVE_GAP: f32 = 1.5;
+/// The room the waveform takes.
+pub(super) const WAVE_WIDTH: f32 =
+    media_model::WAVE as f32 * WAVE_BAR + (media_model::WAVE - 1) as f32 * WAVE_GAP;
+
+/// What sounds, as a waveform in the accent: the last half second of the
+/// output's real loudness, the newest on the right, each bar growing both
+/// ways from the middle. Where the system has no meter the bars sway by
+/// themselves; paused or under reduced motion they rest as a row of dots.
 fn equalizer(playing: bool) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, cx| {
             let moving = playing && !cx.reduce_motion();
             let t = since_start();
-            let bottom = bounds.bottom();
-            // What the output really sounds like, where the system says;
-            // elsewhere the bars bob by themselves.
-            let heard = if moving { platform::audio_bars() } else { None };
-            for (index, (speed, phase)) in [(7.1, 0.0), (9.3, 1.7), (6.2, 3.1), (8.4, 4.4)]
-                .into_iter()
-                .enumerate()
-            {
+            let middle = bounds.center().y;
+            let heard = if moving { platform::audio_wave() } else { None };
+            let accent = accent_color();
+            for index in 0..media_model::WAVE {
+                let place = index as f32;
                 let level: f32 = match heard {
-                    // A little sway of its own keeps a held note alive.
-                    Some(bars) => {
-                        (0.16 + 0.84 * bars[index]) * (0.9 + 0.1 * (t * speed + phase).sin())
-                    }
+                    Some(wave) => wave[index],
                     None if moving => {
-                        0.3 + 0.7
+                        let (speed, phase) = (6.2 + (place * 1.7) % 3.1, place * 1.3);
+                        0.25 + 0.75
                             * ((t * speed + phase).sin() * 0.5 + 0.5)
                             * ((t * speed * 0.37 + phase * 2.).sin() * 0.35 + 0.65)
                     }
-                    None => 0.25,
+                    None => 0.,
                 };
-                let height = bounds.size.height * level;
-                let x = bounds.left() + px(index as f32 * 4.5);
+                // Never less than a dot, so silence still shows the trace.
+                let height = (bounds.size.height * level).max(px(WAVE_BAR));
+                let x = bounds.left() + px(place * (WAVE_BAR + WAVE_GAP));
+                // What sounded a moment ago fades as it travels left.
+                let mut color = accent;
+                color.a *= 0.45 + 0.55 * (place + 1.) / media_model::WAVE as f32;
                 window.paint_quad(
                     gpui::fill(
-                        Bounds::new(point(x, bottom - height), gpui::size(px(2.5), height)),
-                        accent_color(),
+                        Bounds::new(
+                            point(x, middle - height / 2.),
+                            gpui::size(px(WAVE_BAR), height),
+                        ),
+                        color,
                     )
-                    .corner_radii(px(1.)),
+                    .corner_radii(px(WAVE_BAR / 2.)),
                 );
             }
             if moving {
@@ -912,7 +923,7 @@ fn equalizer(playing: bool) -> impl IntoElement {
             }
         },
     )
-    .w(px(16.))
+    .w(px(WAVE_WIDTH))
     .h(px(14.))
     .flex_shrink_0()
 }

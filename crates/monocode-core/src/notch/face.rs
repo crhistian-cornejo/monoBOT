@@ -37,6 +37,21 @@ pub fn glance(from: f32, to: f32, since: f32) -> f32 {
     }
 }
 
+/// How often the eyes look for the pointer, in seconds.
+pub const FOLLOW: f32 = 0.08;
+
+/// The glance one look later, on its way from `shown` to where the pointer
+/// is (`toward`): most of the way at once and the rest easing in, so the
+/// eyes trail a fast pointer a little and rest exactly on a still one.
+pub fn follow(shown: f32, toward: f32) -> f32 {
+    let next = shown + (toward - shown) * 0.45;
+    if (toward - next).abs() < 0.02 {
+        toward
+    } else {
+        next
+    }
+}
+
 /// The wait before blink number `count`, in seconds: uneven, as eyes are,
 /// between three and six seconds.
 pub fn wait(count: u32) -> f32 {
@@ -65,6 +80,21 @@ mod tests {
         assert_eq!(gaze(10., 0., 0.), 0.);
         assert_eq!(glance(-1., 1., 0.), -1.);
         assert_eq!(glance(-1., 1., BLINK * 0.6), 1.);
+    }
+
+    #[test]
+    fn the_eyes_trail_the_pointer_and_come_to_rest_on_it() {
+        let first = follow(0., 1.);
+        assert!(first > 0.4 && first < 1.);
+        let mut shown = 0.;
+        let mut looks = 0;
+        while shown != 1. {
+            shown = follow(shown, 1.);
+            looks += 1;
+            assert!(looks < 12, "it settles within a second");
+        }
+        // A still pointer moves nothing: no frame is asked for.
+        assert_eq!(follow(-0.3, -0.3), -0.3);
     }
 
     #[test]

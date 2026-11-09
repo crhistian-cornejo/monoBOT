@@ -1,8 +1,10 @@
 //! The face the notch wears at rest: two eyes that blink now and then,
 //! glance toward the pointer and smile for a moment when an agent finishes.
 //! Its arithmetic is `monocode_core::notch::face`; this keeps its clock and
-//! paints it. It asks for frames only during a blink (a fifth of a second
-//! every few seconds), and not at all under reduced motion.
+//! paints it. Between blinks the eyes follow the pointer: they look for it a
+//! dozen times a second and repaint only when it moved. It asks for frames
+//! only during a blink (a fifth of a second every few seconds), and nothing
+//! moves under reduced motion.
 use super::*;
 use monocode_core::notch::face as eyes;
 
@@ -26,6 +28,8 @@ pub(super) struct Face {
     gaze: (f32, f32),
     glad: bool,
     blinks: Option<Task<()>>,
+    /// Looks for the pointer while the face shows.
+    follows: Option<Task<()>>,
     cheer: Option<Task<()>>,
 }
 
@@ -52,15 +56,25 @@ impl Notch {
                 }
             }
         }));
-    }
-
-    /// One blink, the eyes turning to the pointer while they are shut. Only
-    /// at rest: nothing is painted for a face nobody sees.
-    pub(super) fn blink(&mut self, cx: &mut Context<Self>) {
-        if self.shape() != Shape::Quiet || cx.reduce_motion() || !self.wears_face(cx) {
+        // Tests move the eyes themselves; there is no pointer to ask about.
+        if cfg!(test) {
             return;
         }
-        let toward = match (platform::pointer_x(), self.screen_island) {
+        self.face.follows = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(Duration::from_secs_f32(eyes::FOLLOW))
+                    .await;
+                if this.update(cx, |this, cx| this.follow_pointer(cx)).is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Where the pointer is from the face: -1 far left to 1 far right.
+    fn toward_pointer(&self, cx: &App) -> f32 {
+        match (platform::pointer_x(), self.screen_island) {
             (Some(pointer), Some([left, _, width, _])) => {
                 // The island's width tells the scale: the screen is as many
                 // physical pixels wide as the island is, in proportion.
@@ -73,7 +87,34 @@ impl Notch {
                 eyes::gaze(pointer, left + width / 2., screen)
             }
             _ => 0.,
-        };
+        }
+    }
+
+    /// The eyes turn a step toward the pointer. A still pointer changes
+    /// nothing, so nothing is painted; a blink under way moves them itself.
+    pub(super) fn follow_pointer(&mut self, cx: &mut Context<Self>) {
+        if self.face.blink.is_some()
+            || self.shape() != Shape::Quiet
+            || cx.reduce_motion()
+            || !self.wears_face(cx)
+        {
+            return;
+        }
+        let shown = self.face.gaze.1;
+        let next = eyes::follow(shown, self.toward_pointer(cx));
+        if next != shown {
+            self.face.gaze = (next, next);
+            cx.notify();
+        }
+    }
+
+    /// One blink, the eyes turning to the pointer while they are shut. Only
+    /// at rest: nothing is painted for a face nobody sees.
+    pub(super) fn blink(&mut self, cx: &mut Context<Self>) {
+        if self.shape() != Shape::Quiet || cx.reduce_motion() || !self.wears_face(cx) {
+            return;
+        }
+        let toward = self.toward_pointer(cx);
         self.face.gaze = (self.face.gaze.1, toward);
         self.face.blink = Some(Instant::now());
         cx.notify();

@@ -1046,7 +1046,7 @@ mod win {
     /// endpoint's peak meter, read about thirty times a second on a thread
     /// of its own that lives only while the bars are asked for.
     pub(crate) mod meter {
-        use monocode_core::notch::media::Meter;
+        use monocode_core::notch::media::{WAVE, Wave};
         use std::sync::OnceLock;
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         use std::time::{Duration, Instant};
@@ -1061,8 +1061,9 @@ mod win {
         static RUNNING: AtomicBool = AtomicBool::new(false);
         /// When the bars were last asked for, in milliseconds on `clock`.
         static ASKED: AtomicU64 = AtomicU64::new(0);
-        /// The four bars, sixteen bits each; `NONE` while there are none.
+        /// The waveform's bars, seven bits each; `NONE` while there are none.
         static BARS: AtomicU64 = AtomicU64::new(NONE);
+        const STEPS: f32 = 127.;
         const NONE: u64 = u64::MAX;
         /// The thread ends this long after the last ask.
         const IDLE: u64 = 2_000;
@@ -1086,7 +1087,7 @@ mod win {
         }
 
         fn run() {
-            let mut meter = Meter::default();
+            let mut wave = Wave::default();
             let mut endpoint = open();
             let mut opened = Instant::now();
             while clock().saturating_sub(ASKED.load(Ordering::Relaxed)) < IDLE {
@@ -1100,8 +1101,8 @@ mod win {
                     .as_ref()
                     .and_then(|endpoint| unsafe { endpoint.GetPeakValue().ok() });
                 let packed = match peak {
-                    Some(peak) => meter.feed(peak).iter().fold(0u64, |packed, bar| {
-                        (packed << 16) | (bar.clamp(0., 1.) * 65_534.) as u64
+                    Some(peak) => wave.feed(peak).iter().fold(0u64, |packed, bar| {
+                        (packed << 7) | (bar.clamp(0., 1.) * STEPS) as u64
                     }),
                     None => NONE,
                 };
@@ -1112,9 +1113,9 @@ mod win {
             RUNNING.store(false, Ordering::Release);
         }
 
-        /// The bars now, first to last; none until the first reading, or
+        /// The bars now, oldest to newest; none until the first reading, or
         /// where the output has no meter.
-        pub(crate) fn bars() -> Option<[f32; 4]> {
+        pub(crate) fn bars() -> Option<[f32; WAVE]> {
             ASKED.store(clock(), Ordering::Relaxed);
             if !RUNNING.swap(true, Ordering::AcqRel)
                 && std::thread::Builder::new()
@@ -1127,7 +1128,7 @@ mod win {
             let packed = BARS.load(Ordering::Relaxed);
             (packed != NONE).then(|| {
                 std::array::from_fn(|index| {
-                    ((packed >> (16 * (3 - index))) & 0xffff) as f32 / 65_534.
+                    ((packed >> (7 * (WAVE - 1 - index))) & 0x7f) as f32 / STEPS
                 })
             })
         }
@@ -1454,10 +1455,10 @@ pub(crate) fn watch_levels(
     monocode_core::notch::system::watch(on_change)
 }
 
-/// The equalizer's four bars from what the system plays now, each 0 to 1,
-/// where the system has a meter for its output (Windows). Asking keeps the
-/// reading going; it stops by itself a moment after the last ask.
-pub(crate) fn audio_bars() -> Option<[f32; 4]> {
+/// The waveform of what the system plays now, oldest bar first, each 0 to
+/// 1, where the system has a meter for its output (Windows). Asking keeps
+/// the reading going; it stops by itself a moment after the last ask.
+pub(crate) fn audio_wave() -> Option<[f32; monocode_core::notch::media::WAVE]> {
     #[cfg(all(target_os = "windows", not(test)))]
     return win::meter::bars();
     #[cfg(not(all(target_os = "windows", not(test))))]

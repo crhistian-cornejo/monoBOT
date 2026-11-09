@@ -227,31 +227,39 @@ pub fn sung(lines: &[Line], index: usize, position: Duration) -> f32 {
     (position.saturating_sub(line.at).as_secs_f32() / length).clamp(0., 1.)
 }
 
-/// The equalizer's bars out of the output's loudness. The system gives one
-/// number, the peak of what sounds now, about thirty times a second; each
-/// bar jumps up to it and falls back at its own pace, the first quickest,
-/// so a beat runs through them and a held note keeps them up.
+/// How many bars the waveform draws.
+pub const WAVE: usize = 9;
+
+/// The waveform out of the output's loudness: the last moments of what
+/// sounded, oldest first, scrolling as it plays. The system gives one
+/// number, the peak of what sounds now, about thirty times a second; every
+/// other reading starts a new bar and the one between raises it, so a bar
+/// is the loudest of some 66 ms and the whole trace a little over half a
+/// second: a beat is seen entering on the right and travelling left.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Meter {
-    bars: [f32; 4],
+pub struct Wave {
+    levels: [f32; WAVE],
+    /// Whether the newest bar is still being filled.
+    filling: bool,
 }
 
-impl Meter {
-    /// How much of its height each bar keeps from one reading to the next.
-    const KEPT: [f32; 4] = [0.5, 0.68, 0.8, 0.9];
-
+impl Wave {
     /// Takes the peak now (0 to 1) and gives the bars, each 0 to 1.
-    pub fn feed(&mut self, peak: f32) -> [f32; 4] {
+    pub fn feed(&mut self, peak: f32) -> [f32; WAVE] {
         // Quiet passages still move the bars: loudness is not heard evenly.
         let level = if peak.is_finite() {
             peak.clamp(0., 1.).sqrt()
         } else {
             0.
         };
-        for (bar, kept) in self.bars.iter_mut().zip(Self::KEPT) {
-            *bar = level.max(*bar * kept);
+        if self.filling {
+            self.levels[WAVE - 1] = self.levels[WAVE - 1].max(level);
+        } else {
+            self.levels.rotate_left(1);
+            self.levels[WAVE - 1] = level;
         }
-        self.bars
+        self.filling = !self.filling;
+        self.levels
     }
 }
 
@@ -431,18 +439,25 @@ mod tests {
     }
 
     #[test]
-    fn the_meters_bars_jump_to_a_beat_and_fall_at_their_own_pace() {
-        let mut meter = Meter::default();
-        assert_eq!(meter.feed(0.), [0.; 4]);
-        // A beat lifts every bar at once.
-        assert_eq!(meter.feed(0.25), [0.5; 4]);
-        // Then silence: the first bar falls fastest, the last slowest.
-        let after = meter.feed(0.);
-        assert!(after[0] < after[1] && after[1] < after[2] && after[2] < after[3]);
-        assert!(after[3] < 0.5);
-        // Louder than a bar still holds lifts it again; odd readings do not.
-        assert_eq!(meter.feed(1.)[0], 1.);
-        assert!(meter.feed(f32::NAN)[0] < 1.);
+    fn the_waveform_scrolls_what_sounded_with_the_newest_last() {
+        let mut wave = Wave::default();
+        // A beat enters on the right as its own bar.
+        let first = wave.feed(0.25);
+        assert_eq!(first[WAVE - 1], 0.5);
+        assert!(first[..WAVE - 1].iter().all(|bar| *bar == 0.));
+        // The reading between two bars only raises the newest.
+        assert_eq!(wave.feed(0.04)[WAVE - 1], 0.5);
+        assert_eq!(wave.feed(1.)[WAVE - 2], 0.5);
+        let now = wave.feed(0.);
+        assert_eq!((now[WAVE - 2], now[WAVE - 1]), (0.5, 1.));
+        // It travels left and leaves after the trace's length.
+        for _ in 0..(2 * WAVE) {
+            wave.feed(0.);
+        }
+        assert_eq!(wave.feed(0.), [0.; WAVE]);
+        // Odd readings are silence, never a spike.
+        assert_eq!(wave.feed(f32::NAN)[WAVE - 1], 0.);
+        assert_eq!(wave.feed(7.)[WAVE - 1], 1.);
     }
 
     #[test]
