@@ -1,15 +1,39 @@
 //! Introduce CLI visual discovery once to contexts without native MCP tools.
-use monocode_core::{provider::Kind, store::Store};
+use monocode_core::{introduction::Introduction, provider::Kind, store::Store};
 use std::path::Path;
 
 const VERSION: u8 = 1;
 
 pub(super) struct Discovery {
-    key: String,
+    introduction: Introduction,
     executable: String,
 }
 
 impl Discovery {
+    /// The introduction a context without native visual tools needs, due or
+    /// not; `None` for a context that has the tools.
+    pub(super) fn for_context(
+        session: i64,
+        kind: Kind,
+        account: &str,
+        provider_id: Option<&str>,
+        executable: &Path,
+    ) -> Option<Self> {
+        let fallback = matches!(kind, Kind::Pi | Kind::Omp | Kind::OpenCode)
+            || (provider_id.is_some() && matches!(kind, Kind::Grok | Kind::Fx));
+        let executable = executable.to_string_lossy().into_owned();
+        fallback.then(|| Self {
+            introduction: Introduction::new(
+                format!("visual-discovery:{session}:{}:{account}", kind.id()),
+                // The id's place keeps the receipts saved before byte for byte.
+                serde_json::json!({"version": VERSION, "providerId": null, "executable": executable}),
+            ),
+            executable,
+        })
+    }
+
+    /// The introduction when this context still needs it.
+    #[cfg(test)]
     pub(super) fn prepare(
         store: &Store,
         session: i64,
@@ -18,22 +42,12 @@ impl Discovery {
         provider_id: Option<&str>,
         executable: &Path,
     ) -> Result<Option<Self>, String> {
-        let fallback = matches!(kind, Kind::Pi | Kind::Omp | Kind::OpenCode)
-            || (provider_id.is_some() && matches!(kind, Kind::Grok | Kind::Fx));
-        if !fallback {
-            return Ok(None);
-        }
-        let discovery = Self {
-            key: format!("visual-discovery:{session}:{}:{account}", kind.id()),
-            executable: executable.to_string_lossy().into_owned(),
-        };
-        if let Some(provider_id) = provider_id {
-            let expected = discovery.receipt(provider_id);
-            if store.setting(&discovery.key)?.as_deref() == Some(expected.as_str()) {
-                return Ok(None);
+        match Self::for_context(session, kind, account, provider_id, executable) {
+            Some(discovery) if discovery.introduction.due(store, provider_id)? => {
+                Ok(Some(discovery))
             }
+            _ => Ok(None),
         }
-        Ok(Some(discovery))
     }
 
     pub(super) fn prepend(&self, prompt: String) -> String {
@@ -43,22 +57,24 @@ impl Discovery {
         )
     }
 
-    /// Call only after the introduction reached a successfully completed turn.
-    /// A provider that has not supplied a context id remains eligible next time.
-    pub(super) fn remember(&self, store: &Store, provider_id: Option<&str>) -> Result<(), String> {
-        if let Some(provider_id) = provider_id.filter(|id| !id.trim().is_empty()) {
-            store.save_setting(&self.key, &self.receipt(provider_id))?;
-        }
-        Ok(())
+    pub(super) fn due(&self, store: &Store, provider_id: Option<&str>) -> Result<bool, String> {
+        self.introduction.due(store, provider_id)
     }
 
+    pub(super) fn into_introduction(self) -> Introduction {
+        self.introduction
+    }
+
+    /// Call only after the introduction reached a successfully completed turn.
+    /// A provider that has not supplied a context id remains eligible next time.
+    #[cfg(test)]
+    pub(super) fn remember(&self, store: &Store, provider_id: Option<&str>) -> Result<(), String> {
+        self.introduction.remember(store, provider_id)
+    }
+
+    #[cfg(test)]
     fn receipt(&self, provider_id: &str) -> String {
-        serde_json::json!({
-            "version": VERSION,
-            "providerId": provider_id,
-            "executable": self.executable,
-        })
-        .to_string()
+        self.introduction.receipt(provider_id)
     }
 }
 
@@ -163,11 +179,21 @@ mod tests {
                     .unwrap()
                     .is_some()
             );
+            // Receipts saved before the shared `introduction` still match.
+            assert_eq!(
+                discovery.receipt("old-context"),
+                serde_json::json!({
+                    "version": VERSION,
+                    "providerId": "old-context",
+                    "executable": executable.to_string_lossy(),
+                })
+                .to_string()
+            );
             let mut previous: serde_json::Value =
                 serde_json::from_str(&discovery.receipt("old-context")).unwrap();
             previous["version"] = 0.into();
             store
-                .save_setting(&discovery.key, &previous.to_string())
+                .save_setting(discovery.introduction.key(), &previous.to_string())
                 .unwrap();
             assert!(
                 Discovery::prepare(&store, 8, kind, "default", Some("old-context"), executable)

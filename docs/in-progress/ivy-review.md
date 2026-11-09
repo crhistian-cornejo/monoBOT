@@ -40,6 +40,7 @@ memory was copied from MonoBOT's.
 - A session an agent starts never has more access than that agent (`AccessMode::at_most` in `app_access::launch_settings`).
 - A project whose repository brings `.claude/settings*.json` or `.mcp.json` runs Claude Code with `--setting-sources=user` until the user trusts it (`project_trust`). The chat shows a "Trust project" notice.
 - `loop_guard` stops a turn that makes the same call with the same input 6 times in a row, or that keeps writing the same passage. The reason stays as the turn's error row.
+- Nov 9: a provider that takes a steer is first reminded at the 3rd and 5th repeat, and stopped at the 8th. See [code-harness.md](../done/code-harness.md), which also covers context sent once and large attachments.
 
 **Order for the rest:** 5–6, then 7–9, then 10.
 

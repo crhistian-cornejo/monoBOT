@@ -273,6 +273,7 @@ pub fn prepare_prompt(text: &str, cwd: &str, attachments: &[PathBuf]) -> Result<
         if image_mime(path).is_none() {
             if let Ok(body) = read_text(path, 128 * 1024) {
                 if !body.contains('\0') {
+                    let body = attachment_excerpt(&body);
                     context_bytes += body.len();
                     if context_bytes > 512 * 1024 {
                         return Err(
@@ -308,6 +309,44 @@ fn invoked(text: &str, skill: &DiscoveredSkill) -> bool {
             })
         })
 }
+/// A text attachment up to this size goes into the message whole. A larger
+/// one goes as its start and end, with the path to read the rest from, as
+/// DeepSeek Harness keeps large results: the agent reads the part it needs,
+/// and the rest never fills a conversation that every later request pays
+/// for again.
+const INLINE_ATTACHMENT: usize = 24 * 1024;
+const EXCERPT_HEAD: usize = 12 * 1024;
+const EXCERPT_TAIL: usize = 4 * 1024;
+
+fn attachment_excerpt(body: &str) -> String {
+    if body.len() <= INLINE_ATTACHMENT {
+        return body.to_owned();
+    }
+    // Whole lines on both sides of the cut.
+    let mut head = EXCERPT_HEAD;
+    while !body.is_char_boundary(head) {
+        head -= 1;
+    }
+    if let Some(end) = body[..head].rfind('\n') {
+        head = end + 1;
+    }
+    let mut tail = body.len() - EXCERPT_TAIL;
+    while !body.is_char_boundary(tail) {
+        tail += 1;
+    }
+    if let Some(start) = body[tail..].find('\n') {
+        tail += start + 1;
+    }
+    format!(
+        "{}[… {} of {} lines ({} bytes) left out here. Read them from the file's path above when you need them. …]\n{}",
+        &body[..head],
+        body[head..tail].lines().count(),
+        body.lines().count(),
+        tail - head,
+        &body[tail..]
+    )
+}
+
 fn read_text(path: &Path, max: usize) -> Result<String, String> {
     let mut data = Vec::new();
     std::fs::File::open(path)
@@ -444,5 +483,38 @@ mod tests {
         assert!(prompt.contains("Inspect before edits."));
         assert!(prompt.contains("useful context"));
         assert!(prompt.ends_with("/native-test-skill do it"));
+    }
+    #[test]
+    fn a_large_text_attachment_goes_as_its_start_and_end_with_its_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let file = temp.path().join("log.txt");
+        let body: String = (1..=2000)
+            .map(|n| format!("línea {n:04} del registro de prueba\n"))
+            .collect();
+        assert!(body.len() > INLINE_ATTACHMENT);
+        std::fs::write(&file, &body).unwrap();
+        let prompt = prepare_prompt(
+            "read it",
+            temp.path().to_str().unwrap(),
+            std::slice::from_ref(&file),
+        )
+        .unwrap();
+        assert!(prompt.contains(&format!("Attached file: {}", file.display())));
+        assert!(prompt.contains("línea 0001 del registro"));
+        assert!(prompt.contains("línea 2000 del registro"));
+        assert!(
+            !prompt.contains("línea 1000 del registro"),
+            "the middle stays out"
+        );
+        assert!(prompt.contains("of 2000 lines"));
+        assert!(prompt.len() < EXCERPT_HEAD + EXCERPT_TAIL + 1024);
+        // Whole lines on both sides of the cut.
+        let excerpt = attachment_excerpt(&body);
+        let (head, rest) = excerpt.split_once("[… ").unwrap();
+        assert!(head.ends_with('\n'));
+        let tail = rest.split_once("…]\n").unwrap().1;
+        assert!(tail.starts_with("línea "));
+        let left_out: usize = rest.split_whitespace().next().unwrap().parse().unwrap();
+        assert_eq!(head.lines().count() + left_out + tail.lines().count(), 2000);
     }
 }

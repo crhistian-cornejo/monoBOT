@@ -122,6 +122,57 @@ pub(crate) fn locked(store: &Database) -> Result<std::sync::MutexGuard<'_, Store
         .map_err(|_| "Native session store unavailable".into())
 }
 
+/// The conversation's controls, joined by the loop guard's reminders. The
+/// thread that forwards the controls ends with the turn.
+struct Reminders {
+    send: std::sync::mpsc::Sender<Control>,
+    ended: Arc<AtomicBool>,
+}
+
+impl Reminders {
+    fn join(
+        controls: std::sync::mpsc::Receiver<Control>,
+    ) -> (Self, std::sync::mpsc::Receiver<Control>) {
+        let (send, joined) = std::sync::mpsc::channel();
+        let ended = Arc::new(AtomicBool::new(false));
+        let (forward, done) = (send.clone(), ended.clone());
+        std::thread::spawn(move || {
+            while !done.load(Ordering::Relaxed) {
+                match controls.recv_timeout(Duration::from_millis(100)) {
+                    Ok(control) => {
+                        if forward.send(control).is_err() {
+                            break;
+                        }
+                    }
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                }
+            }
+        });
+        (Self { send, ended }, joined)
+    }
+
+    /// Steer the turn with a reminder, as if queued mid-turn.
+    fn send(&self, n: usize, text: String) {
+        let id = monocode_core::loop_guard::reminder_id(n);
+        let _ = self.send.send(Control {
+            id: id.clone(),
+            decision: monocode_core::agent::Decision::Steer(monocode_core::follow_up::Message {
+                id,
+                text,
+                steer: true,
+                ..Default::default()
+            }),
+        });
+    }
+}
+
+impl Drop for Reminders {
+    fn drop(&mut self) {
+        self.ended.store(true, Ordering::Relaxed);
+    }
+}
+
 pub(crate) fn run_turn(
     summary: Session,
     prompt: String,
@@ -185,7 +236,10 @@ fn run_turn_using(
     let mut images_wanted = false;
     let mut turn_receipt: Option<(usize, monocode_core::agent::TurnInfo)> = None;
     let mut mono_fingerprint = None;
-    let mut visual_introduction = None;
+    // Context sent once per provider conversation (`introduction`), with
+    // whether this turn sent it.
+    let mut introductions: Vec<(monocode_core::introduction::Introduction, bool)> = Vec::new();
+    let mut compacted = false;
     let mut prepared_handoff = None;
     let mut handoff_accepted = false;
     // SessionReview's recorded turn: its project and id, once the baseline is taken.
@@ -620,12 +674,28 @@ fn run_turn_using(
                 monocode_core::orchestration::INSTRUCTIONS
             );
         }
-        if !raw_native_command && settings.operator_enabled {
-            let cli = std::env::current_exe().map_err(|e| e.to_string())?;
-            prompt = format!(
-                "You have MonoBOT app access for this project. Use the CLI: {} app ACTION --json JSON. Supported actions: models.list {{}}, sessions.list {{}}, sessions.read {{sessionId}}, sessions.start {{prompt,harness?,model?,title?,draft?,reveal?}}, sessions.send/draft {{sessionId,prompt}}, sessions.stop {{sessionId}}, folders.list {{}}, folders.move {{sessionId,folderId?,newFolderName?}}, notes.list {{}}, notes.read {{id}}, notes.write {{id?,title,body}}, worktrees.list {{}}. Scope is this thread's project. App credentials are in the environment; never print them. Respect the user’s request and selected access policy.\n\n{prompt}",
-                shlex_quote(&cli.to_string_lossy())
+        // The Operator rules go once per provider conversation, not with
+        // every message; Claude reads them in its system prompt instead.
+        if !raw_native_command
+            && settings.operator_enabled
+            && !monocode_core::app_access::operator_in_system(kind)
+        {
+            let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+            let rules = monocode_core::app_access::operator_instructions(&executable);
+            let introduction = monocode_core::introduction::Introduction::new(
+                format!(
+                    "operator-rules:{}:{}:{}",
+                    summary.id,
+                    kind.id(),
+                    settings.account.id
+                ),
+                serde_json::json!({"rules": monocode_core::mono::files::content_hash(&rules)}),
             );
+            let due = introduction.due(&*locked(&store)?, provider_id.as_deref())?;
+            if due {
+                prompt = format!("{rules}\n\n{prompt}");
+            }
+            introductions.push((introduction, due));
         }
         // Every foreground session receives an independent visual capability.
         // This happens after configuration was persisted, and Settings' env is
@@ -640,16 +710,18 @@ fn run_turn_using(
             settings
                 .environment
                 .extend(visual_bridge.environment(&executable));
-            visual_introduction = visual_discovery::Discovery::prepare(
-                &*locked(&store)?,
+            if let Some(discovery) = visual_discovery::Discovery::for_context(
                 summary.id,
                 kind,
                 &settings.account.id,
                 provider_id.as_deref(),
                 &executable,
-            )?;
-            if let Some(discovery) = &visual_introduction {
-                prompt = discovery.prepend(prompt);
+            ) {
+                let due = discovery.due(&*locked(&store)?, provider_id.as_deref())?;
+                if due {
+                    prompt = discovery.prepend(prompt);
+                }
+                introductions.push((discovery.into_introduction(), due));
             }
         }
         let request = Request {
@@ -671,8 +743,19 @@ fn run_turn_using(
         let antigravity = request.kind == Kind::Antigravity;
         let mut plan_tools = std::collections::HashSet::new();
         // A turn going round in circles is stopped (`loop_guard`): each new
-        // call by its id, and the answer as it grows.
-        let mut guard = monocode_core::loop_guard::Guard::default();
+        // call by its id, and the answer as it grows. A provider that takes a
+        // steer is reminded first, on the same channel as the user's controls.
+        let (mut guard, reminders, controls) = if request.kind.can_steer() {
+            let (reminders, controls) = Reminders::join(controls);
+            (
+                monocode_core::loop_guard::Guard::reminding(),
+                Some(reminders),
+                controls,
+            )
+        } else {
+            (monocode_core::loop_guard::Guard::default(), None, controls)
+        };
+        let mut reminded = 0;
         let mut guarded_calls = std::collections::HashSet::new();
         let mut turn_text = String::new();
         // The running-work list attributes the provider and its tools to this session.
@@ -732,6 +815,11 @@ fn run_turn_using(
                                 store.save_agent_settings(summary.id, &persisted)?;
                             }
                         }
+                        // The loop guard's reminders are not the user's words.
+                        Event::FollowUp(message)
+                            if monocode_core::loop_guard::is_reminder(&message.id) => {}
+                        Event::FollowUpFailed { id, .. }
+                            if monocode_core::loop_guard::is_reminder(&id) => {}
                         Event::FollowUp(message) => {
                             let at = transcript.begin("user");
                             transcript.rows[at].sent_at =
@@ -821,10 +909,25 @@ fn run_turn_using(
                             boundary = true;
                         }
                         Event::Tool(tool) => {
-                            if guarded_calls.insert(tool.id.clone())
-                                && let Some(reason) = guard.call(&tool)
+                            if tool.name == "contextCompaction"
+                                && tool.state == monocode_core::tool::ToolState::Completed
                             {
-                                return Err(reason.into());
+                                compacted = true;
+                            }
+                            if guarded_calls.insert(tool.id.clone()) {
+                                match guard.call(&tool) {
+                                    Some(monocode_core::loop_guard::Repeat::Stop(reason)) => {
+                                        return Err(reason.into());
+                                    }
+                                    Some(monocode_core::loop_guard::Repeat::Remind(text)) => {
+                                        if let Some(reminders) = &reminders {
+                                            reminded += 1;
+                                            reminders.send(reminded, text);
+                                            status = "Reminded the agent that it keeps repeating the same call".into();
+                                        }
+                                    }
+                                    None => {}
+                                }
                             }
                             if antigravity
                                 && !images_wanted
@@ -1041,11 +1144,23 @@ fn run_turn_using(
                     .to_string(),
             )?;
         }
-        if result.is_ok()
-            && !cancel.load(Ordering::Relaxed)
-            && let Some(discovery) = &visual_introduction
-        {
-            discovery.remember(&*locked(&store)?, provider_id.as_deref())?;
+        if compacted {
+            // The provider summarized its conversation and may have dropped
+            // the context it was given once: the next turn sends it again.
+            let held = locked(&store)?;
+            for (introduction, _) in &introductions {
+                introduction.forget(&held)?;
+            }
+            if mono_fingerprint.is_some() {
+                held.save_setting(&format!("mono-context:{}", summary.id), "")?;
+            }
+        } else if result.is_ok() && !cancel.load(Ordering::Relaxed) {
+            let held = locked(&store)?;
+            for (introduction, sent) in &introductions {
+                if *sent {
+                    introduction.remember(&held, provider_id.as_deref())?;
+                }
+            }
         }
         result
     })();
@@ -1295,13 +1410,7 @@ pub(crate) fn edited_paths(rows: &[Row]) -> Vec<String> {
 }
 
 fn shlex_quote(text: &str) -> String {
-    format!(
-        "\"{}\"",
-        text.replace('\\', "\\\\")
-            .replace('\"', "\\\"")
-            .replace('$', "\\$")
-            .replace('`', "\\`")
-    )
+    monocode_core::app_access::shell_word(text)
 }
 
 #[cfg(test)]

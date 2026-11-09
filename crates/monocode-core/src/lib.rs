@@ -21,6 +21,7 @@ pub mod hands;
 pub mod harness_updates;
 pub mod images;
 pub mod inbox;
+pub mod introduction;
 pub mod keep_awake;
 pub mod loop_guard;
 pub mod mobile;

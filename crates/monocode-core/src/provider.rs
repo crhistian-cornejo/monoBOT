@@ -1623,6 +1623,12 @@ fn run_operation(
             if let Some(mono) = settings.mono.as_ref().filter(|_| !settings.text_only) {
                 system.push(crate::mono::instructions(&mono.mono, &mono.executable));
             }
+            // Standing rules ride in the system prompt, sent identically with
+            // every request, rather than once more in each message.
+            if settings.operator_enabled && !settings.text_only {
+                let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+                system.push(crate::app_access::operator_instructions(&executable));
+            }
             if let Some(server) = visual_server {
                 servers.insert("monocode_visual".into(), server);
                 allowed.push(crate::visual_bridge::CLAUDE_ALLOWED_TOOLS);

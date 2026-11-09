@@ -13,6 +13,7 @@ things were, move it to `old/`.
 | [building.md](done/building.md) | Platform prerequisites, `cargo xtask`, packages, releases and update signing |
 | [install.md](done/install.md) | Installing the Linux packages |
 | [providers.md](done/providers.md) | Installing and signing in to each agent CLI |
+| [code-harness.md](done/code-harness.md) | What MonoBOT adds around a coding agent: context sent once, large attachments, loop reminders |
 | [remote-access.md](done/remote-access.md) | The remote host over SSH, its protocol and packaging |
 | [agent-access.md](done/agent-access.md) | `/operator` and the `monobot app` actions agents can call |
 | [agent-teams.md](done/agent-teams.md) | Specialist bots and the coordinating orchestrator |

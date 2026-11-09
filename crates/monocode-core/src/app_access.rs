@@ -12,6 +12,36 @@ use std::collections::HashMap;
 #[cfg(test)]
 mod tests;
 
+/// The rules an Operator thread's agent reads: how to call the app's CLI.
+/// They do not change within a conversation, so they go once: in the system
+/// prompt where the provider sends it with every request
+/// ([`operator_in_system`]), otherwise with the first message a provider
+/// conversation sees (`introduction`).
+pub fn operator_instructions(executable: &std::path::Path) -> String {
+    format!(
+        "You have MonoBOT app access for this project. Use the CLI: {} app ACTION --json JSON. Supported actions: models.list {{}}, sessions.list {{}}, sessions.read {{sessionId}}, sessions.start {{prompt,harness?,model?,title?,draft?,reveal?}}, sessions.send/draft {{sessionId,prompt}}, sessions.stop {{sessionId}}, folders.list {{}}, folders.move {{sessionId,folderId?,newFolderName?}}, notes.list {{}}, notes.read {{id}}, notes.write {{id?,title,body}}, worktrees.list {{}}. Scope is this thread's project. App credentials are in the environment; never print them. Respect the user’s request and selected access policy.",
+        shell_word(&executable.to_string_lossy())
+    )
+}
+
+/// Whether the Operator rules ride in the provider's system prompt. Claude
+/// Code takes it with every process; Codex keeps the one a thread started
+/// with, so a thread that gains app access later would never see them.
+pub fn operator_in_system(kind: Kind) -> bool {
+    kind == Kind::Claude
+}
+
+/// One shell word in double quotes, for a path the agent pastes into a shell.
+pub fn shell_word(text: &str) -> String {
+    format!(
+        "\"{}\"",
+        text.replace('\\', "\\\\")
+            .replace('\"', "\\\"")
+            .replace('$', "\\$")
+            .replace('`', "\\`")
+    )
+}
+
 pub fn validate_operator(action: &str, input: &Value) -> Result<(), String> {
     if !matches!(
         action,
