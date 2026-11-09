@@ -11,10 +11,18 @@ pub(crate) enum Page {
     Notices,
     Widgets,
     Look,
+    /// The sign-in for the player's "Playing next".
+    Music,
 }
 
 impl Page {
-    const ALL: [Page; 4] = [Page::General, Page::Notices, Page::Widgets, Page::Look];
+    const ALL: [Page; 5] = [
+        Page::General,
+        Page::Notices,
+        Page::Widgets,
+        Page::Look,
+        Page::Music,
+    ];
 
     fn name(self) -> &'static str {
         match self {
@@ -22,6 +30,7 @@ impl Page {
             Page::Notices => "Notices",
             Page::Widgets => "Widgets",
             Page::Look => "Look",
+            Page::Music => "Music",
         }
     }
 
@@ -31,6 +40,7 @@ impl Page {
             Page::Notices => "bell",
             Page::Widgets => "dashboard",
             Page::Look => "palette",
+            Page::Music => "queue-list",
         }
     }
 
@@ -40,6 +50,7 @@ impl Page {
             Page::Notices => "notch-page-notices",
             Page::Widgets => "notch-page-widgets",
             Page::Look => "notch-page-look",
+            Page::Music => "notch-page-music",
         }
     }
 }
@@ -172,6 +183,7 @@ impl Notch {
             Page::Notices => self.notices_page(cx),
             Page::Widgets => self.widgets_page(cx),
             Page::Look => self.look_page(cx),
+            Page::Music => self.music_page(cx),
         };
         div()
             .debug_selector(|| "notch-settings-page".into())
@@ -232,6 +244,15 @@ impl Notch {
                         .on_click(choose(cx, |look| look.width = "wide".into())),
                 ]),
             ))
+            .when(platform::CLIPBOARD, |page| {
+                page.child(row(
+                    "Clipboard history",
+                    "Text you copy, kept in memory only",
+                    toggle(cx, "notch-clipboard", look.clipboard, |look, on| {
+                        look.clipboard = on
+                    }),
+                ))
+            })
             .into_any_element()
     }
 
@@ -285,6 +306,11 @@ impl Notch {
         div()
             .flex()
             .flex_col()
+            .child(row(
+                "Face at rest",
+                "Eyes that blink and follow the pointer",
+                toggle(cx, "notch-face", look.face, |look, on| look.face = on),
+            ))
             .child(row(
                 "Edge line",
                 "A hairline while it shows something",

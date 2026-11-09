@@ -99,7 +99,14 @@ impl Notch {
         let glow = if since < 0.15 {
             1.
         } else {
-            (1. - (since - 0.15) / (SHOWN.as_secs_f32() - 0.15)).clamp(0., 1.)
+            let left = (1. - (since - 0.15) / (SHOWN.as_secs_f32() - 0.15)).clamp(0., 1.);
+            // Windows' brighter bloom eases out instead of dimming evenly, so
+            // it lingers a moment and then goes softly.
+            if cfg!(target_os = "windows") {
+                1. - (1. - left) * (1. - left)
+            } else {
+                left
+            }
         };
         if glow > 0. {
             window.request_animation_frame();
@@ -118,13 +125,15 @@ impl Notch {
         let (share, muted) = match level {
             Level::Volume(volume, muted) => (if muted { 0. } else { volume }, muted),
             Level::Brightness(brightness) => (brightness, false),
+            Level::Power(charge, _) => (charge, false),
         };
         let mark = level_mark(level).into_any_element();
         let bar = div().flex_1().h(px(3.)).bg(ink(0.16)).child(
-            div()
-                .h_full()
-                .w(gpui::relative(share))
-                .bg(if muted { ink(0.4) } else { ink(0.92) }),
+            div().h_full().w(gpui::relative(share)).bg(match level {
+                Level::Power(charge, plugged) => media::charge_color(charge, plugged),
+                _ if muted => ink(0.4),
+                _ => ink(0.92),
+            }),
         );
         let percent = div()
             .w(px(30.))
@@ -233,6 +242,47 @@ fn level_mark(level: Level) -> impl IntoElement {
                                 window.paint_path(path, color);
                             }
                         }
+                    }
+                }
+                Level::Power(charge, plugged) => {
+                    // The battery's case and its cap, then the charge
+                    // inside, or a bolt while it is plugged in.
+                    let mut case = gpui::PathBuilder::stroke(px(1.2));
+                    case.add_polygon(
+                        &[at(1., 3.5), at(13., 3.5), at(13., 10.5), at(1., 10.5)],
+                        true,
+                    );
+                    if let Ok(path) = case.build() {
+                        window.paint_path(path, color);
+                    }
+                    window.paint_quad(gpui::fill(
+                        Bounds::new(at(14., 5.5), gpui::size(px(1.5), px(3.))),
+                        color,
+                    ));
+                    if plugged {
+                        let mut bolt = gpui::PathBuilder::fill();
+                        bolt.add_polygon(
+                            &[
+                                at(8., 4.5),
+                                at(4.5, 7.5),
+                                at(6.8, 7.5),
+                                at(6., 9.5),
+                                at(9.5, 6.5),
+                                at(7.2, 6.5),
+                            ],
+                            true,
+                        );
+                        if let Ok(path) = bolt.build() {
+                            window.paint_path(path, color);
+                        }
+                    } else {
+                        window.paint_quad(gpui::fill(
+                            Bounds::new(
+                                at(2.6, 5.1),
+                                gpui::size(px(8.8 * charge.clamp(0.08, 1.)), px(3.8)),
+                            ),
+                            media::charge_color(charge, false),
+                        ));
                     }
                 }
                 Level::Brightness(_) => {

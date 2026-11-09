@@ -526,9 +526,441 @@ mod win {
         Some(HWND(handle.hwnd.get() as _))
     }
 
-    /// GPUI already makes a pop-up a borderless, topmost tool window that
-    /// shows without taking focus.
-    pub(super) fn style(_window: &Window) {}
+    /// GPUI makes a pop-up a topmost tool window that shows without taking
+    /// focus. Two things more make it the notch:
+    ///
+    /// - `WS_EX_NOACTIVATE`: Windows never picks the notch when it passes
+    ///   activation to another window of the app (minimizing the workspace,
+    ///   switching with the taskbar). A click still activates it, since GPUI
+    ///   answers `WM_MOUSEACTIVATE` itself, so its chat still takes text.
+    /// - No Windows 11 frame: the window is a transparent room larger than
+    ///   the island, and DWM would otherwise round it and draw its border and
+    ///   shadow around that room.
+    pub(super) fn style(window: &Window) {
+        use windows::Win32::Graphics::Dwm::{
+            DWMNCRP_DISABLED, DWMWA_BORDER_COLOR, DWMWA_NCRENDERING_POLICY,
+            DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DwmSetWindowAttribute,
+        };
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, GetWindowLongPtrW, SetWindowLongPtrW, WS_EX_NOACTIVATE,
+        };
+        let Some(hwnd) = hwnd(window) else {
+            return;
+        };
+        // DWMWA_COLOR_NONE: no border at all.
+        const COLOR_NONE: u32 = 0xFFFF_FFFE;
+        // SAFETY: plain style and attribute writes on the live window, each
+        // with a value of the size the attribute expects.
+        unsafe {
+            let style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, style | WS_EX_NOACTIVATE.0 as isize);
+            let set = |attribute, value: &u32| {
+                // Older Windows lacks some attributes; the notch still works.
+                let _ = DwmSetWindowAttribute(
+                    hwnd,
+                    attribute,
+                    std::ptr::from_ref(value).cast(),
+                    std::mem::size_of::<u32>() as u32,
+                );
+            };
+            set(
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                &(DWMWCP_DONOTROUND.0 as u32),
+            );
+            set(DWMWA_BORDER_COLOR, &COLOR_NONE);
+            set(DWMWA_NCRENDERING_POLICY, &(DWMNCRP_DISABLED.0 as u32));
+        }
+        stay_on_top(hwnd);
+    }
+
+    /// The notch the foreground watch keeps on top.
+    static ON_TOP: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    /// Windows raises the taskbar, the Start menu and the window just
+    /// clicked above every other topmost window, so the notch slipped under
+    /// a taskbar docked at the top until something moved it. Each time the
+    /// foreground changes it goes back on top, without taking focus.
+    fn stay_on_top(hwnd: HWND) {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EVENT_SYSTEM_FOREGROUND, SWP_NOMOVE, SWP_NOSIZE, WINEVENT_OUTOFCONTEXT,
+        };
+        unsafe extern "system" fn raise(
+            _: HWINEVENTHOOK,
+            _: u32,
+            _: HWND,
+            _: i32,
+            _: i32,
+            _: u32,
+            _: u32,
+        ) {
+            let notch = ON_TOP.load(Ordering::Relaxed);
+            if notch == 0 {
+                return;
+            }
+            // SAFETY: a z-order change only; a stale handle just fails.
+            let _ = unsafe {
+                SetWindowPos(
+                    HWND(notch as _),
+                    Some(HWND_TOPMOST),
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER,
+                )
+            };
+        }
+        // The hook is made once; a new notch window only replaces the handle.
+        if ON_TOP.swap(hwnd.0 as isize, Ordering::Relaxed) != 0 {
+            return;
+        }
+        // SAFETY: out of context, the callback runs on this (the interface)
+        // thread's message loop and only touches the notch's z-order.
+        unsafe {
+            SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                None,
+                Some(raise),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT,
+            );
+        }
+    }
+
+    /// The battery's charge and whether it charges; none on a desktop.
+    pub(crate) fn battery() -> Option<(f32, bool)> {
+        use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
+        let mut status = SYSTEM_POWER_STATUS::default();
+        // SAFETY: fills `status`.
+        unsafe { GetSystemPowerStatus(&mut status) }.ok()?;
+        // 128: no system battery; 255: unknown.
+        if status.BatteryFlag & 128 != 0 || status.BatteryLifePercent > 100 {
+            return None;
+        }
+        Some((
+            f32::from(status.BatteryLifePercent) / 100.,
+            status.ACLineStatus == 1,
+        ))
+    }
+
+    /// What the user copies, for the notch's Clipboard page. Windows tells
+    /// a change by the clipboard's sequence number, so the thread reads the
+    /// text only when something was copied, and never on the interface thread.
+    pub(crate) mod clipboard {
+        use windows::Win32::Foundation::HGLOBAL;
+        use windows::Win32::System::DataExchange::{
+            CloseClipboard, GetClipboardData, GetClipboardSequenceNumber,
+            IsClipboardFormatAvailable, OpenClipboard, RegisterClipboardFormatW,
+        };
+        use windows::Win32::System::Memory::{GlobalLock, GlobalSize, GlobalUnlock};
+        use windows::core::w;
+
+        use super::super::Copied;
+
+        /// `CF_UNICODETEXT`.
+        const TEXT: u32 = 13;
+        /// `CF_DIB`: a picture as its header and pixels.
+        const PICTURE: u32 = 8;
+
+        /// A format's memory as its owner wrote it, copied out.
+        ///
+        /// SAFETY: the clipboard is open, so the handle stays alive.
+        unsafe fn bytes(format: u32, largest: usize) -> Option<Vec<u8>> {
+            unsafe {
+                IsClipboardFormatAvailable(format).ok()?;
+                let memory = HGLOBAL(GetClipboardData(format).ok()?.0);
+                let size = GlobalSize(memory);
+                if size == 0 || size > largest {
+                    return None;
+                }
+                let data = GlobalLock(memory) as *const u8;
+                if data.is_null() {
+                    return None;
+                }
+                let copy = std::slice::from_raw_parts(data, size).to_vec();
+                let _ = GlobalUnlock(memory);
+                Some(copy)
+            }
+        }
+
+        /// The copied text, or the copied picture where there is no text.
+        /// `Err` while another app holds the clipboard; `None` for what is
+        /// neither, is too large, or what its owner asked to keep out of
+        /// histories (a password manager's copy).
+        fn read(largest: usize, largest_picture: usize) -> Result<Option<Copied>, ()> {
+            // SAFETY: opened and closed here; every read is bounded by the
+            // memory's own size.
+            unsafe {
+                OpenClipboard(None).map_err(|_| ())?;
+                let excluded =
+                    RegisterClipboardFormatW(w!("ExcludeClipboardContentFromMonitorProcessing"));
+                let history = RegisterClipboardFormatW(w!("CanIncludeInClipboardHistory"));
+                let hidden = IsClipboardFormatAvailable(excluded).is_ok()
+                    || bytes(history, 16).is_some_and(|value| value.iter().all(|byte| *byte == 0));
+                let has_text = IsClipboardFormatAvailable(TEXT).is_ok();
+                let text = if hidden {
+                    None
+                } else {
+                    bytes(TEXT, largest * 2 + 2).map(|data| {
+                        let units: Vec<u16> = data
+                            .as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|pair| u16::from_le_bytes(*pair))
+                            .take_while(|unit| *unit != 0)
+                            .collect();
+                        Copied::Text(String::from_utf16_lossy(&units))
+                    })
+                };
+                // A spreadsheet's cells come as text and as a picture of
+                // them: the text is what was copied.
+                let picture = if hidden || has_text {
+                    None
+                } else {
+                    bytes(PICTURE, largest_picture)
+                };
+                let _ = CloseClipboard();
+                // Made into a file here, off the interface thread.
+                Ok(text.or_else(|| {
+                    let (bmp, width, height) =
+                        monocode_core::notch::clipboard::bmp_from_dib(&picture?)?;
+                    Some(Copied::Picture(bmp, width, height))
+                }))
+            }
+        }
+
+        /// Sends each new copy until the receiver is gone.
+        pub(crate) fn watch(
+            copies: async_channel::Sender<Copied>,
+            largest: usize,
+            largest_picture: usize,
+        ) -> bool {
+            std::thread::Builder::new()
+                .name("notch-clipboard".into())
+                .spawn(move || {
+                    // SAFETY: a plain read of a counter.
+                    let mut seen = unsafe { GetClipboardSequenceNumber() };
+                    while !copies.is_closed() {
+                        std::thread::sleep(std::time::Duration::from_millis(400));
+                        // SAFETY: as above.
+                        let now = unsafe { GetClipboardSequenceNumber() };
+                        if now == seen {
+                            continue;
+                        }
+                        // Busy: the next round reads it.
+                        if let Ok(copy) = read(largest, largest_picture) {
+                            seen = now;
+                            if let Some(copy) = copy {
+                                let _ = copies.try_send(copy);
+                            }
+                        }
+                    }
+                })
+                .is_ok()
+        }
+    }
+
+    /// What plays, from the system's media controls: the same session the
+    /// Windows media flyout shows (Spotify, a browser's video, the media
+    /// player). Read on a thread of its own every half second; WinRT's calls
+    /// block there, never on the interface thread.
+    pub(crate) mod media {
+        use super::super::MediaCommand;
+        use monocode_core::notch::media::{Playhead, Playing, Track};
+        use std::sync::Arc;
+        use std::sync::mpsc::{self, RecvTimeoutError};
+        use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+        use windows::Media::Control::{
+            GlobalSystemMediaTransportControlsSession as Session,
+            GlobalSystemMediaTransportControlsSessionManager as Manager,
+            GlobalSystemMediaTransportControlsSessionPlaybackStatus as Status,
+        };
+        use windows::Win32::System::WinRT::{RO_INIT_MULTITHREADED, RoInitialize};
+
+        const POLL: Duration = Duration::from_millis(500);
+        /// Windows counts 100 ns ticks from 1601; Unix seconds from 1970.
+        const UNIX_IN_TICKS: i64 = 116_444_736_000_000_000;
+        /// A position older than this is a stale stamp, not playback.
+        const STALE: i64 = 10 * 60 * 10_000_000;
+        /// A difference this large from where the notch thinks the playhead
+        /// is gets reported: lyrics show it well before a second.
+        const SEEK: Duration = Duration::from_millis(350);
+
+        fn span(ticks: i64) -> Duration {
+            Duration::from_nanos(ticks.max(0) as u64 * 100)
+        }
+
+        fn now_ticks() -> i64 {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |since| (since.as_nanos() / 100) as i64)
+                + UNIX_IN_TICKS
+        }
+
+        /// The cover, as the app's bytes (PNG or JPEG). Spotify and browsers
+        /// hand it over a moment after the title, so it is asked again until
+        /// it comes.
+        fn art(
+            properties: &windows::Media::Control::GlobalSystemMediaTransportControlsSessionMediaProperties,
+        ) -> Option<Arc<[u8]>> {
+            use windows::Storage::Streams::{DataReader, IInputStream};
+            use windows::core::Interface;
+            let stream = properties
+                .Thumbnail()
+                .ok()?
+                .OpenReadAsync()
+                .ok()?
+                .join()
+                .ok()?;
+            let size = u32::try_from(stream.Size().ok()?).ok()?;
+            // Nothing, or something no cover is: a few megabytes at most.
+            if size == 0 || size > 8 << 20 {
+                return None;
+            }
+            let reader = DataReader::CreateDataReader(&stream.cast::<IInputStream>().ok()?).ok()?;
+            reader.LoadAsync(size).ok()?.join().ok()?;
+            let mut bytes = vec![0; size as usize];
+            reader.ReadBytes(&mut bytes).ok()?;
+            Some(bytes.into())
+        }
+
+        /// What is kept about the track that plays: its cover, how often the
+        /// cover was asked for, and the playhead's clock.
+        #[derive(Default)]
+        struct Cover {
+            track: Option<Track>,
+            art: Option<Arc<[u8]>>,
+            tries: u32,
+            playhead: Playhead,
+        }
+
+        fn read(session: &Session, cover: &mut Cover) -> windows::core::Result<Option<Playing>> {
+            let properties = session.TryGetMediaPropertiesAsync()?.join()?;
+            let timeline = session.GetTimelineProperties()?;
+            let playing = session.GetPlaybackInfo()?.PlaybackStatus()? == Status::Playing;
+            let start = span(timeline.StartTime()?.Duration);
+            let end = span(timeline.EndTime()?.Duration);
+            let raw = span(timeline.Position()?.Duration);
+            let since = now_ticks() - timeline.LastUpdatedTime()?.UniversalTime;
+            let track = Track {
+                app: session.SourceAppUserModelId()?.to_string(),
+                title: properties.Title()?.to_string(),
+                artist: properties.Artist()?.to_string(),
+                album: properties.AlbumTitle()?.to_string(),
+                duration: (end > start).then(|| end - start),
+            };
+            if !track.is_known() {
+                return Ok(None);
+            }
+            if cover.track.as_ref() != Some(&track) {
+                *cover = Cover {
+                    track: Some(track.clone()),
+                    ..Cover::default()
+                };
+            }
+            // A few tries, a poll apart, then the track goes without.
+            if cover.art.is_none() && cover.tries < 6 {
+                cover.tries += 1;
+                cover.art = art(&properties);
+            }
+            // Where the song is: see `Playhead` for why not just the stamp.
+            let now = Instant::now();
+            let position = cover.playhead.read(
+                raw,
+                playing,
+                (since > 0 && since < STALE).then(|| span(since)),
+                now,
+            );
+            if super::super::super::tracing() {
+                eprintln!(
+                    "NOTCHTRACE timeline playing={playing} raw={:.3} stamp_age={:.3} playhead={:.3}",
+                    raw.as_secs_f32(),
+                    since as f64 / 1e7,
+                    position.saturating_sub(start).as_secs_f32()
+                );
+            }
+            Ok(Some(Playing {
+                track,
+                playing,
+                position: position.saturating_sub(start),
+                at: now,
+                art: cover.art.clone(),
+            }))
+        }
+
+        /// Whether `now` says something `shown` does not: another track, play
+        /// or pause, a seek, or the cover arriving. The playhead running on
+        /// is not news.
+        fn changed(shown: &Option<Playing>, now: &Option<Playing>) -> bool {
+            match (shown, now) {
+                (None, None) => false,
+                (Some(shown), Some(now)) => {
+                    let expected = shown.position_at(now.at);
+                    let drift = expected.max(now.position) - expected.min(now.position);
+                    shown.track != now.track
+                        || shown.playing != now.playing
+                        || shown.art.is_some() != now.art.is_some()
+                        || drift > SEEK
+                }
+                _ => true,
+            }
+        }
+
+        fn send(session: &Session, command: MediaCommand) -> windows::core::Result<bool> {
+            match command {
+                MediaCommand::TogglePlay => session.TryTogglePlayPauseAsync()?.join(),
+                MediaCommand::Next => session.TrySkipNextAsync()?.join(),
+                MediaCommand::Previous => session.TrySkipPreviousAsync()?.join(),
+                MediaCommand::Seek(to) => {
+                    let start = session.GetTimelineProperties()?.StartTime()?.Duration;
+                    let ticks = start + (to.as_nanos() / 100) as i64;
+                    session.TryChangePlaybackPositionAsync(ticks)?.join()
+                }
+            }
+        }
+
+        pub(crate) fn watch(
+            on_change: impl Fn(Option<Playing>) + Send + 'static,
+        ) -> Option<mpsc::Sender<MediaCommand>> {
+            let (commands, received) = mpsc::channel();
+            std::thread::Builder::new()
+                .name("notch-media".into())
+                .spawn(move || {
+                    // SAFETY: this thread's own WinRT apartment.
+                    let _ = unsafe { RoInitialize(RO_INIT_MULTITHREADED) };
+                    let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else {
+                        return;
+                    };
+                    let mut shown: Option<Playing> = None;
+                    let mut cover = Cover::default();
+                    loop {
+                        match received.recv_timeout(POLL) {
+                            Ok(command) => {
+                                if let Ok(session) = manager.GetCurrentSession() {
+                                    let _ = send(&session, command);
+                                }
+                            }
+                            Err(RecvTimeoutError::Timeout) => {}
+                            Err(RecvTimeoutError::Disconnected) => return,
+                        }
+                        let now = manager
+                            .GetCurrentSession()
+                            .ok()
+                            .and_then(|session| read(&session, &mut cover).ok().flatten());
+                        if changed(&shown, &now) {
+                            on_change(now.clone());
+                            shown = now;
+                        }
+                    }
+                })
+                .ok()?;
+            Some(commands)
+        }
+    }
 
     /// The default output's volume, through its audio endpoint.
     pub(crate) mod audio {
@@ -587,6 +1019,7 @@ mod win {
             Levels {
                 volume,
                 brightness: None,
+                power: super::battery(),
             }
         }
 
@@ -606,6 +1039,97 @@ mod win {
                 Some(())
             })?;
             Some(level)
+        }
+    }
+
+    /// How loud the default output sounds now, for the equalizer: the
+    /// endpoint's peak meter, read about thirty times a second on a thread
+    /// of its own that lives only while the bars are asked for.
+    pub(crate) mod meter {
+        use monocode_core::notch::media::Meter;
+        use std::sync::OnceLock;
+        use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+        use std::time::{Duration, Instant};
+        use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
+        use windows::Win32::Media::Audio::{
+            IMMDeviceEnumerator, MMDeviceEnumerator, eConsole, eRender,
+        };
+        use windows::Win32::System::Com::{
+            CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx,
+        };
+
+        static RUNNING: AtomicBool = AtomicBool::new(false);
+        /// When the bars were last asked for, in milliseconds on `clock`.
+        static ASKED: AtomicU64 = AtomicU64::new(0);
+        /// The four bars, sixteen bits each; `NONE` while there are none.
+        static BARS: AtomicU64 = AtomicU64::new(NONE);
+        const NONE: u64 = u64::MAX;
+        /// The thread ends this long after the last ask.
+        const IDLE: u64 = 2_000;
+
+        fn clock() -> u64 {
+            static START: OnceLock<Instant> = OnceLock::new();
+            START.get_or_init(Instant::now).elapsed().as_millis() as u64
+        }
+
+        fn open() -> Option<IAudioMeterInformation> {
+            // SAFETY: COM for this thread, then the default render endpoint.
+            unsafe {
+                let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                let devices: IMMDeviceEnumerator =
+                    CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).ok()?;
+                let device = devices.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
+                device
+                    .Activate::<IAudioMeterInformation>(CLSCTX_ALL, None)
+                    .ok()
+            }
+        }
+
+        fn run() {
+            let mut meter = Meter::default();
+            let mut endpoint = open();
+            let mut opened = Instant::now();
+            while clock().saturating_sub(ASKED.load(Ordering::Relaxed)) < IDLE {
+                // The output may change (headphones): look again now and then.
+                if opened.elapsed() > Duration::from_secs(5) {
+                    endpoint = open();
+                    opened = Instant::now();
+                }
+                // SAFETY: a plain read on a live endpoint.
+                let peak = endpoint
+                    .as_ref()
+                    .and_then(|endpoint| unsafe { endpoint.GetPeakValue().ok() });
+                let packed = match peak {
+                    Some(peak) => meter.feed(peak).iter().fold(0u64, |packed, bar| {
+                        (packed << 16) | (bar.clamp(0., 1.) * 65_534.) as u64
+                    }),
+                    None => NONE,
+                };
+                BARS.store(packed, Ordering::Relaxed);
+                std::thread::sleep(Duration::from_millis(33));
+            }
+            BARS.store(NONE, Ordering::Relaxed);
+            RUNNING.store(false, Ordering::Release);
+        }
+
+        /// The bars now, first to last; none until the first reading, or
+        /// where the output has no meter.
+        pub(crate) fn bars() -> Option<[f32; 4]> {
+            ASKED.store(clock(), Ordering::Relaxed);
+            if !RUNNING.swap(true, Ordering::AcqRel)
+                && std::thread::Builder::new()
+                    .name("notch-meter".into())
+                    .spawn(run)
+                    .is_err()
+            {
+                RUNNING.store(false, Ordering::Release);
+            }
+            let packed = BARS.load(Ordering::Relaxed);
+            (packed != NONE).then(|| {
+                std::array::from_fn(|index| {
+                    ((packed >> (16 * (3 - index))) & 0xffff) as f32 / 65_534.
+                })
+            })
         }
     }
 
@@ -681,7 +1205,11 @@ mod win {
         }
     }
 
-    pub(super) fn place(window: &mut Window, _cx: &mut App, display: &Display, frame: Frame) {
+    /// Moves and sizes the window at once. It is called while rendering, so
+    /// the `WM_SIZE` this sends cannot reach GPUI (the window is mid-update):
+    /// tell GPUI the new bounds here, or it keeps laying out, painting and
+    /// hit-testing in the old size, as `mac::place` does.
+    pub(super) fn place(window: &mut Window, cx: &mut App, display: &Display, frame: Frame) {
         let Some(hwnd) = hwnd(window) else {
             window.resize(gpui::size(px(frame.width), px(frame.height)));
             return;
@@ -702,6 +1230,7 @@ mod win {
                 SWP_NOACTIVATE | SWP_NOOWNERZORDER,
             )
         };
+        window.bounds_changed(cx);
     }
 }
 
@@ -744,6 +1273,109 @@ impl PointerWatch {
         false
     }
     pub(crate) fn set_area(&self, _: f32, _: f32, _: f32, _: f32) {}
+}
+
+/// What the notch asks of the player.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum MediaCommand {
+    TogglePlay,
+    Next,
+    Previous,
+    /// Move the playhead to this point of the track.
+    Seek(std::time::Duration),
+}
+
+/// The battery's charge (0 to 1) and whether it charges; none where there
+/// is no battery or the system does not say.
+pub(crate) fn battery() -> Option<(f32, bool)> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::battery();
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    None
+}
+
+/// Whether this system's clipboard can be watched for the Clipboard page.
+pub(crate) const CLIPBOARD: bool = cfg!(any(target_os = "windows", test));
+
+/// Something the user copied. Made only by a system's watcher, and tests
+/// and the systems without one have none.
+#[cfg_attr(any(test, not(target_os = "windows")), allow(dead_code))]
+pub(crate) enum Copied {
+    Text(String),
+    /// A picture as a BMP file, with its width and height in pixels.
+    Picture(Vec<u8>, u32, u32),
+}
+
+/// Watches the clipboard off the interface thread and sends each new copy
+/// (text up to `largest` bytes, or a picture up to `largest_picture` where
+/// there is no text), until the receiver is dropped. Windows only for now.
+pub(crate) fn watch_clipboard(
+    copies: async_channel::Sender<Copied>,
+    largest: usize,
+    largest_picture: usize,
+) -> bool {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::clipboard::watch(copies, largest, largest_picture);
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    {
+        let _ = (copies, largest, largest_picture);
+        false
+    }
+}
+
+/// The system pointer's x on the screen, in physical pixels, for the
+/// face's glance (Windows).
+pub(crate) fn pointer_x() -> Option<f32> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let mut point = POINT::default();
+        // SAFETY: writes the cursor position into `point`.
+        unsafe { GetCursorPos(&mut point) }.ok()?;
+        Some(point.x as f32)
+    }
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    None
+}
+
+/// Watches what plays and reports each change (another track, play or
+/// pause, a seek); the sender carries the notch's commands to the player.
+/// Windows only for now: macOS keeps "now playing" behind a private
+/// framework.
+pub(crate) fn watch_media(
+    on_change: impl Fn(Option<monocode_core::notch::media::Playing>) + Send + 'static,
+) -> Option<std::sync::mpsc::Sender<MediaCommand>> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::media::watch(on_change);
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    {
+        let _ = on_change;
+        None
+    }
+}
+
+/// Whether the system pointer is inside `area`, a rectangle in physical
+/// screen pixels, where the app asks the system rather than a watch (Windows).
+/// GPUI's hover goes stale when the notch's window resizes under a still
+/// pointer, so the decision to open or close asks the system instead.
+pub(crate) fn pointer_in(area: Option<[f32; 4]>) -> Option<bool> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    {
+        use windows::Win32::Foundation::POINT;
+        use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+        let [left, top, width, height] = area?;
+        let mut point = POINT::default();
+        // SAFETY: writes the cursor position into `point`.
+        unsafe { GetCursorPos(&mut point) }.ok()?;
+        let (x, y) = (point.x as f32, point.y as f32);
+        Some(x >= left && x < left + width && y >= top && y < top + height)
+    }
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    {
+        let _ = area;
+        None
+    }
 }
 
 /// Where GPUI cannot see hover on its own (an inactive app's panel on
@@ -820,6 +1452,16 @@ pub(crate) fn watch_levels(
     return monocode_core::notch::system::watch_with(win::audio::read, on_change);
     #[cfg(not(all(target_os = "windows", not(test))))]
     monocode_core::notch::system::watch(on_change)
+}
+
+/// The equalizer's four bars from what the system plays now, each 0 to 1,
+/// where the system has a meter for its output (Windows). Asking keeps the
+/// reading going; it stops by itself a moment after the last ask.
+pub(crate) fn audio_bars() -> Option<[f32; 4]> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::meter::bars();
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    None
 }
 
 /// The system's reduced motion setting, where the system says it.

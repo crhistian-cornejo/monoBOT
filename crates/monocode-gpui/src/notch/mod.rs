@@ -9,11 +9,16 @@
 //! once, the island springs between them inside it at the display's rate,
 //! and the window shrinks back to the island when it settles. Its rules live
 //! in `monocode_core::notch`; this module only paints and moves.
+mod clips;
+mod face;
 pub(crate) mod levels;
+mod media;
 mod pages;
 mod platform;
+mod queue;
 mod settings;
 mod shelf;
+mod talk;
 #[cfg(test)]
 pub(crate) mod tests;
 
@@ -96,6 +101,14 @@ pub(crate) enum NotchEvent {
     /// Starts a chat with this prompt in the last project.
     Ask(String),
     HangUp,
+    /// The notch opened its own chat with this agent (or left it): the app
+    /// keeps what was said in the feed.
+    Watch(Option<i64>),
+    /// Says this to the agent's chat, without bringing the app forward.
+    Tell {
+        session: i64,
+        text: String,
+    },
 }
 
 /// The open panel's pages.
@@ -104,17 +117,20 @@ pub(crate) enum Tab {
     Home,
     Agents,
     Chat,
+    /// What was copied lately, where the clipboard can be watched.
+    Clips,
     Settings,
 }
 
 impl Tab {
-    pub(crate) const ALL: [Tab; 4] = [Tab::Home, Tab::Agents, Tab::Chat, Tab::Settings];
+    pub(crate) const ALL: [Tab; 5] = [Tab::Home, Tab::Agents, Tab::Chat, Tab::Clips, Tab::Settings];
 
     fn name(self) -> &'static str {
         match self {
             Tab::Home => "Home",
             Tab::Agents => "Agents",
             Tab::Chat => "Chat",
+            Tab::Clips => "Clipboard",
             Tab::Settings => "Settings",
         }
     }
@@ -124,6 +140,7 @@ impl Tab {
             Tab::Home => "dashboard",
             Tab::Agents => "bot",
             Tab::Chat => "chatting",
+            Tab::Clips => "response-copy",
             Tab::Settings => "sliders",
         }
     }
@@ -133,6 +150,7 @@ impl Tab {
             Tab::Home => "notch-tab-home",
             Tab::Agents => "notch-tab-agents",
             Tab::Chat => "notch-tab-chat",
+            Tab::Clips => "notch-tab-clips",
             Tab::Settings => "notch-tab-settings",
         }
     }
@@ -208,7 +226,18 @@ pub(crate) struct Notch {
     /// Repaints the clock and elapsed times while the panel is open.
     ticker: Option<Task<()>>,
     /// The system's load, sampled while the panel shows the System widget.
-    usage: Option<monocode_core::resources::Usage>,
+    usage: Option<model::stats::Stats>,
+    /// The reading before it and when the new one came, for the bars' glide,
+    /// and the last minute of readings, for the graphs.
+    usage_before: Option<(model::stats::Stats, Instant)>,
+    usage_history: model::stats::History,
+    /// What was dropped on the notch, waiting.
+    pub(crate) tray: model::tray::Tray,
+    tray_scroll: gpui::ScrollHandle,
+    /// The cover on its way from the wing to the open player.
+    cover_flight: bool,
+    /// Where the arranging's row of widgets to add is scrolled to.
+    catalog_scroll: gpui::ScrollHandle,
     save: Save,
     /// The Chat page's field.
     pub(crate) field: Entity<Input>,
@@ -233,6 +262,8 @@ pub(crate) struct Notch {
     pub(crate) screen_override: Option<model::Screen>,
     /// The pointer's comings and goings where GPUI sees no hover.
     _pointer: Option<(platform::PointerWatch, Task<()>)>,
+    /// The island on the screen, in physical pixels, as last drawn.
+    screen_island: Option<[f32; 4]>,
     /// Full pace while the notch is in use (hovered, open, moving or
     /// showing a notice).
     responsive: Option<platform::Responsive>,
@@ -247,6 +278,41 @@ pub(crate) struct Notch {
     level_sender: Option<async_channel::Sender<monocode_core::notch::system::Level>>,
     /// Tries again to take the keys while the system does not allow it yet.
     keys_task: Option<Task<()>>,
+    /// What plays (Windows), and the player's commands.
+    media: Option<monocode_core::notch::media::Playing>,
+    media_commands: Option<std::sync::mpsc::Sender<platform::MediaCommand>>,
+    media_task: Option<Task<()>>,
+    /// Repaints the line and the progress while something plays.
+    media_tick: Option<Task<()>>,
+    /// The track whose lyrics were asked for, and what came back.
+    lyrics_for: Option<monocode_core::notch::media::Track>,
+    lyrics: Option<(
+        monocode_core::notch::media::Track,
+        monocode_core::notch::media::Lyrics,
+    )>,
+    lyrics_task: Option<Task<()>>,
+    /// The cover's bytes as the player sent them, and the image drawn.
+    art: Option<(std::sync::Arc<[u8]>, std::sync::Arc<gpui::Image>)>,
+    /// Where the scrubber is dragged to, while it is.
+    scrub: media::Scrub,
+    /// The face worn at rest.
+    face: face::Face,
+    /// What was copied lately, and its watch.
+    pub(crate) clips: model::clipboard::History,
+    clips_task: Option<Task<()>>,
+    /// Whether the app has said anything yet: what was already finished
+    /// when the notch opened is no news.
+    fed: bool,
+    /// The copy just made from the history says so until this ends.
+    clip_copied: Option<Task<()>>,
+    /// Kept pictures as drawn.
+    thumbnails: clips::Thumbnails,
+    /// The agent the notch chats with, and the field to answer it.
+    talk: Option<talk::Talking>,
+    pub(crate) talk_field: Entity<Input>,
+    /// Spotify's "Playing next", and the field for its Client ID.
+    queue: queue::Queue,
+    pub(crate) spotify_field: Entity<Input>,
 }
 
 impl EventEmitter<NotchEvent> for Notch {}
@@ -298,6 +364,10 @@ pub(crate) fn open(look: Look, save: Save, cx: &mut App) -> Option<WindowHandle<
                     let mut notch = Notch::new(look, save, cx);
                     notch.watch_pointer(window, cx);
                     notch.watch_levels(cx);
+                    notch.watch_media(cx);
+                    notch.watch_clipboard(cx);
+                    notch.start_queue(cx);
+                    notch.start_face(cx);
                     notch
                 })
             },
@@ -347,6 +417,20 @@ impl Notch {
             )
         });
         let submitted = cx.subscribe(&field, |this, _, _: &input::Submitted, cx| this.ask(cx));
+        let talk_field = cx.new(|cx| Input::field("Message the agent", "Message", ink(0.4), cx));
+        let told = cx.subscribe(&talk_field, |this, _, _: &input::Submitted, cx| {
+            this.tell(cx)
+        });
+        let spotify_field = cx.new(|cx| {
+            let mut field = Input::field(
+                "Spotify Client ID",
+                "Paste your Spotify app's Client ID",
+                ink(0.4),
+                cx,
+            );
+            field.set_text(look.spotify_client.clone(), cx);
+            field
+        });
         Self {
             look,
             feed: Feed::default(),
@@ -361,6 +445,12 @@ impl Notch {
             expiry: None,
             ticker: None,
             usage: None,
+            usage_before: None,
+            usage_history: Default::default(),
+            tray: Default::default(),
+            tray_scroll: gpui::ScrollHandle::new(),
+            cover_flight: false,
+            catalog_scroll: gpui::ScrollHandle::new(),
             save,
             field,
             shown: None,
@@ -374,14 +464,34 @@ impl Notch {
             epoch: Instant::now(),
             screen_override: None,
             _pointer: None,
+            screen_island: None,
             responsive: None,
-            _subscriptions: vec![submitted],
+            _subscriptions: vec![submitted, told],
             level: None,
             level_clear: None,
             level_at: None,
             level_task: None,
             level_sender: None,
             keys_task: None,
+            media: None,
+            media_commands: None,
+            media_task: None,
+            media_tick: None,
+            lyrics_for: None,
+            lyrics: None,
+            lyrics_task: None,
+            art: None,
+            scrub: Default::default(),
+            face: Default::default(),
+            clips: Default::default(),
+            clips_task: None,
+            fed: false,
+            clip_copied: None,
+            thumbnails: Vec::new(),
+            talk: None,
+            talk_field,
+            queue: Default::default(),
+            spotify_field,
         }
     }
 
@@ -435,7 +545,14 @@ impl Notch {
         }
         self.notices.update(&feed, &self.look, now_ms());
         self.rest = model::rest(&feed);
+        // One more finished turn than a moment ago: the face is glad of it.
+        let finished = |feed: &Feed| feed.activities.iter().filter(|a| a.done).count();
+        let cheer = self.fed && finished(&feed) > finished(&self.feed);
+        self.fed = true;
         self.feed = feed;
+        if cheer {
+            self.cheer(cx);
+        }
         self.schedule_expiry(cx);
         cx.notify();
     }
@@ -495,7 +612,15 @@ impl Notch {
             return;
         }
         let keys_changed = look.system_keys != self.look.system_keys;
+        let clips_changed = look.clipboard != self.look.clipboard;
+        let face_changed = look.face != self.look.face;
         self.look = look;
+        if clips_changed {
+            self.watch_clipboard(cx);
+        }
+        if face_changed {
+            self.start_face(cx);
+        }
         if keys_changed {
             if self.look.system_keys {
                 self.take_system_keys(cx);
@@ -521,6 +646,7 @@ impl Notch {
         self.hover = None;
         if open {
             self.start_ticker(cx);
+            self.read_queue(true, cx);
         } else {
             self.editing = false;
             self.tab = Tab::Home;
@@ -546,7 +672,7 @@ impl Notch {
                 let usage = if sample {
                     Some(
                         cx.background_executor()
-                            .spawn(async { monocode_core::resources::usage() })
+                            .spawn(async { model::stats::read() })
                             .await,
                     )
                 } else {
@@ -554,8 +680,8 @@ impl Notch {
                 };
                 if this
                     .update(cx, |this, cx| {
-                        if usage.is_some() {
-                            this.usage = usage;
+                        if let Some(usage) = usage {
+                            this.take_usage(usage);
                         }
                         // Only what shows a clock or a time repaints each second.
                         if matches!(this.tab, Tab::Home | Tab::Agents) && !this.editing {
@@ -616,7 +742,7 @@ impl Notch {
     fn pointer_over(&self) -> bool {
         match &self._pointer {
             Some((watch, _)) => watch.inside(),
-            None => self.hovered,
+            None => platform::pointer_in(self.screen_island).unwrap_or(self.hovered),
         }
     }
 
@@ -636,6 +762,7 @@ impl Notch {
             Tab::Settings => SETTINGS_HEIGHT,
             Tab::Agents => self.agents_height(),
             Tab::Chat => self.chat_height(),
+            Tab::Clips => self.clips_height(),
             Tab::Home => {
                 let rows = if self.editing {
                     self.look.shelf_rows as usize
@@ -648,37 +775,16 @@ impl Notch {
                     } else {
                         0.
                     }
+                    + if self.player_shown() {
+                        media::PLAYER_HEIGHT
+                            + model::CELL_GAP
+                            + self.player_lyrics_height()
+                            + self.queue_height()
+                    } else {
+                        0.
+                    }
             }
         }
-    }
-
-    /// The Agents page as tall as its sections, up to where it scrolls.
-    fn agents_height(&self) -> f32 {
-        let feed = &self.feed;
-        let section = |rows: usize| {
-            if rows == 0 {
-                0.
-            } else {
-                CAPTION + ROW * rows as f32
-            }
-        };
-        let working = feed.activities.iter().filter(|a| !a.done).count();
-        let finished = feed.activities.len() - working;
-        let recent = feed.recent.len().max(1);
-        (section(feed.asks.len()) + section(working) + section(finished) + section(recent) + 4.)
-            .min(AGENTS_MAX)
-    }
-
-    /// The Chat page: its field, the quick composer and up to three chats.
-    fn chat_height(&self) -> f32 {
-        let recent = self.feed.recent.len().min(3);
-        40. + 28.
-            + if recent > 0 {
-                CAPTION + ROW * recent as f32
-            } else {
-                0.
-            }
-            + 4.
     }
 
     pub(crate) fn shape(&self) -> Shape {
@@ -695,7 +801,19 @@ impl Notch {
             }
         } else if self.rest.busy() {
             let (left, right) = self.rest.wings(self.look.show_count);
+            // Music playing keeps a corner of the right wing.
+            let right = right
+                + if self.media_showing() {
+                    media::MUSIC_BADGE
+                } else {
+                    0
+                };
             Shape::Busy { left, right }
+        } else if self.media_showing() {
+            Shape::Busy {
+                left: media::MEDIA_WING,
+                right: media::MEDIA_WING,
+            }
         } else {
             Shape::Quiet
         }
@@ -778,7 +896,16 @@ impl Notch {
                 &self.look,
                 model::frame(&self.look, &display.screen, self.shape()),
             );
-            let room = union(base, base, PEEK);
+            let room = union(
+                base,
+                base,
+                // Only while it glows: the room blocks clicks to what is under it.
+                if cfg!(target_os = "windows") && self.level.is_some() {
+                    PEEK.max(GLOW_ROOM)
+                } else {
+                    PEEK
+                },
+            );
             match self.motion {
                 Some(motion) => union(room, outer(&self.look, motion.from), MARGIN),
                 None => room,
@@ -826,10 +953,17 @@ impl Notch {
 
     /// The tallest any page can get, for the fixed room.
     fn tallest_possible_body(&self) -> f32 {
-        (model::shelf_height(model::MAX_ROWS as usize) + CATALOG_HEIGHT + model::CELL_GAP)
-            .max(SETTINGS_HEIGHT)
-            .max(AGENTS_MAX)
-            .max(40. + 28. + CAPTION + ROW * 3. + 4.)
+        (model::shelf_height(model::MAX_ROWS as usize)
+            + (CATALOG_HEIGHT + model::CELL_GAP)
+                .max(
+                    media::PLAYER_HEIGHT
+                        + 2. * model::CELL_GAP
+                        + media::LYRICS_HEIGHT
+                        + queue::TALLEST,
+                ))
+        .max(SETTINGS_HEIGHT)
+        // Agents and Chat both scroll past this.
+        .max(AGENTS_MAX)
     }
 
     fn camera(&self, cx: &App) -> Option<model::Camera> {
@@ -946,14 +1080,50 @@ fn outline(bounds: Bounds<Pixels>, island: bool) -> Vec<gpui::Point<Pixels>> {
 /// The black body, with a hairline along its edge so it reads as a notch
 /// over dark wallpapers too. At rest over the camera it has none: it is the
 /// hardware.
-fn body(island: bool, edge: bool, glow: f32) -> impl IntoElement {
+/// The light around the edge after a system change, widest first: stroke
+/// width and alpha. Only the outer half shows, outside the black.
+const GLOW_RINGS: [(f32, f32); 3] = [(14., 0.07), (8., 0.14), (3., 0.5)];
+/// Windows has no camera housing to light: there the change blooms as a
+/// soft blurred light in the accent around the whole body, which reads on a
+/// dark taskbar without a hard line. The window keeps this much room for it.
+const GLOW_ROOM: f32 = 26.;
+
+fn body(
+    island: bool,
+    edge: bool,
+    rest_mark: bool,
+    glow: f32,
+    eyes: Option<face::Eyes>,
+) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, _| {
             let points = outline(bounds, island);
             // A system change lights the edge: soft rings in the accent,
             // under the black, so only their outer half shows.
-            if glow > 0. {
+            if glow > 0. && cfg!(target_os = "windows") {
+                let shoulder = if island { 0. } else { SHOULDER };
+                let lit = Bounds::new(
+                    bounds.origin + point(px(shoulder), px(0.)),
+                    gpui::size(bounds.size.width - px(2. * shoulder), bounds.size.height),
+                );
+                let light = |alpha: f32, blur: f32, spread: f32| {
+                    let mut color = accent_color();
+                    color.a = alpha * glow;
+                    gpui::BoxShadow {
+                        color,
+                        offset: point(px(0.), px(0.)),
+                        blur_radius: px(blur),
+                        spread_radius: px(spread),
+                        inset: false,
+                    }
+                };
+                window.paint_drop_shadows(
+                    lit,
+                    gpui::Corners::all(px(RADIUS)),
+                    &[light(0.35, 22., 0.), light(0.6, 9., 1.)],
+                );
+            } else if glow > 0. {
                 let edge_points: Vec<_> = if island {
                     points
                         .iter()
@@ -963,7 +1133,7 @@ fn body(island: bool, edge: bool, glow: f32) -> impl IntoElement {
                 } else {
                     points[4..points.len() - 4].to_vec()
                 };
-                for (width, alpha) in [(14., 0.07), (8., 0.14), (3., 0.5)] {
+                for (width, alpha) in GLOW_RINGS {
                     let mut ring = gpui::PathBuilder::stroke(px(width));
                     ring.add_polygon(&edge_points, false);
                     if let Ok(path) = ring.build() {
@@ -978,9 +1148,28 @@ fn body(island: bool, edge: bool, glow: f32) -> impl IntoElement {
             if let Ok(path) = fill.build() {
                 window.paint_path(path, black(1.));
             }
-            if !edge {
+            // Windows' resting handle: its face, or a short grip line in its
+            // middle, so the black strip still reads on a dark taskbar.
+            if let Some(eyes) = eyes {
+                face::paint_eyes(eyes, bounds, window);
+            } else if rest_mark {
+                let (w, h) = (bounds.size.width, bounds.size.height);
+                let grip = gpui::size(px(28.), px(2.));
+                window.paint_quad(
+                    gpui::fill(
+                        Bounds::new(
+                            bounds.origin + point((w - grip.width) / 2., (h - grip.height) / 2.),
+                            grip,
+                        ),
+                        ink(0.42),
+                    )
+                    .corner_radii(px(1.)),
+                );
+            }
+            if !edge && !rest_mark {
                 return;
             }
+            let edge_alpha = if rest_mark && !edge { 0.22 } else { 0.12 };
             let mut edge = gpui::PathBuilder::stroke(px(1.));
             // Half a point inside the outline, so the whole line lies on the
             // black and nothing behind the notch shows through its edge. The
@@ -1004,7 +1193,7 @@ fn body(island: bool, edge: bool, glow: f32) -> impl IntoElement {
             };
             edge.add_polygon(&edge_points, false);
             if let Ok(path) = edge.build() {
-                window.paint_path(path, ink(0.12));
+                window.paint_path(path, ink(edge_alpha));
             }
         },
     )
@@ -1250,7 +1439,10 @@ impl Notch {
                             .pl(px(10.))
                             .pr(px(12.))
                             .flex()
-                            .child(right),
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().flex_1().min_w_0().flex().child(right))
+                            .children(self.music_badge()),
                     )
                     .into_any_element()
             }
@@ -1263,6 +1455,7 @@ impl Notch {
                 .when(rest.busy(), |bar| {
                     bar.child(div().flex_shrink_0().child(left))
                         .child(div().flex_1().min_w_0().flex().child(right))
+                        .children(self.music_badge())
                 })
                 .into_any_element(),
         }
@@ -1382,7 +1575,11 @@ impl Notch {
             tab => tab.name(),
         };
         let mut tabs = div().flex().items_center().gap(px(2.));
-        for tab in Tab::ALL {
+        let clips = self.keeps_clips();
+        for tab in Tab::ALL
+            .into_iter()
+            .filter(|tab| clips || *tab != Tab::Clips)
+        {
             tabs = tabs.child(
                 glyph(tab.id(), tab.name(), tab.icon(), self.tab == tab)
                     .on_click(cx.listener(move |this, _, _, cx| this.set_tab(tab, cx))),
@@ -1420,6 +1617,7 @@ impl Notch {
                     ),
                 )
             })
+            .children(media::battery_chip())
             .child(div().w(px(1.)).h(px(14.)).bg(ink(0.12)))
             .child(tabs)
             .into_any_element()
@@ -1431,6 +1629,7 @@ impl Notch {
         shape: Shape,
         tab: Tab,
         size: Frame,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let camera = self.camera(cx);
@@ -1445,6 +1644,9 @@ impl Notch {
                 let wings = (left as f32 + swell, right as f32 + swell);
                 match self.level {
                     Some(level) => self.level_view(level, camera, wings),
+                    None if !self.rest.busy() && self.media_showing() => {
+                        self.media_wings(camera, wings)
+                    }
                     None => self.ears(camera, wings, cx),
                 }
             }
@@ -1463,9 +1665,20 @@ impl Notch {
             Shape::Open { .. } => {
                 let inner = size.width - 2. * model::PANEL_PAD;
                 let page = match tab {
+                    Tab::Home if self.player_shown() => div()
+                        .flex()
+                        .flex_col()
+                        .child(self.player_view(cx))
+                        .child(self.player_lyrics_view())
+                        .child(self.queue_view())
+                        .child(div().h(px(model::CELL_GAP)).flex_shrink_0())
+                        .child(self.shelf_view(size.width, cx))
+                        .into_any_element(),
                     Tab::Home => self.shelf_view(size.width, cx),
+                    Tab::Agents if self.talking_with().is_some() => self.talk_page(window, cx),
                     Tab::Agents => self.agents_page(inner, cx),
                     Tab::Chat => self.chat_page(cx),
+                    Tab::Clips => self.clips_page(cx),
                     Tab::Settings => self.settings_view(cx),
                 };
                 div()
@@ -1549,7 +1762,7 @@ impl Notch {
                 (shape, self.tab, target, opacity, (1. - opacity) * RISE)
             }
         };
-        let content = self.content(drawn_shape, drawn_tab, size, cx);
+        let content = self.content(drawn_shape, drawn_tab, size, window, cx);
         let target = size;
         let is_island = self.look.island();
         let shoulder = if is_island { 0. } else { SHOULDER };
@@ -1559,9 +1772,23 @@ impl Notch {
         let top = island.y - room.y;
         let glow = self.level_glow(window, cx);
         let clickable = !self.open && self.notices.current().is_none();
+        let eyes = if shape == Shape::Quiet && drawn_shape == Shape::Quiet {
+            self.eyes(window, cx)
+        } else {
+            None
+        };
         if let Some((watch, _)) = &self._pointer {
             watch.set_area(left, top, island.width + 2. * shoulder, island.height);
         }
+        // The island on the screen in physical pixels, for `pointer_over`.
+        let origin = window.bounds().origin;
+        let scale = window.scale_factor();
+        self.screen_island = Some([
+            (f32::from(origin.x) + left) * scale,
+            (f32::from(origin.y) + top) * scale,
+            (island.width + 2. * shoulder) * scale,
+            island.height * scale,
+        ]);
         let open = self.open;
         div()
             .size_full()
@@ -1608,7 +1835,9 @@ impl Notch {
                     .child(body(
                         is_island,
                         self.look.edge && (shape != Shape::Quiet || is_island),
+                        cfg!(target_os = "windows") && shape == Shape::Quiet && !is_island,
                         glow,
+                        eyes,
                     ))
                     .child(
                         div()

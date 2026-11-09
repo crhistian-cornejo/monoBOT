@@ -1,7 +1,7 @@
 //! The system's own levels for the notch, as IVY shows them: the output
-//! volume (and mute) and the built-in display's brightness. A thread of its
-//! own reads them five times a second and says only when one changes; both
-//! reads are a property query, with no audio or display work.
+//! volume (and mute), the built-in display's brightness and the battery. A
+//! thread of its own reads them five times a second and says only when one
+//! changes; each read is a property query, with no audio or display work.
 use std::time::Duration;
 
 /// A level the user just changed.
@@ -11,6 +11,10 @@ pub enum Level {
     Volume(f32, bool),
     /// 0 to 1.
     Brightness(f32),
+    /// The battery's charge, 0 to 1, and whether the charger is in: told
+    /// when the charger goes in or out, when the charge fills, and when it
+    /// runs low.
+    Power(f32, bool),
 }
 
 /// What the system reports now; `None` where it cannot say (no output
@@ -19,7 +23,15 @@ pub enum Level {
 pub struct Levels {
     pub volume: Option<(f32, bool)>,
     pub brightness: Option<f32>,
+    /// The battery's charge and whether the charger is in; `None` on a
+    /// machine without a battery.
+    pub power: Option<(f32, bool)>,
 }
+
+/// The charges at which a battery running down is told: a fifth, a tenth.
+const LOW: [f32; 2] = [0.2, 0.1];
+/// The charge that counts as full.
+const FULL: f32 = 0.995;
 
 /// How often the levels are read.
 const EVERY: Duration = Duration::from_millis(200);
@@ -37,6 +49,13 @@ pub fn changes(before: &Levels, now: &Levels) -> Vec<Level> {
     if let (Some(was), Some(brightness)) = (before.brightness, now.brightness) {
         if moved(was, brightness) {
             changes.push(Level::Brightness(brightness));
+        }
+    }
+    if let (Some((was, was_plugged)), Some((charge, plugged))) = (before.power, now.power) {
+        let filled = plugged && was < FULL && charge >= FULL;
+        let ran_low = !plugged && LOW.iter().any(|low| was > *low && charge <= *low);
+        if was_plugged != plugged || filled || ran_low {
+            changes.push(Level::Power(charge, plugged));
         }
     }
     changes
@@ -300,6 +319,7 @@ mod mac {
             super::Level::Brightness(value) => set_brightness()
                 // SAFETY: a display id and a level from 0 to 1.
                 .is_some_and(|set| unsafe { set(CGMainDisplayID(), value) } == 0),
+            super::Level::Power(..) => false,
         }
     }
 
@@ -307,6 +327,7 @@ mod mac {
         Levels {
             volume: volume(),
             brightness: brightness(),
+            power: None,
         }
     }
 }
@@ -320,11 +341,13 @@ mod tests {
         let before = Levels {
             volume: Some((0.5, false)),
             brightness: Some(0.8),
+            power: None,
         };
         assert!(changes(&before, &before).is_empty());
         let jitter = Levels {
             volume: Some((0.502, false)),
             brightness: Some(0.801),
+            power: None,
         };
         assert!(changes(&before, &jitter).is_empty(), "noise");
         let louder = Levels {
@@ -347,6 +370,45 @@ mod tests {
     }
 
     #[test]
+    fn the_battery_is_told_when_it_matters() {
+        let at = |charge: f32, plugged: bool| Levels {
+            power: Some((charge, plugged)),
+            ..Levels::default()
+        };
+        // Draining or charging on its own says nothing.
+        assert!(changes(&at(0.6, false), &at(0.59, false)).is_empty());
+        assert!(changes(&at(0.6, true), &at(0.61, true)).is_empty());
+        assert_eq!(
+            changes(&at(0.6, false), &at(0.6, true)),
+            [Level::Power(0.6, true)],
+            "the charger went in"
+        );
+        assert_eq!(
+            changes(&at(0.6, true), &at(0.6, false)),
+            [Level::Power(0.6, false)],
+            "and out"
+        );
+        assert_eq!(
+            changes(&at(0.99, true), &at(1., true)),
+            [Level::Power(1., true)],
+            "full"
+        );
+        assert!(changes(&at(1., true), &at(1., true)).is_empty());
+        assert_eq!(
+            changes(&at(0.21, false), &at(0.2, false)),
+            [Level::Power(0.2, false)],
+            "a fifth left"
+        );
+        assert!(changes(&at(0.2, false), &at(0.19, false)).is_empty());
+        assert_eq!(
+            changes(&at(0.11, false), &at(0.1, false)),
+            [Level::Power(0.1, false)]
+        );
+        // No battery says nothing.
+        assert!(changes(&Levels::default(), &at(0.5, true)).is_empty());
+    }
+
+    #[test]
     fn keys_step_as_the_system_does() {
         assert_eq!(stepped(0.5, true, false), 9. / 16.);
         assert_eq!(stepped(0.5, false, true), 31. / 64.);
@@ -355,6 +417,7 @@ mod tests {
         let now = Levels {
             volume: Some((0.5, true)),
             brightness: Some(0.25),
+            power: None,
         };
         assert_eq!(
             after(Key::VolumeUp, &now, false),

@@ -5,6 +5,9 @@
 use super::*;
 use monocode_core::notch::{Activity, Widget};
 
+/// How far one press of the catalog's arrows moves it.
+const CATALOG_STEP: f32 = 150.;
+
 /// One of the arranging's small square buttons over a widget.
 fn tool(
     id: impl Into<gpui::ElementId>,
@@ -122,9 +125,11 @@ impl Notch {
             "clock" => clock_widget(),
             "system" => self.system_widget(widget.span),
             "new" => self.new_widget(cx),
+            "calendar" => super::media::calendar_widget(widget.span),
             _ => div().into_any_element(),
         };
         let editing = self.editing;
+        let name = model::widget_name(&id);
         div()
             .id(gpui::SharedString::from(format!("notch-widget-{id}")))
             .debug_selector({
@@ -140,23 +145,56 @@ impl Notch {
             .flex_col()
             .gap(px(6.))
             .bg(ink(0.07))
-            .when(editing, |cell| cell.border_1().border_color(ink(0.18)))
-            .child(label(model::widget_name(&id)))
-            .child(div().flex_1().min_h_0().flex().flex_col().child(content))
             .when(editing, |cell| {
-                cell.child(self.arranging(&widget, index, shelf.len(), cx))
+                // Arranging: pick a widget up and drop it on another to put
+                // it there; the one under it lights up.
+                let dragged = WidgetDrag {
+                    id: id.clone(),
+                    name,
+                };
+                cell.border_1()
+                    .border_color(ink(0.18))
+                    .cursor(gpui::CursorStyle::OpenHand)
+                    .on_drag(dragged, |dragged, _, _, cx| cx.new(|_| dragged.clone()))
+                    .drag_over::<WidgetDrag>(|style, _, _, _| {
+                        style.border_color(accent_color()).bg(ink(0.12))
+                    })
+                    .on_drop(cx.listener(move |this, dragged: &WidgetDrag, _, cx| {
+                        let id = dragged.id.clone();
+                        this.change_look(
+                            |look| {
+                                look.move_to(&id, index);
+                            },
+                            cx,
+                        );
+                    }))
             })
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(5.))
+                    .when(editing, |row| {
+                        row.child(icon("grip-vertical", 10.).text_color(ink(0.45)))
+                    })
+                    .child(label(name)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_h_0()
+                    .flex()
+                    .flex_col()
+                    .when(editing, |content| content.opacity(0.45))
+                    .child(content),
+            )
+            .when(editing, |cell| cell.child(self.arranging(&widget, cx)))
             .into_any_element()
     }
 
-    /// The arranging's tools over one widget.
-    fn arranging(
-        &self,
-        widget: &Widget,
-        index: usize,
-        count: usize,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
+    /// The arranging's tools over one widget, in its corner: narrower,
+    /// wider and remove. Moving is a drag.
+    fn arranging(&self, widget: &Widget, cx: &mut Context<Self>) -> AnyElement {
         let id = widget.id.clone();
         let widths = model::widths(&id).unwrap_or(&[1]);
         let narrower = widths.first().is_some_and(|first| *first < widget.span);
@@ -171,7 +209,6 @@ impl Notch {
                 this.change_look(
                     |look| {
                         match kind {
-                            "shift" => look.shift(&id, by),
                             "resize" => look.resize(&id, by),
                             _ => {
                                 look.remove(&id);
@@ -186,23 +223,10 @@ impl Notch {
         let key = |name: &str| gpui::SharedString::from(format!("notch-{name}-{}", widget.id));
         div()
             .absolute()
-            .top(px(6.))
+            .bottom(px(6.))
             .right(px(6.))
             .flex()
             .gap(px(3.))
-            .child(
-                tool(key("earlier"), "Move earlier", "chevron-left", index > 0)
-                    .when(index > 0, |tool| tool.on_click(action(-1, "shift"))),
-            )
-            .child(
-                tool(
-                    key("later"),
-                    "Move later",
-                    "chevron-right",
-                    index + 1 < count,
-                )
-                .when(index + 1 < count, |tool| tool.on_click(action(1, "shift"))),
-            )
             .child(
                 tool(key("narrower"), "Narrower", "minus-sign", narrower)
                     .when(narrower, |tool| tool.on_click(action(-1, "resize"))),
@@ -233,13 +257,48 @@ impl Notch {
                 },
             ));
         }
+        if addable.is_empty() {
+            return row.into_any_element();
+        }
+        // More widgets than the row holds: it scrolls (the wheel moves it
+        // too) and an arrow at each end steps through it.
+        let room = self.look.panel_width() - 2. * model::PANEL_PAD;
+        let needed: f32 = addable
+            .iter()
+            .map(|id| (model::widget_name(id).chars().count() + 2) as f32 * 6. + 18. + 6.)
+            .sum();
+        let overflows = needed > room - 12.;
+        let at = -f32::from(self.catalog_scroll.offset().x);
+        let end = f32::from(self.catalog_scroll.max_offset().x);
+        let step = |by: f32| {
+            cx.listener(move |this: &mut Notch, _: &gpui::ClickEvent, _, cx| {
+                let handle = &this.catalog_scroll;
+                let end = f32::from(handle.max_offset().x).max(0.);
+                let to = (-f32::from(handle.offset().x) + by).clamp(0., end);
+                handle.set_offset(point(px(-to), px(0.)));
+                cx.notify();
+            })
+        };
+        let (back, forward) = (at > 0.5, end <= 0. || at < end - 0.5);
+        let mut pills = div()
+            .id("notch-catalog-scroll")
+            .debug_selector(|| "notch-catalog-scroll".into())
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .overflow_x_scroll()
+            .track_scroll(&self.catalog_scroll);
         for id in addable {
-            row = row.child(
+            pills = pills.child(
                 pill(
                     gpui::SharedString::from(format!("notch-add-{id}")),
                     &format!("+ {}", model::widget_name(id)),
                     false,
                 )
+                .flex_shrink_0()
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.change_look(
                         |look| {
@@ -250,7 +309,34 @@ impl Notch {
                 })),
             );
         }
-        row.into_any_element()
+        row.when(overflows, |row| {
+            row.child(
+                tool(
+                    "notch-catalog-back",
+                    "Earlier widgets",
+                    "chevron-left",
+                    back,
+                )
+                .size(px(22.))
+                .flex_shrink_0()
+                .when(back, |tool| tool.on_click(step(-CATALOG_STEP))),
+            )
+        })
+        .child(pills)
+        .when(overflows, |row| {
+            row.child(
+                tool(
+                    "notch-catalog-forward",
+                    "More widgets",
+                    "chevron-right",
+                    forward,
+                )
+                .size(px(22.))
+                .flex_shrink_0()
+                .when(forward, |tool| tool.on_click(step(CATALOG_STEP))),
+            )
+        })
+        .into_any_element()
     }
 
     fn agents_widget(&self, span: u32, cx: &mut Context<Self>) -> AnyElement {
@@ -501,48 +587,111 @@ impl Notch {
     }
 
     fn system_widget(&self, span: u32) -> AnyElement {
-        let Some(usage) = self.usage else {
+        let Some(stats) = self.usage else {
             return quiet("Measuring…").into_any_element();
         };
-        let cpu = usage
-            .cpu_percent
-            .map_or_else(|| "—".to_owned(), |cpu| format!("{cpu:.0}%"));
-        let memory = match usage.memory_pressure {
-            Some(1) => "Normal",
-            Some(2) => "Tight",
-            Some(4) => "Critical",
-            _ => "—",
+        let percent = |value: Option<f32>| {
+            value.map_or_else(|| "—".to_owned(), |value| format!("{value:.0}%"))
         };
-        let stat = |name: &'static str, value: String| {
-            div()
+        // The memory in use where the system counts it; its pressure where
+        // it only says that (macOS).
+        let memory = match (stats.memory, stats.pressure) {
+            (Some(memory), _) => percent(Some(memory.percent())),
+            (None, Some(1)) => "Normal".to_owned(),
+            (None, Some(2)) => "Tight".to_owned(),
+            (None, Some(4)) => "Critical".to_owned(),
+            _ => "—".to_owned(),
+        };
+        let mut meters = vec![
+            ("CPU", percent(stats.cpu), stats.cpu),
+            ("RAM", memory, stats.memory.map(|memory| memory.percent())),
+        ];
+        // The graphics card where the system gives its load.
+        if stats.gpu.is_some() || cfg!(target_os = "windows") {
+            meters.push(("GPU", percent(stats.gpu), stats.gpu));
+        }
+        let bar = |level: Option<f32>| {
+            div().h(px(3.)).bg(ink(0.12)).child(
+                div()
+                    .h_full()
+                    .w(gpui::relative(level.unwrap_or(0.).clamp(0., 100.) / 100.))
+                    .bg(accent_color()),
+            )
+        };
+        if span < 2 {
+            // One column: a row each, its bar between the name and the number.
+            return div()
+                .debug_selector(|| "notch-system".into())
+                .flex_1()
                 .flex()
                 .flex_col()
-                .child(
+                .justify_end()
+                .gap(px(5.))
+                .children(meters.into_iter().map(|(name, value, level)| {
                     div()
-                        .text_size(px(18.))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .text_color(ink(0.92))
-                        .child(value),
-                )
-                .child(div().text_size(px(10.5)).text_color(ink(0.45)).child(name))
-        };
+                        .debug_selector(move || format!("notch-system-{}", name.to_lowercase()))
+                        .h(px(14.))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .child(
+                            div()
+                                .w(px(24.))
+                                .flex_shrink_0()
+                                .text_size(px(10.))
+                                .text_color(ink(0.45))
+                                .child(name),
+                        )
+                        .child(bar(level).flex_1())
+                        .child(
+                            div()
+                                .min_w(px(28.))
+                                .flex_shrink_0()
+                                .flex()
+                                .justify_end()
+                                .text_size(px(11.))
+                                .font_weight(gpui::FontWeight::SEMIBOLD)
+                                .text_color(ink(0.92))
+                                .child(value),
+                        )
+                }))
+                .into_any_element();
+        }
+        let detail = stats.memory.map(|memory| memory.label());
         div()
+            .debug_selector(|| "notch-system".into())
             .flex_1()
             .flex()
             .items_end()
-            .gap(px(18.))
-            .child(stat("CPU", cpu))
-            .when(span >= 2, |row| {
-                row.child(stat("Memory", memory.to_owned()))
-            })
-            .when(span < 2, |row| {
-                row.child(
-                    div()
-                        .text_size(px(10.5))
-                        .text_color(ink(0.45))
-                        .child(memory),
-                )
-            })
+            .gap(px(14.))
+            .children(meters.into_iter().map(|(name, value, level)| {
+                let caption = match (&detail, name) {
+                    (Some(detail), "RAM") => format!("RAM {detail}"),
+                    _ => name.to_owned(),
+                };
+                div()
+                    .debug_selector(move || format!("notch-system-{}", name.to_lowercase()))
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(
+                        div()
+                            .text_size(px(18.))
+                            .font_weight(gpui::FontWeight::SEMIBOLD)
+                            .text_color(ink(0.92))
+                            .child(value),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(px(10.))
+                            .text_color(ink(0.45))
+                            .child(caption),
+                    )
+                    .child(bar(level))
+            }))
             .into_any_element()
     }
 
@@ -666,4 +815,31 @@ fn clock_widget() -> AnyElement {
                 .child(now.format("%a %e %b").to_string()),
         )
         .into_any_element()
+}
+
+/// A widget picked up while arranging, and the card that follows the
+/// pointer while it is carried.
+#[derive(Clone)]
+pub(super) struct WidgetDrag {
+    id: String,
+    name: &'static str,
+}
+
+impl Render for WidgetDrag {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div()
+            .h(px(28.))
+            .px(px(10.))
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .bg(black(0.92))
+            .border_1()
+            .border_color(accent_color())
+            .text_size(px(11.5))
+            .text_color(ink(0.95))
+            .cursor(gpui::CursorStyle::ClosedHand)
+            .child(icon("grip-vertical", 10.).text_color(ink(0.6)))
+            .child(self.name)
+    }
 }

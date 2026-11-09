@@ -126,6 +126,17 @@ pub fn saved(provider: Provider) -> bool {
     get(provider).is_some()
 }
 
+/// Another secret of the app's under the same keychain service (a sign-in's
+/// refresh token), by its own account name.
+pub(crate) fn secret(account: &str) -> Option<String> {
+    store::get(account)
+}
+
+/// Saves or, with `None`, forgets such a secret.
+pub(crate) fn set_secret(account: &str, value: Option<&str>) -> Result<(), KeyError> {
+    store::set(account, value)
+}
+
 /// Keeps keys in this process's memory instead of the keychain, for the
 /// app's own tests: nothing they save reaches the real keychain.
 pub fn keep_in_memory() {

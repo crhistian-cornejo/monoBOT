@@ -53,7 +53,10 @@ fn the_shelf_is_arranged_only_within_its_rows() {
     assert!(!look.resize("recent", 1));
     // A third row makes room.
     look.set_rows(3);
-    assert_eq!(look.addable(), ["asks", "today", "call", "system"]);
+    assert_eq!(
+        look.addable(),
+        ["asks", "today", "call", "system", "calendar"]
+    );
     assert!(look.add("asks"));
     assert!(look.resize("asks", 1));
     assert!(look.resize("asks", 1));
@@ -155,9 +158,24 @@ fn without_a_camera_the_quiet_notch_is_a_handle_on_the_top_edge() {
         width: 1920.,
         ..Screen::default()
     };
-    let rest = frame(&Look::default(), &screen, Shape::Quiet);
+    let plain = Look {
+        face: false,
+        ..Look::default()
+    };
+    let rest = frame(&plain, &screen, Shape::Quiet);
     assert_eq!((rest.width, rest.height), HANDLE);
-    assert_eq!((rest.x, rest.y), (900., 0.));
+    // With its face, Windows' handle is tall enough for two eyes; a Mac's
+    // stays a hairline over the menu bar.
+    let faced = frame(&Look::default(), &screen, Shape::Quiet);
+    let height = if cfg!(target_os = "windows") {
+        FACE_HANDLE
+    } else {
+        HANDLE.1
+    };
+    assert_eq!((faced.width, faced.height), (HANDLE.0, height));
+    assert!(wears_face(&Look::default(), &screen) == cfg!(target_os = "windows"));
+    // Centered on the top edge.
+    assert_eq!((rest.x, rest.y), ((1920. - HANDLE.0) / 2., 0.));
     let busy = frame(
         &Look::default(),
         &screen,
@@ -407,4 +425,89 @@ fn sessions_of_one_kind_share_a_mark_and_count_the_rest() {
     let at_rest = rest(&feed);
     assert_eq!(at_rest.marks.len(), 1, "one Claude mark");
     assert_eq!(at_rest.more(), 1, "and +1");
+}
+
+#[test]
+fn a_dragged_widget_lands_where_it_is_dropped_if_the_shelf_still_fits() {
+    let mut look = Look::default();
+    // agents(2) clock(1) / recent(2) new(1)
+    assert!(look.move_to("new", 0));
+    assert_eq!(
+        ids(&look),
+        [("new", 1), ("agents", 2), ("clock", 1), ("recent", 2)]
+    );
+    assert!(look.move_to("new", 3));
+    assert_eq!(
+        ids(&look),
+        [("agents", 2), ("clock", 1), ("recent", 2), ("new", 1)]
+    );
+    // Dropped where it already is, or unknown: nothing changes.
+    assert!(!look.move_to("new", 3));
+    assert!(!look.move_to("call", 0));
+    // Each lands in the first row with room, so the shelf still fills two.
+    assert!(look.move_to("recent", 1));
+    assert_eq!(rows(&look.shelf), 2);
+    // A shelf of one row takes no move that needs a second.
+    let mut one = Look::default();
+    one.set_rows(1);
+    one.shelf = vec![Widget::new("agents", 2), Widget::new("clock", 1)];
+    assert!(!one.move_to("clock", 0) || rows(&one.shelf) == 1);
+    // The lyrics show on the closed notch unless turned off.
+    assert!(look.lyrics);
+}
+
+#[test]
+fn the_notchs_chat_keeps_what_was_said_without_the_tools() {
+    let rows = [
+        ("user", "old question"),
+        ("assistant", "old answer"),
+        ("user", "what changed?"),
+        ("thinking", "let me look"),
+        ("assistant", "Two files."),
+        ("tool", "git diff"),
+        ("assistant", "Both in the shell."),
+        ("user", "  "),
+    ];
+    let kept = said(rows.iter().copied());
+    let lines: Vec<_> = kept.iter().map(|s| (s.mine, s.text.as_str())).collect();
+    assert_eq!(
+        lines,
+        [
+            (true, "old question"),
+            (false, "old answer"),
+            (true, "what changed?"),
+            (false, "Two files.\nBoth in the shell."),
+        ]
+    );
+    // Only the latest are kept, and a long answer keeps its end.
+    let long = "word ".repeat(400);
+    let many: Vec<(&str, &str)> = (0..20)
+        .map(|n| {
+            if n % 2 == 0 {
+                ("user", "q")
+            } else {
+                ("assistant", long.as_str())
+            }
+        })
+        .collect();
+    let kept = said(many.iter().copied());
+    assert_eq!(kept.len(), SAID_KEPT);
+    assert!(kept
+        .last()
+        .is_some_and(|last| !last.mine && last.text.starts_with('…')));
+    assert!(kept.iter().all(|said| said.text.chars().count() <= 601));
+}
+
+#[test]
+fn a_spotify_client_id_is_kept_only_when_it_looks_like_one() {
+    let look = |id: &str| {
+        Look {
+            spotify_client: id.into(),
+            ..Look::default()
+        }
+        .normalized()
+        .spotify_client
+    };
+    assert_eq!(look(&format!(" {} ", "0a".repeat(16))), "0a".repeat(16));
+    assert_eq!(look("paste here"), "");
 }

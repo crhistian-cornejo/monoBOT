@@ -6,8 +6,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
+pub mod clipboard;
+pub mod face;
 pub mod hooks;
+pub mod media;
+pub mod spotify;
+pub mod stats;
 pub mod system;
+pub mod tray;
 
 /// The setting that keeps [`Look`], as JSON.
 pub const SETTING: &str = "notch.look";
@@ -21,7 +27,7 @@ pub const OPENS_ON: [&str; 2] = ["hover", "click"];
 pub const WIDTHS: [&str; 3] = ["compact", "regular", "wide"];
 
 /// The widgets the shelf can hold and the widths each may take, in columns.
-pub const WIDGETS: [(&str, &[u32]); 8] = [
+pub const WIDGETS: [(&str, &[u32]); 9] = [
     ("agents", &[2, 3]),
     ("recent", &[2, 3]),
     ("asks", &[1, 2, 3]),
@@ -30,6 +36,7 @@ pub const WIDGETS: [(&str, &[u32]); 8] = [
     ("clock", &[1]),
     ("system", &[1, 2]),
     ("new", &[1]),
+    ("calendar", &[1, 2, 3]),
 ];
 /// The shelf's columns.
 pub const COLUMNS: u32 = 3;
@@ -47,6 +54,7 @@ pub fn widget_name(id: &str) -> &'static str {
         "clock" => "Clock",
         "system" => "System",
         "new" => "New chat",
+        "calendar" => "Calendar",
         _ => "",
     }
 }
@@ -120,6 +128,17 @@ pub struct Look {
     /// The volume and brightness keys answered by the notch instead of the
     /// system's own indicator.
     pub system_keys: bool,
+    /// The lyric line at the playhead on the closed notch while a song
+    /// plays, instead of its title.
+    pub lyrics: bool,
+    /// Two eyes on the notch at rest, where it has room for them: they
+    /// blink, glance at the pointer and cheer when an agent finishes.
+    pub face: bool,
+    /// The Clipboard page: what was copied lately, kept in memory only.
+    pub clipboard: bool,
+    /// The user's own Spotify app's Client ID, for the player's "Playing
+    /// next". Not a secret; the sign-in's token is in the keychain.
+    pub spotify_client: String,
     /// The shelf's rows of widgets (1 to 3).
     pub shelf_rows: u32,
     /// What the shelf shows, in order, and how wide each one is.
@@ -137,6 +156,10 @@ impl Default for Look {
             edge: true,
             show_count: true,
             system_keys: true,
+            lyrics: true,
+            face: true,
+            clipboard: true,
+            spotify_client: String::new(),
             shelf_rows: 2,
             shelf: vec![
                 Widget::new("agents", 2),
@@ -167,6 +190,10 @@ impl Look {
         self.opens_on = word(&OPENS_ON, &self.opens_on, &base.opens_on);
         self.width = word(&WIDTHS, &self.width, &base.width);
         self.notice_seconds = self.notice_seconds.clamp(2, 12);
+        self.spotify_client = self.spotify_client.trim().to_owned();
+        if !spotify::valid_client(&self.spotify_client) {
+            self.spotify_client.clear();
+        }
         self.shelf_rows = self.shelf_rows.clamp(1, MAX_ROWS);
         let mut shelf: Vec<Widget> = Vec::new();
         for mut widget in std::mem::take(&mut self.shelf) {
@@ -260,6 +287,22 @@ impl Look {
             return false;
         }
         self.try_shelf(|shelf| shelf.swap(at, to as usize))
+    }
+
+    /// Puts a widget at `to` (a place on the shelf, counted before it is
+    /// lifted), as a drag drops it, if the shelf still fits.
+    pub fn move_to(&mut self, id: &str, to: usize) -> bool {
+        let Some(at) = self.shelf.iter().position(|widget| widget.id == id) else {
+            return false;
+        };
+        let to = to.min(self.shelf.len() - 1);
+        if to == at {
+            return false;
+        }
+        self.try_shelf(|shelf| {
+            let widget = shelf.remove(at);
+            shelf.insert(to, widget);
+        })
     }
 
     /// The next width the widget allows, wider (`1`) or narrower (`-1`), if
@@ -361,7 +404,15 @@ pub struct Frame {
 /// The gap between the menu bar (or the top edge) and a floating island.
 pub const ISLAND_GAP: f32 = 6.;
 /// The closed notch where there is no camera: a slim handle on the top edge.
-pub const HANDLE: (f32, f32) = (120., 8.);
+/// Windows has no camera housing to sit on and its taskbar is often dark and
+/// on top, so its handle is a little larger to stay findable.
+pub const HANDLE: (f32, f32) = if cfg!(target_os = "windows") {
+    (156., 10.)
+} else {
+    (120., 8.)
+};
+/// The handle's height while it wears the face: room for two eyes.
+pub const FACE_HANDLE: f32 = 18.;
 /// The closed island while nothing happens.
 pub const ISLAND_REST: (f32, f32) = (132., 30.);
 /// The height of the closed notch with something to say, where there is no
@@ -392,6 +443,13 @@ pub enum Shape {
     Open { body: u32 },
 }
 
+/// Whether the notch at rest shows its face on `screen`: the island does,
+/// and so does Windows' handle. A camera housing has no room for eyes, and
+/// the handle over a Mac's menu bar stays the hairline it is.
+pub fn wears_face(look: &Look, screen: &Screen) -> bool {
+    look.face && (look.island() || (cfg!(target_os = "windows") && camera(screen).is_none()))
+}
+
 /// Where the notch sits and how big it is on `screen`, for `shape`.
 pub fn frame(look: &Look, screen: &Screen, shape: Shape) -> Frame {
     let camera = camera(screen);
@@ -405,6 +463,7 @@ pub fn frame(look: &Look, screen: &Screen, shape: Shape) -> Frame {
         Shape::Quiet => match (island, camera) {
             (true, _) => ISLAND_REST,
             (false, Some(camera)) => (camera.width, camera.height),
+            (false, None) if wears_face(look, screen) => (HANDLE.0, FACE_HANDLE),
             (false, None) => HANDLE,
         },
         Shape::Busy { left, right } => {
@@ -544,9 +603,90 @@ pub struct Upcoming {
     pub due_at: u64,
 }
 
+/// One of the user's own agents (a Mono), as the Agents page lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Personal {
+    pub name: String,
+    pub face: Face,
+    /// Its own chat, where a click opens it.
+    pub session: Option<i64>,
+    /// What it does now ("Reading files"); none while it rests.
+    pub doing: Option<String>,
+    pub needs_you: bool,
+}
+
+/// One thing said in an agent's chat, as the notch's own chat shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Said {
+    /// The user said it; otherwise the agent did.
+    pub mine: bool,
+    pub text: String,
+}
+
+/// The chat the notch has open with one agent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Talk {
+    pub session: i64,
+    /// The latest things said, oldest first.
+    pub said: Vec<Said>,
+    /// The agent is answering.
+    pub busy: bool,
+}
+
+/// How many things said the notch's chat keeps, and how long each may be.
+pub const SAID_KEPT: usize = 8;
+const SAID_LENGTH: usize = 600;
+
+/// The latest things said out of a transcript's rows (`role`, `text`): what
+/// the user wrote and what the agent answered, without tools or thinking.
+/// An answer streamed over several rows is one thing said.
+pub fn said<'a>(rows: impl DoubleEndedIterator<Item = (&'a str, &'a str)>) -> Vec<Said> {
+    let mut kept: Vec<Said> = Vec::new();
+    for (role, text) in rows.rev() {
+        let mine = match role {
+            "user" => true,
+            "assistant" => false,
+            _ => continue,
+        };
+        let text = text.trim();
+        if text.is_empty() {
+            continue;
+        }
+        match kept.last_mut() {
+            // Rows are read newest first: an earlier row of the same answer
+            // goes before what is already kept.
+            Some(last) if !mine && !last.mine => {
+                if last.text.len() < SAID_LENGTH {
+                    last.text = format!("{text}\n{}", last.text);
+                }
+            }
+            _ => {
+                if kept.len() == SAID_KEPT {
+                    break;
+                }
+                kept.push(Said {
+                    mine,
+                    text: text.to_owned(),
+                });
+            }
+        }
+    }
+    for said in &mut kept {
+        if said.text.chars().count() > SAID_LENGTH {
+            // An answer keeps its end, where it concludes.
+            let skip = said.text.chars().count() - SAID_LENGTH;
+            said.text = format!("…{}", said.text.chars().skip(skip).collect::<String>());
+        }
+    }
+    kept.reverse();
+    kept
+}
+
 /// Everything the notch reads from the app.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Feed {
+    /// The user's own agents, working ones first.
+    pub agents: Vec<Personal>,
     pub activities: Vec<Activity>,
     pub asks: Vec<Ask>,
     pub call: Option<Call>,
@@ -554,6 +694,8 @@ pub struct Feed {
     pub recent: Vec<Recent>,
     /// Reminders not yet due, soonest first.
     pub upcoming: Vec<Upcoming>,
+    /// The agent's chat the notch has open, if any.
+    pub talk: Option<Talk>,
 }
 
 /// "3m", "2h", "Yesterday" or a date: how long ago `at` was, short.

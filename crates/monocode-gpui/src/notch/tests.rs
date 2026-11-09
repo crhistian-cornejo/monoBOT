@@ -214,7 +214,19 @@ fn the_pencil_arranges_the_shelf_and_saves_each_change(cx: &mut TestAppContext) 
     click(visual, "notch-remove-clock");
     assert!(visual.debug_bounds("notch-widget-clock").is_none());
     click(visual, "notch-add-call");
-    click(visual, "notch-earlier-call");
+    // Moving is a drag: the call, picked up and dropped on New chat, goes
+    // where New chat was.
+    let from = visual.debug_bounds("notch-widget-call").unwrap().center();
+    let to = visual.debug_bounds("notch-widget-new").unwrap().center();
+    visual.simulate_mouse_down(from, gpui::MouseButton::Left, Default::default());
+    visual.simulate_mouse_move(
+        from + gpui::point(px(12.), px(0.)),
+        Some(gpui::MouseButton::Left),
+        Default::default(),
+    );
+    visual.simulate_mouse_move(to, Some(gpui::MouseButton::Left), Default::default());
+    visual.simulate_mouse_up(to, gpui::MouseButton::Left, Default::default());
+    visual.run_until_parked();
     let look = opened
         .window
         .update(visual, |n, _, _| n.look.clone())
@@ -447,4 +459,583 @@ fn a_volume_change_opens_the_wings_for_a_moment(cx: &mut TestAppContext) {
     visual.run_until_parked();
     assert!(visual.debug_bounds("notch-level").is_none());
     assert_eq!(size(opened.window, visual), (186. + 2. * SHOULDER, 37.));
+}
+
+#[gpui::test]
+fn what_plays_glides_past_at_rest_and_leads_home_with_its_player(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Lyrics, Playing, Track, parse_lrc};
+    let mut look = Look::default();
+    look.shelf = vec![monocode_core::notch::Widget::new("calendar", 3)];
+    let opened = open_notch(look, cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    let track = Track {
+        app: "Spotify.exe".into(),
+        title: "Song".into(),
+        artist: "Artist".into(),
+        album: "Album".into(),
+        duration: Some(Duration::from_secs(200)),
+    };
+    let playing = |playing| Playing {
+        track: track.clone(),
+        playing,
+        position: Duration::from_secs(12),
+        at: Instant::now(),
+        art: None,
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            // The lyrics are in hand already: nothing is fetched in a test.
+            notch.lyrics_for = Some(track.clone());
+            notch.lyrics = Some((
+                track.clone(),
+                Lyrics::Synced(parse_lrc("[00:10.00]first line\n[00:20.00]second line")),
+            ));
+            notch.set_media(Some(playing(true)), cx);
+            assert_eq!(
+                notch.lyric_moment().map(|(_, line, _)| line).as_deref(),
+                Some("first line")
+            );
+        })
+        .unwrap();
+    visual.run_until_parked();
+    // At rest the notch grows wings for the cover and the title while it plays.
+    assert!(visual.debug_bounds("notch-media").is_some());
+    assert_eq!(
+        size(opened.window, visual),
+        (186. + 2. * (media::MEDIA_WING as f32 + SHOULDER), 37.)
+    );
+    // Open, the player leads Home, above the shelf and its calendar.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_open(true, cx))
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-player").is_some());
+    assert!(visual.debug_bounds("notch-widget-calendar").is_some());
+    assert!(visual.debug_bounds("notch-media-play").is_some());
+    assert!(visual.debug_bounds("notch-media-next").is_some());
+    // Paused, the closed notch goes quiet again.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_open(false, cx);
+            notch.set_media(Some(playing(false)), cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-media").is_none());
+    assert_eq!(size(opened.window, visual), (186. + 2. * SHOULDER, 37.));
+}
+
+#[gpui::test]
+fn agents_lists_the_users_own_agents_and_chat_the_coding_chats(cx: &mut TestAppContext) {
+    use monocode_core::notch::{Face, Personal, Recent};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let mut agent_chat = working(20);
+    agent_chat.agent = Some("Ivy".into());
+    agent_chat.face = Some(Face {
+        mascot: "ivy".into(),
+        color: 0x7c5cff,
+    });
+    let agent_ask = Ask {
+        session: 20,
+        ..approval()
+    };
+    let code_ask = Ask {
+        session: 4,
+        request: "r2".into(),
+        ..approval()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    agents: vec![Personal {
+                        name: "Ivy".into(),
+                        face: Face {
+                            mascot: "ivy".into(),
+                            color: 0x7c5cff,
+                        },
+                        session: Some(20),
+                        doing: Some("Reading files".into()),
+                        needs_you: true,
+                    }],
+                    activities: vec![working(4), agent_chat],
+                    asks: vec![agent_ask, code_ask],
+                    recent: vec![Recent {
+                        id: 9,
+                        provider: "codex".into(),
+                        title: "Ship the notch".into(),
+                        updated_at: 0,
+                    }],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    opened
+        .window
+        .update(visual, |notch, _, _| {
+            // The agent's approval is the Agents page's, the coding one the
+            // Chat page's, and each page's work is its own.
+            let sessions = |asks: Vec<Ask>| asks.iter().map(|a| a.session).collect::<Vec<_>>();
+            assert_eq!(sessions(notch.asks_of(true)), [20]);
+            assert_eq!(sessions(notch.asks_of(false)), [4]);
+            let ids = |work: Vec<Activity>| work.iter().map(|a| a.id).collect::<Vec<_>>();
+            assert_eq!(ids(notch.coding_work(false)), [4]);
+            // Ivy's own chat is Ivy's row, not another agent at work.
+            assert!(notch.other_agent_work().is_empty());
+        })
+        .unwrap();
+    click(visual, "notch-tab-agents");
+    assert!(visual.debug_bounds("notch-agents-page").is_some());
+    click(visual, "notch-tab-chat");
+    assert!(visual.debug_bounds("notch-chat-page").is_some());
+}
+
+#[gpui::test]
+fn the_clipboard_page_keeps_what_was_copied_a_click_from_copying_again(cx: &mut TestAppContext) {
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.copied("cargo xtask dev", cx);
+            notch.copied("https://usemono.dev", cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-clips");
+    assert!(visual.debug_bounds("notch-clips-page").is_some());
+    // The older copy, copied again: it is on the clipboard and the newest.
+    click(visual, "notch-clip-1");
+    assert_eq!(
+        visual.read_from_clipboard().and_then(|item| item.text()),
+        Some("cargo xtask dev".into())
+    );
+    let texts = |notch: &Notch| {
+        notch
+            .clips
+            .clips()
+            .iter()
+            .map(|clip| clip.text.clone())
+            .collect::<Vec<_>>()
+    };
+    let kept = opened.window.update(visual, |notch, _, _| texts(notch));
+    assert_eq!(kept.unwrap(), ["cargo xtask dev", "https://usemono.dev"]);
+    // Its cross removes one without copying it.
+    click(visual, "notch-clip-remove-0");
+    let kept = opened.window.update(visual, |notch, _, _| texts(notch));
+    assert_eq!(kept.unwrap(), ["https://usemono.dev"]);
+    click(visual, "notch-clips-clear");
+    assert!(visual.debug_bounds("notch-clip-0").is_none());
+    // Turned off, the page goes and nothing is kept.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.copied("kept for now", cx);
+            notch.change_look(|look| look.clipboard = false, cx);
+            notch.copied("not kept", cx);
+            assert!(notch.clips.clips().is_empty());
+            assert_eq!(notch.tab, Tab::Home);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-tab-clips").is_none());
+}
+
+#[gpui::test]
+fn the_battery_shows_on_the_wings_like_a_level(cx: &mut TestAppContext) {
+    use monocode_core::notch::system::Level;
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.show_level(Level::Power(0.18, false), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-level").is_some());
+}
+
+#[gpui::test]
+fn the_island_wears_a_face_at_rest_unless_turned_off(cx: &mut TestAppContext) {
+    let island = Look {
+        style: "island".into(),
+        ..Look::default()
+    };
+    let opened = open_notch(island, cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    opened
+        .window
+        .update(visual, |notch, window, cx| {
+            // Under reduced motion the eyes are open and still.
+            notch.blink(cx);
+            let eyes = notch.eyes(window, cx).expect("a face");
+            assert_eq!((eyes.open, eyes.gaze, eyes.glad), (1., 0., false));
+            // A finished turn makes it glad; what was done already did not.
+            let done = Activity {
+                done: true,
+                ..working(1)
+            };
+            notch.update_feed(
+                Feed {
+                    activities: vec![done.clone()],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            assert!(!notch.eyes(window, cx).unwrap().glad);
+            notch.update_feed(
+                Feed {
+                    activities: vec![
+                        done,
+                        Activity {
+                            done: true,
+                            ..working(2)
+                        },
+                    ],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            assert!(notch.eyes(window, cx).unwrap().glad);
+            notch.change_look(|look| look.face = false, cx);
+            assert!(notch.eyes(window, cx).is_none());
+        })
+        .unwrap();
+    // The cheer passes by itself.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.change_look(|look| look.face = true, cx);
+            notch.cheer(cx);
+        })
+        .unwrap();
+    visual.executor().advance_clock(Duration::from_secs(5));
+    visual.run_until_parked();
+    opened
+        .window
+        .update(visual, |notch, window, cx| {
+            assert!(!notch.eyes(window, cx).unwrap().glad)
+        })
+        .unwrap();
+}
+
+fn ivy() -> monocode_core::notch::Personal {
+    monocode_core::notch::Personal {
+        name: "Ivy".into(),
+        face: monocode_core::notch::Face {
+            mascot: "ivy".into(),
+            color: 0x7c5cff,
+        },
+        session: Some(20),
+        doing: None,
+        needs_you: false,
+    }
+}
+
+#[gpui::test]
+fn an_agents_row_opens_its_chat_in_the_notch_and_sends_without_the_app(cx: &mut TestAppContext) {
+    use monocode_core::notch::{Said, Talk};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let feed = |talk: Option<Talk>| Feed {
+        agents: vec![ivy()],
+        talk,
+        ..Feed::default()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(None), cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-agents");
+    click(visual, "notch-agent-0");
+    // The chat is here, and the app was only asked for what was said.
+    assert!(visual.debug_bounds("notch-talk").is_some());
+    assert!(visual.debug_bounds("notch-agents-page").is_none());
+    assert!(matches!(
+        opened.events.borrow().as_slice(),
+        [NotchEvent::Watch(Some(20))]
+    ));
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                feed(Some(Talk {
+                    session: 20,
+                    said: vec![
+                        Said {
+                            mine: true,
+                            text: "What changed today?".into(),
+                        },
+                        Said {
+                            mine: false,
+                            text: "Two files in the shell.".into(),
+                        },
+                    ],
+                    busy: false,
+                })),
+                cx,
+            );
+            notch
+                .talk_field
+                .update(cx, |field, cx| field.set_text("  Thanks  ".into(), cx));
+        })
+        .unwrap();
+    click(visual, "notch-talk-send");
+    assert!(matches!(
+        opened.events.borrow().as_slice(),
+        [_, NotchEvent::Tell { session: 20, text }] if text == "Thanks"
+    ));
+    // Sent: the field is clear and the panel stays open on the chat.
+    let (open, typed) = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            (notch.open, notch.talk_field.read(cx).content.to_string())
+        })
+        .unwrap();
+    assert!(open && typed.is_empty());
+    // What could not be delivered comes back with why.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.tell_failed("Thanks".into(), "The agent is busy.".into(), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-talk-error").is_some());
+    let typed = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.talk_field.read(cx).content.to_string()
+        })
+        .unwrap();
+    assert_eq!(typed, "Thanks");
+    // Back to the agents; Open in app is the one way that raises the app.
+    click(visual, "notch-talk-open");
+    click(visual, "notch-talk-back");
+    assert!(visual.debug_bounds("notch-agents-page").is_some());
+    assert!(matches!(
+        opened.events.borrow().as_slice(),
+        [.., NotchEvent::OpenSession(20), NotchEvent::Watch(None)]
+    ));
+}
+
+#[gpui::test]
+fn a_copied_row_says_so_and_each_kind_wears_its_mark(cx: &mut TestAppContext) {
+    use monocode_core::notch::clipboard::Kind;
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    // A 2 × 1 picture at 24 bits, as a BMP file.
+    let mut dib = Vec::new();
+    dib.extend_from_slice(&40u32.to_le_bytes());
+    dib.extend_from_slice(&2i32.to_le_bytes());
+    dib.extend_from_slice(&1i32.to_le_bytes());
+    dib.extend_from_slice(&1u16.to_le_bytes());
+    dib.extend_from_slice(&24u16.to_le_bytes());
+    dib.extend_from_slice(&[0; 24]);
+    dib.extend_from_slice(&[0, 0, 255, 255, 0, 0, 0, 0]);
+    let (bmp, width, height) = monocode_core::notch::clipboard::bmp_from_dib(&dib).unwrap();
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.copied("fn main() {}", cx);
+            notch.copied("ana@example.com", cx);
+            notch.copied_picture(bmp, width, height, cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    let kinds = opened
+        .window
+        .update(visual, |notch, _, _| {
+            notch
+                .clips
+                .clips()
+                .iter()
+                .map(|clip| clip.kind)
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
+    assert_eq!(kinds, [Kind::Image(2, 1), Kind::Email, Kind::Code]);
+    click(visual, "notch-tab-clips");
+    assert!(visual.debug_bounds("notch-clip-copied").is_none());
+    // The code, copied again: it is the newest and says it was copied.
+    click(visual, "notch-clip-2");
+    assert!(visual.debug_bounds("notch-clip-copied").is_some());
+    assert_eq!(
+        visual.read_from_clipboard().and_then(|item| item.text()),
+        Some("fn main() {}".into())
+    );
+    let first = opened
+        .window
+        .update(visual, |notch, _, _| notch.clips.clips()[0].kind)
+        .unwrap();
+    assert_eq!(first, Kind::Code);
+    // The word passes by itself.
+    visual.executor().advance_clock(Duration::from_millis(1500));
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-clip-copied").is_none());
+    // A picture is copied back as a picture.
+    click(visual, "notch-clip-1");
+    let item = visual.read_from_clipboard().expect("something was copied");
+    assert!(item.text().is_none());
+    assert!(matches!(
+        item.entries().first(),
+        Some(gpui::ClipboardEntry::Image(_))
+    ));
+}
+
+#[gpui::test]
+fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Playing, Track};
+    use monocode_core::notch::spotify::Next;
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let next = |title: &str| Next {
+        title: title.into(),
+        artist: "Someone".into(),
+    };
+    let heights = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_media(
+                Some(Playing {
+                    track: Track {
+                        app: "Spotify.exe".into(),
+                        title: "Now".into(),
+                        artist: "Someone".into(),
+                        album: String::new(),
+                        duration: None,
+                    },
+                    playing: false,
+                    position: Duration::ZERO,
+                    at: Instant::now(),
+                    art: None,
+                }),
+                cx,
+            );
+            notch.set_open(true, cx);
+            let without = notch.body_height();
+            notch.set_queue(vec![next("One"), next("Two")], cx);
+            (without, notch.body_height())
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-player").is_some());
+    assert!(visual.debug_bounds("notch-queue").is_some());
+    assert!(heights.1 > heights.0, "the panel grows by the queue");
+    // Settings › Music holds the sign-in.
+    click(visual, "notch-tab-settings");
+    click(visual, "notch-page-music");
+    assert!(visual.debug_bounds("notch-music-page").is_some());
+    // A Client ID that is not one is refused before anything is asked.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch
+                .spotify_field
+                .update(cx, |field, cx| field.set_text("not an id".into(), cx))
+        })
+        .unwrap();
+    click(visual, "notch-spotify-connect");
+    assert!(visual.debug_bounds("notch-spotify-status").is_some());
+    let saved = opened
+        .window
+        .update(visual, |notch, _, _| notch.look.spotify_client.clone())
+        .unwrap();
+    assert_eq!(saved, "");
+}
+
+#[gpui::test]
+fn the_catalog_steps_through_the_widgets_that_do_not_fit_its_row(cx: &mut TestAppContext) {
+    // One widget on the shelf: nearly every other one can be added, more
+    // than the row shows at once.
+    let mut look = Look::default();
+    look.shelf = vec![monocode_core::notch::Widget::new("clock", 1)];
+    let opened = open_notch(look, cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_open(true, cx))
+        .unwrap();
+    click(visual, "notch-edit");
+    let row = visual.debug_bounds("notch-catalog-scroll").unwrap();
+    let last = "notch-add-calendar";
+    let hidden = visual
+        .debug_bounds(last)
+        .is_none_or(|pill| pill.right() > row.right());
+    assert!(hidden, "the last widget starts out of the row");
+    let offset = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| notch.catalog_scroll.offset().x)
+            .unwrap()
+    };
+    assert_eq!(offset(visual), px(0.));
+    // Forward until the row ends: the last widget is in it and can be added.
+    for _ in 0..6 {
+        click(visual, "notch-catalog-forward");
+    }
+    assert!(offset(visual) < px(0.));
+    let row = visual.debug_bounds("notch-catalog-scroll").unwrap();
+    let pill = visual.debug_bounds(last).unwrap();
+    assert!(pill.right() <= row.right() + px(0.5));
+    // And back to the start.
+    for _ in 0..6 {
+        click(visual, "notch-catalog-back");
+    }
+    assert_eq!(offset(visual), px(0.));
+    click(visual, "notch-catalog-forward");
+    click(visual, "notch-catalog-forward");
+    click(visual, "notch-catalog-forward");
+    click(visual, last);
+    let shelf = opened
+        .window
+        .update(visual, |notch, _, _| notch.look.shelf.clone())
+        .unwrap();
+    assert!(shelf.iter().any(|widget| widget.id == "calendar"));
+}
+
+#[gpui::test]
+fn the_system_widget_shows_the_processor_the_memory_and_the_graphics(cx: &mut TestAppContext) {
+    use monocode_core::notch::stats::{Memory, Stats};
+    let mut look = Look::default();
+    look.shelf = vec![monocode_core::notch::Widget::new("system", 2)];
+    let opened = open_notch(look, cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.usage = Some(Stats {
+                cpu: Some(23.4),
+                memory: Some(Memory {
+                    used: 8 << 30,
+                    total: 32 << 30,
+                }),
+                pressure: None,
+                gpu: Some(61.),
+            });
+            notch.open = true;
+            cx.notify();
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-system").is_some());
+    assert!(visual.debug_bounds("notch-system-cpu").is_some());
+    assert!(visual.debug_bounds("notch-system-ram").is_some());
+    assert!(visual.debug_bounds("notch-system-gpu").is_some());
 }

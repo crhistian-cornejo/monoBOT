@@ -60,6 +60,19 @@ impl Monos {
             })
             .collect()
     }
+    /// Loads the chat of the Mono whose own session this is, for the notch's
+    /// chat with it: a Mono not opened since the app started has none yet.
+    pub(crate) fn notch_load_chat(&mut self, session: i64, cx: &mut Context<Self>) {
+        let mono = self
+            .roster
+            .monos
+            .iter()
+            .find(|mono| mono.session_id == Some(session))
+            .map(|mono| mono.id.clone());
+        if let Some(id) = mono {
+            self.ensure_chat(&id, cx);
+        }
+    }
     /// The Mono a session belongs to: its own chat or one of its habit runs.
     pub(crate) fn notification_mono(&self, id: i64) -> Option<&Mono> {
         self.roster

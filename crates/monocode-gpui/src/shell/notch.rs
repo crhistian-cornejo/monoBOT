@@ -5,7 +5,9 @@
 use super::*;
 use crate::notch::{Handle, NotchEvent};
 use crate::notifications::approvals::InputKind;
-use monocode_core::notch::{self as model, Activity, Ask, Call, Face, Feed, Recent, Upcoming};
+use monocode_core::notch::{
+    self as model, Activity, Ask, Call, Face, Feed, Personal, Recent, Talk, Upcoming,
+};
 use std::path::Path;
 
 impl Shell {
@@ -255,10 +257,45 @@ impl Shell {
             .as_ref()
             .and_then(|monos| monos.read(cx).notch_call())
             .map(|(group, status)| Call { group, status });
+        // The user's own agents for the Agents page, each with what it does
+        // now; their chats stay out of the coding chats below.
+        let mut agents: Vec<Personal> = Vec::new();
+        let mut agent_sessions: std::collections::HashSet<i64> = std::collections::HashSet::new();
+        if let Some(monos) = &self.monos {
+            let roster = &monos.read(cx).roster;
+            agent_sessions.extend(roster.hidden_sessions.iter().copied());
+            for mono in &roster.monos {
+                agent_sessions.extend(mono.session_id);
+                agent_sessions.extend(mono.habit_sessions.iter().copied());
+                let name = mono.label();
+                let busy = activities.iter().find(|activity| {
+                    !activity.done
+                        && (Some(activity.id) == mono.session_id
+                            || activity.agent.as_deref() == Some(name.as_str()))
+                });
+                let asking = mono
+                    .session_id
+                    .is_some_and(|session| asks.iter().any(|ask| ask.session == session));
+                agents.push(Personal {
+                    face: Face {
+                        mascot: mono.mascot.clone(),
+                        color: mono.color,
+                    },
+                    session: mono.session_id,
+                    doing: busy.map(|activity| activity.step.clone()),
+                    needs_you: asking || busy.is_some_and(|activity| activity.needs_you),
+                    name,
+                });
+            }
+        }
+        // Who needs the user, then who works, then the rest as listed.
+        agents.sort_by_key(|agent| (!agent.needs_you, agent.doing.is_none()));
         let mut recent: Vec<Recent> = self
             .session_summaries
             .values()
-            .filter(|session| !session.archived && session.has_messages)
+            .filter(|session| {
+                !session.archived && session.has_messages && !agent_sessions.contains(&session.id)
+            })
             .map(|session| Recent {
                 id: session.id,
                 provider: session.provider.clone(),
@@ -287,12 +324,32 @@ impl Shell {
             })
             .collect();
         upcoming.sort_by_key(|reminder| reminder.due_at);
+        // The chat the notch has open with an agent: the latest things said.
+        let talk = self.notch_talk.and_then(|session| {
+            let view = self
+                .monos
+                .as_ref()?
+                .read(cx)
+                .notification_entity(session, cx)?;
+            let chat = view.read(cx);
+            Some(Talk {
+                session,
+                said: model::said(
+                    chat.mono_rows(cx)
+                        .iter()
+                        .map(|row| (row.role.as_str(), row.text.as_str())),
+                ),
+                busy: chat.responding(),
+            })
+        });
         let feed = Feed {
+            agents,
             activities,
             asks,
             call,
             recent,
             upcoming,
+            talk,
         };
         notch
             .entity
@@ -308,6 +365,34 @@ impl Shell {
                 .into_iter()
                 .map(|(view, _, _)| view)
                 .collect()
+        })
+    }
+
+    /// Says `text` in an agent's own chat from the notch: a new turn while
+    /// the agent rests, a steer while it answers. The window is not raised.
+    fn notch_tell(
+        &mut self,
+        session: i64,
+        text: String,
+        cx: &mut Context<Self>,
+    ) -> Result<(), String> {
+        let view = self
+            .monos
+            .as_ref()
+            .and_then(|monos| monos.read(cx).notification_entity(session, cx))
+            .ok_or("The agent's chat is still loading. Try again in a moment.")?;
+        view.update(cx, |chat, cx| {
+            if chat.busy {
+                if chat.steer_external(text, cx) {
+                    Ok(())
+                } else {
+                    Err("The agent is busy. Try again when it finishes.".to_owned())
+                }
+            } else {
+                chat.mono_external_send(text, false, cx).map_err(|_| {
+                    "The agent's chat has an unsent draft. Open it in the app.".to_owned()
+                })
+            }
         })
     }
 
@@ -370,6 +455,23 @@ impl Shell {
                     });
                 })
                 .detach();
+            }
+            NotchEvent::Watch(session) => {
+                self.notch_talk = session;
+                // Its chat may never have been opened since the app started.
+                if let (Some(session), Some(monos)) = (session, self.monos.clone()) {
+                    monos.update(cx, |monos, cx| monos.notch_load_chat(session, cx));
+                }
+                self.sync_notch_now(cx);
+            }
+            NotchEvent::Tell { session, text } => {
+                let sent = self.notch_tell(session, text.clone(), cx);
+                if let (Err(error), Some(notch)) = (sent, self.notch.clone()) {
+                    notch
+                        .entity
+                        .update(cx, |notch, cx| notch.tell_failed(text, error, cx));
+                }
+                self.sync_notch_now(cx);
             }
             NotchEvent::HangUp => {
                 if let Some(monos) = self.monos.clone() {

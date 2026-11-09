@@ -706,6 +706,8 @@ pub(crate) struct Shell {
     notch: Option<crate::notch::Handle>,
     /// The notch's pending catch-up.
     notch_sync: Option<gpui::Task<()>>,
+    /// The agent's chat the notch has open, whose words the feed carries.
+    notch_talk: Option<i64>,
     /// Claude Code's and Codex's own sessions, as their hooks report them.
     notch_externals: monocode_core::notch::hooks::Externals,
     notch_hooks: Option<gpui::Task<()>>,
@@ -1111,6 +1113,7 @@ impl Shell {
             quick: Default::default(),
             notch: None,
             notch_sync: None,
+            notch_talk: None,
             notch_externals: Default::default(),
             notch_hooks: None,
             unseen_finished: HashSet::new(),
