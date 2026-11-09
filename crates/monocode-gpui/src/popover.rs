@@ -545,8 +545,13 @@ impl Popover {
         .with_priority(self.priority)
     }
 }
+/// The glass's veil over the blur: the pane's own color, most of the way.
+/// A faint veil let a bright picture behind a menu (the Images agent's
+/// renders under the composer's "/" menu) wash its text out.
 fn tint() -> Hsla {
-    content(0.02)
+    let mut fill = crate::theme::pane_fill();
+    fill.a = 0.8;
+    fill
 }
 // On macOS the renderer blurs what is already drawn behind this quad.
 // Light themes, and platforms without the blur, paint an opaque card.

@@ -240,6 +240,8 @@ pub(crate) struct Notch {
     /// The system level just changed (volume, brightness), and its readers.
     level: Option<monocode_core::notch::system::Level>,
     level_clear: Option<Task<()>>,
+    /// When the level last changed, for the edge's light.
+    level_at: Option<Instant>,
     level_task: Option<Task<()>>,
 }
 
@@ -372,6 +374,7 @@ impl Notch {
             _subscriptions: vec![submitted],
             level: None,
             level_clear: None,
+            level_at: None,
             level_task: None,
         }
     }
@@ -929,11 +932,33 @@ fn outline(bounds: Bounds<Pixels>, island: bool) -> Vec<gpui::Point<Pixels>> {
 /// The black body, with a hairline along its edge so it reads as a notch
 /// over dark wallpapers too. At rest over the camera it has none: it is the
 /// hardware.
-fn body(island: bool, edge: bool) -> impl IntoElement {
+fn body(island: bool, edge: bool, glow: f32) -> impl IntoElement {
     canvas(
         |_, _, _| (),
         move |bounds, _, window, _| {
             let points = outline(bounds, island);
+            // A system change lights the edge: soft rings in the accent,
+            // under the black, so only their outer half shows.
+            if glow > 0. {
+                let edge_points: Vec<_> = if island {
+                    points
+                        .iter()
+                        .copied()
+                        .chain(points.first().copied())
+                        .collect()
+                } else {
+                    points[4..points.len() - 4].to_vec()
+                };
+                for (width, alpha) in [(14., 0.07), (8., 0.14), (3., 0.5)] {
+                    let mut ring = gpui::PathBuilder::stroke(px(width));
+                    ring.add_polygon(&edge_points, false);
+                    if let Ok(path) = ring.build() {
+                        let mut color = accent_color();
+                        color.a = alpha * glow;
+                        window.paint_path(path, color);
+                    }
+                }
+            }
             let mut fill = gpui::PathBuilder::fill();
             fill.add_polygon(&points, true);
             if let Ok(path) = fill.build() {
@@ -1287,14 +1312,9 @@ impl Notch {
                     pill("notch-dismiss", "Dismiss", false)
                         .on_click(cx.listener(|this, _, _, cx| this.dismiss_notice(cx))),
                 )
-                // A terminal's session (negative id) has no chat here to open.
-                .when(session >= 0, |actions| {
-                    actions.child(pill("notch-open", "Open", true).on_click(cx.listener(
-                        move |this, _, _, cx| {
-                            this.act_on_notice(NotchEvent::OpenSession(session), cx)
-                        },
-                    )))
-                }),
+                .child(pill("notch-open", "Open", true).on_click(cx.listener(
+                    move |this, _, _, cx| this.act_on_notice(NotchEvent::OpenSession(session), cx),
+                ))),
         };
         div()
             .debug_selector(|| "notch-notice".into())
@@ -1523,6 +1543,7 @@ impl Notch {
         // size it will rest at, so nothing reflows while it springs.
         let left = island.x - room.x - shoulder;
         let top = island.y - room.y;
+        let glow = self.level_glow(window, cx);
         let clickable = !self.open && self.notices.current().is_none();
         if let Some((watch, _)) = &self._pointer {
             watch.set_area(left, top, island.width + 2. * shoulder, island.height);
@@ -1573,6 +1594,7 @@ impl Notch {
                     .child(body(
                         is_island,
                         self.look.edge && (shape != Shape::Quiet || is_island),
+                        glow,
                     ))
                     .child(
                         div()

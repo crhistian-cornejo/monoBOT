@@ -38,6 +38,7 @@ impl Notch {
 
     pub(crate) fn show_level(&mut self, level: Level, cx: &mut Context<Self>) {
         self.level = Some(level);
+        self.level_at = Some(Instant::now());
         self.keep_responsive();
         self.level_clear = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(SHOWN).await;
@@ -47,6 +48,27 @@ impl Notch {
             });
         }));
         cx.notify();
+    }
+
+    /// The edge's light while a level shows: full at the change, fading
+    /// out with the level; steady and dim under reduced motion.
+    pub(super) fn level_glow(&self, window: &mut Window, cx: &App) -> f32 {
+        let (Some(_), Some(at)) = (self.level, self.level_at) else {
+            return 0.;
+        };
+        if cx.reduce_motion() {
+            return 0.6;
+        }
+        let since = at.elapsed().as_secs_f32();
+        let glow = if since < 0.15 {
+            1.
+        } else {
+            (1. - (since - 0.15) / (SHOWN.as_secs_f32() - 0.15)).clamp(0., 1.)
+        };
+        if glow > 0. {
+            window.request_animation_frame();
+        }
+        glow
     }
 
     /// The level on the wings: its mark on the left, a bar and the percent

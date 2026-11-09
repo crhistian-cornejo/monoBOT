@@ -36,18 +36,35 @@ The notch is all GPUI and Rust, with no Swift helper and no web view.
   - Reduced motion draws every final state at once, and `follow_reduced_motion` now reads the system setting for the whole app.
 - **Look.** Square corners softened to 4 px, a 4 px flare where the notch meets the top edge, and a 1 px hairline while it shows something (Settings › Look). It is black in every theme, and the accent comes from the palette.
 
+**Window.** The open panel's window holds the room of its tallest page, so
+changing pages never resizes it. Closed, the window is the island plus room
+for its swell, so the resting loops repaint a small window. Clicks pass
+through the transparent room on macOS (`setIgnoresMouseEvents`, driven by the
+pointer watch). GPUI counts a panel above the menu bar as on screen
+(`on_screen` in `vendor/gpui-pre-macos`, see
+[architecture](../done/architecture.md)). Before that, AppKit reported it
+occluded and its frames stopped for up to two seconds.
+
 **Platform.** It is in `notch/platform.rs`.
 
-- **macOS.**
-  - The notch reads `NSScreen`'s safe area and auxiliary areas.
-  - The panel is borderless at `mainMenu + 3`, on every Space and over full-screen apps.
-  - It is placed with `setFrame`. A borderless panel is not pushed below the menu bar, so GPUI needed no patch.
-  - The pointer is watched with global and local `NSEvent` monitors. GPUI sends no hover to a pop-up while another app is active, and its stale hover reopened the panel.
-  - Opening and closing check the pointer's live position.
-  - While the notch is in use it holds a latency-critical `NSProcessInfo` activity. App Nap otherwise delayed every timer by about a second.
-- **Windows.** A topmost tool window on the primary display, moved with `SetWindowPos`. This was not compiled here: `cargo check --target x86_64-pc-windows-msvc` stops at `ring`'s C build on this Mac.
+- **macOS.** The notch reads `NSScreen`'s safe area and auxiliary areas, and is a borderless panel at `mainMenu + 3` on every Space and over full-screen apps. Global and local `NSEvent` monitors watch the pointer, and a latency-critical `NSProcessInfo` activity holds while the notch is in use, because App Nap delayed timers by about a second.
+- **Windows.** A topmost tool window on the primary display, moved with `SetWindowPos`. It is not compiled here: `ring`'s C build stops the cross-check.
 
-**App.** In `shell/notch.rs`, the shell feeds the notch on every session change and every 3 seconds. It sends the live agents, pending asks, the group call, recent chats and reminders, and carries out what the notch asks.
+**Claude Code and Codex in a terminal** (`notch/hooks.rs`).
+
+- **The hook.** Each hook is one shell command per event. It sends `source app\n` plus the hook's JSON to `notch.sock` in the data folder with `nc -U`, and always succeeds; with MonoBOT closed, `nc` fails at once.
+- **Sessions MonoBOT runs itself** carry `MONOCODE_HARNESS_PARENT`, so their hooks stay quiet.
+- **Install.** MonoBOT adds its entries beside everybody else's in `~/.claude/settings.json` and `~/.codex/hooks.json`. It keeps a `.monobot-backup` of each file, writes through a temporary file, and replaces its own older command for the same socket.
+- **Codex runs a new hook only after the user trusts it** in Codex's `/hooks`.
+- **In the notch.** Sessions show as "folder · Claude Code" with their state word. Clicking one brings forward the app it runs in (`open -b` with the hook's `__CFBundleIdentifier`).
+
+**System levels** (`notch/system.rs`, `notch/levels.rs`).
+
+- A thread reads the output volume and mute (CoreAudio) and the built-in display's brightness (DisplayServices) five times a second, and reports only changes.
+- A change opens the wings for 1.6 s with a drawn mark, a bar and the percent, and lights the edge in the accent as it fades.
+- macOS's own indicator still shows. Replacing it needs an event tap on the media keys, with Accessibility permission, as IVY does.
+
+**App.** In `shell/notch.rs`, the shell gathers the feed at most four times a second. It covers MonoBOT's sessions with their task progress, the Monos' chats with their faces, group members in their seats, pending asks, the call, recent chats, reminders and the terminal sessions. It carries out what the notch asks.
 
 ## Checked
 
@@ -57,6 +74,11 @@ The notch is all GPUI and Rust, with no Swift helper and no web view.
 | Nov 8 | `cargo xtask cargo test -p monocode-gpui … notch::` (real GPUI events: hover, clicks, pages, settings, shelf) | 9 passed |
 | Nov 8 | Clippy with `-D warnings` on core and GPUI | Clean |
 | Nov 8 | Dev app on a 14-inch MacBook Pro | Window exactly over the camera at level 27. Hover opens in about 120 ms and the panel settles by about 460 ms |
+| Nov 8 | `MONOBOT_NOTCH_TRACE=tour` | After the GPUI patch every page change runs at about 60 fps (largest gap 18 ms) |
+| Nov 8 | Hook commands run live (bash, zsh -lc) | Delivered; quiet for MonoBOT's own sessions; succeed with MonoBOT closed (4 ms) |
+| Nov 8 | Installed into the real settings | Earlier hooks and settings untouched, backups written, reinstall replaces without duplicating |
+| Nov 8 | Simulated Claude Code session through the installed command | Wings "Editing", then the Done notice |
+| Nov 8 | `cargo xtask cargo test -p monocode-gpui` (full) | 1040 passed; 2 known flaky under load passed alone |
 
 ## Next
 
@@ -64,3 +86,5 @@ The notch is all GPUI and Rust, with no Swift helper and no web view.
 - Measure the CPU at rest with `cargo xtask perf`.
 - Keep the old content during the fold, so the panel fades out instead of emptying.
 - Add a Settings row in the app that opens the notch's settings, and a way to hide the notch.
+- Replace macOS's volume and brightness indicator: an event tap on the media keys (Accessibility permission) that sets the levels itself.
+- Windows: the hooks over a named pipe, and the levels.

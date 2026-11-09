@@ -314,8 +314,21 @@ impl Shell {
     fn notch_event(&mut self, event: NotchEvent, cx: &mut Context<Self>) {
         use crate::notifications::delivery::Target;
         match event {
-            // A terminal's session has no chat here to open.
-            NotchEvent::OpenSession(id) if id < 0 => {}
+            // A terminal's or another app's session: bring that app forward.
+            NotchEvent::OpenSession(id) if id < 0 => {
+                if let Some(app) = self.notch_externals.app_for(id) {
+                    cx.background_executor()
+                        .spawn(async move {
+                            #[cfg(target_os = "macos")]
+                            let _ = std::process::Command::new("/usr/bin/open")
+                                .args(["-b", &app])
+                                .status();
+                            #[cfg(not(target_os = "macos"))]
+                            let _ = app;
+                        })
+                        .detach();
+                }
+            }
             NotchEvent::OpenSession(id) => {
                 // The notch is another app's neighbor: bring MonoBOT forward
                 // with the chat, as a notification's click does.

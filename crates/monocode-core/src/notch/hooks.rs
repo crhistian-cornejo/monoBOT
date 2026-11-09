@@ -47,10 +47,18 @@ pub const CODEX_EVENTS: &[(&str, u64)] = &[
 pub fn command(source: &str, socket: &Path) -> String {
     let socket = socket.to_string_lossy().replace('\'', r"'\''");
     // Sessions MonoBOT runs itself carry MONOCODE_HARNESS_PARENT and are
-    // already in the notch: their hooks stay quiet.
+    // already in the notch: their hooks stay quiet. The first line also
+    // names the app the agent runs in (macOS passes its bundle id down), so
+    // the notch can bring that app forward.
     format!(
-        "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || {{ printf '{source}\\n'; cat; }} | nc -U -w 1 '{socket}' >/dev/null 2>&1; true # {MARK}"
+        "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || {{ printf '{source} %s\\n' \"$__CFBundleIdentifier\"; cat; }} | nc -U -w 1 '{socket}' >/dev/null 2>&1; true # {MARK}"
     )
+}
+
+/// The socket as the command quotes it, to find MonoBOT's older commands
+/// for it.
+fn quoted(socket: &Path) -> String {
+    format!("'{}'", socket.to_string_lossy().replace('\'', r"'\''"))
 }
 
 fn ours(handler: &Value) -> bool {
@@ -81,12 +89,38 @@ pub fn merge(
         return Err("\"hooks\" is not an object".into());
     };
     let command = command(source, socket);
+    let socket = quoted(socket);
     let mut changed = false;
     for (event, timeout) in events {
         let groups = hooks.entry(*event).or_insert_with(|| json!([]));
         let Some(groups) = groups.as_array_mut() else {
             return Err(format!("\"hooks.{event}\" is not a list"));
         };
+        // An older MonoBOT command for this same socket gives way to this one.
+        let before: usize = groups
+            .iter()
+            .map(|group| group["hooks"].as_array().map_or(0, Vec::len))
+            .sum();
+        for group in groups.iter_mut() {
+            if let Some(handlers) = group["hooks"].as_array_mut() {
+                handlers.retain(|handler| {
+                    let stale = handler["command"]
+                        .as_str()
+                        .is_some_and(|old| old != command && old.contains(&socket));
+                    !(ours(handler) && stale)
+                });
+            }
+        }
+        groups.retain(|group| {
+            group["hooks"]
+                .as_array()
+                .is_none_or(|handlers| !handlers.is_empty())
+        });
+        let after: usize = groups
+            .iter()
+            .map(|group| group["hooks"].as_array().map_or(0, Vec::len))
+            .sum();
+        changed |= after != before;
         let present = groups.iter().any(|group| {
             group["hooks"]
                 .as_array()
@@ -216,6 +250,8 @@ pub fn serve(socket: &Path, on_event: impl Fn(HookEvent) + Send + 'static) -> st
 pub struct HookEvent {
     /// "claude" or "codex".
     pub source: String,
+    /// The app the agent runs in, by bundle id ("com.apple.Terminal").
+    pub app: Option<String>,
     pub session: String,
     pub cwd: String,
     pub event: String,
@@ -223,18 +259,27 @@ pub struct HookEvent {
     pub message: Option<String>,
 }
 
-/// Reads what a hook sent: its source, a newline, then its JSON.
+/// Reads what a hook sent: its source and app, a newline, then its JSON.
 pub fn parse(payload: &str) -> Option<HookEvent> {
-    let (source, json) = payload.split_once('\n')?;
-    let source = match source.trim() {
+    let (head, json) = payload.split_once('\n')?;
+    let mut head = head.split_whitespace();
+    let source = match head.next()? {
         "claude" => "claude",
         "codex" => "codex",
         _ => return None,
     };
+    // Only what a bundle id can hold: it is handed to `open -b`.
+    let app = head.next().filter(|app| {
+        app.len() <= 255
+            && app
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
+    });
     let value: Value = serde_json::from_str(json.trim()).ok()?;
     let text = |key: &str| value[key].as_str().map(str::to_owned);
     Some(HookEvent {
         source: source.into(),
+        app: app.map(str::to_owned),
         session: text("session_id")?,
         cwd: text("cwd").unwrap_or_default(),
         event: text("hook_event_name")?,
@@ -247,6 +292,7 @@ pub fn parse(payload: &str) -> Option<HookEvent> {
 #[derive(Clone, Debug, PartialEq)]
 struct External {
     source: String,
+    app: Option<String>,
     cwd: String,
     step: String,
     working: bool,
@@ -278,6 +324,7 @@ impl Externals {
             .entry(event.session)
             .or_insert_with(|| External {
                 source: event.source.clone(),
+                app: None,
                 cwd: event.cwd.clone(),
                 step: "Thinking".into(),
                 working: false,
@@ -287,6 +334,9 @@ impl Externals {
                 seen_at: now,
             });
         session.seen_at = now;
+        if event.app.is_some() {
+            session.app = event.app;
+        }
         if !event.cwd.is_empty() {
             session.cwd = event.cwd;
         }
@@ -349,6 +399,14 @@ impl Externals {
             }
         });
         self.sessions.len() != before
+    }
+
+    /// The app a session runs in, by its notch id, to bring forward.
+    pub fn app_for(&self, id: i64) -> Option<String> {
+        self.sessions
+            .iter()
+            .find(|(session, _)| external_id(session) == id)
+            .and_then(|(_, session)| session.app.clone())
     }
 
     /// The sessions at work, waiting or just finished, for the notch. Each
@@ -462,16 +520,61 @@ mod tests {
     fn the_command_never_fails_and_quotes_the_socket() {
         let command = command("codex", Path::new("/tmp/it's/notch.sock"));
         assert!(command.starts_with(
-            "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || { printf 'codex\\n'; cat; } | nc -U -w 1 "
+            "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || { printf 'codex %s\\n' \"$__CFBundleIdentifier\"; cat; } | nc -U -w 1 "
         ));
         assert!(command.contains(r"'/tmp/it'\''s/notch.sock'"));
         assert!(command.contains("; true #"));
     }
 
+    #[test]
+    fn an_older_command_for_the_same_socket_gives_way() {
+        let old = format!("old {MARK} '/tmp/monobot test/notch.sock'");
+        let other_app = format!("other {MARK} '/tmp/elsewhere.sock'");
+        let file = json!({ "hooks": { "Stop": [
+            { "hooks": [{ "type": "command", "command": old }] },
+            { "hooks": [{ "type": "command", "command": other_app }] },
+        ]}})
+        .to_string();
+        let merged = merge(&file, "claude", CLAUDE_EVENTS, socket())
+            .unwrap()
+            .unwrap();
+        let value: Value = serde_json::from_str(&merged).unwrap();
+        let commands: Vec<String> = value["hooks"]["Stop"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(
+            commands.len(),
+            2,
+            "the old one replaced, the other app's kept"
+        );
+        assert!(commands.contains(&other_app));
+        assert!(commands.contains(&command("claude", socket())));
+    }
+
+    #[test]
+    fn a_bundle_id_is_read_and_anything_else_dropped() {
+        let read = |head: &str| {
+            parse(&format!(
+                "{head}\n{{\"session_id\":\"s\",\"hook_event_name\":\"Stop\"}}"
+            ))
+            .unwrap()
+            .app
+        };
+        assert_eq!(
+            read("codex com.openai.codex").as_deref(),
+            Some("com.openai.codex")
+        );
+        assert_eq!(read("claude"), None);
+        assert_eq!(read("claude $(rm -rf ~)"), None);
+    }
+
     fn event(name: &str, tool: Option<&str>) -> String {
         let tool = tool.map_or(String::new(), |tool| format!(r#","tool_name":"{tool}""#));
         format!(
-            "claude\n{{\"session_id\":\"s1\",\"cwd\":\"/Users/me/monoBOT\",\"hook_event_name\":\"{name}\"{tool}}}"
+            "claude com.apple.Terminal\n{{\"session_id\":\"s1\",\"cwd\":\"/Users/me/monoBOT\",\"hook_event_name\":\"{name}\"{tool}}}"
         )
     }
 
@@ -486,6 +589,10 @@ mod tests {
         assert_eq!(working[0].title, "monoBOT · Claude Code");
         assert_eq!(working[0].step, "Thinking");
         assert!(working[0].id < 0);
+        assert_eq!(
+            externals.app_for(working[0].id).as_deref(),
+            Some("com.apple.Terminal")
+        );
         externals.apply(parse(&event("PreToolUse", Some("Edit"))).unwrap(), 2_000);
         assert_eq!(externals.activities()[0].step, "Editing");
         externals.apply(
