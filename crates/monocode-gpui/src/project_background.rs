@@ -230,6 +230,18 @@ impl ProjectBackground {
         let preview = self.preview;
         let empty = self.empty;
         let haze = settings.effect == Effect::GradientBlur;
+        // The surface the chat sits on in the active theme, opaque: light
+        // themes fade the picture into their own paper, not into black.
+        #[cfg(not(target_os = "macos"))]
+        let surface = {
+            let mut surface = if self.clip.is_some() {
+                crate::theme::pane_fill()
+            } else {
+                crate::theme::inset_pane_fill()
+            };
+            surface.a = 1.;
+            surface
+        };
         canvas(
             |_, _, _| {},
             move |bounds, _, window, _| {
@@ -253,12 +265,11 @@ impl ProjectBackground {
                 if !begin {
                     // Other backends have an opaque chat surface. Reveal that
                     // surface with the same view-relative stops while it resizes.
-                    use crate::theme::CHAT;
                     use monocode_core::project_appearance::background_fade;
                     let _ = (preview, &clip, opacity);
                     let height = bounds.size.height.as_f32().ceil() as usize;
                     for y in 0..height {
-                        let mut color: gpui::Hsla = gpui::rgb(CHAT).into();
+                        let mut color = surface;
                         color.a =
                             1. - background_fade((y as f32 + 0.5) / height as f32, empty, haze);
                         window.paint_quad(gpui::fill(
