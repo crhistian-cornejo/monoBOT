@@ -62,7 +62,7 @@ occluded and its frames stopped for up to two seconds.
 
 - A thread reads the output volume and mute (CoreAudio) and the built-in display's brightness (DisplayServices) five times a second, and reports only changes.
 - A change opens the wings for 1.6 s with a drawn mark, a bar and the percent, and lights the edge in the accent as it fades.
-- macOS's own indicator still shows. Replacing it needs an event tap on the media keys, with Accessibility permission, as IVY does.
+- On macOS the notch answers the volume, mute and brightness keys itself (an event tap, with Accessibility permission), so macOS's indicator does not show; Settings › Look › Volume and brightness gives them back to the system. On Windows a low-level keyboard hook takes the volume keys (not built here).
 
 **App.** In `shell/notch.rs`, the shell gathers the feed at most four times a second. It covers MonoBOT's sessions with their task progress, the Monos' chats with their faces, group members in their seats, pending asks, the call, recent chats, reminders and the terminal sessions. It carries out what the notch asks.
 
@@ -82,9 +82,7 @@ occluded and its frames stopped for up to two seconds.
 
 ## Next
 
-- Look at it on Windows, an external display and a full-screen app.
+- Windows: compile and try it on a Windows machine (the volume, its keys and the window code are written against windows 0.62 but not built here), then the hooks over a named pipe and the brightness.
+- Look at it on an external display and over a full-screen app.
 - Measure the CPU at rest with `cargo xtask perf`.
-- Keep the old content during the fold, so the panel fades out instead of emptying.
-- Add a Settings row in the app that opens the notch's settings, and a way to hide the notch.
-- Replace macOS's volume and brightness indicator: an event tap on the media keys (Accessibility permission) that sets the levels itself.
-- Windows: the hooks over a named pipe, and the levels.
+- A row in the app's Settings that opens the notch's settings, and a way to hide the notch.
