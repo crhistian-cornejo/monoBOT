@@ -55,10 +55,18 @@ pub(crate) fn ready(cx: &mut App) {
 }
 
 pub(crate) fn install(prefs: &crate::settings::Preferences, cx: &mut App) {
-    if !cx.has_global::<MenuReady>() {
+    // Only AppKit pays for an early menu bar; elsewhere it goes in at once.
+    if cfg!(target_os = "macos") && !cx.has_global::<MenuReady>() {
         return;
     }
     cx.set_menus(menus(prefs));
+}
+
+/// The app menu itself, for the Windows title bar's menu button. It is built
+/// from the preferences, not read back from the platform, so the button
+/// lists it however early it opens.
+pub(crate) fn owned(prefs: &crate::settings::Preferences) -> Vec<gpui::OwnedMenu> {
+    menus(prefs).into_iter().map(Menu::owned).collect()
 }
 
 /// Windows has no menu bar: the title bar's menu button lists these, laid

@@ -40,11 +40,8 @@ impl Shell {
 
     /// One row per top-level menu, each opening its items. Read before the
     /// menu takes focus, so availability reflects the view the user was in.
-    pub(super) fn app_menu_items(window: &Window, cx: &App) -> Vec<MenuItem> {
-        let Some(menus) = cx.get_menus() else {
-            return Vec::new();
-        };
-        menus
+    pub(super) fn app_menu_items(&self, window: &Window, cx: &App) -> Vec<MenuItem> {
+        crate::app_menu::owned(&self.workspace.preferences)
             .iter()
             .enumerate()
             .map(|(menu_ix, menu)| {
@@ -91,12 +88,13 @@ impl Shell {
         else {
             return;
         };
-        let Some(action) =
-            cx.get_menus()
-                .and_then(|menus| match menus.get(menu_ix)?.items.get(item_ix)? {
-                    gpui::OwnedMenuItem::Action { action, .. } => Some(action.boxed_clone()),
-                    _ => None,
-                })
+        let menus = crate::app_menu::owned(&self.workspace.preferences);
+        let Some(action) = menus
+            .get(menu_ix)
+            .and_then(|menu| match menu.items.get(item_ix)? {
+                gpui::OwnedMenuItem::Action { action, .. } => Some(action.boxed_clone()),
+                _ => None,
+            })
         else {
             return;
         };

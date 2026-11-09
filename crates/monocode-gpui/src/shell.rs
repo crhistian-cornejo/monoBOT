@@ -5668,7 +5668,7 @@ impl Shell {
             }
             MenuTarget::AppMenu => (
                 "Menu".into(),
-                Self::app_menu_items(window, cx),
+                self.app_menu_items(window, cx),
                 160.,
                 MenuStyle::Explorer,
             ),
@@ -10472,6 +10472,40 @@ mod tests {
                 assert_ne!(shell.workspace.project, before);
             })
             .unwrap();
+    }
+    /// The title bar's menu button (Windows) lists every top-level menu,
+    /// each opening its items, even before the menu bar is installed: it
+    /// opened empty when clicked in the first frames after launch.
+    #[gpui::test]
+    fn app_menu_button_lists_the_menus(cx: &mut TestAppContext) {
+        let (window, _, _) = window(cx);
+        cx.update(|cx| {
+            input::bind(cx);
+            crate::popover::bind(cx);
+            cx.set_reduce_motion(true);
+        });
+        let menus = window
+            .update(cx, |shell, _, _| {
+                crate::app_menu::owned(&shell.workspace.preferences).len()
+            })
+            .unwrap();
+        assert!(menus > 0);
+        window
+            .update(cx, |shell, w, cx| {
+                let anchor = Anchor::Slot(shell.app_menu_anchor.clone());
+                shell.open_menu(MenuTarget::AppMenu, anchor, w, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        for ix in 0..menus {
+            let row: &'static str = Box::leak(format!("menu-action-{ix}").into_boxed_str());
+            assert!(
+                visual.debug_bounds(row).is_some(),
+                "top-level menu {ix} has a row"
+            );
+        }
     }
     #[gpui::test]
     fn header_menu_hugs_its_rows(cx: &mut TestAppContext) {
