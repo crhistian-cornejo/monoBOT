@@ -318,7 +318,10 @@ impl Shell {
                         div()
                             .relative()
                             .h_full()
-                            .pl_3()
+                            // The menu button, toggle and arrows float over
+                            // this header where they overhang the rail; the
+                            // title starts after them.
+                            .pl(px(12. + self.classic_header_lead(cx)))
                             .pr_1p5()
                             .flex()
                             .items_center()
@@ -379,12 +382,27 @@ impl Shell {
             .into_any()
     }
 
+    /// How far the floating navigation overhangs the sidebar's header: with
+    /// the rail closed it is wider than the icon rail (Windows' menu button
+    /// takes the rail's column), and nothing where the title bar spans the
+    /// window or the rail holds it all.
+    pub(super) fn classic_header_lead(&self, cx: &App) -> f32 {
+        if self.workspace.project_rail_open
+            || self.settings.is_some()
+            || self.classic_titlebar_spans_window(cx)
+        {
+            return 0.;
+        }
+        (self.navigation_width() - self.project_rail_drawn_width()).max(0.)
+    }
+
     fn classic_workspace_picker(&self, cx: &Context<Self>) -> AnyElement {
         if self.workspace.project.is_empty()
             || self.workspace.project == "~"
             || self.workspace.project.starts_with("remote://")
         {
             return div()
+                .debug_selector(|| "classic-workspace-title".into())
                 .flex_1()
                 .min_w_0()
                 .truncate()

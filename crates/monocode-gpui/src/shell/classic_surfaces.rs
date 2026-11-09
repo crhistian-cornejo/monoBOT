@@ -1,6 +1,12 @@
 //! Original application destinations replace the project workspace temporarily.
 use super::*;
 
+/// The room a header leaves for the window's controls: what of them the
+/// right panel does not already sit under.
+pub(super) fn caption_room(controls: f32, panel: f32) -> f32 {
+    (controls - panel).max(0.)
+}
+
 impl Shell {
     pub(super) fn classic_surface_open(&self, cx: &App) -> bool {
         self.workspace.classic_layout
@@ -79,7 +85,10 @@ impl Shell {
             .flex()
             .items_center()
             .when(compact, |d| d.pl(px(self.strip_lead(cx))))
-            .pr(px(self.window_controls))
+            // The window's controls hold the corner: over this header while
+            // the overview is shut, over the overview's own header once it
+            // is open.
+            .pr(px(caption_room(self.window_controls, self.right_drawn)))
             .child(titlebar_drag_area().flex_1().min_w_0().child(title))
             .child(
                 div()

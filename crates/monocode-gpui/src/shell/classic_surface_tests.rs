@@ -1119,3 +1119,63 @@ fn boxy_layouts_set_the_sidebar_apart_from_the_main_column(cx: &mut TestAppConte
         }
     }
 }
+
+#[test]
+fn a_header_leaves_the_window_controls_only_the_room_the_panel_does_not() {
+    use super::classic_surfaces::caption_room;
+    assert_eq!(caption_room(138., 0.), 138.);
+    // Sliding open: the header gives the room back as the panel takes it.
+    assert_eq!(caption_room(138., 60.), 78.);
+    assert_eq!(caption_room(138., 320.), 0.);
+    assert_eq!(caption_room(0., 320.), 0.);
+}
+
+#[gpui::test]
+fn the_navigation_never_covers_what_it_floats_over(cx: &mut TestAppContext) {
+    // Classic with the rail closed: the navigation overhangs the sidebar's
+    // header, whose title starts after the arrows.
+    let (window, _) = setup(cx, true, false);
+    window
+        .update(cx, |shell, _, cx| {
+            shell.workspace.project_rail_open = false;
+            shell.layout_changed(cx);
+        })
+        .unwrap();
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    let toggle = visual.debug_bounds("toggle-sidebar").unwrap();
+    let forward = visual.debug_bounds("visit-forward").unwrap();
+    let title = visual
+        .debug_bounds("classic-workspace-picker")
+        .or_else(|| visual.debug_bounds("classic-workspace-title"))
+        .expect("the sidebar's header names the working copy");
+    assert!(toggle.right() <= forward.left());
+    if !window
+        .read_with(visual, |shell, cx| shell.classic_titlebar_spans_window(cx))
+        .unwrap()
+    {
+        assert!(
+            title.left() >= forward.right(),
+            "the title starts after the navigation: {title:?} against {forward:?}"
+        );
+    }
+    // Focused, sidebar shut: the tabs start after the arrows.
+    for boxy in [false, true] {
+        let (window, _) = setup(cx, false, boxy);
+        window
+            .update(cx, |shell, _, cx| {
+                shell.workspace.sidebar_visible = false;
+                shell.layout_changed(cx);
+            })
+            .unwrap();
+        let visual = &mut VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        let toggle = visual.debug_bounds("toggle-sidebar").unwrap();
+        let back = visual.debug_bounds("visit-back").unwrap();
+        let forward = visual.debug_bounds("visit-forward").unwrap();
+        assert!(toggle.left() >= px(super::TRAFFIC_LIGHTS) || cfg!(target_os = "macos"));
+        assert!(toggle.right() <= back.left() && back.right() <= forward.left());
+    }
+}
