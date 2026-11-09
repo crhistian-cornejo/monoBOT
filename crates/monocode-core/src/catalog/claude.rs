@@ -209,6 +209,43 @@ mod tests {
         assert!(models[3].thinking);
     }
 
+    /// The rows Claude Code 2.1.318 answers `list_models` with on the day
+    /// Fable 5.2 shipped: it is the account default and takes every effort.
+    #[test]
+    fn fable_5_2_is_the_default_and_offers_every_effort() {
+        let efforts = json!(["low", "medium", "high", "xhigh", "max"]);
+        let models = models(&json!([
+            {"value":"default","resolvedModel":"claude-fable-5-2","displayName":"Default (recommended)","description":"Fable 5.2","supportsEffort":true,"supportedEffortLevels":efforts,"supportsAdaptiveThinking":true},
+            {"value":"opus","resolvedModel":"claude-opus-5-5","displayName":"Opus 5.5","supportsEffort":true,"supportedEffortLevels":efforts,"supportsFastMode":true},
+            {"value":"claude-fable-5-2","resolvedModel":"claude-fable-5-2","displayName":"Fable 5.2","description":"Most capable for your hardest and longest-running tasks","supportsEffort":true,"supportedEffortLevels":efforts,"supportsAdaptiveThinking":true},
+            {"value":"fable","resolvedModel":"claude-fable-5-1","displayName":"Fable 5.1","supportsEffort":true,"supportedEffortLevels":efforts}
+        ]));
+        assert_eq!(
+            models.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            ["opus", "claude-fable-5-2", "fable"]
+        );
+        let fable = &models[1];
+        assert_eq!(fable.name, "Fable 5.2");
+        assert!(fable.default);
+        assert!(!models[0].default && !models[2].default);
+        assert_eq!(fable.alias_target, None);
+        assert_eq!(
+            fable.efforts,
+            [
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max",
+                "ultracode",
+                "ultrathink"
+            ]
+        );
+        assert_eq!(fable.default_effort.as_deref(), Some("high"));
+        assert!(!fable.fast);
+        assert_eq!(models[2].name, "Fable 5.1");
+    }
+
     #[test]
     fn preserves_advertised_versions_and_qualifies_generic_names() {
         let models = models(&json!([

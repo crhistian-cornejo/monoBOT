@@ -13,9 +13,13 @@ pub(crate) const MODEL_FLYOUT_HEIGHT: f32 = 460.;
 
 /// Friendly names used before a provider's live catalog arrives.
 pub(crate) const CLAUDE_MODELS: &[(&str, &str)] = &[
+    ("claude-fable-5-2", "Claude Fable 5.2"),
+    ("claude-opus-5-5", "Claude Opus 5.5"),
+    ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+    ("claude-haiku-5-5", "Claude Haiku 5.5"),
+    ("claude-fable-5-1", "Claude Fable 5.1"),
     ("claude-sonnet-5", "Claude Sonnet 5"),
     ("claude-opus-5", "Claude Opus 5"),
-    ("claude-opus-5-5", "Claude Opus 5.5"),
     ("claude-fable-5", "Claude Fable 5"),
     ("claude-opus-4-6", "Opus 4.6"),
     ("claude-sonnet-4-6", "Sonnet 4.6"),
