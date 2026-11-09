@@ -11,6 +11,8 @@ description = "MonoBOT's build, packaging and release tooling (`cargo xtask`)."
 # everyday commands do not compile the interpreter; `cargo xtask icons` turns
 # it on by itself.
 icons = ["dep:rquickjs"]
+# `cargo xtask logo` rasterizes the mark with resvg, and turns this on by itself.
+logo = ["dep:resvg"]
 
 [dependencies]
 serde_json.workspace = true
@@ -19,6 +21,7 @@ minisign = { version = "0.10", default-features = false }
 percent-encoding = "2"
 url = "2"
 rquickjs = { version = "0.14.0", optional = true }
+resvg = { version = "0.46", default-features = false, optional = true }
 tempfile = "3"
 
 [target.'cfg(unix)'.dependencies]

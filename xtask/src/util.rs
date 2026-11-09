@@ -260,6 +260,41 @@ pub fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Runs `cargo xtask <command> <argv>` again with `feature` compiled in, for a
+/// command whose heavy dependency the everyday build leaves out. The command
+/// is named after its feature.
+pub fn rerun_with_feature(feature: &str, argv: &[String]) -> Result<()> {
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    // Its own folder inside the target directory: Windows cannot replace the
+    // xtask that is running this, nor one that is running `cargo xtask dev`.
+    let target = std::env::current_exe()
+        .ok()
+        .and_then(|exe| Some(exe.parent()?.parent()?.to_path_buf()))
+        .unwrap_or_else(|| root().join("target"))
+        .join(format!("xtask-{feature}"));
+    let status = command(cargo)
+        .args([
+            "run",
+            "--quiet",
+            "--package",
+            "xtask",
+            "--features",
+            feature,
+            "--target-dir",
+        ])
+        .arg(target)
+        .args(["--", feature])
+        .args(argv)
+        .current_dir(root())
+        .status()
+        .map_err(|e| e.to_string())?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("{feature} failed ({status})"))
+    }
+}
+
 pub fn write(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
     std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
 }

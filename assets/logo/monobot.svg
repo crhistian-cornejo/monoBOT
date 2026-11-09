@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>MonoBOT</title>
+  <!--
+    The MonoBOT mark: a block M with an ear on each side and two eyes, on a grid of 4.
+    One evenodd path, white on nothing. `cargo xtask logo` draws every icon from it.
+  -->
+  <path fill="#fff" fill-rule="evenodd"
+    d="M24 28H48L64 44L80 28H104V44H116V72H104V100H80L64 84L48 100H24V72H12V44H24Z
+       M36 48H52V64H36Z M76 48H92V64H76Z"/>
+</svg>

@@ -9796,6 +9796,7 @@ dependencies = [
  "libc",
  "minisign",
  "percent-encoding",
+ "resvg",
  "rquickjs",
  "serde_json",
  "tempfile",

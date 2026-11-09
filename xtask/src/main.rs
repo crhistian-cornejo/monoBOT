@@ -8,6 +8,7 @@ mod bundle;
 mod dependency_guard;
 mod dev;
 mod icons;
+mod logo;
 mod package;
 mod perf;
 mod release;
@@ -48,6 +49,7 @@ Packaging and releases
 Tools
   icons hugeicons <package dir> <out dir> name=Icon@stroke...
   icons material <package dir> <out.json>
+  logo                  Redraw every app icon from assets/logo/monobot.svg
   ssh-smoke [--desktop <bin>] [--host <monocode-host>] [--profile <p>]
                         Native SSH transport against a disposable loopback sshd
   perf <frame-run|stream-profile> [binary] [seconds]
@@ -245,6 +247,7 @@ fn run(args: &[String]) -> Result<()> {
             Ok(())
         }
         "icons" => icons::main(rest),
+        "logo" => logo::main(rest),
         #[cfg(unix)]
         "ssh-smoke" => ssh_smoke::main(rest),
         "perf" => perf::main(rest),

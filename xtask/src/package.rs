@@ -120,7 +120,7 @@ fn linux_tree(root: &Path, directory: &Path, binary: &Path, kind: &str) -> Resul
 }
 
 fn app_icon(root: &Path) -> PathBuf {
-    root.join("crates/monocode-gpui/assets/monocode.png")
+    root.join("assets/icons/icon.png")
 }
 
 /// NSIS string quoting: `$` doubles and `"` becomes `$\"`.

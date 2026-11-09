@@ -127,6 +127,54 @@ pub fn copy_notices(root: &Path, directory: &Path) -> Result<()> {
 }
 
 /// Builds `<profile_dir>/MonoBOT Native.app` and signs it. Returns its path.
+/// macOS 26 draws the Liquid Glass icon from Assets.car, which only Xcode's
+/// actool compiles. Without Xcode the bundle has none, and the .icns that
+/// covers older releases is the icon there too.
+fn compile_icon(root: &Path, resources: &Path, tools: &dyn Tools) {
+    let catalog = resources.join("Assets.car");
+    // One left by an earlier build may hold an older icon.
+    let _ = std::fs::remove_file(&catalog);
+    let Ok(scratch) = tempfile::tempdir() else {
+        return;
+    };
+    let actool = Tool::new("xcrun")
+        .arg("actool")
+        .arg(root.join("assets/macos/AppIcon.icon"))
+        .arg("--compile")
+        .arg(scratch.path())
+        .arg("--output-partial-info-plist")
+        .arg(scratch.path().join("partial.plist"))
+        .args([
+            "--app-icon",
+            "AppIcon",
+            "--include-all-app-icons",
+            "--enable-on-demand-resources",
+            "NO",
+            "--development-region",
+            "en",
+            "--target-device",
+            "mac",
+            "--platform",
+            "macosx",
+            "--minimum-deployment-target",
+            "26.0",
+            "--output-format",
+            "human-readable-text",
+        ])
+        .capture();
+    let compiled = scratch.path().join("Assets.car");
+    let placed = match tools.run(&actool) {
+        Ok(_) if compiled.is_file() => copy(&compiled, &catalog).map_err(|e| e.to_string()),
+        Ok(_) => Err("actool wrote no Assets.car".to_owned()),
+        Err(error) => Err(error.message),
+    };
+    if let Err(error) = placed {
+        eprintln!(
+            "No Liquid Glass icon: Xcode's actool did not compile it ({error}). The .icns is used."
+        );
+    }
+}
+
 pub fn bundle_macos(bundle: &Bundle, tools: &dyn Tools) -> Result<PathBuf> {
     let binary = bundle.profile_dir.join("monocode-gpui");
     if !binary.is_file() {
@@ -150,11 +198,7 @@ pub fn bundle_macos(bundle: &Bundle, tools: &dyn Tools) -> Result<PathBuf> {
         &root.join("assets/icons/icon.icns"),
         &resources.join("monocode.icns"),
     )?;
-    // macOS 26 draws the Liquid Glass icon from Assets.car; the .icns covers older releases.
-    copy(
-        &root.join("assets/macos/Assets.car"),
-        &resources.join("Assets.car"),
-    )?;
+    compile_icon(root, &resources, tools);
     // Add the notices before signing so the signature covers them too.
     let licenses = resources.join("licenses");
     copy_notices(root, &licenses)?;
@@ -189,9 +233,16 @@ mod tests {
     use crate::util::{root, ToolError};
     use std::process::Command;
 
+    /// A Mac without Xcode: codesign works, actool is missing.
     struct FakeCodesign;
     impl Tools for FakeCodesign {
         fn run(&self, tool: &Tool) -> Result<String, ToolError> {
+            if tool.name() == "xcrun" {
+                return Err(ToolError {
+                    status: Some(72),
+                    message: "unable to find utility \"actool\"".into(),
+                });
+            }
             assert_eq!(tool.name(), "codesign");
             Ok(String::new())
         }
@@ -244,6 +295,10 @@ mod tests {
             // Without it macOS ends the app the moment dictation opens the microphone.
             assert!(plist.contains("<key>NSMicrophoneUsageDescription</key><string>MonoBOT "));
             assert!(!bundle.join("MacOS/monocode-launcher").exists());
+            // The .icns is the icon when actool compiled no catalog, and a
+            // catalog left by an earlier build is gone.
+            assert!(bundle.join("Resources/monocode.icns").is_file());
+            assert!(!bundle.join("Resources/Assets.car").exists());
             let launched = Command::new(bundle.join("MacOS/monocode-gpui"))
                 .args(["--cwd", "a project with spaces"])
                 .output()

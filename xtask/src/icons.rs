@@ -17,28 +17,7 @@ const USAGE: &str = "usage: cargo xtask icons hugeicons <package dir> <out dir> 
 
 #[cfg(not(feature = "icons"))]
 pub fn main(argv: &[String]) -> Result<()> {
-    // Re-run with the interpreter compiled in.
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let status = crate::util::command(cargo)
-        .args([
-            "run",
-            "--quiet",
-            "--package",
-            "xtask",
-            "--features",
-            "icons",
-            "--",
-            "icons",
-        ])
-        .args(argv)
-        .current_dir(crate::util::root())
-        .status()
-        .map_err(|e| e.to_string())?;
-    if status.success() {
-        Ok(())
-    } else {
-        Err(format!("icons failed ({status})"))
-    }
+    crate::util::rerun_with_feature("icons", argv)
 }
 
 #[cfg(feature = "icons")]

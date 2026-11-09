@@ -31,7 +31,7 @@ El escritorio no necesita Node ni Bun. Antes de hacer commit: `cargo fmt --all` 
 
 - La lógica va en `monocode-core`, sin GPUI. La app GPUI solo pinta y conecta. Nada de E/S, parseo ni disco en el hilo de la interfaz.
 - Los tests van junto al código (`#[cfg(test)] mod tests` o `<módulo>/tests.rs`). Los tests de interfaz usan el banco de pruebas de GPUI con eventos reales, no copias de la máquina de estados.
-- Los bundles `crates/monocode-gpui/assets/native-editor.js` y `settings-arcade.js` son generados. Su fuente está en `scripts/generators/native-editor/` y `scripts/generators/native-settings/`: cambia la fuente y regenera, no edites el bundle. Los iconos (`hugeicons/`, `material-icons.json`) salen de `cargo xtask icons`.
+- Los bundles `crates/monocode-gpui/assets/native-editor.js` y `settings-arcade.js` son generados. Su fuente está en `scripts/generators/native-editor/` y `scripts/generators/native-settings/`: cambia la fuente y regenera, no edites el bundle. Los iconos (`hugeicons/`, `material-icons.json`) salen de `cargo xtask icons`. El logo y todos los iconos de la app (escritorio y móvil) salen de `assets/logo/monobot.svg` con `cargo xtask logo`: cambia el SVG y regenera, no edites los PNG, el `.ico` ni el `.icns`. El icono Liquid Glass de macOS 26 lo compila `cargo xtask build` en un Mac con Xcode, desde `assets/macos/AppIcon.icon`.
 - Las herramientas nuevas del escritorio van en `xtask/` (Rust, con tests junto al código), no en scripts sueltos. Llama a programas externos (codesign, hdiutil, rpmbuild…) solo cuando no hay otra forma.
 
 ## Interfaz: respeta lo que ya existe
