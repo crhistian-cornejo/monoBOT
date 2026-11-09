@@ -20,6 +20,9 @@ monobot-http = { path = "../http" }
 thiserror.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# Smart Turn (`smart_turn.rs`), pure Rust as IVY runs it.
+tract-onnx = "0.23.9"
+rustfft = "6"
 
 # Parakeet on the Neural Engine (`neural.rs`), straight from Rust.
 [target.'cfg(target_os = "macos")'.dependencies]

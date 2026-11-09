@@ -33,7 +33,7 @@ things were, move it to `old/`.
 | [workstreams.md](in-progress/workstreams.md) | Workstreams (beta): multi-day work run by an orchestrator |
 | [ivy-review.md](in-progress/ivy-review.md) | What to take from IVY: harness and agent gaps, Decider, live and group calls, dictation |
 | [notch.md](in-progress/notch.md) | Plan for a minimal macOS notch |
-| [voice-and-hands.md](in-progress/voice-and-hands.md) | Voice settings, models and keys, JOSIE-style calls, Gemini Live and Phonic, native hands and CUA |
+| [voice-and-hands.md](in-progress/voice-and-hands.md) | Voice: done so far are the Neural Engine ear, call fixes, Settings › Voice, Gemini Live and Phonic calls, and Mac actions; done too are JOSIE-style turns with Smart Turn; left are speaker echo, the wake word and CUA |
 
 ## old/ — history
 

@@ -32,6 +32,12 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
         "wakes.add"=>"in at note","name.update"=>"name",
         "web.read"=>"url query maxChars","web.download"=>"url name",
         "images.generate"=>"prompt count aspect source",
+        // Computer actions (hands.rs), for agents with the computer access.
+        "apps.open"|"apps.quit"=>"name",
+        "web.open"=>"url browser","web.search"=>"query site",
+        "media.control"=>"command app","media.play"=>"query","media.now"=>"app",
+        "system.volume"=>"level","clipboard.read"|"screen.look"=>"","clipboard.write"=>"text",
+        "keys.type"=>"text app",
         _=>return Err("Unknown app action. Run app help".into()),
     };
     for (key, value) in input.as_object().ok_or("Input must be an object")? {
@@ -75,6 +81,7 @@ pub fn validate(action: &str, input: &Value) -> Result<(), String> {
             "fromYear",
             "page",
             "count",
+            "level",
         ]
         .contains(&key.as_str())
             && value.as_u64().is_none()

@@ -9,6 +9,7 @@ pub(crate) enum Section {
     General,
     Connections,
     Appearance,
+    Voice,
     Keybindings,
     Chat,
     Providers,
@@ -27,6 +28,7 @@ pub(crate) const GROUPS: [(&str, &[Section]); 3] = [
             Section::General,
             Section::Connections,
             Section::Appearance,
+            Section::Voice,
             Section::Keybindings,
         ],
     ),
@@ -47,10 +49,11 @@ pub(crate) const GROUPS: [(&str, &[Section]); 3] = [
 ];
 
 impl Section {
-    pub(crate) const ALL: [Section; 12] = [
+    pub(crate) const ALL: [Section; 13] = [
         Section::General,
         Section::Connections,
         Section::Appearance,
+        Section::Voice,
         Section::Keybindings,
         Section::Chat,
         Section::Providers,
@@ -66,6 +69,7 @@ impl Section {
             Section::General => "general",
             Section::Connections => "connections",
             Section::Appearance => "appearance",
+            Section::Voice => "voice",
             Section::Keybindings => "keybindings",
             Section::Chat => "chat",
             Section::Providers => "providers",
@@ -82,6 +86,7 @@ impl Section {
             Section::General => "General",
             Section::Connections => "Connections",
             Section::Appearance => "Appearance",
+            Section::Voice => "Voice",
             Section::Keybindings => "Keybindings",
             Section::Chat => "Chat",
             Section::Providers => "Providers",
@@ -101,6 +106,9 @@ impl Section {
             Section::Connections => "Connect your machines and run agents remotely through SSH.",
             Section::Appearance => {
                 "Theme, tint, translucency, workspace layout, and conversation backgrounds."
+            }
+            Section::Voice => {
+                "Dictation and call voices on this Mac, and the live models calls can talk through."
             }
             Section::Keybindings => {
                 "Every shortcut the workspace handles, from the app menu and the key handler."
@@ -130,6 +138,9 @@ impl Section {
             Section::Appearance => {
                 "theme dark light color accent glass blur zoom scale wallpaper rail sidebar"
             }
+            Section::Voice => {
+                "voice dictation microphone mic speech parakeet neural engine call model download delete gemini live phonic api key realtime"
+            }
             Section::Keybindings => "shortcut hotkey keyboard binding",
             Section::Chat => {
                 "transcript composer prompt message diff review layout format save editor"
@@ -155,6 +166,7 @@ impl Section {
             Section::General => "sliders",
             Section::Connections => "internet",
             Section::Appearance => "palette",
+            Section::Voice => "mic-01",
             Section::Keybindings => "keyboard",
             Section::Chat => "message-square",
             Section::Providers => "bot",

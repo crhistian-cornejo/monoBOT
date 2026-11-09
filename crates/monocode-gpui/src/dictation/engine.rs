@@ -30,6 +30,10 @@ pub(crate) struct Status {
     pub bytes: u64,
     pub done: u64,
     pub total: u64,
+    /// What the model takes on disk now.
+    pub on_disk: u64,
+    /// The model on disk runs on the Neural Engine.
+    pub neural: bool,
 }
 
 /// What the composers dictate with; tests stand in for the microphone.
@@ -43,11 +47,19 @@ pub(crate) trait Engine: Send + Sync {
     /// `dictation_start`: opens the microphone, ending any other dictation.
     /// The ticket names this one for stop and cancel.
     fn start(&self, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String>;
+    /// A call's dictation: the session ends each turn at `pace`. Engines
+    /// that cannot tell dictate as usual, and the call times the pauses.
+    fn start_call(&self, _pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+        self.start(on_event)
+    }
     /// `dictation_stop`: the whole transcript, or nothing once another
     /// dictation took the microphone.
     fn stop(&self, ticket: u64) -> String;
     /// `dictation_cancel`: stops listening and drops what was said.
     fn cancel(&self, ticket: u64);
+    /// Settings › Voice: deletes the model, never while dictating or
+    /// downloading.
+    fn remove(&self) -> Result<(), String>;
 }
 
 /// The app's one engine.
@@ -71,6 +83,48 @@ struct Local {
 }
 
 impl Local {
+    fn open(&self, pace: Option<&str>, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+        let previous = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        if let Some((_, previous)) = previous {
+            previous.cancel();
+        }
+        // Keep Parakeet loaded while the microphone is open: this cancels a
+        // release already waiting.
+        self.uses.fetch_add(1, Ordering::AcqRel);
+        let opened = (|| {
+            // A missing model fails here, before anything asks for the microphone.
+            self.engine.prepare().map_err(|e| e.to_string())?;
+            super::permission::microphone()?;
+            match pace {
+                Some(pace) => self.engine.start_call(pace, on_event),
+                None => self.engine.start(on_event),
+            }
+            .map_err(|e| e.to_string())
+        })();
+        let session = match opened {
+            Ok(session) => session,
+            Err(err) => {
+                // A failed start (no microphone, say) must not pin the model.
+                self.release_when_idle();
+                return Err(err);
+            }
+        };
+        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed) + 1;
+        let replaced = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .replace((ticket, session));
+        if let Some((_, replaced)) = replaced {
+            replaced.cancel();
+        }
+        Ok(ticket)
+    }
+
     fn new(dir: std::path::PathBuf) -> Self {
         Self {
             engine: Arc::new(Dictation::new(dir)),
@@ -117,6 +171,8 @@ impl Engine for Local {
             bytes: monobot_dictation::model::total_bytes(),
             done: self.done.load(Ordering::Relaxed),
             total: self.total.load(Ordering::Relaxed),
+            on_disk: self.engine.disk_bytes(),
+            neural: self.engine.engine() == Some(monobot_dictation::Engine::Neural),
         }
     }
 
@@ -127,6 +183,10 @@ impl Engine for Local {
         // offers it again.
         if self.engine.wants_upgrade() {
             let _ = self.install(&mut |_, _| {});
+        }
+        // Calls' end-of-turn detector, 32 MB; without it the words decide.
+        if self.engine.installed() {
+            let _ = self.engine.install_turn();
         }
     }
 
@@ -149,41 +209,11 @@ impl Engine for Local {
     }
 
     fn start(&self, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
-        let previous = self
-            .session
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .take();
-        if let Some((_, previous)) = previous {
-            previous.cancel();
-        }
-        // Keep Parakeet loaded while the microphone is open: this cancels a
-        // release already waiting.
-        self.uses.fetch_add(1, Ordering::AcqRel);
-        let opened = (|| {
-            // A missing model fails here, before anything asks for the microphone.
-            self.engine.prepare().map_err(|e| e.to_string())?;
-            super::permission::microphone()?;
-            self.engine.start(on_event).map_err(|e| e.to_string())
-        })();
-        let session = match opened {
-            Ok(session) => session,
-            Err(err) => {
-                // A failed start (no microphone, say) must not pin the model.
-                self.release_when_idle();
-                return Err(err);
-            }
-        };
-        let ticket = self.tickets.fetch_add(1, Ordering::Relaxed) + 1;
-        let replaced = self
-            .session
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .replace((ticket, session));
-        if let Some((_, replaced)) = replaced {
-            replaced.cancel();
-        }
-        Ok(ticket)
+        self.open(None, on_event)
+    }
+
+    fn start_call(&self, pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+        self.open(Some(pace), on_event)
     }
 
     fn stop(&self, ticket: u64) -> String {
@@ -200,6 +230,21 @@ impl Engine for Local {
             session.cancel();
             self.release_when_idle();
         }
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        if self.installing.load(Ordering::Acquire) {
+            return Err("The speech model is downloading.".into());
+        }
+        let dictating = self
+            .session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_some();
+        if dictating {
+            return Err("Stop dictating before deleting the speech model.".into());
+        }
+        self.engine.remove().map_err(|error| error.to_string())
     }
 }
 
@@ -221,6 +266,10 @@ mod tests {
         );
         assert_eq!(engine.stop(1), "");
         engine.cancel(1);
+        assert_eq!(status.on_disk, 0);
+        assert!(!status.neural);
+        // Deleting a model that is not there is fine.
+        assert_eq!(engine.remove(), Ok(()));
         let _ = std::fs::remove_dir_all(dir);
     }
 

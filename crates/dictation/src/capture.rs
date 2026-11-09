@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 
 use crate::Error;
 
@@ -116,8 +116,8 @@ fn build(
     level: Arc<AtomicU32>,
     failure: Arc<Mutex<Option<String>>>,
 ) -> Result<(cpal::Stream, u32), Error> {
-    let device = cpal::default_host()
-        .default_input_device()
+    // Never a Bluetooth headset's microphone when the computer has its own.
+    let device = crate::devices::microphone()
         .ok_or_else(|| Error::Microphone("no microphone found".into()))?;
     let supported = device
         .default_input_config()

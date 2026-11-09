@@ -100,6 +100,31 @@ impl Monos {
             let _ = call.reply.send(reply.and(result));
         }));
     }
+    /// A computer action (`monocode_core::hands`), run off the interface
+    /// thread; screenshots go to the app's own folder.
+    fn computer_action(
+        &mut self,
+        call: Call,
+        mono_id: String,
+        action: &str,
+        input: Value,
+        cx: &mut Context<Self>,
+    ) {
+        let action = action.to_owned();
+        self.call_work(
+            call,
+            mono_id,
+            move |_| {
+                let shots = monocode_core::store::monocode_data_dir().join("screens");
+                Ok((
+                    monocode_core::hands::run(&action, &input, &shots)?,
+                    Effect::None,
+                ))
+            },
+            cx,
+        );
+    }
+
     fn call_work(
         &mut self,
         call: Call,
@@ -844,6 +869,24 @@ if let Some(enabled)=input.get("enabled").and_then(Value::as_bool){h.enabled=ena
                 return;
             }
             "images.generate" => self.images_generate(&call, &mono, &input, cx),
+            action if monocode_core::hands::ACTIONS.contains(&action) => {
+                if mono.is_bot() {
+                    let role = mono.bot_role.as_deref().unwrap_or("assistant");
+                    if !monocode_core::mono::bot_tools::tools(role, mono.bot_tools.as_ref())
+                        .access
+                        .iter()
+                        .any(|access| access == "computer")
+                    {
+                        Err("This bot may not use the computer. The user can turn on Use this Mac in its settings.".to_owned())
+                    } else {
+                        self.computer_action(call, target.clone(), action, input, cx);
+                        return;
+                    }
+                } else {
+                    self.computer_action(call, target.clone(), action, input, cx);
+                    return;
+                }
+            }
             "papers.find" => {
                 self.call_work(
                     call,

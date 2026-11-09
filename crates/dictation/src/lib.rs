@@ -5,17 +5,21 @@
 //! (`neural`), elsewhere on the CPU. Everything runs on this machine; nothing
 //! is sent anywhere.
 mod capture;
+pub mod devices;
 pub mod model;
 #[cfg(target_os = "macos")]
 mod neural;
 mod session;
+pub mod smart_turn;
 mod text;
+pub mod turn;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+pub use capture::Microphone;
 pub use model::Engine;
-pub use session::{Event, Session};
+pub use session::{CallMode, Event, Session};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -33,6 +37,8 @@ pub enum Error {
     Load,
     #[error("Microphone: {0}")]
     Microphone(String),
+    #[error("The speech model is in use; stop dictating first")]
+    Busy,
 }
 
 /// A loaded Parakeet, either build.
@@ -89,6 +95,8 @@ impl Ear {
 pub struct Dictation {
     dir: PathBuf,
     recognizer: Mutex<Option<Arc<Ear>>>,
+    /// Smart Turn, loaded for calls only and let go with the recognizer.
+    smart_turn: Mutex<Option<Arc<smart_turn::Model>>>,
 }
 
 impl Dictation {
@@ -96,6 +104,7 @@ impl Dictation {
         Self {
             dir,
             recognizer: Mutex::new(None),
+            smart_turn: Mutex::new(None),
         }
     }
 
@@ -123,6 +132,22 @@ impl Dictation {
         result
     }
 
+    /// Deletes the model from disk, once no dictation holds it.
+    pub fn remove(&self) -> Result<(), Error> {
+        let slot = self.recognizer.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().is_some_and(|ear| Arc::strong_count(ear) > 1) {
+            return Err(Error::Busy);
+        }
+        drop(slot);
+        self.release();
+        model::remove(&self.dir)
+    }
+
+    /// What the model takes on disk, in bytes.
+    pub fn disk_bytes(&self) -> u64 {
+        model::disk_bytes(&self.dir)
+    }
+
     /// Loads the recognizer ahead of the first dictation: the best build on
     /// disk, falling back to the CPU one when the Neural Engine refuses.
     pub fn prepare(&self) -> Result<Arc<Ear>, Error> {
@@ -141,6 +166,14 @@ impl Dictation {
     /// Frees the recognizer's memory unless a session still uses it. Returns
     /// whether it was released; the next dictation loads it again.
     pub fn release(&self) -> bool {
+        let mut turn = self.smart_turn.lock().unwrap_or_else(|e| e.into_inner());
+        if turn
+            .as_ref()
+            .is_some_and(|model| Arc::strong_count(model) == 1)
+        {
+            *turn = None;
+        }
+        drop(turn);
         let mut slot = self.recognizer.lock().unwrap_or_else(|e| e.into_inner());
         match slot.as_ref() {
             Some(recognizer) if Arc::strong_count(recognizer) == 1 => {
@@ -154,7 +187,38 @@ impl Dictation {
     /// Opens the microphone and starts transcribing.
     pub fn start(&self, on_event: impl Fn(Event) + Send + 'static) -> Result<Session, Error> {
         let recognizer = self.prepare()?;
-        Session::start(&self.dir, recognizer, on_event)
+        Session::start(&self.dir, recognizer, None, on_event)
+    }
+
+    /// Smart Turn, when it is on disk; a load that fails leaves the words to
+    /// decide alone.
+    fn smart_turn(&self) -> Option<Arc<smart_turn::Model>> {
+        let mut slot = self.smart_turn.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.is_none() && model::turn_installed(&self.dir) {
+            let path = model::path(&self.dir, model::SMART_TURN.name).ok()?;
+            *slot = smart_turn::Model::load(&path).ok().map(Arc::new);
+        }
+        slot.clone()
+    }
+
+    /// Opens the microphone for a call turn: as `start`, and the session
+    /// ends the turn itself (`Event::TurnEnd`) at `pace`.
+    pub fn start_call(
+        &self,
+        pace: &str,
+        on_event: impl Fn(Event) + Send + 'static,
+    ) -> Result<Session, Error> {
+        let recognizer = self.prepare()?;
+        let call = CallMode {
+            pace: pace.to_owned(),
+            smart_turn: self.smart_turn(),
+        };
+        Session::start(&self.dir, recognizer, Some(call), on_event)
+    }
+
+    /// Downloads Smart Turn when it is missing (32 MB).
+    pub fn install_turn(&self) -> Result<(), Error> {
+        model::install_turn(&self.dir)
     }
 }
 

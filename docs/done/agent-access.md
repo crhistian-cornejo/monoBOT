@@ -22,6 +22,27 @@ can stay visible in history without switching the user's current conversation.
   `body`, with optional title and tags; pass an existing note `id` to update just
   its title, body or tags while preserving the other fields.
 
+### The user's Mac (macOS)
+
+These actions act on the user's Mac (`monocode-core/src/hands.rs`). A bot
+needs the **Use this Mac** access in its settings; the user's own Monos may use
+them.
+
+| Action | What it does |
+| --- | --- |
+| `apps.open {name}` / `apps.quit {name}` | Opens or quits an app by its name, never by a path. |
+| `web.open {url, browser?}` | Opens an http or https address. |
+| `web.search {query, site?}` | Searches Google or YouTube. |
+| `media.control {command, app?}` | Plays, pauses, toggles, skips forward or goes back in Spotify or Music. |
+| `media.play {query}` | Opens a Spotify search. |
+| `media.now {app?}` | Says what is playing. |
+| `system.volume {level}` | Sets the volume. |
+| `clipboard.read {}` / `clipboard.write {text}` | Reads or writes the clipboard. |
+| `keys.type {text, app?}` | Types into the front window or into `app`. Needs Accessibility. |
+| `screen.look {}` | Saves a picture of the screen for the agent to open. Needs Screen Recording. |
+
+Nothing runs through a shell, and AppleScript values are escaped.
+
 Retry an uncertain mutation with the same request ID and identical input.
 Unknown fields and invalid options produce errors instead of being ignored.
 

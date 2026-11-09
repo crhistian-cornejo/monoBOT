@@ -43,6 +43,10 @@ agents.list {}; agents.message {to,message,wait?}; agents.wait {waitId}: the use
 group.members {}; group.ask {member,message,wait?}; group.access {target,reason,group?}: a group and its members only
 name.update {name}: the name the rail, the tab and the chat show
 web.read {url,query?,maxChars?}: a page's text; web.download {url,name?}: keeps a file from the web in Documents/MonoBOT
+apps.open {name}; apps.quit {name}; web.open {url,browser?}; web.search {query,site?:"google"|"youtube"}: on the user's Mac, with the computer access
+media.control {command:"play"|"pause"|"toggle"|"next"|"previous",app?:"spotify"|"music"}; media.play {query}: Spotify search; media.now {app?}
+system.volume {level:0-100}; clipboard.read {}; clipboard.write {text}; keys.type {text,app?}: types into the front window or app; screen.look {}: a picture of the screen to open
+Ask the user before typing, quitting an app or reading the clipboard unless they asked for it; never type passwords or codes.
 images.generate {prompt,count?,aspect?,style?,source?}: pictures through Gemini's Nano Banana; style is a preset look id; frames show in your chat at once and the pictures replace them
 chat.card {type:"pr",repo?,number,note?} / {type:"session",sessionId,note?} / {type:"choices",options:[text]} / {type:"habit",name,instructions,schedule}
 mail.list {view?,query?,unread?,limit?}: the user's email from the accounts they connected in the Inbox's Email tab: id, sender, subject, date, unread, a preview

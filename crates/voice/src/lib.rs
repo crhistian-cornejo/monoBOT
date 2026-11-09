@@ -1,6 +1,8 @@
 //! Local voices for MonoBOT's group calls: each member's reply is spoken by
 //! Supertonic 3 through sherpa-onnx, in the language it was written in and in
 //! a voice of its own. Like dictation, everything runs on this machine.
+#[cfg(feature = "playback")]
+pub mod duplex;
 pub mod model;
 #[cfg(feature = "playback")]
 pub mod player;
@@ -38,6 +40,8 @@ pub enum Error {
     Text,
     #[error("Could not speak that sentence")]
     Synthesis,
+    #[error("The voice is in use; hang up the call first")]
+    Busy,
 }
 
 /// What the call asks for; Supertonic knows more, the call only needs these.
@@ -85,6 +89,22 @@ impl Voice {
 
     pub fn installed(&self) -> bool {
         model::installed(&self.dir)
+    }
+
+    /// Deletes the model from disk, once no call is speaking with it.
+    pub fn remove(&self) -> Result<(), Error> {
+        let slot = self.tts.lock().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().is_some_and(|tts| Arc::strong_count(tts) > 1) {
+            return Err(Error::Busy);
+        }
+        drop(slot);
+        self.release();
+        model::remove(&self.dir)
+    }
+
+    /// What the model takes on disk, in bytes.
+    pub fn disk_bytes(&self) -> u64 {
+        model::disk_bytes(&self.dir)
     }
 
     pub fn install(&self, progress: impl FnMut(u64, u64)) -> Result<(), Error> {

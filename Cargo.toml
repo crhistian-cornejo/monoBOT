@@ -6,6 +6,7 @@ members = [
   "crates/dictation",
   "crates/email",
   "crates/http",
+  "crates/live",
   "crates/mobile-link",
   "crates/voice",
   "xtask",

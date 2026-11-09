@@ -66,78 +66,166 @@ The other ears in the table (Whisper, Qwen3, Scribe) are out of scope.
 
 Each phase ships on its own and leaves the app working.
 
-### 1. Fix the current call (small)
+### 1. Fix the current call (done Nov 8)
 
-From ivy-review.md items 4–8, all in `crates/voice` and `crates/dictation`:
+From ivy-review.md items 4–6 and 8:
 
-- Keep one input and one output stream open for the whole call.
-- Echo tail of 400 ms (700 ms without headphones), not 100 ms.
-- Synthesize the next sentence while the current one plays (`queue.rs`).
-- Prefer the built-in mic over a Bluetooth headset mic; treat headphones as
-  echo free.
-- Text: `tidy` (¿¡, capitals), `rejoin_pauses`, the misheard name fold
-  (`IVY/crates/core/src/agents/groups.rs` `sound`, `spoken_address`).
+- **One output stream for the whole call.** `voice/src/player.rs` keeps one
+  cpal stream on the call's player thread, from the first sentence to
+  hang-up. It plays silence between sentences, so a Bluetooth link stays
+  awake. A fresh stream starts with 150 ms of silence, and the stream
+  reopens when it fails or the default output changes.
+- **Synthesis one sentence ahead.** `voice/src/queue.rs` synthesizes on one
+  thread and plays on another, with one ready sentence waiting at most, so an
+  interruption wastes little.
+- **Echo tail at the end of a round:** 400 ms on speakers and 120 ms on
+  headphones, before `Drained` reopens the mic. Between sentences there is
+  none. The old wait was 100 ms after every sentence.
+- **Mic choice.** `dictation/src/devices.rs` never opens a Bluetooth
+  headset's mic when the computer has its own, so AirPods stay in A2DP. The
+  mic still reopens each turn, but on the built-in device that costs nothing.
+  `in_ears` tells headphones and Bluetooth headsets from speakers.
+- **Text.** For Spanish only, `dictation/src/text.rs` adds the opening ¿¡,
+  sentence capitals and `rejoin_pauses` (". y luego" becomes ", y luego").
+  English stays as Parakeet wrote it.
+- **Misheard names.** `call::spoken_address` (in `mono/groups/call.rs`)
+  rewrites «Hola yares, …» as «Jarvis, …» before the turn order is chosen.
 
-### 2. Settings › Voice, model manager and keys (medium)
+Left for phase 3: the turn end (item 7, Smart Turn) and keeping the mic open
+across turns with barge-in.
 
-- `crates/voice/src/catalog.rs`: one catalog for every local model (Parakeet,
-  Whisper turbo, Qwen3-ASR, Silero v6, Smart Turn v3.2, WeSpeaker, Supertonic)
-  pinned by size and SHA-256, ported from `IVY/crates/voice/src/models.rs`
-  (free space check, staging folder, 4 MiB Range chunks, archive fallback,
-  atomic rename, `remove`).
-- `monocode-core/src/voice/keys.rs`: Gemini, Phonic, ElevenLabs and Gradium
+### 2. Settings › Voice, models and keys (done Nov 8)
+
+- **Keys.** `monocode-core/src/voice/keys.rs` keeps the Gemini and Phonic
   keys in the keychain (service `com.monocode.desktop`, account
-  `voice-<provider>`), mirroring `inbox/workspace/secrets.rs` with its test
-  mock. Settings only stores "saved" flags.
-- A Voice page in the App group: ear, voice, live provider, keys (secret
-  inputs), models with size, Download, Delete and progress (pattern from
-  `settings/pages/poki.rs`).
-- Cloud voices (ElevenLabs flash, Gradium, Phonic, Gemini TTS) behind one
-  `Voice` trait with the local voice as fallback and the reason shown once.
+  `voice-<provider>`).
+  - A pasted key is trimmed and checked (16 to 200 printable characters).
+  - `ApiKey` never prints itself.
+  - `keep_in_memory` makes the app's own tests use memory, never the real
+    keychain.
+- **Models.** `Dictation::remove` and `Voice::remove` delete a model
+  (refused while it is in use), and `disk_bytes` says what it takes.
+- **The Voice page** (`settings/pages/voice.rs`) sits in the App group. It
+  has three groups:
+  - Dictation: the Parakeet build and its size, with Download, "Get the
+    faster model" and Delete (asks once).
+  - Call voices: Supertonic, with the same controls.
+  - Live calls: how calls talk (This Mac, Gemini Live or Phonic) and a secret
+    field per key. The field clears once the key is saved. Removing the
+    chosen provider's key sends calls back to this Mac.
+- Not done, on purpose: the cloud voices for the local call (ElevenLabs,
+  Gradium, Gemini TTS). The user asked for fewer models, and a live provider
+  covers the cloud case.
+- Tests: `settings/voice_tests.rs` (six, with clicks), plus the core, model
+  and dictation engine tests.
 
-### 3. Call mode in the JOSIE-Voice style (large)
+### 3. Call mode in the JOSIE-Voice style (done Nov 8, except speaker echo and wake word)
 
-Port `IVY/crates/voice/src/call.rs` and `IVY/crates/rules/src/call.rs` into
-`crates/voice/src/call/` and `monocode-core/src/voice/call.rs`:
+- **Turn rules** (`dictation/src/turn.rs`, ported from IVY's
+  `rules/call.rs`):
+  - The pause depends on the pace (patient 1400 ms, normal 800 ms, quick
+    450 ms).
+  - It is ×0.6 after a question or an exclamation, and ×1.8 after an open
+    ending (a comma, «y», «pero», a hesitation, or "and" and "um" in
+    English).
+  - When Smart Turn finds a turn unfinished, it waits 1 s more.
+  - A turn needs at least 300 ms of voice and lasts at most 30 s.
+  - `Tracker` follows a turn through the voice detector, counting the
+    detector's 450 ms lag in the silence.
+  - Backchannels («sí», «ajá», "yeah", a laugh) never cut in, and
+    `echo_of` tells the members' own words heard back.
+- **Smart Turn v3.2** (`dictation/src/smart_turn.rs`): IVY's port as is
+  (Whisper log-mel features, tract, rustfft, pure Rust).
+  - The model is pinned by size and SHA-256 (32 MB) and downloaded at
+    launch with the ear.
+  - It is loaded only for calls, and released with the ear.
+  - On this Mac: a 0.08 s load and 0.04 s per verdict.
+  - It gave 0.90 for a finished sentence. macOS's synthetic voice also read
+    as finished when cut off mid-sentence, so judge it with real speech.
+- **The session decides turns.** `Dictation::start_call` gives the
+  session a `CallMode`; it sends `Event::DecidesTurns`, then
+  `Event::TurnEnd` when the rules say so. The group call ends the turn on
+  that event instead of its fixed 600 ms. An engine that cannot decide
+  keeps the old timer.
+- **Cutting in, with headphones.** When the voice goes into the user's ears
+  (`devices::in_ears`), the mic stays open while members answer. A turn
+  with real words that are not the members' echo interrupts them and
+  becomes the next turn; a backchannel lets them go on. On speakers the
+  call stays half duplex.
+- **Settings › Voice › Answer after a pause** chooses the pace.
+- Tests:
+  - 9 rule and tracker tests and the Smart Turn feature tests.
+  - The real model, as an ignored test.
+  - 3 GPUI call tests: the session ends the turn, cutting in with
+    headphones while a backchannel goes by, and speakers keeping the mic
+    closed.
+- Left:
+  - Telling the user's voice from the speakers' echo (WeSpeaker), so
+    cutting in works on speakers too.
+  - Partials every 320 ms (today they come per phrase).
+  - The wake word «Hey IVY».
+  - Acknowledgements and fillers.
 
-- Open mic, Silero in 32 ms windows, partial every 320 ms and at 160 ms of
-  quiet; the last partial becomes the transcript when it covers the turn.
-- End of turn: patient 1400 / normal 800 / quick 450 ms, shortened after ?/!,
-  lengthened after an open ending, plus Smart Turn after 200 ms.
-- Barge-in: WeSpeaker voiceprint against the app's own voice and the words it
-  said lately; backchannels («sí», «ajá») do not cut in.
-- Calls with any session, Mono or group (not only groups), a push-to-talk
-  hotkey on the existing Carbon hotkey (`quick_composer/hotkey.rs`), acks and
-  a filler at 1.5 s.
-- Warm the agent before the first turn (the parked pool already exists in
-  `provider/parked.rs`; add a prewarm when a call opens).
+### 4. Live speech: Gemini Live and Phonic (done Nov 8; not tried against the real services)
 
-### 4. Live speech: Gemini Live and Phonic (large)
+- **`crates/live` (`monobot-live`)**, no GPUI:
+  - `gemini.rs` and `phonic.rs` build and parse every message.
+  - `session.rs` runs a call on its own thread:
+    - setup, audio both ways, transcripts and interruptions;
+    - tools on worker threads: a tool slower than 8 s gets "still running",
+      then a late note on Gemini or repeated "still working" lines on
+      Phonic; at most 3 run at once;
+    - cancellation, `goAway` with the resumption handle, three reconnects a
+      minute;
+    - IVY's Gemini model ladder when a model is refused;
+    - a clear error for a refused key.
+  - `transport.rs` is a blocking `tungstenite` socket over rustls. The key
+    goes only in a header.
+- **`voice/src/duplex.rs`**: the microphone goes up in 16 kHz frames while
+  speech plays as it arrives. The gate holds the mic while speakers play and
+  for the 400 ms tail; with headphones nothing is held.
+- **`monocode-core/src/mono/groups/live.rs`**: the host's instructions, the
+  `ask_member` schema with the members' names, and finding a member even
+  when misspelled.
+- **`monos/group_call_live.rs`**: when Settings chooses a live provider,
+  Start call opens the live session instead of Supertonic.
+  - The user's and the host's words become lines.
+  - `ask_member` sends the request to the member's own seat, and its answer
+    goes back to the model.
+  - Hanging up closes the session off the interface thread and saves the
+    transcript.
+  - Without a key, the call falls back to this Mac and says so.
+- Tests:
+  - `crates/live`: 23, including a real local WebSocket.
+  - The duplex gate, and 5 in core.
+  - Two GPUI tests: a full ask through a seat, and refusals.
+- Not checked: a call against Google's and Phonic's servers with a real key,
+  and the model names in the ladder (taken from IVY).
 
-As designed in ivy-review.md: a `crates/live` crate with the WebSocket
-protocols, the model ladder with cooldowns, `goAway` resumption, interruption
-and the 100 ms jitter buffer. Tools: quick actions answered at once, and
-`ask_agent {request}` that runs a turn in a MonoBOT session, answers
-"running" after 8 s and injects the result later as a note. Up to 3 tasks at
-once on Gemini, one on Phonic.
+### 5. Hands on macOS (done Nov 8, except CUA)
 
-### 5. Hands on macOS (medium–large)
+`monocode-core/src/hands.rs` adds twelve `monobot app` actions:
+`apps.open/quit`, `web.open/search`, `media.control/play/now`,
+`system.volume`, `clipboard.read/write`, `keys.type` and `screen.look`.
 
-New `crates/hands` without GPUI, exposed as `monobot app` actions:
-
-- `apps.open/close`, `web.open/search/play`, `media.control/play/now`,
-  `spotify.search/play` (Web API with the user's own app; AppleScript
-  fallback), `system.volume/dark_mode/clipboard`, `keys.type` (CGEvent through
-  `objc2`), `windows.list/focus` and `window.read` (Accessibility API).
-- `screen.look`: a ScreenCaptureKit capture returned as an image, behind an
-  approval card.
-- `computer.use`: the pinned `cua-driver` binary as one persistent process,
-  with IVY's allowlist (no terminals, password managers or System Settings;
-  every click needs a fresh capture; a card for each call).
-- Office: write .docx/.xlsx/.pptx directly (port `IVY/crates/hook/src/office`)
-  instead of relying on skills.
-- Live sessions get the quick ones as direct tools, so "abre Spotify y pon
-  algo de jazz" runs without an LLM turn.
+- Each action becomes a `Plan` (program and arguments) that is checked and
+  tested before it runs.
+- Nothing runs through a shell. Values sent to AppleScript are escaped, only
+  http and https addresses open, and app names cannot be paths or options.
+- Clipboard text goes on stdin, never as an argument.
+- Bots need the new **Use this Mac** access (`bot_tools::ACCESS`). The
+  user's own Monos may use the actions.
+- The actions are listed in `bridge.rs` HELP and checked in `api.rs`.
+- Tests:
+  - Eight plan tests.
+  - A GPUI test that a bot without the access is refused.
+  - An ignored test that runs `media.now` on this Mac; it passed.
+- Left:
+  - CUA through `cua-driver` (screenshot and accessibility tree, then
+    click), with IVY's allowlist and a card per action.
+  - Writing Office files directly.
+  - Giving the live host these actions as direct tools, so «pon jazz» needs
+    no agent turn.
 
 ### 6. iPhone (later)
 

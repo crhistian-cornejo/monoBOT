@@ -17,6 +17,7 @@ pub mod files;
 pub mod follow_up;
 pub mod git;
 pub mod github_star;
+pub mod hands;
 pub mod harness_updates;
 pub mod images;
 pub mod inbox;
@@ -47,6 +48,7 @@ pub mod usage;
 pub mod user_links;
 pub mod visual;
 pub mod visual_bridge;
+pub mod voice;
 pub mod web;
 
 pub mod composer;

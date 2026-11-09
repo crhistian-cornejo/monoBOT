@@ -42,12 +42,15 @@ impl Fake {
 
 impl Engine for Fake {
     fn status(&self) -> Status {
+        let installed = *self.installed.lock().unwrap();
         Status {
-            installed: *self.installed.lock().unwrap(),
+            installed,
             installing: *self.installing.lock().unwrap(),
             bytes: 671_122_626,
             done: 300,
             total: 1_200,
+            on_disk: if installed { 460_000_000 } else { 0 },
+            neural: installed,
         }
     }
 
@@ -79,6 +82,12 @@ impl Engine for Fake {
     fn cancel(&self, ticket: u64) {
         self.call(format!("cancel {ticket}"));
         self.hearing.lock().unwrap().take();
+    }
+
+    fn remove(&self) -> Result<(), String> {
+        self.call("remove");
+        *self.installed.lock().unwrap() = false;
+        Ok(())
     }
 }
 

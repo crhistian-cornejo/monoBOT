@@ -120,6 +120,30 @@ pub fn installed_engine(dir: &Path) -> Option<Engine> {
         .find(|engine| engine.installed(dir))
 }
 
+/// Smart Turn v3.2, the unquantised checkpoint (`smart-turn-v3.2-gpu.onnx`
+/// of pipecat-ai/smart-turn-v3 at a pinned commit), as IVY pins it: the
+/// call's end-of-turn detector, 32 MB, in the dictation folder.
+pub const SMART_TURN: ModelFile = ModelFile {
+    name: "smart-turn-v3.2.onnx",
+    bytes: 32_411_198,
+    sha256: "ab8dc64b88713f90b571c15b714bd1330e6c883cad8763dacf65c9376dc539be",
+    url: Some("https://huggingface.co/pipecat-ai/smart-turn-v3/resolve/f766f81d3cfdf7737ac64aad813d91bbfd56bf93/smart-turn-v3.2-gpu.onnx"),
+};
+
+/// Whether Smart Turn is on disk at its pinned size.
+pub fn turn_installed(dir: &Path) -> bool {
+    present(dir, &SMART_TURN)
+}
+
+/// Downloads Smart Turn when it is missing.
+pub fn install_turn(dir: &Path) -> Result<(), Error> {
+    if turn_installed(dir) {
+        return Ok(());
+    }
+    fs::create_dir_all(dir)?;
+    download(&SMART_TURN, &dir.join(SMART_TURN.name), |_| {})
+}
+
 /// Where the Neural build lives under the dictation folder.
 pub const NEURAL_FOLDER: &str = "neural";
 
@@ -326,6 +350,31 @@ pub fn install_neural(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<
     }
     remove_cpu(dir);
     Ok(())
+}
+
+/// Deletes every build and the detector, so the folder holds no model; a
+/// later dictation offers the download again.
+pub fn remove(dir: &Path) -> Result<(), Error> {
+    remove_cpu(dir);
+    let _ = fs::remove_file(dir.join(SMART_TURN.name));
+    let _ = fs::remove_file(dir.join(silero().name));
+    match fs::remove_dir_all(dir.join(NEURAL_FOLDER)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// What the model files on disk take, in bytes, for Settings.
+pub fn disk_bytes(dir: &Path) -> u64 {
+    [Engine::Cpu, Engine::Neural]
+        .iter()
+        .flat_map(|engine| engine.files())
+        .filter(|(folder, file)| present(&dir.join(folder), file))
+        .map(|(folder, file)| (folder.to_owned() + file.name, file.bytes))
+        .collect::<std::collections::HashMap<_, _>>()
+        .values()
+        .sum()
 }
 
 /// Deletes the CPU build's own files (not Silero). Errors are ignored: a file
@@ -706,11 +755,22 @@ mod tests {
             stand_in(&dir, folder, file);
         }
         assert_eq!(installed_engine(&dir), Some(Engine::preferred()));
+        assert_eq!(
+            disk_bytes(&dir),
+            Engine::Cpu.bytes() + Engine::Neural.bytes() - silero().bytes,
+            "Silero counts once"
+        );
         // Once the Neural build is in, the CPU one's model goes; Silero stays.
         remove_cpu(&dir);
         assert!(!Engine::Cpu.installed(&dir));
         assert!(present(&dir, silero()));
         assert!(Engine::Neural.installed(&dir));
+        assert_eq!(disk_bytes(&dir), Engine::Neural.bytes());
+        // Removing leaves nothing, and removing again is fine.
+        remove(&dir).unwrap();
+        assert_eq!(installed_engine(&dir), None);
+        assert_eq!(disk_bytes(&dir), 0);
+        remove(&dir).unwrap();
         fs::remove_dir_all(&dir).unwrap();
     }
 

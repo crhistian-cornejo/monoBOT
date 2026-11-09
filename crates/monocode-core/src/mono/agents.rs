@@ -602,6 +602,10 @@ pub fn access_label(access: &str) -> (&'static str, &'static str) {
             "Change files",
             "Create and edit files in folders you allow; never delete",
         ),
+        "computer" => (
+            "Use this Mac",
+            "Open apps and pages, control the music and volume, use the clipboard, type, and look at the screen",
+        ),
         _ => (
             "Images",
             "Make and edit pictures with Gemini's Nano Banana, through Antigravity",
@@ -828,11 +832,16 @@ mod tests {
             assert!(source.contains(&format!("name: \"{label}\"")), "{label}");
             assert!(source.contains(does), "{does}");
         }
-        for access in bot_tools::ACCESS {
+        // "computer" (Use this Mac) is native only: the web build never had it.
+        for access in bot_tools::ACCESS
+            .iter()
+            .filter(|access| **access != "computer")
+        {
             let (label, does) = access_label(access);
             assert!(source.contains(&format!("name: \"{label}\"")), "{label}");
             assert!(source.contains(does), "{does}");
         }
+        assert_eq!(access_label("computer").0, "Use this Mac");
         let tools = bot_tools::tools("research", None);
         let rows = vec![
             (
