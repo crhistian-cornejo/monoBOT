@@ -909,9 +909,10 @@ fn read_only_git_cmd_path_adds_fixed_dirs_to_inherited_path() {
 #[test]
 fn local_git_never_resolves_login_shell_path() {
     for action in ["status", "diff", "add", "restore", "cat-file"] {
-        let cmd = git_cmd_for_args_with_path(&[action], || {
+        let cmd = git_cmd_in_with_path(&std::env::temp_dir(), &[action], || {
             panic!("local git must not resolve the login-shell PATH")
-        });
+        })
+        .unwrap();
         assert!(git_cmd_path(&cmd).contains(&PathBuf::from("/opt/homebrew/bin")));
     }
 }
@@ -926,12 +927,27 @@ fn git_actions_that_need_helpers_use_login_shell_path() {
         &["clone"],
         &["--literal-pathspecs", "commit"],
     ] {
-        let cmd = git_cmd_for_args_with_path(args, || "gui-git-path".into());
+        let cmd =
+            git_cmd_in_with_path(&std::env::temp_dir(), args, || "gui-git-path".into()).unwrap();
         assert!(cmd.get_envs().any(|(key, value)| {
             key == std::ffi::OsStr::new("PATH")
                 && value == Some(std::ffi::OsStr::new("gui-git-path"))
         }));
     }
+}
+
+#[test]
+fn only_a_commit_or_a_push_keeps_the_repositorys_hooks() {
+    let hooks_off = |args: &[&str]| {
+        git_cmd_in_with_path(&std::env::temp_dir(), args, || "p".into())
+            .unwrap()
+            .get_args()
+            .any(|arg| arg.to_string_lossy().starts_with("core.hooksPath="))
+    };
+    assert!(hooks_off(&["status"]));
+    assert!(hooks_off(&["diff", "--stat"]));
+    assert!(!hooks_off(&["commit", "-m", "x"]));
+    assert!(!hooks_off(&["--literal-pathspecs", "push"]));
 }
 
 #[test]

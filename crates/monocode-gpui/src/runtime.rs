@@ -670,6 +670,11 @@ fn run_turn_using(
         planning = request.settings.plan;
         let antigravity = request.kind == Kind::Antigravity;
         let mut plan_tools = std::collections::HashSet::new();
+        // A turn going round in circles is stopped (`loop_guard`): each new
+        // call by its id, and the answer as it grows.
+        let mut guard = monocode_core::loop_guard::Guard::default();
+        let mut guarded_calls = std::collections::HashSet::new();
+        let mut turn_text = String::new();
         // The running-work list attributes the provider and its tools to this session.
         let result = monocode_core::process::owned_by(summary.id, || {
             provider::run_with_controls(request, cancel.clone(), Some(controls), |events| {
@@ -782,9 +787,13 @@ fn run_turn_using(
                             if transcript.rows.last().is_none_or(|r| r.role != "assistant") {
                                 start = start.min(transcript.begin("assistant"));
                             }
+                            turn_text.push_str(&text);
                             let at = transcript.append(&text);
                             start = start.min(at);
                             pending.changed(at);
+                            if let Some(reason) = guard.text(&turn_text) {
+                                return Err(reason.into());
+                            }
                         }
                         Event::Reasoning(text) => {
                             if text.is_empty() {
@@ -812,6 +821,11 @@ fn run_turn_using(
                             boundary = true;
                         }
                         Event::Tool(tool) => {
+                            if guarded_calls.insert(tool.id.clone())
+                                && let Some(reason) = guard.call(&tool)
+                            {
+                                return Err(reason.into());
+                            }
                             if antigravity
                                 && !images_wanted
                                 && monocode_core::images::update_makes_image(

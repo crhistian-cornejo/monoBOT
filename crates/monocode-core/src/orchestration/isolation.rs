@@ -6,10 +6,7 @@
 //! and refuses it when the worker wrote outside its scopes. Synchronous: run
 //! these on a background executor.
 use serde::{Deserialize, Serialize};
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 /// Where a worker works, and the snapshot it started from.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -24,15 +21,12 @@ fn git(cwd: &Path, index: Option<&Path>, args: &[&str]) -> Result<String, String
     if crate::files::remote::is_remote(cwd) {
         return Err("Worker worktrees are not available on another machine.".into());
     }
-    let mut command = Command::new("git");
-    command
-        .current_dir(cwd)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0");
+    let mut command =
+        crate::git::safe::command(cwd, args.first().copied(), crate::git::safe::Hooks::Off)?;
+    command.current_dir(cwd).args(args);
     if let Some(index) = index {
         command.env("GIT_INDEX_FILE", index);
     }
-    crate::process::configure_child(&mut command);
     let out = command
         .output()
         .map_err(|e| format!("Could not run Git: {e}"))?;

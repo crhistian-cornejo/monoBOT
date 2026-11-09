@@ -137,7 +137,8 @@ fn git_ignored_names(dir: &Path, names: &[&str]) -> Option<HashSet<String>> {
     if names.is_empty() {
         return Some(HashSet::new());
     }
-    let mut child = crate::scm::git_cmd()
+    let mut child = crate::scm::git_cmd_in(dir, &["check-ignore"])
+        .ok()?
         .arg("-C")
         .arg(dir)
         .args(["check-ignore", "--stdin", "-z"])

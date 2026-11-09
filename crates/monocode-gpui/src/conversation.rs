@@ -26,6 +26,7 @@ mod send_later;
 #[cfg(test)]
 mod submission_tests;
 mod title;
+mod trust;
 mod worktree_naming;
 use crate::{
     composer_motion::ComposerMotion,
@@ -194,6 +195,8 @@ pub(crate) struct Conversation {
     managed_by: Option<i64>,
     status: String,
     loaded: bool,
+    /// The project brings Claude Code configuration not trusted yet.
+    project_untrusted: bool,
     history_unloaded: bool,
     history_actions: std::collections::VecDeque<history::HistoryAction>,
     pending_search: Option<(usize, String)>,
@@ -662,6 +665,7 @@ impl Conversation {
             managed_by: None,
             status: "Loading conversation…".into(),
             loaded: false,
+            project_untrusted: false,
             history_unloaded: false,
             history_actions: Default::default(),
             pending_search: None,
@@ -914,6 +918,7 @@ impl Conversation {
         self.loaded = true;
         self.model = settings.model.clone();
         self.settings = settings;
+        self.check_project_trust(cx);
         self.input
             .update(cx, |input, cx| input.set_text(prompt, cx));
         self.send(cx);
@@ -1656,6 +1661,7 @@ impl Conversation {
         self.status = "Ready".into();
         self.refresh_catalog(cx);
         self.refresh_git(cx);
+        self.check_project_trust(cx);
         if let Some(prompt) = prompt {
             self.input.update(cx, |i, cx| i.set_text(prompt, cx));
             self.send(cx);
@@ -2921,6 +2927,7 @@ impl Conversation {
             .child(self.background_shelf(window, cx))
             .child(self.message_queue(window, cx))
             .children(if self.is_remote() { None } else { self.auth_notice(cx) })
+            .children(self.trust_notice(cx))
             .when(self.settings.worktree_removed,|d|d.child(div().mb_2().p_3().rounded_lg().border_1().border_color(content(0.1)).flex().items_center().gap_3().text_size(px(12.)).child(div().flex_1().child("Worktree deleted. Select a branch or worktree to continue this conversation.")).child(tool_pill("reattach-worktree","Select worktree").child("Select worktree").on_click(cx.listener(|this,_,window,cx|this.open_git(GitMode::Worktree,window,cx))))))
             .when_some(self.settings.handoff.clone(), |d, handoff| {
                 d.child(

@@ -31,6 +31,24 @@ impl AccessMode {
             Self::FullAccess => "Full access",
         }
     }
+    /// How much the mode lets an agent do without asking, lowest first.
+    pub fn rank(self) -> u8 {
+        match self {
+            Self::ReadOnly => 0,
+            Self::Supervised => 1,
+            Self::AutoAcceptEdits => 2,
+            Self::Auto => 3,
+            Self::FullAccess => 4,
+        }
+    }
+    /// This mode, never above `ceiling`.
+    pub fn at_most(self, ceiling: Self) -> Self {
+        if self.rank() > ceiling.rank() {
+            ceiling
+        } else {
+            self
+        }
+    }
     pub fn from_id(id: &str) -> Self {
         match id {
             "read-only" => Self::ReadOnly,

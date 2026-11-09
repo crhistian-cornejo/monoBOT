@@ -237,8 +237,10 @@ pub fn launch_settings(
         }
         settings.model_settings.extend(values);
     }
+    // `settings` are the session that asks: a session an agent starts never
+    // has more access than that agent, so it cannot grant itself more.
     if let Some(mode) = input["runtimeMode"].as_str() {
-        settings.access = AccessMode::from_id(mode);
+        settings.access = AccessMode::from_id(mode).at_most(settings.access);
     }
     let workspace = input["workspaceMode"].as_str().unwrap_or("current");
     if input.get("worktreeBase").is_some() && workspace != "worktree" {

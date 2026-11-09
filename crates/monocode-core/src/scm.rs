@@ -1148,33 +1148,59 @@ fn resolve_repo_path(root: &Path, relative: &str) -> Result<String, String> {
 
 /// Any git can start a filter (git-lfs), which a Finder launch's bare PATH
 /// lacks. The cached search path finds it without waiting on the login shell.
+/// Hardened (see `git::safe`); a call that knows its folder takes
+/// [`git_cmd_in`], which also sets aside what the repository's own
+/// configuration would run.
+#[cfg(test)]
 pub(crate) fn git_cmd() -> Command {
-    let mut cmd = Command::new("git");
-    crate::process::configure_child(&mut cmd);
-    cmd.env("PATH", shell::cached_gui_search_path())
-        .env("GIT_TERMINAL_PROMPT", "0");
+    let mut cmd = crate::git::safe::base(std::path::Path::new("git"), crate::git::safe::Hooks::Off);
+    cmd.env("PATH", shell::cached_gui_search_path());
     cmd
 }
 
-fn git_cmd_for_args_with_path(args: &[&str], gui_path: impl FnOnce() -> String) -> Command {
-    let mut cmd = git_cmd();
+/// The subcommand in `args`, past Git's own options.
+fn subcommand<'a>(args: &[&'a str]) -> Option<&'a str> {
+    args.iter().copied().find(|arg| !arg.starts_with('-'))
+}
+
+/// Git for `args` in `root`, hardened against the repository: its programs
+/// set aside, and its hooks only for a commit or a push the user asked for.
+pub(crate) fn git_cmd_in(root: &Path, args: &[&str]) -> Result<Command, String> {
+    git_cmd_in_with_path(root, args, shell::gui_search_path)
+}
+
+fn git_cmd_in_with_path(
+    root: &Path,
+    args: &[&str],
+    gui_path: impl FnOnce() -> String,
+) -> Result<Command, String> {
+    use crate::git::safe::{self, Hooks};
     let args = args.strip_prefix(&["--literal-pathspecs"]).unwrap_or(args);
-    if matches!(
-        args.first().copied(),
-        Some("commit" | "push" | "pull" | "fetch" | "clone")
+    let sub = subcommand(args);
+    let hooks = if matches!(
+        sub,
+        Some("commit" | "push" | "pull" | "merge" | "rebase" | "cherry-pick" | "revert" | "am")
     ) {
-        // Signers, hooks, and credential helpers may only be on the login-shell PATH.
-        cmd.env("PATH", gui_path());
-    }
-    cmd
-}
-
-fn git_cmd_for_args(args: &[&str]) -> Command {
-    git_cmd_for_args_with_path(args, shell::gui_search_path)
+        Hooks::Repo
+    } else {
+        Hooks::Off
+    };
+    let mut cmd = safe::command(root, sub, hooks)?;
+    let full_path = matches!(sub, Some("commit" | "push" | "pull" | "fetch" | "clone"));
+    // Signers, hooks, and credential helpers may only be on the login-shell PATH.
+    cmd.env(
+        "PATH",
+        if full_path {
+            gui_path()
+        } else {
+            shell::cached_gui_search_path()
+        },
+    );
+    Ok(cmd)
 }
 
 fn git_checked(root: &Path, args: &[&str]) -> Result<(), String> {
-    let mut cmd = git_cmd_for_args(args);
+    let mut cmd = git_cmd_in(root, args)?;
     let output = cmd
         .arg("--no-pager")
         .arg("-C")
@@ -1204,7 +1230,8 @@ fn git_run(root: &Path, args: &[&str]) -> Option<String> {
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Option<Vec<u8>> {
-    let output = git_cmd_for_args(args)
+    let output = git_cmd_in(root, args)
+        .ok()?
         .arg("--no-pager")
         .arg("-C")
         .arg(root)
@@ -1371,7 +1398,13 @@ pub fn git_dirs(root: &Path) -> Vec<std::path::PathBuf> {
 }
 
 fn git_stdout(root: &Path, args: &[&str]) -> Option<String> {
-    let output = git_cmd().arg("-C").arg(root).args(args).output().ok()?;
+    let output = git_cmd_in(root, args)
+        .ok()?
+        .arg("-C")
+        .arg(root)
+        .args(args)
+        .output()
+        .ok()?;
     if !output.status.success() {
         return None;
     }

@@ -1714,7 +1714,9 @@ fn run_operation(
             }
             command.args(["--settings", &config.to_string()]);
             if !settings.text_only {
-                command.arg("--setting-sources=user,project,local");
+                // A project's own hooks and MCP servers only once the user
+                // trusts it (`project_trust`).
+                command.arg(crate::project_trust::setting_sources(&request.cwd));
             }
             if let Some(id) = &request.provider_id {
                 command.args(["--resume", id]);

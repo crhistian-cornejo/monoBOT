@@ -1339,6 +1339,8 @@ fn git_diff_full_context(root: &Path, base: &str, head: &str) -> Result<(String,
             "diff",
             "--no-color",
             "--no-ext-diff",
+            // A textconv driver the repository names is a program it runs.
+            "--no-textconv",
             "-U999999",
             &format!("{base}...{head}"),
         ],

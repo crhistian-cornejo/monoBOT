@@ -3,11 +3,9 @@
 pub mod naming;
 mod remote;
 pub mod report;
+pub mod safe;
 use serde::Deserialize;
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Branch {
@@ -36,12 +34,8 @@ pub(crate) fn git(cwd: &Path, args: &[&str]) -> Result<String, String> {
     if crate::files::remote::is_remote(cwd) {
         return Err("This isn’t available for projects on another machine yet.".into());
     }
-    let mut command = Command::new("git");
-    command
-        .current_dir(cwd)
-        .args(args)
-        .env("GIT_TERMINAL_PROMPT", "0");
-    crate::process::configure_child(&mut command);
+    let mut command = safe::command(cwd, args.first().copied(), safe::Hooks::Off)?;
+    command.current_dir(cwd).args(args);
     let out = command
         .output()
         .map_err(|e| format!("Could not run Git: {e}"))?;

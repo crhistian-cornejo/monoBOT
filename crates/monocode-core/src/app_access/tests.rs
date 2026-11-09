@@ -373,3 +373,29 @@ fn launch_identity_and_unsent_prompt_survive_reopen_without_duplicate_sessions()
             .unwrap();
     }
 }
+
+#[test]
+fn an_agent_cannot_start_a_session_with_more_access_than_its_own() {
+    let supervised = Settings {
+        access: AccessMode::Supervised,
+        ..Default::default()
+    };
+    for (asked, given) in [
+        ("full-access", AccessMode::Supervised),
+        ("auto", AccessMode::Supervised),
+        ("read-only", AccessMode::ReadOnly),
+    ] {
+        let input = json!({"prompt":"Go","runtimeMode":asked});
+        let settings =
+            launch_settings(&input, "codex", supervised.clone(), Kind::Codex, &[model()]).unwrap();
+        assert_eq!(settings.access, given, "{asked}");
+    }
+    // One with full access may start another with it.
+    let full = Settings {
+        access: AccessMode::FullAccess,
+        ..Default::default()
+    };
+    let input = json!({"prompt":"Go","runtimeMode":"full-access"});
+    let settings = launch_settings(&input, "codex", full, Kind::Codex, &[model()]).unwrap();
+    assert_eq!(settings.access, AccessMode::FullAccess);
+}

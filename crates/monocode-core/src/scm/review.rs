@@ -416,7 +416,7 @@ fn index_mode(root: &Path, relative: &str) -> Option<String> {
     (mode.len() == 6 && mode.bytes().all(|b| b.is_ascii_digit())).then(|| mode.to_string())
 }
 fn hash_object(root: &Path, relative: &str, contents: &[u8]) -> Result<String, String> {
-    let mut command = git_cmd();
+    let mut command = git_cmd_in(root, &["hash-object"])?;
     command
         .arg("--no-pager")
         .arg("-C")

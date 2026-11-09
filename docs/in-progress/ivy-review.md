@@ -34,7 +34,14 @@ IVY has nothing to add on memory, agent messages, groups with rounds and
 mentions, commit messages, checkpoints, provider switching or worktrees. Its
 memory was copied from MonoBOT's.
 
-**Order:** 1–4 first (all small, mostly security), then 5–6, then 7–9, then 10.
+**Done Nov 8 (1–4):**
+
+- Every background Git call goes through `git::safe`. Its fixed settings run nothing, hooks go to `/dev/null`, the app's Git variables are removed, and the repository's own programs give way to the user's or to nothing. Those programs are fsmonitor, filters, textconv, credential helpers, signers, ssh and core.worktree; an external diff of the repository's own is refused. A commit or a push the user asks for runs as in their terminal, with the repository's hooks. A test runs a hostile repository: plain Git runs its fsmonitor, `git::safe` does not.
+- A session an agent starts never has more access than that agent (`AccessMode::at_most` in `app_access::launch_settings`).
+- A project whose repository brings `.claude/settings*.json` or `.mcp.json` runs Claude Code with `--setting-sources=user` until the user trusts it (`project_trust`). The chat shows a "Trust project" notice.
+- `loop_guard` stops a turn that makes the same call with the same input 6 times in a row, or that keeps writing the same passage. The reason stays as the turn's error row.
+
+**Order for the rest:** 5–6, then 7–9, then 10.
 
 ## Perplexity Decider
 

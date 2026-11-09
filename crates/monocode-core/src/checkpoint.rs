@@ -885,12 +885,16 @@ fn resolve_edit_path(workspace: &Path, root: &Path, path: &str) -> Result<String
 }
 
 fn git_command(root: &Path, args: &[&str]) -> Command {
-    let mut command = Command::new("git");
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000);
-    }
+    // Hardened against the repository (`git::safe`). A configuration it
+    // cannot set aside makes the call fail rather than run unguarded.
+    let mut command =
+        crate::git::safe::command(root, args.first().copied(), crate::git::safe::Hooks::Off)
+            .unwrap_or_else(|_| {
+                let mut refused =
+                    crate::git::safe::base(Path::new("git"), crate::git::safe::Hooks::Off);
+                refused.arg("--refused-unsafe-repository-configuration");
+                refused
+            });
     command
         .args(["--no-pager", "-C"])
         .arg(root)
