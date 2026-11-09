@@ -259,6 +259,15 @@ pub(crate) fn content(alpha: f32) -> Hsla {
     color
 }
 
+/// The red Windows 11 paints behind a hovered caption close button, in every
+/// theme: a system color, so it does not follow the palette or the accent.
+#[cfg(target_os = "windows")]
+pub(crate) fn caption_close_fill(alpha: f32) -> Hsla {
+    let mut color: Hsla = rgb(0xc42b1c).into();
+    color.a = alpha;
+    color
+}
+
 /// `[data-composer-box]::before` uses content ink at 3% over its backdrop.
 /// Light mode instead gives the box the solid `background-base` surface.
 pub(crate) fn composer_fill() -> Hsla {

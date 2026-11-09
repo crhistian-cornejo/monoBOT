@@ -16,6 +16,7 @@ mod image_lightbox_tests;
 mod keep_awake;
 mod layout;
 mod live_agents;
+mod menu_button;
 mod mobile_host;
 mod mono_panes;
 pub(crate) mod monos;
@@ -392,6 +393,8 @@ pub(crate) enum MenuTarget {
     Actions,
     /// The title strip's new-tab button, when terminals open in the title bar.
     NewTab,
+    /// Windows' title bar menu button: the app menu, which has no menu bar.
+    AppMenu,
 }
 pub(crate) struct ShellMenu {
     pub(crate) target: MenuTarget,
@@ -401,8 +404,19 @@ pub(crate) struct ShellMenu {
 }
 /// The gap the traffic lights take in the title bar (`w-[78px]`, or `w-2.5`
 /// where the window has none, as in macOS fullscreen).
-const TRAFFIC_LIGHTS: f32 = if cfg!(target_os = "macos") { 78. } else { 10. };
-const NO_TRAFFIC_LIGHTS: f32 = 10.;
+/// Windows puts its menu button there instead, in fullscreen too.
+const TRAFFIC_LIGHTS: f32 = if cfg!(target_os = "macos") {
+    78.
+} else if cfg!(target_os = "windows") {
+    menu_button::MENU_BUTTON_SLOT
+} else {
+    10.
+};
+const NO_TRAFFIC_LIGHTS: f32 = if cfg!(target_os = "windows") {
+    menu_button::MENU_BUTTON_SLOT
+} else {
+    10.
+};
 // The tab strip's padding; the trailing side also has the 2px gap before the
 // strip's drag area.
 const STRIP_LEAD: f32 = 6.;
@@ -706,6 +720,7 @@ pub(crate) struct Shell {
     link_dialog: Option<session_groups::LinkDialog>,
     action_dialog: Option<actions::ActionDialog>,
     actions_anchor: AnchorSlot,
+    app_menu_anchor: AnchorSlot,
     new_tab_anchor: AnchorSlot,
     /// The dock terminal each action last ran in, by project and action id.
     action_terminals: HashMap<(String, String), gpui::WeakEntity<Terminal>>,
@@ -1108,6 +1123,7 @@ impl Shell {
             link_dialog: None,
             action_dialog: None,
             actions_anchor: AnchorSlot::default(),
+            app_menu_anchor: AnchorSlot::default(),
             new_tab_anchor: AnchorSlot::default(),
             action_terminals: HashMap::new(),
             deleting: HashSet::new(),
@@ -4891,13 +4907,15 @@ impl Shell {
             } else {
                 6. * self.sidebar_fraction
             }))
-            .child(
+            .child(if cfg!(target_os = "windows") {
+                self.app_menu_button(cx)
+            } else {
                 // Fixed, so the toggle holds still as the sidebar opens
                 // and closes.
                 titlebar_drag_area()
                     .w(px(self.traffic_lights()))
-                    .flex_shrink_0(),
-            )
+                    .flex_shrink_0()
+            })
             .child(self.sidebar_toggle(cx))
             .child(titlebar_drag_area().flex_1())
             .child(
@@ -5648,6 +5666,12 @@ impl Shell {
             MenuTarget::TerminalTab(_) | MenuTarget::RunningTerminals => {
                 ("".into(), Vec::new(), 160., MenuStyle::Explorer)
             }
+            MenuTarget::AppMenu => (
+                "Menu".into(),
+                Self::app_menu_items(window, cx),
+                160.,
+                MenuStyle::Explorer,
+            ),
             MenuTarget::Actions => (
                 "Actions".into(),
                 self.actions_menu(),
@@ -6123,6 +6147,7 @@ impl Shell {
             MenuTarget::TerminalTab(ix) => self.run_terminal_tab_menu(ix, action, window, cx),
             MenuTarget::RunningTerminals => self.run_running_terminals_menu(action, window, cx),
             MenuTarget::Actions => self.run_actions_menu(action, window, cx),
+            MenuTarget::AppMenu => self.run_app_menu(action, window, cx),
             MenuTarget::NewTab => match action {
                 "terminal" => self.new_title_terminal(window, cx),
                 _ => self.new_chat(cx),
@@ -9628,9 +9653,13 @@ impl Render for Shell {
                     )
                     .when(point, |p| p.gap(0.))
                     .when(beside, |p| p.side(Side::Right))
-                    .when(open.target == MenuTarget::SidebarOptions, |p| {
-                        p.align(Align::Start)
-                    })
+                    .when(
+                        matches!(
+                            open.target,
+                            MenuTarget::SidebarOptions | MenuTarget::AppMenu
+                        ),
+                        |p| p.align(Align::Start),
+                    )
                     .when(open.target == MenuTarget::Actions, |p| {
                         p.side(Side::Top).align(crate::popover::Align::End)
                     })

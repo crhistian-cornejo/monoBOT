@@ -160,7 +160,7 @@ impl WindowsWindowInner {
             WM_GPUI_CURSOR_STYLE_CHANGED => self.handle_cursor_changed(lparam),
             WM_GPUI_FORCE_UPDATE_WINDOW => self.draw_window(handle, true),
             WM_GPUI_GPU_DEVICE_LOST => self.handle_device_lost(lparam),
-            DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(wparam),
+            DM_POINTERHITTEST => self.handle_dm_pointer_hit_test(handle, wparam),
             WM_GETOBJECT => self.handle_wm_getobject(wparam, lparam),
             _ => None,
         };
@@ -1312,8 +1312,14 @@ impl WindowsWindowInner {
         Some(0)
     }
 
-    fn handle_dm_pointer_hit_test(&self, wparam: WPARAM) -> Option<isize> {
-        self.state.direct_manipulation.on_pointer_hit_test(wparam);
+    fn handle_dm_pointer_hit_test(&self, handle: HWND, wparam: WPARAM) -> Option<isize> {
+        self.state
+            .direct_manipulation
+            .on_pointer_hit_test(wparam, |screen| {
+                let lparam = LPARAM(((screen.y as u16 as isize) << 16) | screen.x as u16 as isize);
+                self.handle_hit_test_msg(handle, lparam)
+                    .is_none_or(|area| area == HTCLIENT as isize)
+            });
         None
     }
 

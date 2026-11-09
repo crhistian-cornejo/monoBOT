@@ -17,6 +17,14 @@ actions!(application, [Hide, HideOthers, ShowAll]);
 pub(crate) struct OpenUrl(pub &'static str);
 
 const REPO: &str = "https://github.com/crhistian-cornejo/monoBOT";
+const BUG_REPORT: &str = concat!(
+    "https://github.com/crhistian-cornejo/monoBOT",
+    "/issues/new?template=bug_report.yml"
+);
+const FEATURE_REQUEST: &str = concat!(
+    "https://github.com/crhistian-cornejo/monoBOT",
+    "/issues/new?template=feature_request.yml"
+);
 
 pub(crate) fn bind(cx: &mut App) {
     cx.on_action(|_: &Hide, cx| cx.hide());
@@ -50,7 +58,92 @@ pub(crate) fn install(prefs: &crate::settings::Preferences, cx: &mut App) {
     if !cx.has_global::<MenuReady>() {
         return;
     }
-    cx.set_menus(vec![
+    cx.set_menus(menus(prefs));
+}
+
+/// Windows has no menu bar: the title bar's menu button lists these, laid
+/// out as Windows apps do, with Settings and Exit under File and About under
+/// Help.
+#[cfg(target_os = "windows")]
+fn menus(prefs: &crate::settings::Preferences) -> Vec<Menu> {
+    vec![
+        Menu::new("File").items([
+            MenuItem::action("New Tab", NewCodex),
+            MenuItem::action("New Claude Tab", NewClaude),
+            MenuItem::action("New Terminal", NewTerminal),
+            MenuItem::action("Open Project…", OpenProject),
+            MenuItem::action("Save", Save),
+            MenuItem::action("Reload File", ReloadFile),
+            MenuItem::action("Autosave", ToggleAutosave).checked(prefs.autosave),
+            MenuItem::action("Split Pane Right", SplitRight),
+            MenuItem::action("Split Pane Down", SplitDown),
+            MenuItem::action("Close Pane", CloseTab),
+            MenuItem::action("Close Other Tabs", CloseOtherTabs),
+            MenuItem::action("Close All Tabs", CloseAllTabs),
+            MenuItem::action("Settings…", OpenSettings),
+            MenuItem::action("Exit", Quit),
+        ]),
+        Menu::new("Edit").items([
+            MenuItem::action("Undo", input::Undo),
+            MenuItem::action("Redo", input::Redo),
+            MenuItem::action("Cut", input::Cut),
+            MenuItem::action("Copy", input::Copy),
+            MenuItem::action("Paste", input::Paste),
+            MenuItem::action("Select All", input::SelectAll),
+            MenuItem::action("Find", Find),
+            MenuItem::action("Replace", Replace),
+            MenuItem::action("Format Document", Format),
+            MenuItem::action("Word Wrap", ToggleWordWrap).checked(prefs.file_word_wrap),
+            MenuItem::action("Fold", input::FoldCode),
+            MenuItem::action("Unfold", input::UnfoldCode),
+            MenuItem::action("Fold All", input::FoldAll),
+            MenuItem::action("Unfold All", input::UnfoldAll),
+        ]),
+        Menu::new("View").items([
+            MenuItem::action("Toggle Sidebar", ToggleSidebar),
+            MenuItem::action("Toggle Session Sidebar", ToggleRightPanel),
+            MenuItem::action("Toggle Layout", ToggleLayout),
+            MenuItem::action("Toggle Terminal", ToggleTerminal),
+            MenuItem::action("Inbox", OpenInbox),
+            MenuItem::action("Notes", OpenNotes),
+            MenuItem::action("Switch Model…", SwitchModel),
+            MenuItem::action("Zoom In", ZoomIn),
+            MenuItem::action("Zoom Out", ZoomOut),
+            MenuItem::action("Reset Zoom", ResetZoom),
+            MenuItem::action("Reload", Reload),
+            MenuItem::action("Sidebar Appearance…", SidebarAppearance),
+        ]),
+        Menu::new("Go").items([
+            MenuItem::action("Search…", FocusSearch),
+            MenuItem::action("Go to File…", GoToFile),
+            MenuItem::action("Command Palette…", OpenCommandPalette),
+            MenuItem::action("Find in Files…", SearchFiles),
+            MenuItem::action("Back", VisitBack),
+            MenuItem::action("Forward", VisitForward),
+            MenuItem::action("Previous Tab", PreviousTab),
+            MenuItem::action("Next Tab", NextTab),
+            MenuItem::action("Previous Session", PreviousSession),
+            MenuItem::action("Next Session", NextSession),
+            MenuItem::action("Previous Project", PreviousProject),
+            MenuItem::action("Next Project", NextProject),
+            MenuItem::action("Focus Left", FocusPaneLeft),
+            MenuItem::action("Focus Right", FocusPaneRight),
+            MenuItem::action("Focus Up", FocusPaneUp),
+            MenuItem::action("Focus Down", FocusPaneDown),
+        ]),
+        Menu::new("Help").items([
+            MenuItem::action("View on GitHub", OpenUrl(REPO)),
+            MenuItem::action("Report a Bug…", OpenUrl(BUG_REPORT)),
+            MenuItem::action("Request a Feature…", OpenUrl(FEATURE_REQUEST)),
+            MenuItem::action("Check for Updates…", CheckForUpdates),
+            MenuItem::action("About MonoBOT Native", About),
+        ]),
+    ]
+}
+
+#[cfg(not(target_os = "windows"))]
+fn menus(prefs: &crate::settings::Preferences) -> Vec<Menu> {
+    vec![
         Menu::new("MonoBOT Native").items([
             MenuItem::action("About MonoBOT Native", About),
             MenuItem::separator(),
@@ -141,20 +234,8 @@ pub(crate) fn install(prefs: &crate::settings::Preferences, cx: &mut App) {
         Menu::new("Help").items([
             MenuItem::action("View on GitHub", OpenUrl(REPO)),
             MenuItem::separator(),
-            MenuItem::action(
-                "Report a Bug…",
-                OpenUrl(concat!(
-                    "https://github.com/crhistian-cornejo/monoBOT",
-                    "/issues/new?template=bug_report.yml"
-                )),
-            ),
-            MenuItem::action(
-                "Request a Feature…",
-                OpenUrl(concat!(
-                    "https://github.com/crhistian-cornejo/monoBOT",
-                    "/issues/new?template=feature_request.yml"
-                )),
-            ),
+            MenuItem::action("Report a Bug…", OpenUrl(BUG_REPORT)),
+            MenuItem::action("Request a Feature…", OpenUrl(FEATURE_REQUEST)),
         ]),
-    ]);
+    ]
 }

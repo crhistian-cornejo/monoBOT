@@ -109,6 +109,17 @@ fn terminal_font(installed: &[String], mono: &str) -> Font {
     font
 }
 
+/// The caption button glyphs Windows itself draws: Segoe Fluent Icons on
+/// Windows 11, Segoe MDL2 Assets (same code points) on Windows 10.
+#[cfg(target_os = "windows")]
+pub(crate) fn caption_glyphs() -> Font {
+    let mut font = gpui::font("Segoe Fluent Icons");
+    font.fallbacks = Some(FontFallbacks::from_fonts(vec![
+        "Segoe MDL2 Assets".to_owned(),
+    ]));
+    font
+}
+
 pub(crate) fn init(cx: &App) {
     let loaded = cx
         .text_system()

@@ -1,19 +1,18 @@
+#[cfg(target_os = "windows")]
+use gpui::WindowControlArea;
 use gpui::{
-    AnyElement, Bounds, CursorStyle, MouseButton, Pixels, ResizeEdge, Size, Window,
-    WindowControlArea, div, point, prelude::*, px, size,
+    AnyElement, Bounds, CursorStyle, MouseButton, Pixels, ResizeEdge, Size, Window, div, point,
+    prelude::*, px, size,
 };
 
+/// Windows 11's caption buttons are 46 px wide and span the whole bar.
+#[cfg(target_os = "windows")]
+const CAPTION_BUTTON_WIDTH: f32 = 46.;
+#[cfg(target_os = "windows")]
+pub(super) const CONTROLS_WIDTH: f32 = 3. * CAPTION_BUTTON_WIDTH;
+#[cfg(not(target_os = "windows"))]
 pub(super) const CONTROLS_WIDTH: f32 = 106.;
 
-// Windows uses the Tauri app's `WindowControls` glyphs.
-#[cfg(target_os = "windows")]
-const MINIMIZE_ICON: &str = "minus-sign";
-#[cfg(target_os = "windows")]
-const MAXIMIZE_ICON: &str = "window-maximize";
-#[cfg(target_os = "windows")]
-const RESTORE_ICON: &str = "window-restore";
-#[cfg(target_os = "windows")]
-const CLOSE_ICON: &str = "cancel-01";
 #[cfg(not(target_os = "windows"))]
 const MINIMIZE_ICON: &str = "minus";
 #[cfg(not(target_os = "windows"))]
@@ -23,6 +22,100 @@ const RESTORE_ICON: &str = "copy";
 #[cfg(not(target_os = "windows"))]
 const CLOSE_ICON: &str = "close";
 
+/// Windows draws the buttons as the system does: flush with the top right
+/// corner, full height, Segoe Fluent glyphs, a faint ink fill on hover and the
+/// system red behind close. The buttons hit-test as the system caption
+/// buttons, so Windows minimizes, toggles maximize and restore, shows Snap
+/// Layouts, closes through `WM_CLOSE` and shows its own tooltips.
+#[cfg(target_os = "windows")]
+pub(super) fn controls(
+    window: &Window,
+    _on_close: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
+) -> AnyElement {
+    let maximized = window.is_maximized();
+    let active = window.is_window_active();
+    div()
+        .absolute()
+        .top_0()
+        .right_0()
+        .w(px(CONTROLS_WIDTH))
+        .h(px(crate::theme::TITLE_BAR_HEIGHT))
+        .flex()
+        .occlude()
+        .child(caption_button(
+            "window-minimize",
+            "Minimize window",
+            // ChromeMinimize
+            "\u{e921}",
+            WindowControlArea::Min,
+            active,
+        ))
+        .child(caption_button(
+            "window-maximize",
+            if maximized {
+                "Restore window"
+            } else {
+                "Maximize window"
+            },
+            // ChromeRestore, ChromeMaximize
+            if maximized { "\u{e923}" } else { "\u{e922}" },
+            WindowControlArea::Max,
+            active,
+        ))
+        .child(caption_button(
+            "window-close",
+            "Close window",
+            // ChromeClose
+            "\u{e8bb}",
+            WindowControlArea::Close,
+            active,
+        ))
+        .into_any_element()
+}
+
+#[cfg(target_os = "windows")]
+fn caption_button(
+    id: &'static str,
+    label: &'static str,
+    glyph: &'static str,
+    area: WindowControlArea,
+    active: bool,
+) -> gpui::Stateful<gpui::Div> {
+    use crate::theme::{caption_close_fill, content, white};
+    let close = matches!(area, WindowControlArea::Close);
+    // An inactive window dims its glyphs, as the system caption does.
+    let ink = content(if active { 0.9 } else { 0.45 });
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(gpui::Role::Button)
+        .aria_label(label)
+        .w(px(CAPTION_BUTTON_WIDTH))
+        .h_full()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .font(crate::fonts::caption_glyphs())
+        .text_size(px(10.))
+        .line_height(px(10.))
+        .text_color(ink)
+        .map(|button| {
+            if close {
+                button
+                    .hover(|s| s.bg(caption_close_fill(1.)).text_color(white(1.)))
+                    .active(|s| s.bg(caption_close_fill(0.9)).text_color(white(0.7)))
+            } else {
+                button
+                    .hover(|s| s.bg(content(0.06)))
+                    .active(|s| s.bg(content(0.04)).text_color(content(0.6)))
+            }
+        })
+        .window_control_area(area)
+        .child(glyph)
+}
+
+#[cfg(not(target_os = "windows"))]
 pub(super) fn controls(
     window: &Window,
     on_close: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
@@ -41,7 +134,6 @@ pub(super) fn controls(
         .child(caption_button(
             crate::theme::icon_button("window-minimize", "Minimize window", MINIMIZE_ICON)
                 .debug_selector(|| "window-minimize".into()),
-            WindowControlArea::Min,
             |_, window, _| window.minimize_window(),
         ))
         .child(caption_button(
@@ -59,31 +151,23 @@ pub(super) fn controls(
                 },
             )
             .debug_selector(|| "window-maximize".into()),
-            WindowControlArea::Max,
             |_, window, _| window.zoom_window(),
         ))
         .child(caption_button(
             crate::theme::icon_button("window-close", "Close window", CLOSE_ICON)
                 .debug_selector(|| "window-close".into()),
-            WindowControlArea::Close,
             on_close,
         ))
         .into_any_element()
 }
 
-/// On Windows the buttons hit-test as the system caption buttons. Windows
-/// then minimizes, toggles maximize and restore, shows Snap Layouts and
-/// closes through `WM_CLOSE`. GPUI's `zoom_window` can only maximize there.
+#[cfg(not(target_os = "windows"))]
 fn caption_button(
     button: gpui::Stateful<gpui::Div>,
-    area: WindowControlArea,
     on_click: impl Fn(&gpui::ClickEvent, &mut Window, &mut gpui::App) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
-    let button = button.w(px(30.));
-    if cfg!(target_os = "windows") {
-        return button.window_control_area(area);
-    }
     button
+        .w(px(30.))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(on_click)
 }
@@ -227,7 +311,16 @@ mod tests {
             assert!(bounds.left() >= right);
             assert!(bounds.right() <= width);
             right = bounds.right();
+            // Windows' caption buttons span the bar, edge to edge.
+            #[cfg(target_os = "windows")]
+            {
+                assert_eq!(bounds.size.width, px(CAPTION_BUTTON_WIDTH));
+                assert_eq!(bounds.top(), px(0.));
+                assert_eq!(bounds.size.height, px(crate::theme::TITLE_BAR_HEIGHT));
+            }
         }
+        #[cfg(target_os = "windows")]
+        assert_eq!(right, width);
         // Windows sends these clicks to its caption buttons, not to GPUI.
         if cfg!(target_os = "windows") {
             return;

@@ -94,14 +94,24 @@ impl DirectManipulationHandler {
         self.scale_factor.set(scale_factor);
     }
 
-    pub fn on_pointer_hit_test(&self, wparam: WPARAM) {
+    /// `is_client` gets the contact's screen position and answers whether it
+    /// lies in the client area. A contact handed to DirectManipulation stops
+    /// reaching the window as plain mouse input, so contacts over the custom
+    /// title bar (`HTCAPTION`, caption buttons, resize borders) stay with
+    /// `DefWindowProc`, which drags, snaps and resizes the window.
+    pub fn on_pointer_hit_test(&self, wparam: WPARAM, is_client: impl FnOnce(POINT) -> bool) {
         unsafe {
             let pointer_id = wparam.loword() as u32;
             let mut pointer_type = POINTER_INPUT_TYPE::default();
-            if GetPointerType(pointer_id, &mut pointer_type).is_ok() && pointer_type == PT_TOUCHPAD
+            if GetPointerType(pointer_id, &mut pointer_type).is_err() || pointer_type != PT_TOUCHPAD
             {
-                self.viewport.SetContact(pointer_id).log_err();
+                return;
             }
+            let mut info = POINTER_INFO::default();
+            if GetPointerInfo(pointer_id, &mut info).is_ok() && !is_client(info.ptPixelLocation) {
+                return;
+            }
+            self.viewport.SetContact(pointer_id).log_err();
         }
     }
 
