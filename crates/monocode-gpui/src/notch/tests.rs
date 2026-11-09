@@ -1038,4 +1038,114 @@ fn the_system_widget_shows_the_processor_the_memory_and_the_graphics(cx: &mut Te
     assert!(visual.debug_bounds("notch-system-cpu").is_some());
     assert!(visual.debug_bounds("notch-system-ram").is_some());
     assert!(visual.debug_bounds("notch-system-gpu").is_some());
+    // A second reading: the first stays for the bars to glide from, and
+    // both are in the last minute's graph.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.usage_history = Default::default();
+            let first = notch.usage.unwrap();
+            notch.take_usage(first);
+            notch.take_usage(Stats {
+                cpu: Some(80.),
+                ..first
+            });
+            assert_eq!(
+                notch.usage_before.map(|(before, _)| before.cpu),
+                Some(Some(23.4))
+            );
+            assert_eq!(notch.usage_history.cpu, [23.4, 80.]);
+            cx.notify();
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-system-cpu").is_some());
+}
+
+#[gpui::test]
+fn files_dragged_onto_the_notch_open_it_and_wait_on_its_tray(cx: &mut TestAppContext) {
+    use gpui::{ExternalPaths, FileDropEvent};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    assert!(visual.debug_bounds("notch-tray").is_none());
+    // Held over the closed notch: it opens on Home and says it takes them.
+    let over = visual.debug_bounds("notch").unwrap().center();
+    let files: Vec<std::path::PathBuf> = vec!["notes/plan.md".into(), "shots".into()];
+    visual.simulate_event(FileDropEvent::Entered {
+        position: over,
+        paths: ExternalPaths(files.clone().into()),
+    });
+    visual.simulate_event(FileDropEvent::Pending { position: over });
+    visual.run_until_parked();
+    assert!(opened.window.update(visual, |n, _, _| n.open).unwrap());
+    assert!(visual.debug_bounds("notch-tray").is_some());
+    // Dropped: they wait there, newest first.
+    let over = visual.debug_bounds("notch").unwrap().center();
+    visual.simulate_event(FileDropEvent::Pending { position: over });
+    visual.simulate_event(FileDropEvent::Submit { position: over });
+    visual.run_until_parked();
+    let kept = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| notch.tray.items().to_vec())
+            .unwrap()
+    };
+    assert_eq!(kept(visual), files);
+    assert!(visual.debug_bounds("notch-tray-file-0").is_some());
+    assert!(visual.debug_bounds("notch-tray-file-1").is_some());
+    // The cross takes one out without opening it; Clear empties the tray
+    // and its row goes.
+    click(visual, "notch-tray-remove-0");
+    assert_eq!(kept(visual), files[1..]);
+    click(visual, "notch-tray-clear");
+    assert!(kept(visual).is_empty());
+    assert!(visual.debug_bounds("notch-tray").is_none());
+}
+
+#[gpui::test]
+fn the_open_player_shows_the_lines_around_the_playhead(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Lyrics, Playing, Track, parse_lrc};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let track = Track {
+        app: "Spotify.exe".into(),
+        title: "Song".into(),
+        artist: "Artist".into(),
+        album: "Album".into(),
+        duration: Some(Duration::from_secs(200)),
+    };
+    let height = |visual: &mut VisualTestContext| size(opened.window, visual).1;
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.lyrics_for = Some(track.clone());
+            notch.lyrics = Some((
+                track.clone(),
+                Lyrics::Synced(parse_lrc("[00:10.00]first line\n[00:20.00]second line")),
+            ));
+            notch.set_media(
+                Some(Playing {
+                    track: track.clone(),
+                    playing: false,
+                    position: Duration::from_secs(12),
+                    at: Instant::now(),
+                    art: None,
+                }),
+                cx,
+            );
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-player").is_some());
+    assert!(visual.debug_bounds("notch-player-lyrics").is_some());
+    let with_lyrics = height(visual);
+    // With Lyrics off the player keeps its own height.
+    click(visual, "notch-media-lyrics");
+    assert!(visual.debug_bounds("notch-player-lyrics").is_none());
+    assert_eq!(
+        with_lyrics - height(visual),
+        media::LYRICS_HEIGHT + model::CELL_GAP
+    );
 }

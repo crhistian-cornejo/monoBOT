@@ -89,7 +89,10 @@ mod tests {
             tray.add([PathBuf::from(format!("file-{index}"))]);
         }
         assert_eq!(tray.items().len(), CAPACITY);
-        assert_eq!(tray.items()[0], PathBuf::from(format!("file-{}", CAPACITY + 2)));
+        assert_eq!(
+            tray.items()[0],
+            PathBuf::from(format!("file-{}", CAPACITY + 2))
+        );
         assert!(!tray.items().contains(&PathBuf::from("file-0")));
     }
 

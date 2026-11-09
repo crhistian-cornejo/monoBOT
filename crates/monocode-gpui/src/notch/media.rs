@@ -378,13 +378,46 @@ impl Notch {
         div()
             .pt(px(model::CELL_GAP))
             .flex_shrink_0()
-            .child(lyric_stack(
-                shown,
-                since,
-                self.lyric_sung(),
-                media.playing,
-            ))
+            .child(lyric_stack(shown, since, self.lyric_sung(), media.playing))
             .into_any_element()
+    }
+
+    /// The cover on its way from the wing to the open player, drawn over
+    /// the island while it springs open: it moves and grows with the
+    /// island's own spring. `island` is the island now and `rest` the open
+    /// panel it will rest at. None once it has landed.
+    pub(super) fn flying_cover(&self, island: Frame, rest: Frame, cx: &App) -> Option<AnyElement> {
+        let from = self.cover_flight?;
+        if !self.player_shown() {
+            return None;
+        }
+        let camera = self.camera(cx);
+        let span = rest.height - from.height;
+        if span <= 1. {
+            return None;
+        }
+        // The spring overshoots a little, and so does the cover.
+        let along = ((island.height - from.height) / span).clamp(0., 1.2);
+        let lerp = |start: f32, end: f32| start + (end - start) * along;
+        const WING_COVER: f32 = 20.;
+        let side = lerp(WING_COVER, PLAYER_HEIGHT);
+        let left = lerp(
+            if camera.is_some() { 12. } else { 6. },
+            (island.width - rest.width) / 2. + model::PANEL_PAD,
+        );
+        let top = lerp(
+            (from.height - WING_COVER) / 2.,
+            camera.map_or(0., |camera| camera.height) + model::PANEL_HEADER,
+        );
+        Some(
+            div()
+                .debug_selector(|| "notch-cover-flight".into())
+                .absolute()
+                .left(px(left))
+                .top(px(top))
+                .child(self.cover(side, false))
+                .into_any_element(),
+        )
     }
 
     /// While an agent works, a little of what plays beside it: the cover
@@ -562,7 +595,13 @@ impl Notch {
             .h(px(PLAYER_HEIGHT))
             .flex()
             .gap(px(12.))
-            .child(self.cover(PLAYER_HEIGHT, true))
+            // While the cover flies in from the wing, its place waits empty.
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .when(self.cover_flight.is_some(), |cover| cover.opacity(0.))
+                    .child(self.cover(PLAYER_HEIGHT, true)),
+            )
             .child(
                 div()
                     .flex_1()
@@ -841,11 +880,7 @@ fn equalizer(playing: bool) -> impl IntoElement {
             let bottom = bounds.bottom();
             // What the output really sounds like, where the system says;
             // elsewhere the bars bob by themselves.
-            let heard = if moving {
-                platform::audio_bars()
-            } else {
-                None
-            };
+            let heard = if moving { platform::audio_bars() } else { None };
             for (index, (speed, phase)) in [(7.1, 0.0), (9.3, 1.7), (6.2, 3.1), (8.4, 4.4)]
                 .into_iter()
                 .enumerate()
@@ -951,14 +986,7 @@ fn paint_sung(
             };
             let line = lyric_line(text, size, weight, accent.opacity(alpha * fade), window);
             window.with_content_mask(Some(mask), |window| {
-                let _ = line.paint(
-                    origin,
-                    line_height,
-                    gpui::TextAlign::Left,
-                    None,
-                    window,
-                    cx,
-                );
+                let _ = line.paint(origin, line_height, gpui::TextAlign::Left, None, window, cx);
             });
         }
     });

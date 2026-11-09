@@ -92,6 +92,16 @@ occluded and its frames stopped for up to two seconds.
 
 **System widget** (`monocode-core/src/notch/stats.rs`). CPU, RAM and GPU, each with its percent and a bar in the accent; two columns wide it also says the memory in gigabytes. On Windows the processor comes from `GetSystemTimes`, the memory from `GlobalMemoryStatusEx` and the graphics from the `GPU Engine` performance counters (PDH), the busiest engine summed over its processes as the Task Manager counts it. It is read off the interface thread every two seconds, only while the widget shows. macOS still gives the processor and the memory pressure word, and no graphics load.
 
+**System history.** The widget keeps the last minute of each number (`History`, 30 readings). Two columns wide, each number has its minute drawn behind it as a faint area in the accent; the bars glide from the reading before to the new one over 0.45 s (at once under reduced motion).
+
+**Lyrics in the open player.** With Lyrics on and timed lyrics, the player shows three lines under it: the one before, the one sung now (filling with the accent) and the one after. On a new line they all rise one place. The Lyrics switch turns them off here and on the closed notch together.
+
+**Equalizer.** On Windows the four bars follow what the output really sounds like: the default endpoint's peak meter (`IAudioMeterInformation`), read about thirty times a second on a thread that lives only while the bars are drawn. Each bar jumps to the peak and falls at its own pace (`Meter` in core). It is the loudness, not a spectrum: the bars do not split bass from treble. Elsewhere, and until the first reading, they bob by themselves as before.
+
+**Cover.** Opening from the wings that show what plays, the cover flies from its place in the wing to the player's, growing with the island's own spring; its place in the player waits empty until it lands. Not under reduced motion, where nothing springs.
+
+**File tray** (`monocode-core/src/notch/tray.rs`, `notch/tray.rs`). Files or folders dragged onto the notch open it (its edge lights up in the accent) and, dropped, wait in a row on Home above the shelf, newest first, up to 24. A click opens one with its app; each has a button to show it in its folder and a cross to take it out, and Clear empties the row. Only the paths are kept, in memory. They cannot be dragged out again: GPUI does not start a drag to other apps.
+
 **Karaoke.** On the closed notch the lyric line waits dimmed and fills with the accent from its start as it is sung, with a soft edge; a line too long to fit moves to keep that edge in view. LRCLIB times lines, not words, so a line fills evenly until the next one starts, or for as long as its words would take before a pause (`sung` in `notch/media.rs`). Reduced motion shows the line whole.
 
 **More widgets.** Calendar (today, or the week with today in the accent) joins the catalog, and the header shows the battery's charge where there is one (`GetSystemPowerStatus`).
@@ -128,7 +138,10 @@ occluded and its frames stopped for up to two seconds.
 - Windows: one click on the taskbar button of the minimized workspace still only activates it (a second click restores it, with the error sound). `WS_EX_NOACTIVATE` on the notch was not enough; trace what the shell sends on that click.
 - Copy text, a password from a password manager and a large file by hand and check the Clipboard tab; plug and unplug a laptop for the battery activity.
 - macOS: a clipboard watcher (`NSPasteboard.changeCount`), not written.
-- More from boring.notch and Coucou: a file tray you drop files onto, the Claude and Codex limits as a widget, and the calendar's events.
+- By hand on Windows: drag a file from Explorer onto the closed notch (whether the small topmost window takes the drop), the cover's flight on opening, the bars against real music and silence, and the three lyric lines.
+- The tray: dragging a file out to another app (needs a platform drag GPUI does not have), and keeping it between runs.
+- A real spectrum for the equalizer (loopback capture and an FFT) instead of the loudness.
+- More from boring.notch and Coucou: the Claude and Codex limits as a widget, and the calendar's events.
 - Measure the closed player's frames while a song plays (`MONOCODE_FRAME_LOG`).
 - Look at it on an external display and over a full-screen app.
 - Measure the CPU at rest with `cargo xtask perf`.

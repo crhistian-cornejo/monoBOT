@@ -21,6 +21,7 @@ mod shelf;
 mod talk;
 #[cfg(test)]
 pub(crate) mod tests;
+mod tray;
 
 use crate::input::{self, Input};
 use crate::theme::*;
@@ -234,8 +235,11 @@ pub(crate) struct Notch {
     /// What was dropped on the notch, waiting.
     pub(crate) tray: model::tray::Tray,
     tray_scroll: gpui::ScrollHandle,
-    /// The cover on its way from the wing to the open player.
-    cover_flight: bool,
+    /// Files are being dragged over the notch, to drop on its tray.
+    dropping: bool,
+    /// The cover on its way from the wing to the open player: the closed
+    /// island it left from.
+    cover_flight: Option<Frame>,
     /// Where the arranging's row of widgets to add is scrolled to.
     catalog_scroll: gpui::ScrollHandle,
     save: Save,
@@ -449,7 +453,8 @@ impl Notch {
             usage_history: Default::default(),
             tray: Default::default(),
             tray_scroll: gpui::ScrollHandle::new(),
-            cover_flight: false,
+            dropping: false,
+            cover_flight: None,
             catalog_scroll: gpui::ScrollHandle::new(),
             save,
             field,
@@ -644,6 +649,18 @@ impl Notch {
         }
         self.open = open;
         self.hover = None;
+        // Opening from the wings that show what plays, the cover flies from
+        // its place there to the player's.
+        self.cover_flight = (open
+            && self.tab == Tab::Home
+            && self.level.is_none()
+            && !self.rest.busy()
+            && self.media_showing())
+        .then_some(self.shown)
+        .flatten();
+        if !open {
+            self.dropping = false;
+        }
         if open {
             self.start_ticker(cx);
             self.read_queue(true, cx);
@@ -653,6 +670,14 @@ impl Notch {
             self.ticker = None;
         }
         cx.notify();
+    }
+
+    /// A new reading of the system: the one before stays for the bars to
+    /// glide from, and it joins the last minute's graph.
+    fn take_usage(&mut self, usage: model::stats::Stats) {
+        self.usage_before = self.usage.map(|before| (before, Instant::now()));
+        self.usage_history.push(&usage);
+        self.usage = Some(usage);
     }
 
     /// The panel's clock: once a second for the clock and elapsed times, and
@@ -770,6 +795,7 @@ impl Notch {
                     model::rows(&self.look.shelf).max(1)
                 };
                 model::shelf_height(rows)
+                    + self.tray_height()
                     + if self.editing {
                         CATALOG_HEIGHT + model::CELL_GAP
                     } else {
@@ -954,13 +980,11 @@ impl Notch {
     /// The tallest any page can get, for the fixed room.
     fn tallest_possible_body(&self) -> f32 {
         (model::shelf_height(model::MAX_ROWS as usize)
-            + (CATALOG_HEIGHT + model::CELL_GAP)
-                .max(
-                    media::PLAYER_HEIGHT
-                        + 2. * model::CELL_GAP
-                        + media::LYRICS_HEIGHT
-                        + queue::TALLEST,
-                ))
+            + tray::TRAY_HEIGHT
+            + model::CELL_GAP
+            + (CATALOG_HEIGHT + model::CELL_GAP).max(
+                media::PLAYER_HEIGHT + 2. * model::CELL_GAP + media::LYRICS_HEIGHT + queue::TALLEST,
+            ))
         .max(SETTINGS_HEIGHT)
         // Agents and Chat both scroll past this.
         .max(AGENTS_MAX)
@@ -1672,9 +1696,15 @@ impl Notch {
                         .child(self.player_lyrics_view())
                         .child(self.queue_view())
                         .child(div().h(px(model::CELL_GAP)).flex_shrink_0())
+                        .child(self.tray_view(cx))
                         .child(self.shelf_view(size.width, cx))
                         .into_any_element(),
-                    Tab::Home => self.shelf_view(size.width, cx),
+                    Tab::Home => div()
+                        .flex()
+                        .flex_col()
+                        .child(self.tray_view(cx))
+                        .child(self.shelf_view(size.width, cx))
+                        .into_any_element(),
                     Tab::Agents if self.talking_with().is_some() => self.talk_page(window, cx),
                     Tab::Agents => self.agents_page(inner, cx),
                     Tab::Chat => self.chat_page(cx),
@@ -1762,8 +1792,14 @@ impl Notch {
                 (shape, self.tab, target, opacity, (1. - opacity) * RISE)
             }
         };
+        // The cover flies only while the island springs open onto Home.
+        if self.motion.is_none() || self.leaving.is_some() || drawn_tab != Tab::Home {
+            self.cover_flight = None;
+        }
         let content = self.content(drawn_shape, drawn_tab, size, window, cx);
         let target = size;
+        let flying = self.flying_cover(island, target, cx);
+        let dropping = self.dropping && self.open;
         let is_island = self.look.island();
         let shoulder = if is_island { 0. } else { SHOULDER };
         // The island in the window, and its content centered in it at the
@@ -1856,8 +1892,33 @@ impl Notch {
                                     .h(px(target.height))
                                     .opacity(opacity)
                                     .child(content),
-                            ),
-                    ),
+                            )
+                            .children(flying)
+                            // Files held over it: the edge lights up to
+                            // say they can be dropped.
+                            .when(dropping, |island| {
+                                island.child(
+                                    div()
+                                        .absolute()
+                                        .top_0()
+                                        .left_0()
+                                        .size_full()
+                                        .border_1()
+                                        .border_color(accent_color()),
+                                )
+                            }),
+                    )
+                    // Files dragged onto the notch open it and wait on its tray.
+                    .on_drag_move(cx.listener(
+                        |this, event: &gpui::DragMoveEvent<gpui::ExternalPaths>, _, cx| {
+                            if event.bounds.contains(&event.event.position) {
+                                this.files_over(cx);
+                            }
+                        },
+                    ))
+                    .on_drop(cx.listener(|this, dropped: &gpui::ExternalPaths, _, cx| {
+                        this.drop_files(dropped.paths().to_vec(), cx)
+                    })),
             )
     }
 }

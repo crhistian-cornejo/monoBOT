@@ -56,7 +56,7 @@ pub struct History {
 
 impl History {
     pub fn push(&mut self, stats: &Stats) {
-        let mut keep = |graph: &mut std::collections::VecDeque<f32>, value: Option<f32>| {
+        let keep = |graph: &mut std::collections::VecDeque<f32>, value: Option<f32>| {
             let Some(value) = value else {
                 return;
             };
@@ -66,7 +66,10 @@ impl History {
             }
         };
         keep(&mut self.cpu, stats.cpu);
-        keep(&mut self.memory, stats.memory.map(|memory| memory.percent()));
+        keep(
+            &mut self.memory,
+            stats.memory.map(|memory| memory.percent()),
+        );
         keep(&mut self.gpu, stats.gpu);
     }
 }
