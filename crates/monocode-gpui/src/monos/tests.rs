@@ -5823,6 +5823,17 @@ fn the_images_bot_keeps_a_gallery_and_picks_looks_into_its_draft(cx: &mut TestAp
             .mono_draft_words(cx)
     });
     assert_eq!(words, ["cinematic", "story"]);
+    // A format writes its own name: Ultrawide is `/ultrawide`.
+    visual.refresh().unwrap();
+    let ultrawide = visual.debug_bounds("image-format-ultrawide").unwrap();
+    visual.simulate_click(ultrawide.center(), Default::default());
+    visual.run_until_parked();
+    let words = visual.update(|_, cx| {
+        s.manager.read(cx).chats[&s.id]
+            .read(cx)
+            .mono_draft_words(cx)
+    });
+    assert_eq!(words, ["cinematic", "ultrawide"]);
 }
 
 #[gpui::test]

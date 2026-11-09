@@ -35,8 +35,10 @@ source), reuse its style, or reveal the file. Clicking it opens it full screen.
 Poster 2:3, Classic 3:2, Standard 4:3, Landscape 16:9, Ultrawide 21:9) and 16
 looks (`/screenprint`, `/anime`, `/watercolor`…). Picking one puts its slash
 word at the start of the draft, replacing any other of the same kind. The
-bot's slash menu offers the same words, and `images.generate` takes the style
-id and adds its art direction to the brief. The gallery is read from the chat
+bot's slash menu offers the same words. A format's word is its own name
+(`/portrait`, `/ultrawide`); older words such as `/cinema` still mean the same
+ratio. Typing `/format` lists only the formats with their ratios.
+`images.generate` takes the style id and adds its art direction to the brief. The gallery is read from the chat
 itself, so it needs no store of its own. Sub-agents, Documents and Habits come
 after the gallery and styles.
 

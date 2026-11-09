@@ -160,7 +160,12 @@ impl Monos {
             .get(&mono.id)
             .map(|chat| chat.read(cx).mono_draft_words(cx))
             .unwrap_or_default();
-        let is_picked = |id: &str| picked.iter().any(|word| word == id);
+        // An older word in the draft (`/cinema`) still marks its format.
+        let is_picked = |id: &str| {
+            picked
+                .iter()
+                .any(|word| styles::preset_id(word).unwrap_or(word) == id)
+        };
         // Each look's newest picture, as its thumbnail.
         let items = self.gallery_items(mono, cx);
         let latest = |id: &str| {
