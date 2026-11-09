@@ -1,8 +1,11 @@
 //! One dictation: the microphone through the voice detector, each finished
-//! phrase transcribed as soon as the detector closes it.
+//! phrase transcribed as soon as the detector closes it. The microphone opens
+//! at once; Parakeet loads and transcribes on a thread of its own
+//! (`Decoder`), so the first words are kept while it loads and listening
+//! never waits on a phrase being transcribed.
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
 use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -10,7 +13,7 @@ use std::time::{Duration, Instant};
 use sherpa_onnx::{LinearResampler, SileroVadModelConfig, VadModelConfig, VoiceActivityDetector};
 
 use crate::capture::Microphone;
-use crate::{model, text, Ear, Error};
+use crate::{model, text, Error};
 
 const RATE: i32 = 16_000;
 /// Kept ahead of each phrase the detector reports, so first consonants are
@@ -18,6 +21,15 @@ const RATE: i32 = 16_000;
 const PRE_ROLL: usize = 3_200;
 /// Longest dictation kept in memory: ten minutes at 16 kHz.
 const MAX_HISTORY: usize = 16_000 * 600;
+/// How far past that the history grows before its oldest audio is cut, so a
+/// long dictation moves the buffer twice a minute, not on every chunk.
+const HISTORY_SLACK: usize = 16_000 * 30;
+
+/// What was said in a phrase (mono, 16 kHz).
+pub(crate) type Hear = Box<dyn Fn(&[f32]) -> String + Send>;
+/// Loads the recognizer; runs on the decoding thread while the microphone
+/// already listens.
+pub(crate) type Loader = Box<dyn FnOnce() -> Result<Hear, Error> + Send>;
 
 #[derive(Clone, Debug)]
 pub enum Event {
@@ -55,17 +67,17 @@ pub struct Session {
 }
 
 impl Session {
+    /// `longest_phrase` is the most seconds the recognizer that `load`
+    /// brings takes at once.
     pub(crate) fn start(
         dir: &Path,
-        recognizer: Arc<Ear>,
+        load: Loader,
+        longest_phrase: f32,
         call: Option<CallMode>,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Self, Error> {
         let vad = VoiceActivityDetector::create(
-            &silero(
-                model::path(dir, "silero_vad.onnx")?,
-                recognizer.longest_phrase(),
-            ),
+            &silero(model::path(dir, "silero_vad.onnx")?, longest_phrase),
             30.0,
         )
         .ok_or(Error::Load)?;
@@ -75,6 +87,7 @@ impl Session {
             .transpose()?;
         let stop = Arc::new(AtomicBool::new(false));
         let cancel = Arc::new(AtomicBool::new(false));
+        let decoder = Decoder::start(load, cancel.clone())?;
         let worker = {
             let stop = stop.clone();
             let cancel = cancel.clone();
@@ -82,7 +95,7 @@ impl Session {
                 .name("dictation".into())
                 .spawn(move || {
                     let mut run = Run {
-                        recognizer,
+                        decoder,
                         vad,
                         resampler,
                         history: Vec::new(),
@@ -138,8 +151,94 @@ impl Drop for Session {
     }
 }
 
+/// Parakeet on its own thread: it loads there, then transcribes the phrases
+/// handed over, in order.
+struct Decoder {
+    /// Dropped once no more phrases will come, which ends the thread after
+    /// the ones already queued.
+    phrases: Option<mpsc::Sender<Vec<f32>>>,
+    heard: mpsc::Receiver<Result<String, Error>>,
+    /// Phrases handed over and not yet transcribed.
+    pending: usize,
+}
+
+impl Decoder {
+    fn start(load: Loader, cancel: Arc<AtomicBool>) -> std::io::Result<Self> {
+        let (phrases, queued) = mpsc::channel::<Vec<f32>>();
+        let (results, heard) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("dictation-decode".into())
+            .spawn(move || {
+                let hear = match load() {
+                    Ok(hear) => hear,
+                    Err(error) => {
+                        let _ = results.send(Err(error));
+                        return;
+                    }
+                };
+                for audio in queued {
+                    // A cancelled dictation drops what is still queued.
+                    if cancel.load(Ordering::Acquire) || results.send(Ok(hear(&audio))).is_err() {
+                        return;
+                    }
+                }
+            })?;
+        Ok(Self {
+            phrases: Some(phrases),
+            heard,
+            pending: 0,
+        })
+    }
+
+    fn hear(&mut self, audio: Vec<f32>) {
+        let sent = self
+            .phrases
+            .as_ref()
+            .is_some_and(|phrases| phrases.send(audio).is_ok());
+        self.pending += usize::from(sent);
+    }
+
+    /// No more phrases will come.
+    fn close(&mut self) {
+        self.phrases = None;
+    }
+
+    fn busy(&self) -> bool {
+        self.pending > 0
+    }
+
+    /// The next phrase transcribed, or why the recognizer did not load,
+    /// waiting up to `wait` for it.
+    fn next(&mut self, wait: Duration) -> Option<Result<String, Error>> {
+        let received = if wait.is_zero() {
+            self.heard.try_recv().map_err(|error| match error {
+                TryRecvError::Empty => RecvTimeoutError::Timeout,
+                TryRecvError::Disconnected => RecvTimeoutError::Disconnected,
+            })
+        } else {
+            self.heard.recv_timeout(wait)
+        };
+        match received {
+            Ok(Ok(text)) => {
+                self.pending = self.pending.saturating_sub(1);
+                Some(Ok(text))
+            }
+            Ok(Err(error)) => {
+                self.pending = 0;
+                Some(Err(error))
+            }
+            Err(RecvTimeoutError::Timeout) => None,
+            // The thread is gone: nothing else will be transcribed.
+            Err(RecvTimeoutError::Disconnected) => {
+                self.pending = 0;
+                None
+            }
+        }
+    }
+}
+
 struct Run {
-    recognizer: Arc<Ear>,
+    decoder: Decoder,
     vad: VoiceActivityDetector,
     resampler: Option<LinearResampler>,
     /// Every 16 kHz sample heard, for the pre-roll ahead of a phrase.
@@ -179,7 +278,16 @@ impl Run {
                 }
                 self.feed(&[], true);
                 self.vad.flush();
-                self.drain(on_event);
+                self.hand_over();
+                self.decoder.close();
+                // The last phrases, and Parakeet itself when the dictation
+                // was shorter than its load.
+                while self.decoder.busy() {
+                    if cancel.load(Ordering::Acquire) {
+                        return String::new();
+                    }
+                    self.collect(Duration::from_millis(40), stop, on_event);
+                }
                 return text::join(&self.phrases);
             }
             match mic.chunks.recv_timeout(Duration::from_millis(40)) {
@@ -202,7 +310,8 @@ impl Run {
                 self.speaking = speaking;
                 on_event(Event::Speech(speaking));
             }
-            self.drain(on_event);
+            self.hand_over();
+            self.collect(Duration::ZERO, stop, on_event);
             self.follow_turn(on_event);
         }
     }
@@ -231,6 +340,11 @@ impl Run {
             // Without the model, or when it fails, the words decide alone.
             tracker.verdict(verdict.unwrap_or(crate::turn::COMPLETE_AT));
         }
+        // A phrase still being transcribed belongs to this turn: its words
+        // come first.
+        if self.decoder.busy() {
+            return;
+        }
         let partial = text::join(&self.phrases);
         if !tracker.done(now, &partial) {
             return;
@@ -240,36 +354,56 @@ impl Run {
     }
 
     fn feed(&mut self, chunk: &[f32], flush: bool) {
-        let samples = match &self.resampler {
-            Some(resampler) => resampler.resample(chunk, flush),
-            None => chunk.to_vec(),
+        let resampled;
+        let samples: &[f32] = match &self.resampler {
+            Some(resampler) => {
+                resampled = resampler.resample(chunk, flush);
+                &resampled
+            }
+            None => chunk,
         };
         if samples.is_empty() {
             return;
         }
         self.seen += samples.len();
-        self.history.extend_from_slice(&samples);
-        if self.history.len() > MAX_HISTORY {
+        self.history.extend_from_slice(samples);
+        if self.history.len() > MAX_HISTORY + HISTORY_SLACK {
             // The oldest audio goes; offsets below stay in heard-sample units.
             let excess = self.history.len() - MAX_HISTORY;
             self.history.drain(..excess);
         }
-        self.vad.accept_waveform(&samples);
+        self.vad.accept_waveform(samples);
     }
 
-    /// Transcribes every phrase the detector has closed.
-    fn drain(&mut self, on_event: &impl Fn(Event)) {
-        let mut changed = false;
+    /// Hands every phrase the detector has closed to the decoder.
+    fn hand_over(&mut self) {
         while let Some(segment) = self.vad.front() {
             let start = segment.start().max(0) as usize;
             let mut audio = self.pre_roll(start);
             audio.extend_from_slice(segment.samples());
             self.delivered = start + segment.samples().len();
             self.vad.pop();
-            let heard = self.recognizer.transcribe(&audio);
-            if !heard.trim().is_empty() {
-                self.phrases.push(heard);
-                changed = true;
+            self.decoder.hear(audio);
+        }
+    }
+
+    /// Takes in what the decoder has transcribed, waiting up to `wait` for
+    /// the first phrase. A recognizer that did not load ends the dictation.
+    fn collect(&mut self, wait: Duration, stop: &AtomicBool, on_event: &impl Fn(Event)) {
+        let mut changed = false;
+        let mut wait = wait;
+        while let Some(result) = self.decoder.next(wait) {
+            wait = Duration::ZERO;
+            match result {
+                Ok(heard) if heard.trim().is_empty() => {}
+                Ok(heard) => {
+                    self.phrases.push(heard);
+                    changed = true;
+                }
+                Err(error) => {
+                    on_event(Event::Lost(error.to_string()));
+                    stop.store(true, Ordering::Release);
+                }
             }
         }
         if changed {
@@ -303,5 +437,79 @@ fn silero(model: String, longest_phrase: f32) -> VadModelConfig {
         num_threads: 1,
         provider: Some("cpu".into()),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const LONG: Duration = Duration::from_secs(5);
+
+    /// A recognizer that answers each phrase with its length.
+    fn counting() -> Hear {
+        Box::new(|samples| samples.len().to_string())
+    }
+
+    #[test]
+    fn phrases_said_while_the_model_loads_are_heard_in_order() {
+        let (loaded, wait) = mpsc::channel::<()>();
+        let load: Loader = Box::new(move || {
+            wait.recv().unwrap();
+            Ok(counting())
+        });
+        let mut decoder = Decoder::start(load, Arc::default()).unwrap();
+        for length in 1..=3 {
+            decoder.hear(vec![0.; length]);
+        }
+        // Still loading: listening goes on and nothing is lost.
+        assert!(decoder.busy());
+        assert!(decoder.next(Duration::ZERO).is_none());
+        loaded.send(()).unwrap();
+        let heard: Vec<String> = (0..3)
+            .map(|_| decoder.next(LONG).unwrap().unwrap())
+            .collect();
+        assert_eq!(heard, ["1", "2", "3"]);
+        assert!(!decoder.busy());
+    }
+
+    #[test]
+    fn a_model_that_does_not_load_says_why_and_leaves_nothing_waiting() {
+        let mut decoder = Decoder::start(Box::new(|| Err(Error::Load)), Arc::default()).unwrap();
+        decoder.hear(vec![0.; 4]);
+        assert!(matches!(decoder.next(LONG), Some(Err(Error::Load))));
+        assert!(!decoder.busy());
+        // The thread is gone; stopping does not wait for it.
+        decoder.close();
+        assert!(decoder.next(LONG).is_none());
+    }
+
+    #[test]
+    fn stopping_finishes_the_phrases_already_handed_over() {
+        let mut decoder = Decoder::start(Box::new(|| Ok(counting())), Arc::default()).unwrap();
+        decoder.hear(vec![0.; 7]);
+        decoder.hear(vec![0.; 9]);
+        decoder.close();
+        let mut heard = Vec::new();
+        while decoder.busy() {
+            heard.extend(decoder.next(LONG).map(Result::unwrap));
+        }
+        assert_eq!(heard, ["7", "9"]);
+    }
+
+    #[test]
+    fn a_cancelled_dictation_drops_what_is_still_queued() {
+        let cancel = Arc::new(AtomicBool::new(false));
+        let (loaded, wait) = mpsc::channel::<()>();
+        let load: Loader = Box::new(move || {
+            wait.recv().unwrap();
+            Ok(counting())
+        });
+        let mut decoder = Decoder::start(load, cancel.clone()).unwrap();
+        decoder.hear(vec![0.; 2]);
+        cancel.store(true, Ordering::Release);
+        loaded.send(()).unwrap();
+        assert!(decoder.next(LONG).is_none());
+        assert!(!decoder.busy());
     }
 }

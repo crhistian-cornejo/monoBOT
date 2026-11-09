@@ -3,21 +3,48 @@
 //! also gets what a phrase-by-phrase recognizer misses, as IVY's dictation
 //! does: «¿» and «¡» opening what «?» and «!» close, and a full stop at a
 //! pause before a word that goes on («… el informe. y luego …») becoming a
-//! comma.
+//! comma. The language is told phrase by phrase, so a dictation that mixes
+//! Spanish and English keeps each as its own language writes it.
 
 pub fn join(phrases: &[String]) -> String {
-    let joined = squeeze(phrases);
-    if spanish(&joined) {
-        tidy(&rejoin_pauses(&joined))
-    } else {
-        joined
+    // Runs of phrases in one language. A phrase that leans neither way
+    // («OK.», a name) goes with the one before it; ahead of any that leans,
+    // with the first that does.
+    let mut spanish = phrases
+        .iter()
+        .map(|phrase| lean(phrase))
+        .find(|lean| *lean != 0)
+        .is_some_and(|lean| lean > 0);
+    let mut runs: Vec<(bool, Vec<&str>)> = Vec::new();
+    let said = phrases.iter().map(String::as_str);
+    for phrase in said.filter(|phrase| !phrase.trim().is_empty()) {
+        match lean(phrase) {
+            0 => {}
+            lean => spanish = lean > 0,
+        }
+        match runs.last_mut() {
+            Some((language, run)) if *language == spanish => run.push(phrase),
+            _ => runs.push((spanish, vec![phrase])),
+        }
     }
+    let tidied: Vec<String> = runs
+        .iter()
+        .map(|(spanish, run)| {
+            let joined = squeeze(run);
+            if *spanish {
+                tidy(&rejoin_pauses(&joined))
+            } else {
+                joined
+            }
+        })
+        .collect();
+    tidied.join(" ")
 }
 
-fn squeeze(phrases: &[String]) -> String {
+fn squeeze<S: AsRef<str>>(phrases: &[S]) -> String {
     let joined = phrases
         .iter()
-        .map(|phrase| phrase.trim())
+        .map(|phrase| phrase.as_ref().trim())
         .filter(|phrase| !phrase.is_empty())
         .collect::<Vec<_>>()
         .join(" ");
@@ -38,9 +65,10 @@ fn squeeze(phrases: &[String]) -> String {
     out.trim().to_owned()
 }
 
-/// Whether the text reads as Spanish: its accented letters and common words
-/// outweigh English's. English is left exactly as Parakeet wrote it.
-fn spanish(text: &str) -> bool {
+/// Which way a phrase leans: above zero its accented letters and common
+/// words are Spanish's, below zero English's, zero when it tells neither.
+/// English is left exactly as Parakeet wrote it.
+fn lean(text: &str) -> i32 {
     const SPANISH: [&str; 32] = [
         "el", "la", "los", "las", "que", "de", "del", "y", "en", "un", "una", "por", "para", "con",
         "es", "pero", "muy", "lo", "se", "su", "al", "como", "hola", "gracias", "porque", "cuando",
@@ -60,7 +88,7 @@ fn spanish(text: &str) -> bool {
         score += i32::from(SPANISH.contains(&word));
         score -= i32::from(ENGLISH.contains(&word));
     }
-    score > 0
+    score
 }
 
 /// Words that carry a sentence on: a full stop before one was a pause.
@@ -181,6 +209,33 @@ mod tests {
         assert_eq!(join(&phrases), "How are you? A dog barked.");
         let phrases = ["I went home.".to_owned(), "And then I slept.".to_owned()];
         assert_eq!(join(&phrases), "I went home. And then I slept.");
+    }
+
+    #[test]
+    fn a_dictation_in_both_languages_keeps_each_as_it_is_written() {
+        let phrases = [
+            "hola, cómo va el despliegue?".to_owned(),
+            "Can you check the build?".to_owned(),
+            "OK.".to_owned(),
+            "y luego me avisas.".to_owned(),
+        ];
+        assert_eq!(
+            join(&phrases),
+            "¿Hola, cómo va el despliegue? Can you check the build? OK. Y luego me avisas."
+        );
+        // Mostly English with one Spanish aside: the aside alone is tidied.
+        let phrases = [
+            "The tests are green and the branch is ready.".to_owned(),
+            "qué bueno!".to_owned(),
+            "So we can merge it.".to_owned(),
+        ];
+        assert_eq!(
+            join(&phrases),
+            "The tests are green and the branch is ready. ¡Qué bueno! So we can merge it."
+        );
+        // A phrase that tells neither way ahead of the rest follows them.
+        let phrases = ["Listo.".to_owned(), "ya está en producción?".to_owned()];
+        assert_eq!(join(&phrases), "Listo. ¿Ya está en producción?");
     }
 
     #[test]

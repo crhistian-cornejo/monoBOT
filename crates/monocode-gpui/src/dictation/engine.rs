@@ -96,8 +96,12 @@ impl Local {
         // release already waiting.
         self.uses.fetch_add(1, Ordering::AcqRel);
         let opened = (|| {
-            // A missing model fails here, before anything asks for the microphone.
-            self.engine.prepare().map_err(|e| e.to_string())?;
+            // A missing model fails here, before anything asks for the
+            // microphone. Parakeet itself loads on the session's own thread
+            // while the microphone already listens.
+            if !self.engine.installed() {
+                return Err(monobot_dictation::Error::NotInstalled.to_string());
+            }
             super::permission::microphone()?;
             match pace {
                 Some(pace) => self.engine.start_call(pace, on_event),

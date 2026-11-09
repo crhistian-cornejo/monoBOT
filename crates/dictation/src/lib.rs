@@ -77,14 +77,15 @@ impl Ear {
             Self::Neural(parakeet) => parakeet.transcribe(samples).unwrap_or_default(),
         }
     }
+}
 
-    /// The longest phrase the voice detector should hand over, in seconds:
-    /// the Neural build's window is 15 s, so a phrase fits in one.
-    pub(crate) fn longest_phrase(&self) -> f32 {
-        match self.engine() {
-            Engine::Cpu => 20.0,
-            Engine::Neural => 14.5,
-        }
+/// The longest phrase the voice detector should hand over, in seconds: the
+/// Neural build's window is 15 s, so a phrase fits in one. A Neural build
+/// that falls back to the CPU one takes the shorter phrases as well.
+fn longest_phrase(engine: Engine) -> f32 {
+    match engine {
+        Engine::Cpu => 20.0,
+        Engine::Neural => 14.5,
     }
 }
 
@@ -184,10 +185,28 @@ impl Dictation {
         }
     }
 
-    /// Opens the microphone and starts transcribing.
-    pub fn start(&self, on_event: impl Fn(Event) + Send + 'static) -> Result<Session, Error> {
-        let recognizer = self.prepare()?;
-        Session::start(&self.dir, recognizer, None, on_event)
+    /// Opens the microphone and starts transcribing. The microphone listens
+    /// at once: a recognizer not yet in memory loads on the session's own
+    /// thread, and what was said meanwhile is transcribed when it is ready.
+    pub fn start(
+        self: &Arc<Self>,
+        on_event: impl Fn(Event) + Send + 'static,
+    ) -> Result<Session, Error> {
+        let (load, longest) = self.loader()?;
+        Session::start(&self.dir, load, longest, None, on_event)
+    }
+
+    /// How a session brings the recognizer, and the longest phrase it takes.
+    /// A missing model fails here, before the microphone opens.
+    fn loader(self: &Arc<Self>) -> Result<(session::Loader, f32), Error> {
+        let engine = self.engine().ok_or(Error::NotInstalled)?;
+        let this = self.clone();
+        let load: session::Loader = Box::new(move || {
+            let ear = this.prepare()?;
+            let hear: session::Hear = Box::new(move |samples| ear.transcribe(samples));
+            Ok(hear)
+        });
+        Ok((load, longest_phrase(engine)))
     }
 
     /// Smart Turn, when it is on disk; a load that fails leaves the words to
@@ -204,16 +223,16 @@ impl Dictation {
     /// Opens the microphone for a call turn: as `start`, and the session
     /// ends the turn itself (`Event::TurnEnd`) at `pace`.
     pub fn start_call(
-        &self,
+        self: &Arc<Self>,
         pace: &str,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Session, Error> {
-        let recognizer = self.prepare()?;
+        let (load, longest) = self.loader()?;
         let call = CallMode {
             pace: pace.to_owned(),
             smart_turn: self.smart_turn(),
         };
-        Session::start(&self.dir, recognizer, Some(call), on_event)
+        Session::start(&self.dir, load, longest, Some(call), on_event)
     }
 
     /// Downloads Smart Turn when it is missing (32 MB).
