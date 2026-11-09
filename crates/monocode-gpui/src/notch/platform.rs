@@ -347,12 +347,6 @@ pub(crate) fn place(window: &mut Window, cx: &mut App, display: &Display, frame:
     }
 }
 
-/// Whether the window keeps one fixed room and the notch moves inside it.
-/// On macOS resizing a transparent panel stalls its frames for up to a
-/// second (AppKit briefly reports it occluded), so it never resizes there;
-/// the pointer watch lets clicks through outside the notch.
-pub(crate) const FIXED_ROOM: bool = cfg!(all(target_os = "macos", not(test)));
-
 /// Keeps the pointer watch alive; dropping it stops watching.
 #[cfg(all(target_os = "macos", not(test)))]
 pub(crate) use mac::PointerWatch;

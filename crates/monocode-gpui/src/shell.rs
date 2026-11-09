@@ -691,6 +691,9 @@ pub(crate) struct Shell {
     notch: Option<crate::notch::Handle>,
     /// The notch's pending catch-up.
     notch_sync: Option<gpui::Task<()>>,
+    /// Claude Code's and Codex's own sessions, as their hooks report them.
+    notch_externals: monocode_core::notch::hooks::Externals,
+    notch_hooks: Option<gpui::Task<()>>,
     unseen_finished: HashSet<i64>,
     archiving: HashSet<i64>,
     archive_shortcut_held: bool,
@@ -1092,6 +1095,8 @@ impl Shell {
             quick: Default::default(),
             notch: None,
             notch_sync: None,
+            notch_externals: Default::default(),
+            notch_hooks: None,
             unseen_finished: HashSet::new(),
             archiving: HashSet::new(),
             archive_shortcut_held: false,

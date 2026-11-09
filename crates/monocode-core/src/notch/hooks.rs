@@ -1,0 +1,567 @@
+//! Claude Code's and Codex's own sessions in the notch, through their hooks.
+//!
+//! Each hook is a one-line shell command, so MonoBOT ships no helper: it
+//! writes the source and the hook's JSON to the notch's Unix socket with
+//! `nc`, and always succeeds. When MonoBOT is closed `nc` fails at once, and
+//! the agent never waits on the notch. MonoBOT's entries carry [`MARK`]; the
+//! merge adds them beside everybody else's hooks and touches nothing else.
+//! Claude Code reads `~/.claude/settings.json`; Codex reads
+//! `~/.codex/hooks.json`, and runs a new hook only once the user trusts it
+//! in Codex's `/hooks`.
+use super::{state_word, Activity};
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::path::Path;
+
+/// In every command MonoBOT writes, so it can find its own entries.
+pub const MARK: &str = "monobot-notch";
+
+/// The Claude Code events the notch follows, with each hook's timeout.
+pub const CLAUDE_EVENTS: &[(&str, u64)] = &[
+    ("SessionStart", 5),
+    ("SessionEnd", 5),
+    ("UserPromptSubmit", 5),
+    ("PreToolUse", 5),
+    ("PostToolUse", 5),
+    ("PermissionRequest", 5),
+    ("Notification", 5),
+    ("Stop", 5),
+    ("StopFailure", 5),
+];
+
+/// Codex's: it has no Notification or StopFailure, and SessionEnd and
+/// Interrupt allow at most 3 seconds.
+pub const CODEX_EVENTS: &[(&str, u64)] = &[
+    ("SessionStart", 5),
+    ("SessionEnd", 3),
+    ("UserPromptSubmit", 5),
+    ("PreToolUse", 5),
+    ("PostToolUse", 5),
+    ("PermissionRequest", 5),
+    ("Stop", 5),
+    ("Interrupt", 3),
+];
+
+/// The hook's shell command: the source on the first line, then the
+/// hook's JSON, to the socket; always a success.
+pub fn command(source: &str, socket: &Path) -> String {
+    let socket = socket.to_string_lossy().replace('\'', r"'\''");
+    // Sessions MonoBOT runs itself carry MONOCODE_HARNESS_PARENT and are
+    // already in the notch: their hooks stay quiet.
+    format!(
+        "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || {{ printf '{source}\\n'; cat; }} | nc -U -w 1 '{socket}' >/dev/null 2>&1; true # {MARK}"
+    )
+}
+
+fn ours(handler: &Value) -> bool {
+    handler["command"]
+        .as_str()
+        .is_some_and(|command| command.contains(MARK))
+}
+
+/// The hook file with MonoBOT's entry for `socket` on every event, beside
+/// whatever else it holds. `None` when it already has them all. A file that
+/// is not a JSON object is refused rather than overwritten.
+pub fn merge(
+    file: &str,
+    source: &str,
+    events: &[(&str, u64)],
+    socket: &Path,
+) -> Result<Option<String>, String> {
+    let mut root: Value = if file.trim().is_empty() {
+        json!({})
+    } else {
+        serde_json::from_str(file).map_err(|error| format!("not JSON: {error}"))?
+    };
+    let Some(object) = root.as_object_mut() else {
+        return Err("the hook file is not a JSON object".into());
+    };
+    let hooks = object.entry("hooks").or_insert_with(|| json!({}));
+    let Some(hooks) = hooks.as_object_mut() else {
+        return Err("\"hooks\" is not an object".into());
+    };
+    let command = command(source, socket);
+    let mut changed = false;
+    for (event, timeout) in events {
+        let groups = hooks.entry(*event).or_insert_with(|| json!([]));
+        let Some(groups) = groups.as_array_mut() else {
+            return Err(format!("\"hooks.{event}\" is not a list"));
+        };
+        let present = groups.iter().any(|group| {
+            group["hooks"]
+                .as_array()
+                .is_some_and(|handlers| handlers.iter().any(|h| h["command"] == command.as_str()))
+        });
+        if !present {
+            groups.push(json!({
+                "hooks": [{ "type": "command", "command": command, "timeout": timeout }]
+            }));
+            changed = true;
+        }
+    }
+    if !changed {
+        return Ok(None);
+    }
+    serde_json::to_string_pretty(&root)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
+/// The hook file without any of MonoBOT's entries; everything else stays.
+pub fn remove(file: &str) -> Result<String, String> {
+    let mut root: Value = serde_json::from_str(file).map_err(|error| error.to_string())?;
+    if let Some(hooks) = root["hooks"].as_object_mut() {
+        for groups in hooks.values_mut() {
+            if let Some(groups) = groups.as_array_mut() {
+                for group in groups.iter_mut() {
+                    if let Some(handlers) = group["hooks"].as_array_mut() {
+                        handlers.retain(|handler| !ours(handler));
+                    }
+                }
+                groups.retain(|group| {
+                    group["hooks"]
+                        .as_array()
+                        .is_none_or(|handlers| !handlers.is_empty())
+                });
+            }
+        }
+    }
+    serde_json::to_string_pretty(&root).map_err(|error| error.to_string())
+}
+
+/// Adds MonoBOT's hooks for `socket` to Claude Code's and Codex's files
+/// under `home`, where each agent is installed (its folder exists). The
+/// first change of a file keeps a copy beside it (`.monobot-backup`), and
+/// every write goes through a temporary file. Returns what was done, by
+/// file, for the log.
+pub fn install(home: &Path, socket: &Path) -> Vec<(std::path::PathBuf, Result<bool, String>)> {
+    let codex_home = std::env::var_os("CODEX_HOME")
+        .filter(|dir| !dir.is_empty())
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    let targets = [
+        (
+            home.join(".claude"),
+            "settings.json",
+            "claude",
+            CLAUDE_EVENTS,
+        ),
+        (codex_home, "hooks.json", "codex", CODEX_EVENTS),
+    ];
+    targets
+        .into_iter()
+        .filter(|(dir, ..)| dir.is_dir())
+        .map(|(dir, name, source, events)| {
+            let path = dir.join(name);
+            let result = install_file(&path, source, events, socket);
+            (path, result)
+        })
+        .collect()
+}
+
+fn install_file(
+    path: &Path,
+    source: &str,
+    events: &[(&str, u64)],
+    socket: &Path,
+) -> Result<bool, String> {
+    let current = match std::fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error.to_string()),
+    };
+    let Some(merged) = merge(&current, source, events, socket)? else {
+        return Ok(false);
+    };
+    if !current.is_empty() {
+        let backup = path.with_extension("json.monobot-backup");
+        if !backup.exists() {
+            std::fs::write(&backup, &current).map_err(|error| error.to_string())?;
+        }
+    }
+    let temporary = path.with_extension("json.monobot-tmp");
+    std::fs::write(&temporary, merged + "\n").map_err(|error| error.to_string())?;
+    std::fs::rename(&temporary, path).map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+/// Listens on `socket` on a thread of its own and hands every hook call to
+/// `on_event`. A connection that sends nothing readable is dropped.
+#[cfg(unix)]
+pub fn serve(socket: &Path, on_event: impl Fn(HookEvent) + Send + 'static) -> std::io::Result<()> {
+    use std::io::Read;
+    use std::os::unix::net::UnixListener;
+    // A socket left by an earlier run would refuse the bind.
+    let _ = std::fs::remove_file(socket);
+    let listener = UnixListener::bind(socket)?;
+    std::thread::Builder::new()
+        .name("notch-hooks".into())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                let mut payload = String::new();
+                // Hooks are small; a runaway sender stops at 256 KB.
+                let read = (&mut stream).take(256 * 1024).read_to_string(&mut payload);
+                if let Some(event) = read.ok().and_then(|_| parse(&payload)) {
+                    on_event(event);
+                }
+            }
+        })?;
+    Ok(())
+}
+
+/// One hook call, as the socket received it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HookEvent {
+    /// "claude" or "codex".
+    pub source: String,
+    pub session: String,
+    pub cwd: String,
+    pub event: String,
+    pub tool: Option<String>,
+    pub message: Option<String>,
+}
+
+/// Reads what a hook sent: its source, a newline, then its JSON.
+pub fn parse(payload: &str) -> Option<HookEvent> {
+    let (source, json) = payload.split_once('\n')?;
+    let source = match source.trim() {
+        "claude" => "claude",
+        "codex" => "codex",
+        _ => return None,
+    };
+    let value: Value = serde_json::from_str(json.trim()).ok()?;
+    let text = |key: &str| value[key].as_str().map(str::to_owned);
+    Some(HookEvent {
+        source: source.into(),
+        session: text("session_id")?,
+        cwd: text("cwd").unwrap_or_default(),
+        event: text("hook_event_name")?,
+        tool: text("tool_name"),
+        message: text("message"),
+    })
+}
+
+/// A session the agent runs on its own, as its hooks tell it.
+#[derive(Clone, Debug, PartialEq)]
+struct External {
+    source: String,
+    cwd: String,
+    step: String,
+    working: bool,
+    needs_you: bool,
+    done: bool,
+    started_at: Option<u64>,
+    seen_at: u64,
+}
+
+/// The sessions outside MonoBOT, by their agent's session id.
+#[derive(Debug, Default)]
+pub struct Externals {
+    sessions: HashMap<String, External>,
+}
+
+/// A finished or idle session leaves after this long without news.
+const IDLE_MS: u64 = 10 * 60_000;
+/// A session said to work but silent this long is gone (killed, closed).
+const SILENT_MS: u64 = 30 * 60_000;
+
+impl Externals {
+    pub fn apply(&mut self, event: HookEvent, now: u64) {
+        if event.event == "SessionEnd" {
+            self.sessions.remove(&event.session);
+            return;
+        }
+        let session = self
+            .sessions
+            .entry(event.session)
+            .or_insert_with(|| External {
+                source: event.source.clone(),
+                cwd: event.cwd.clone(),
+                step: "Thinking".into(),
+                working: false,
+                needs_you: false,
+                done: false,
+                started_at: None,
+                seen_at: now,
+            });
+        session.seen_at = now;
+        if !event.cwd.is_empty() {
+            session.cwd = event.cwd;
+        }
+        let start = |session: &mut External| {
+            if !session.working {
+                session.started_at = Some(now);
+            }
+            session.working = true;
+            session.done = false;
+        };
+        match event.event.as_str() {
+            "UserPromptSubmit" => {
+                start(session);
+                session.needs_you = false;
+                session.step = "Thinking".into();
+            }
+            "PreToolUse" => {
+                start(session);
+                session.needs_you = false;
+                session.step = event.tool.unwrap_or_else(|| "Working".into());
+            }
+            "PostToolUse" => {
+                start(session);
+                session.step = "Thinking".into();
+            }
+            "PermissionRequest" => {
+                start(session);
+                session.needs_you = true;
+            }
+            "Notification" => {
+                // Claude Code says it waits for a permission, or for input.
+                let message = event.message.unwrap_or_default().to_lowercase();
+                if message.contains("permission") {
+                    session.needs_you = true;
+                }
+            }
+            "Stop" | "StopFailure" => {
+                session.working = false;
+                session.needs_you = false;
+                session.done = true;
+            }
+            "Interrupt" => {
+                session.working = false;
+                session.needs_you = false;
+            }
+            _ => {}
+        }
+    }
+
+    /// Lets go of sessions with no news for a while. Returns whether any
+    /// went.
+    pub fn prune(&mut self, now: u64) -> bool {
+        let before = self.sessions.len();
+        self.sessions.retain(|_, session| {
+            let quiet = now.saturating_sub(session.seen_at);
+            if session.working {
+                quiet < SILENT_MS
+            } else {
+                quiet < IDLE_MS
+            }
+        });
+        self.sessions.len() != before
+    }
+
+    /// The sessions at work, waiting or just finished, for the notch. Each
+    /// gets a negative id of its own, so it never meets one of MonoBOT's.
+    pub fn activities(&self) -> Vec<Activity> {
+        let mut activities: Vec<Activity> = self
+            .sessions
+            .iter()
+            .filter(|(_, session)| session.working || session.done || session.needs_you)
+            .map(|(id, session)| {
+                let folder = Path::new(&session.cwd)
+                    .file_name()
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| session.cwd.clone());
+                let who = if session.source == "codex" {
+                    "Codex"
+                } else {
+                    "Claude Code"
+                };
+                Activity {
+                    id: external_id(id),
+                    provider: session.source.clone(),
+                    title: if folder.is_empty() {
+                        who.into()
+                    } else {
+                        format!("{folder} · {who}")
+                    },
+                    step: if session.done {
+                        "Done".into()
+                    } else if session.needs_you {
+                        "Need approval".into()
+                    } else {
+                        state_word(&session.step).into()
+                    },
+                    started_at: session.started_at,
+                    needs_you: session.needs_you,
+                    done: session.done && !session.working,
+                    agent: Some(who.into()),
+                    steps: None,
+                    face: None,
+                }
+            })
+            .collect();
+        activities.sort_by_key(|activity| activity.id);
+        activities
+    }
+}
+
+/// A stable negative id from the agent's session id.
+pub fn external_id(session: &str) -> i64 {
+    // FNV-1a: stable across runs, unlike the standard hasher.
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for byte in session.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    -((hash >> 1) as i64).max(1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn socket() -> &'static Path {
+        Path::new("/tmp/monobot test/notch.sock")
+    }
+
+    #[test]
+    fn hooks_join_everybody_elses_and_only_once() {
+        let file =
+            r#"{"model":"x","hooks":{"Stop":[{"hooks":[{"type":"command","command":"other"}]}]}}"#;
+        let merged = merge(file, "claude", CLAUDE_EVENTS, socket())
+            .unwrap()
+            .unwrap();
+        let value: Value = serde_json::from_str(&merged).unwrap();
+        assert_eq!(value["model"], "x", "other settings stay");
+        let stop = value["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop.len(), 2, "the other tool's hook stays");
+        assert_eq!(stop[0]["hooks"][0]["command"], "other");
+        let ours = stop[1]["hooks"][0]["command"].as_str().unwrap();
+        assert!(ours.contains(MARK) && ours.contains("'/tmp/monobot test/notch.sock'"));
+        assert_eq!(
+            value["hooks"].as_object().unwrap().len(),
+            CLAUDE_EVENTS.len()
+        );
+        // Already there: nothing to write.
+        assert_eq!(
+            merge(&merged, "claude", CLAUDE_EVENTS, socket()).unwrap(),
+            None
+        );
+        // Removing takes ours and leaves the rest.
+        let removed: Value = serde_json::from_str(&remove(&merged).unwrap()).unwrap();
+        assert_eq!(removed["hooks"]["Stop"].as_array().unwrap().len(), 1);
+        assert!(removed["hooks"]["PreToolUse"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_file_that_is_not_hooks_is_refused() {
+        assert!(merge("[1]", "codex", CODEX_EVENTS, socket()).is_err());
+        assert!(merge(r#"{"hooks":3}"#, "codex", CODEX_EVENTS, socket()).is_err());
+        assert!(merge("not json", "codex", CODEX_EVENTS, socket()).is_err());
+        assert!(merge("", "codex", CODEX_EVENTS, socket())
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn the_command_never_fails_and_quotes_the_socket() {
+        let command = command("codex", Path::new("/tmp/it's/notch.sock"));
+        assert!(command.starts_with(
+            "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || { printf 'codex\\n'; cat; } | nc -U -w 1 "
+        ));
+        assert!(command.contains(r"'/tmp/it'\''s/notch.sock'"));
+        assert!(command.contains("; true #"));
+    }
+
+    fn event(name: &str, tool: Option<&str>) -> String {
+        let tool = tool.map_or(String::new(), |tool| format!(r#","tool_name":"{tool}""#));
+        format!(
+            "claude\n{{\"session_id\":\"s1\",\"cwd\":\"/Users/me/monoBOT\",\"hook_event_name\":\"{name}\"{tool}}}"
+        )
+    }
+
+    #[test]
+    fn a_session_works_waits_and_finishes_as_its_hooks_say() {
+        let mut externals = Externals::default();
+        for payload in [event("SessionStart", None), event("UserPromptSubmit", None)] {
+            externals.apply(parse(&payload).unwrap(), 1_000);
+        }
+        let working = externals.activities();
+        assert_eq!(working.len(), 1);
+        assert_eq!(working[0].title, "monoBOT · Claude Code");
+        assert_eq!(working[0].step, "Thinking");
+        assert!(working[0].id < 0);
+        externals.apply(parse(&event("PreToolUse", Some("Edit"))).unwrap(), 2_000);
+        assert_eq!(externals.activities()[0].step, "Editing");
+        externals.apply(
+            parse(&event("PermissionRequest", Some("Bash"))).unwrap(),
+            3_000,
+        );
+        assert!(externals.activities()[0].needs_you);
+        externals.apply(parse(&event("Stop", None)).unwrap(), 4_000);
+        let done = &externals.activities()[0];
+        assert!(done.done && !done.needs_you);
+        // A finished session leaves after a while; SessionEnd at once.
+        assert!(!externals.prune(5_000));
+        assert!(externals.prune(4_000 + IDLE_MS));
+        externals.apply(parse(&event("UserPromptSubmit", None)).unwrap(), 1);
+        externals.apply(parse(&event("SessionEnd", None)).unwrap(), 2);
+        assert!(externals.activities().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_socket_hands_over_what_a_hook_sends() {
+        let dir = std::env::temp_dir().join(format!("monobot-hooks-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let socket = dir.join("n.sock");
+        let (sent, received) = std::sync::mpsc::channel();
+        serve(&socket, move |event| {
+            let _ = sent.send(event);
+        })
+        .unwrap();
+        let mut stream = std::os::unix::net::UnixStream::connect(&socket).unwrap();
+        std::io::Write::write_all(&mut stream, event("Stop", None).as_bytes()).unwrap();
+        drop(stream);
+        let event = received
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            (event.session.as_str(), event.event.as_str()),
+            ("s1", "Stop")
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn installing_writes_once_and_keeps_a_backup() {
+        let home = std::env::temp_dir().join(format!("monobot-home-{}", std::process::id()));
+        let claude = home.join(".claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        std::fs::write(claude.join("settings.json"), r#"{"model":"x"}"#).unwrap();
+        let first = install_file(
+            &claude.join("settings.json"),
+            "claude",
+            CLAUDE_EVENTS,
+            socket(),
+        );
+        assert_eq!(first, Ok(true));
+        let second = install_file(
+            &claude.join("settings.json"),
+            "claude",
+            CLAUDE_EVENTS,
+            socket(),
+        );
+        assert_eq!(second, Ok(false), "already there");
+        let backup = std::fs::read_to_string(claude.join("settings.json.monobot-backup")).unwrap();
+        assert_eq!(backup, r#"{"model":"x"}"#);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn only_hooks_from_claude_or_codex_are_read() {
+        assert!(parse("other\n{}").is_none());
+        assert!(parse("claude\nnot json").is_none());
+        assert!(
+            parse("codex\n{\"hook_event_name\":\"Stop\"}").is_none(),
+            "no session"
+        );
+        assert_eq!(external_id("a"), external_id("a"));
+        assert_ne!(external_id("a"), external_id("b"));
+    }
+}

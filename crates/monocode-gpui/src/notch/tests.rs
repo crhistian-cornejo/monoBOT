@@ -69,12 +69,10 @@ fn leave(visual: &mut VisualTestContext) {
     visual.run_until_parked();
 }
 
+/// The island as drawn (the window around it may hold room to move).
 fn size(window: WindowHandle<Notch>, visual: &mut VisualTestContext) -> (f32, f32) {
     window
-        .update(visual, |_, window, _| {
-            let size = window.bounds().size;
-            (f32::from(size.width), f32::from(size.height))
-        })
+        .update(visual, |notch, _, _| notch.island_size())
         .unwrap()
 }
 
@@ -423,4 +421,29 @@ fn several_agents_spread_the_wings_with_the_leads_progress(cx: &mut TestAppConte
         size(opened.window, visual),
         (186. + (left + right) as f32 + 2. * SHOULDER, 37.)
     );
+}
+
+#[gpui::test]
+fn a_volume_change_opens_the_wings_for_a_moment(cx: &mut TestAppContext) {
+    use monocode_core::notch::system::Level;
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.show_level(Level::Volume(0.4, false), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-level").is_some());
+    assert_eq!(
+        size(opened.window, visual),
+        (186. + 2. * (levels::LEVEL_WING as f32 + SHOULDER), 37.)
+    );
+    // It folds back by itself.
+    visual.executor().advance_clock(Duration::from_secs(3));
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-level").is_none());
+    assert_eq!(size(opened.window, visual), (186. + 2. * SHOULDER, 37.));
 }

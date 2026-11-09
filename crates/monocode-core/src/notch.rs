@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
+pub mod hooks;
+pub mod system;
+
 /// The setting that keeps [`Look`], as JSON.
 pub const SETTING: &str = "notch.look";
 

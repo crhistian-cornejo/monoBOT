@@ -6,6 +6,7 @@ use super::*;
 use crate::notch::{Handle, NotchEvent};
 use crate::notifications::approvals::InputKind;
 use monocode_core::notch::{self as model, Activity, Ask, Call, Face, Feed, Recent, Upcoming};
+use std::path::Path;
 
 impl Shell {
     /// Reads the saved look off the interface thread, then opens the notch.
@@ -20,17 +21,75 @@ impl Shell {
         crate::notch::follow_reduced_motion(cx);
         let store = self.store.clone();
         let saved = cx.background_executor().spawn(async move {
-            locked(&store)
-                .ok()
-                .and_then(|store| store.setting(model::SETTING).ok().flatten())
+            let store = locked(&store).ok();
+            let look = store
+                .as_ref()
+                .and_then(|store| store.setting(model::SETTING).ok().flatten());
+            let data = store.and_then(|store| store.data_dir().map(Path::to_path_buf));
+            (look, data)
         });
         cx.spawn(async move |this, cx| {
-            let saved = saved.await;
+            let (saved, data) = saved.await;
             let _ = this.update(cx, |this, cx| {
-                this.open_notch(model::read(saved.as_deref()), cx)
+                this.open_notch(model::read(saved.as_deref()), cx);
+                if let Some(data) = data {
+                    this.start_notch_hooks(&data, cx);
+                }
             });
         })
         .detach();
+    }
+
+    /// Claude Code's and Codex's own sessions: a socket the hooks write to,
+    /// and the hooks added to their settings (once; see `notch::hooks`).
+    fn start_notch_hooks(&mut self, data: &Path, cx: &mut Context<Self>) {
+        #[cfg(unix)]
+        {
+            use monocode_core::notch::hooks;
+            let mut socket = data.join("notch.sock");
+            // A Unix socket's path holds at most 104 bytes.
+            if socket.as_os_str().len() > 100 {
+                socket = std::env::temp_dir().join(format!(
+                    "monobot-notch-{}.sock",
+                    hooks::external_id(&data.to_string_lossy()).unsigned_abs()
+                ));
+            }
+            let (sender, events) = async_channel::unbounded();
+            let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(error) = hooks::serve(&socket, move |event| {
+                        let _ = sender.try_send(event);
+                    }) {
+                        eprintln!("notch hooks: could not listen on {socket:?}: {error}");
+                        return;
+                    }
+                    if let Some(home) = home {
+                        for (path, result) in hooks::install(&home, &socket) {
+                            match result {
+                                Ok(true) => eprintln!("notch hooks: added to {path:?}"),
+                                Ok(false) => {}
+                                Err(error) => eprintln!("notch hooks: {path:?}: {error}"),
+                            }
+                        }
+                    }
+                })
+                .detach();
+            self.notch_hooks = Some(cx.spawn(async move |this, cx| {
+                while let Ok(event) = events.recv().await {
+                    let alive = this.update(cx, |this, cx| {
+                        this.notch_externals
+                            .apply(event, monocode_core::time::now_ms());
+                        this.sync_notch(cx);
+                    });
+                    if alive.is_err() {
+                        break;
+                    }
+                }
+            }));
+        }
+        #[cfg(not(unix))]
+        let _ = (data, cx);
     }
 
     fn open_notch(&mut self, look: model::Look, cx: &mut Context<Self>) {
@@ -58,7 +117,7 @@ impl Shell {
         );
         // MONOBOT_NOTCH_TRACE=1: opens the panel and walks its pages, so
         // their timing can be read without touching the pointer.
-        if crate::notch::tracing() {
+        if crate::notch::touring() {
             let entity = handle.entity.clone();
             cx.spawn(async move |_, cx| {
                 let tabs = crate::notch::Tab::ALL;
@@ -170,6 +229,9 @@ impl Shell {
                 });
             }
         }
+        // Claude Code and Codex in a terminal, through their hooks.
+        self.notch_externals.prune(monocode_core::time::now_ms());
+        activities.extend(self.notch_externals.activities());
         let mut asks = Vec::new();
         let seats = self.notch_seat_chats(cx);
         for view in self.notification_chats(cx).into_iter().chain(seats) {
@@ -252,6 +314,8 @@ impl Shell {
     fn notch_event(&mut self, event: NotchEvent, cx: &mut Context<Self>) {
         use crate::notifications::delivery::Target;
         match event {
+            // A terminal's session has no chat here to open.
+            NotchEvent::OpenSession(id) if id < 0 => {}
             NotchEvent::OpenSession(id) => {
                 // The notch is another app's neighbor: bring MonoBOT forward
                 // with the chat, as a notification's click does.

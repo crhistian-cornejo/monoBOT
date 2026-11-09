@@ -9,6 +9,7 @@
 //! once, the island springs between them inside it at the display's rate,
 //! and the window shrinks back to the island when it settles. Its rules live
 //! in `monocode_core::notch`; this module only paints and moves.
+pub(crate) mod levels;
 mod pages;
 mod platform;
 mod settings;
@@ -223,6 +224,8 @@ pub(crate) struct Notch {
     drawn: Option<(Shape, Tab, Frame)>,
     /// Whether the last change was only the page.
     page_change: bool,
+    /// Whether the window holds the open panel's whole room.
+    wide: bool,
     leaving: Option<(Shape, Tab, Frame)>,
     /// The clock the shimmer sweeps on.
     epoch: Instant,
@@ -234,6 +237,10 @@ pub(crate) struct Notch {
     /// showing a notice).
     responsive: Option<platform::Responsive>,
     _subscriptions: Vec<Subscription>,
+    /// The system level just changed (volume, brightness), and its readers.
+    level: Option<monocode_core::notch::system::Level>,
+    level_clear: Option<Task<()>>,
+    level_task: Option<Task<()>>,
 }
 
 impl EventEmitter<NotchEvent> for Notch {}
@@ -255,7 +262,8 @@ pub(crate) fn only_notches_left(cx: &App) -> bool {
 /// Opens the notch's window on the screen with the camera, or the main one.
 pub(crate) fn open(look: Look, save: Save, cx: &mut App) -> Option<WindowHandle<Notch>> {
     let screen = platform::screen(cx);
-    let frame = outer(&look, model::frame(&look, &screen.screen, Shape::Quiet));
+    let quiet = outer(&look, model::frame(&look, &screen.screen, Shape::Quiet));
+    let frame = union(quiet, quiet, PEEK);
     let bounds = Bounds {
         origin: point(screen.origin.x + px(frame.x), screen.origin.y + px(frame.y)),
         size: gpui::size(px(frame.width), px(frame.height)),
@@ -283,6 +291,7 @@ pub(crate) fn open(look: Look, save: Save, cx: &mut App) -> Option<WindowHandle<
                 cx.new(|cx| {
                     let mut notch = Notch::new(look, save, cx);
                     notch.watch_pointer(window, cx);
+                    notch.watch_levels(cx);
                     notch
                 })
             },
@@ -354,12 +363,16 @@ impl Notch {
             appeared: None,
             drawn: None,
             page_change: false,
+            wide: false,
             leaving: None,
             epoch: Instant::now(),
             screen_override: None,
             _pointer: None,
             responsive: None,
             _subscriptions: vec![submitted],
+            level: None,
+            level_clear: None,
+            level_task: None,
         }
     }
 
@@ -384,6 +397,21 @@ impl Notch {
 
     pub(crate) fn feed(&self) -> &Feed {
         &self.feed
+    }
+
+    /// The island as drawn, with its shoulders.
+    #[cfg(test)]
+    pub(crate) fn island_size(&self) -> (f32, f32) {
+        let island = outer(
+            &self.look,
+            self.shown.unwrap_or(Frame {
+                x: 0.,
+                y: 0.,
+                width: 0.,
+                height: 0.,
+            }),
+        );
+        (island.width, island.height)
     }
 
     #[cfg(test)]
@@ -643,6 +671,11 @@ impl Notch {
             }
         } else if self.notices.current().is_some() {
             Shape::Notice { lines: 2 }
+        } else if self.level.is_some() {
+            Shape::Busy {
+                left: levels::LEVEL_WING,
+                right: levels::LEVEL_WING,
+            }
         } else if self.rest.busy() {
             let (left, right) = self.rest.wings(self.look.show_count);
             Shape::Busy { left, right }
@@ -709,46 +742,34 @@ impl Notch {
     /// Puts the window where the island can move: both shapes' room while it
     /// springs, the island's own once it rests. Only moves it when that room
     /// changes, never on every frame.
-    fn place(
-        &mut self,
-        display: &platform::Display,
-        target: Frame,
-        window: &mut Window,
-        cx: &mut App,
-    ) -> Frame {
-        if platform::FIXED_ROOM {
-            let room = self.fixed_room(display);
-            if self.placed != Some(room) {
-                platform::place(window, cx, display, room);
-                self.placed = Some(room);
-                window.on_next_frame(|window, _| window.refresh());
-            }
-            return room;
-        }
-        let mut wanted = match self.motion {
-            Some(motion) => union(
-                outer(&self.look, motion.from),
-                outer(&self.look, target),
-                MARGIN,
-            ),
-            None => outer(&self.look, target),
-        };
-        // Open, the window keeps the room of its tallest page, so moving
-        // between pages never resizes it: a resized window shows black until
-        // the system draws it again.
+    fn place(&mut self, display: &platform::Display, window: &mut Window, cx: &mut App) -> Frame {
+        // Open (and while it opens or folds) the window is the panel's
+        // whole room, so changing pages never resizes it. Closed it is just
+        // the island and room for its swell: the wings' loops then repaint
+        // a small window, not a large transparent one.
         if self.open {
-            let tallest = model::frame(
-                &self.look,
-                &display.screen,
-                Shape::Open {
-                    body: self.tallest_body().ceil() as u32,
-                },
-            );
-            wanted = union(wanted, outer(&self.look, tallest), MARGIN);
+            self.wide = true;
+        } else if self.motion.is_none() {
+            self.wide = false;
         }
+        let wanted = if self.wide {
+            self.fixed_room(display)
+        } else {
+            // The shape without the pointer's swell, with room for it, so
+            // swelling never resizes the window.
+            let base = outer(
+                &self.look,
+                model::frame(&self.look, &display.screen, self.shape()),
+            );
+            let room = union(base, base, PEEK);
+            match self.motion {
+                Some(motion) => union(room, outer(&self.look, motion.from), MARGIN),
+                None => room,
+            }
+        };
         let placed = match self.placed {
             // Mid-flight the room only grows; it shrinks when the island rests.
-            Some(placed) if self.motion.is_some() || self.open => union(placed, wanted, 0.),
+            Some(placed) if self.motion.is_some() && !self.wide => union(placed, wanted, 0.),
             _ => wanted,
         };
         if self.placed != Some(placed) {
@@ -792,16 +813,6 @@ impl Notch {
             .max(SETTINGS_HEIGHT)
             .max(AGENTS_MAX)
             .max(40. + 28. + CAPTION + ROW * 3. + 4.)
-    }
-
-    /// The open panel's tallest page, for the window's room.
-    fn tallest_body(&self) -> f32 {
-        let shelf =
-            model::shelf_height(self.look.shelf_rows as usize) + CATALOG_HEIGHT + model::CELL_GAP;
-        shelf
-            .max(SETTINGS_HEIGHT)
-            .max(self.agents_height())
-            .max(self.chat_height())
     }
 
     fn camera(&self, cx: &App) -> Option<model::Camera> {
@@ -1276,9 +1287,14 @@ impl Notch {
                     pill("notch-dismiss", "Dismiss", false)
                         .on_click(cx.listener(|this, _, _, cx| this.dismiss_notice(cx))),
                 )
-                .child(pill("notch-open", "Open", true).on_click(cx.listener(
-                    move |this, _, _, cx| this.act_on_notice(NotchEvent::OpenSession(session), cx),
-                ))),
+                // A terminal's session (negative id) has no chat here to open.
+                .when(session >= 0, |actions| {
+                    actions.child(pill("notch-open", "Open", true).on_click(cx.listener(
+                        move |this, _, _, cx| {
+                            this.act_on_notice(NotchEvent::OpenSession(session), cx)
+                        },
+                    )))
+                }),
         };
         div()
             .debug_selector(|| "notch-notice".into())
@@ -1392,7 +1408,11 @@ impl Notch {
                 let swell = (size.width
                     - camera.map_or(size.width, |c| c.width + left as f32 + right as f32))
                     / 2.;
-                self.ears(camera, (left as f32 + swell, right as f32 + swell), cx)
+                let wings = (left as f32 + swell, right as f32 + swell);
+                match self.level {
+                    Some(level) => self.level_view(level, camera, wings),
+                    None => self.ears(camera, wings, cx),
+                }
             }
             Shape::Notice { .. } => {
                 let notice = self.notices.current().cloned();
@@ -1436,8 +1456,11 @@ impl Notch {
 impl Notch {
     /// In use, the app keeps its full pace; at rest it lets the system nap.
     fn keep_responsive(&mut self) {
-        let in_use =
-            self.hovered || self.open || self.motion.is_some() || self.notices.current().is_some();
+        let in_use = self.hovered
+            || self.open
+            || self.motion.is_some()
+            || self.level.is_some()
+            || self.notices.current().is_some();
         if in_use && self.responsive.is_none() {
             self.responsive = platform::responsive();
         } else if !in_use {
@@ -1452,11 +1475,11 @@ impl Render for Notch {
         let element = self.render_notch(window, cx);
         if tracing() {
             eprintln!(
-                "NOTCHTRACE {} render {:?} tab {:?} placed {:?}",
+                "NOTCHTRACE {} render {:?} tab {:?} shape {:?}",
                 monocode_core::time::now_ms() % 100_000,
                 started.elapsed(),
                 self.tab,
-                self.placed
+                self.shape()
             );
         }
         element
@@ -1468,7 +1491,7 @@ impl Notch {
         let (display, target) = self.target(cx);
         let island = self.animate(target, window, cx);
         self.keep_responsive();
-        let room = self.place(&display, target, window, cx);
+        let room = self.place(&display, window, cx);
         let shape = self.shape();
         // While the island folds, what it showed stays and fades out with
         // the first half of the fold, instead of vanishing at once.
@@ -1587,11 +1610,16 @@ impl Handle {
     }
 }
 
-/// `MONOBOT_NOTCH_TRACE=1`: logs each render's time and walks the pages, to
-/// measure the notch without touching the pointer.
+/// `MONOBOT_NOTCH_TRACE=1`: logs each render's time and shape, to measure
+/// the notch without touching the pointer.
 pub(crate) fn tracing() -> bool {
     static TRACE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *TRACE.get_or_init(|| std::env::var_os("MONOBOT_NOTCH_TRACE").is_some())
+}
+
+/// `MONOBOT_NOTCH_TRACE=tour`: also walks the pages.
+pub(crate) fn touring() -> bool {
+    std::env::var("MONOBOT_NOTCH_TRACE").is_ok_and(|value| value == "tour")
 }
 
 /// Reads the system's reduced motion setting into the app, so every view
