@@ -370,8 +370,19 @@ mod mac {
         /// The key a media event names, whether it is pressed, and whether
         /// Option and Shift ask for a fine step.
         fn decode(event: Ref) -> Option<(Key, bool, bool)> {
+            use objc2::encode::{Encode, Encoding, RefEncode};
             use objc2::runtime::AnyObject;
             use objc2::{class, msg_send};
+            /// `CGEventRef`, encoded as AppKit declares it, so objc2's checked
+            /// message sends accept it.
+            #[repr(C)]
+            struct CgEvent([u8; 0]);
+            unsafe impl RefEncode for CgEvent {
+                const ENCODING_REF: Encoding =
+                    Encoding::Pointer(&Encoding::Struct("__CGEvent", &[]));
+            }
+            let _ = <*mut CgEvent as Encode>::ENCODING;
+            let event = event.cast::<CgEvent>();
             // SAFETY: NSEvent wraps the tap's live CGEvent for this call.
             unsafe {
                 let ns: *mut AnyObject = msg_send![class!(NSEvent), eventWithCGEvent: event];
@@ -407,7 +418,13 @@ mod mac {
             TAKING.store(on, std::sync::atomic::Ordering::Relaxed);
         }
 
-        extern "C" fn on_event(_proxy: Ref, kind: u32, event: Ref, _user: Ref) -> Ref {
+        extern "C" fn on_event(proxy: Ref, kind: u32, event: Ref, user: Ref) -> Ref {
+            // A panic must not cross into CoreGraphics (it would abort the
+            // app): the key then goes on to the system.
+            std::panic::catch_unwind(|| handle(proxy, kind, event, user)).unwrap_or(event)
+        }
+
+        fn handle(_proxy: Ref, kind: u32, event: Ref, _user: Ref) -> Ref {
             let guard = tap().lock().unwrap_or_else(|e| e.into_inner());
             let Some(tap) = guard.as_ref() else {
                 return event;
