@@ -449,7 +449,8 @@ impl Notch {
                 }))
                 .into_any_element();
         }
-        let shown = 3;
+        // The card holds three rows: with more agents, "+N more" takes the third.
+        let shown = if activities.len() > 3 { 2 } else { 3 };
         let more = activities.len().saturating_sub(shown);
         div()
             .flex()
@@ -517,6 +518,10 @@ impl Notch {
             .when(more > 0, |list| {
                 list.child(
                     div()
+                        .h(px(18.))
+                        .pl(px(20.))
+                        .flex()
+                        .items_center()
                         .text_size(px(10.5))
                         .text_color(ink(0.4))
                         .child(format!("+{more} more")),

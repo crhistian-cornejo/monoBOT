@@ -1,10 +1,15 @@
 //! Shared app updater: one check/install across windows; no I/O on the UI thread.
+//!
+//! A found update downloads by itself and waits, verified, for a restart.
+//! The Windows installer also finishes it when the app quits. When the
+//! download or the installation fails, the card offers the installer from
+//! the update Worker's download page instead.
 use crate::{
     runtime::{Database, locked},
     theme::*,
 };
 use gpui::{App, Context, Entity, EventEmitter, Global, Role, div, prelude::*, px};
-use monocode_core::app_update::{self, Config, Installation, Installed, Update};
+use monocode_core::app_update::{self, Config, Download, Installation, Installed, Update};
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -17,18 +22,59 @@ impl Global for Shared {}
 struct InstallGate {
     installing: bool,
     quitting: bool,
+    /// A verified download waiting for a restart, or for the app to quit.
+    ready: Option<Ready>,
+}
+struct Ready {
+    update: Update,
+    installation: Installation,
+    download: Download,
+    store: Database,
 }
 
 /// A normal quit can cancel a download, but must not interrupt a file swap or
 /// a privileged package install. Keep this gate outside the entity borrow so
 /// successful installation can call the regular quit path from its callback.
-pub(crate) fn defer_quit(cx: &App) -> bool {
+/// A downloaded update the platform installs unattended starts its installer
+/// here; the quit continues once the installer is running.
+pub(crate) fn defer_quit(cx: &mut App) -> bool {
     let Some(shared) = cx.try_global::<Shared>() else {
         return false;
     };
-    let mut gate = shared.1.lock().unwrap_or_else(|e| e.into_inner());
-    gate.quitting = true;
-    gate.installing
+    let gate = shared.1.clone();
+    let mut state = gate.lock().unwrap_or_else(|e| e.into_inner());
+    state.quitting = true;
+    if state.installing {
+        return true;
+    }
+    let Some(ready) = state
+        .ready
+        .take_if(|ready| Update::installs_on_quit(&ready.installation))
+    else {
+        return false;
+    };
+    state.installing = true;
+    drop(state);
+    let work = cx.background_executor().spawn(async move {
+        let Ready {
+            update,
+            installation,
+            download,
+            store,
+        } = ready;
+        let installed = mark_installing(&store, &update)
+            .and_then(|_| update.install_on_quit(download, &installation));
+        if installed.is_err() {
+            let _ = locked(&store).and_then(|store| store.save_setting(INSTALLED, ""));
+        }
+    });
+    cx.spawn(async move |cx| {
+        work.await;
+        gate.lock().unwrap_or_else(|e| e.into_inner()).installing = false;
+        cx.update(|cx| crate::quit(cx));
+    })
+    .detach();
+    true
 }
 pub(crate) enum Event {
     Changed,
@@ -40,13 +86,28 @@ enum Phase {
     Idle,
     Checking,
     Current,
-    Available,
     Downloading,
+    /// Downloaded and verified; installs on restart (or on quit on Windows).
+    Ready,
     Installing,
+    /// The download or the installation failed: offer the installer by hand.
+    Failed,
 }
-enum Progress {
-    Download(u64, Option<u64>),
-    Installing,
+
+const INSTALLED: &str = "monocode.installedUpdate";
+
+/// Records the version being installed, so the next launch shows What's new
+/// once it is really running.
+fn mark_installing(store: &Database, update: &Update) -> Result<(), String> {
+    let version = update.version.to_string();
+    locked(store)?.save_setting(
+        INSTALLED,
+        &serde_json::json!({ "version": version }).to_string(),
+    )?;
+    locked(store)?.save_setting(
+        "monocode.nativeReleaseNotes",
+        &serde_json::json!({ "version": version, "body": update.notes }).to_string(),
+    )
 }
 
 pub(crate) fn version() -> &'static str {
@@ -77,8 +138,7 @@ impl EventEmitter<Event> for Updater {}
 impl Updater {
     fn new(store: Database, cx: &mut Context<Self>) -> Self {
         let setup = (|| {
-            let endpoint = option_env!("MONOCODE_NATIVE_UPDATER_ENDPOINT")
-                .filter(|v| !v.is_empty())
+            let endpoint = app_update::built_in_feed()
                 .ok_or("Automatic updates aren’t configured for this build")?;
             let key = option_env!("MONOCODE_NATIVE_UPDATER_PUBKEY")
                 .filter(|v| !v.is_empty())
@@ -128,21 +188,40 @@ impl Updater {
     pub(crate) fn actionable(&self) -> bool {
         matches!(
             self.phase,
-            Phase::Available | Phase::Downloading | Phase::Installing
+            Phase::Downloading | Phase::Ready | Phase::Installing | Phase::Failed
         )
     }
     fn changed(&self, cx: &mut Context<Self>) {
         cx.emit(Event::Changed);
         cx.notify();
     }
+    /// The installer to download by hand, from the update Worker.
+    fn manual_url(&self) -> Option<String> {
+        let config = self.config.as_ref()?;
+        app_update::manual_download_url(
+            &config.endpoint,
+            self.installation.as_ref().map(|i| i.kind),
+        )
+    }
+    fn fail(&mut self, error: String, cx: &mut Context<Self>) {
+        self.phase = Phase::Failed;
+        self.progress = None;
+        self.message = Some(error.clone());
+        cx.emit(Event::Error(format!(
+            "Couldn’t update monoBOT: {error}. You can download it by hand."
+        )));
+        self.changed(cx);
+    }
     pub(crate) fn check(&mut self, manual: bool, cx: &mut Context<Self>) {
-        if self.busy() {
+        // A verified download is already waiting for a restart.
+        if self.busy() || self.phase == Phase::Ready {
             return;
         }
         let Some(config) = self.config.clone() else {
             self.changed(cx);
             return;
         };
+        let previous = self.phase;
         self.phase = Phase::Checking;
         self.message = None;
         self.changed(cx);
@@ -159,18 +238,21 @@ impl Updater {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok((installation, update)) => {
+                    Ok((installation, Some(update))) => {
                         this.installation = Some(installation);
-                        this.phase = if update.is_some() {
-                            Phase::Available
-                        } else {
-                            Phase::Current
-                        };
-                        this.pending = update;
+                        this.pending = Some(update);
+                        this.download(cx);
+                        return;
+                    }
+                    Ok((installation, None)) => {
+                        this.installation = Some(installation);
+                        this.pending = None;
+                        this.phase = Phase::Current;
                     }
                     Err(error) => {
-                        this.phase = if this.pending.is_some() {
-                            Phase::Available
+                        // Offline: a failed update keeps offering its installer.
+                        this.phase = if previous == Phase::Failed {
+                            Phase::Failed
                         } else {
                             Phase::Idle
                         };
@@ -185,10 +267,8 @@ impl Updater {
         })
         .detach();
     }
-    fn install(&mut self, cx: &mut Context<Self>) {
-        if self.busy() {
-            return;
-        }
+    /// Downloads and verifies the pending update in the background.
+    fn download(&mut self, cx: &mut Context<Self>) {
         let (Some(update), Some(installation)) = (self.pending.clone(), self.installation.clone())
         else {
             return;
@@ -196,66 +276,95 @@ impl Updater {
         self.phase = Phase::Downloading;
         self.progress = Some(0);
         self.message = None;
-        self.changed(cx); // Close the double-click window before starting I/O.
-        let store = self.store.clone();
-        let gate = self.gate.clone();
-        let (tx, rx) = async_channel::bounded(8);
+        self.changed(cx);
+        let (tx, rx) = async_channel::bounded::<Option<u64>>(8);
         let work = cx.background_executor().spawn(async move {
-            let result = (|| {
-                let mut last_bytes = 0;
-                let mut last_percent = None;
-                let download = update.download(|n, total| {
-                    let percent = total.filter(|n| *n > 0).map(|total| n.saturating_mul(100) / total);
-                    if (percent.is_some() && percent != last_percent) || (percent.is_none() && n - last_bytes >= 1024 * 1024) {
-                        let _ = tx.try_send(Progress::Download(n, total));
+            let mut last_bytes = 0;
+            let mut last_percent = None;
+            update
+                .download(|n, total| {
+                    let percent = total
+                        .filter(|n| *n > 0)
+                        .map(|total| (n.saturating_mul(100) / total).min(100));
+                    if (percent.is_some() && percent != last_percent)
+                        || (percent.is_none() && n - last_bytes >= 1024 * 1024)
+                    {
+                        let _ = tx.try_send(percent);
                         last_percent = percent;
                         last_bytes = n;
                     }
-                })?;
-                {
-                    let mut gate = gate.lock().unwrap_or_else(|e| e.into_inner());
-                    if gate.quitting { return Err("The app is closing; the update was not installed".into()); }
-                    gate.installing = true;
-                }
-                let _ = tx.send_blocking(Progress::Installing);
-                locked(&store)?.save_setting(
-                    "monocode.installedUpdate",
-                    &serde_json::json!({"version": update.version.to_string()}).to_string(),
-                )?;
-                locked(&store)?.save_setting("monocode.nativeReleaseNotes", &serde_json::json!({"version": update.version.to_string(), "body": update.notes}).to_string())?;
-                update.install(download, &installation)
-            })();
-            if result.is_err() {
-                let _ = locked(&store)
-                    .and_then(|store| store.save_setting("monocode.installedUpdate", ""));
-            }
-            gate.lock().unwrap_or_else(|e| e.into_inner()).installing = false;
-            result
+                })
+                .map(|download| (update, download))
         });
         cx.spawn(async move |this, cx| {
-            while let Ok(progress) = rx.recv().await {
-                if this
-                    .update(cx, |this, cx| {
-                        match progress {
-                            Progress::Download(n, total) => {
-                                this.progress = total
-                                    .filter(|n| *n > 0)
-                                    .map(|total| (n.saturating_mul(100) / total).min(100))
-                            }
-                            Progress::Installing => this.phase = Phase::Installing,
-                        }
-                        this.changed(cx);
-                    })
-                    .is_err()
-                {
+            while let Ok(percent) = rx.recv().await {
+                let shown = this.update(cx, |this, cx| {
+                    this.progress = percent;
+                    this.changed(cx);
+                });
+                if shown.is_err() {
                     return;
                 }
             }
             let result = work.await;
             let _ = this.update(cx, |this, cx| match result {
+                Ok((update, download)) => {
+                    this.gate.lock().unwrap_or_else(|e| e.into_inner()).ready = Some(Ready {
+                        update,
+                        installation,
+                        download,
+                        store: this.store.clone(),
+                    });
+                    this.phase = Phase::Ready;
+                    this.progress = None;
+                    this.changed(cx);
+                }
+                Err(error) => this.fail(error, cx),
+            });
+        })
+        .detach();
+    }
+    /// Installs the downloaded update now and reopens the app.
+    fn install(&mut self, cx: &mut Context<Self>) {
+        if self.busy() {
+            return;
+        }
+        let gate = self.gate.clone();
+        let ready = {
+            let mut state = gate.lock().unwrap_or_else(|e| e.into_inner());
+            if state.quitting {
+                return;
+            }
+            let Some(ready) = state.ready.take() else {
+                return;
+            };
+            state.installing = true;
+            ready
+        };
+        self.phase = Phase::Installing;
+        self.message = None;
+        self.changed(cx); // Close the double-click window before starting I/O.
+        let work = cx.background_executor().spawn(async move {
+            let Ready {
+                update,
+                installation,
+                download,
+                store,
+            } = ready;
+            let result = mark_installing(&store, &update)
+                .and_then(|_| update.install(download, &installation));
+            if result.is_err() {
+                let _ = locked(&store).and_then(|store| store.save_setting(INSTALLED, ""));
+            }
+            gate.lock().unwrap_or_else(|e| e.into_inner()).installing = false;
+            result
+        });
+        cx.spawn(async move |this, cx| {
+            let result = work.await;
+            let _ = this.update(cx, |this, cx| match result {
                 Ok(Installed::Relaunch(path)) => {
                     if let Err(error) = app_update::schedule_relaunch(&path) {
-                        this.phase = Phase::Available;
+                        this.phase = Phase::Current;
                         this.message = Some(error.clone());
                         cx.emit(Event::Error(format!(
                             "The update was installed. Reopen monoBOT to finish: {error}"
@@ -267,12 +376,7 @@ impl Updater {
                 }
                 Ok(Installed::InstallerStarted) => crate::quit(cx),
                 Err(error) => {
-                    this.phase = Phase::Available;
-                    this.message = Some(error.clone());
-                    cx.emit(Event::Error(format!(
-                        "Couldn’t install the update: {error}"
-                    )));
-                    this.changed(cx);
+                    this.fail(error, cx);
                     if this.gate.lock().unwrap_or_else(|e| e.into_inner()).quitting {
                         crate::quit(cx);
                     }
@@ -285,13 +389,20 @@ impl Updater {
 /// What the updater offers right now, for Settings' About button.
 pub(crate) enum Action {
     Check,
-    Install(String),
+    /// Restart into the downloaded version.
+    Restart(String),
     Busy(String),
+    /// Download this version's installer by hand: the version and its URL.
+    Manual(String, String),
 }
 pub(crate) fn action(entity: &Entity<Updater>, cx: &App) -> Action {
     let state = entity.read(cx);
     match state.phase {
-        Phase::Available => Action::Install(state.pending_version()),
+        Phase::Ready => Action::Restart(state.pending_version()),
+        Phase::Failed => match state.manual_url() {
+            Some(url) => Action::Manual(state.pending_version(), url),
+            None => Action::Check,
+        },
         Phase::Checking => Action::Busy("Checking…".into()),
         Phase::Downloading | Phase::Installing => Action::Busy(state.progress_label()),
         Phase::Disabled | Phase::Idle | Phase::Current => Action::Check,
@@ -302,6 +413,7 @@ pub(crate) fn status(entity: &Entity<Updater>, cx: &App) -> Option<String> {
     let state = entity.read(cx);
     match state.phase {
         Phase::Current => Some("You’re on the latest version.".into()),
+        Phase::Ready => Some(state.ready_line()),
         Phase::Checking => None,
         _ => state.message.clone(),
     }
@@ -325,18 +437,38 @@ impl Updater {
                 .unwrap_or_else(|| "Downloading…".into()),
         }
     }
+    fn ready_line(&self) -> String {
+        let version = self.pending_version();
+        let quits = self
+            .installation
+            .as_ref()
+            .is_some_and(Update::installs_on_quit);
+        if quits {
+            format!("monoBOT {version} is ready. It installs when you restart or quit.")
+        } else {
+            format!("monoBOT {version} is ready. Restart to install it.")
+        }
+    }
 }
-/// The sidebar's update card, shown while an update is available or installing.
+/// The sidebar's update card: progress while an update downloads or installs,
+/// a restart once it is ready, and the installer by hand if it failed.
 pub(crate) fn row(entity: Entity<Updater>, cx: &App) -> gpui::AnyElement {
-    let action = entity.clone();
     let state = entity.read(cx);
-    let available = state.phase == Phase::Available;
-    // Matches the desktop footer: one line, accent-tinted until it starts.
-    let label = if available {
-        format!("Update to v{}", state.pending_version())
-    } else {
-        state.progress_label()
+    let (label, glyph, aria) = match state.phase {
+        Phase::Ready => (
+            format!("Restart to update to v{}", state.pending_version()),
+            "arrow-down-circle",
+            "Restart monoBOT to install the update",
+        ),
+        Phase::Failed => (
+            format!("Download v{} by hand", state.pending_version()),
+            "external-link",
+            "Open the monoBOT download page",
+        ),
+        _ => (state.progress_label(), "loader", ""),
     };
+    let clickable = matches!(state.phase, Phase::Ready | Phase::Failed);
+    let manual = state.manual_url();
     let glyph = if state.busy() {
         crate::pulse::looping(
             "native-update-spin",
@@ -350,7 +482,7 @@ pub(crate) fn row(entity: Entity<Updater>, cx: &App) -> gpui::AnyElement {
         )
         .into_any_element()
     } else {
-        icon("arrow-down-circle", 16.)
+        icon(glyph, 16.)
             .text_color(accent_color())
             .into_any_element()
     };
@@ -363,12 +495,12 @@ pub(crate) fn row(entity: Entity<Updater>, cx: &App) -> gpui::AnyElement {
         .flex()
         .items_center()
         .gap_2()
-        .bg(if available {
+        .bg(if clickable {
             accent_color().opacity(0.15)
         } else {
             content(0.05)
         })
-        .text_color(content(if available { 1. } else { 0.75 }))
+        .text_color(content(if clickable { 1. } else { 0.75 }))
         .child(
             div()
                 .size(px(18.))
@@ -402,12 +534,20 @@ pub(crate) fn row(entity: Entity<Updater>, cx: &App) -> gpui::AnyElement {
                         .child(format!("v{}", version())),
                 ),
         );
-    if available {
+    if clickable {
+        let ready = state.phase == Phase::Ready;
+        let action = entity.clone();
         button = button
-            .aria_label("Install the available monoBOT update")
+            .aria_label(aria)
             .cursor_pointer()
             .hover(|s| s.bg(accent_color().opacity(0.2)))
-            .on_click(move |_, _, cx| action.update(cx, |updater, cx| updater.install(cx)));
+            .on_click(move |_, _, cx| {
+                if ready {
+                    action.update(cx, |updater, cx| updater.install(cx));
+                } else if let Some(url) = &manual {
+                    cx.open_url(url);
+                }
+            });
     }
     div()
         .id("native-app-update")
@@ -423,12 +563,14 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
     use std::sync::{Arc, Mutex};
+    fn memory() -> Database {
+        Arc::new(Mutex::new(
+            monocode_core::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
+        ))
+    }
     #[gpui::test]
     fn quit_waits_for_installation_to_finish(cx: &mut TestAppContext) {
-        let store = Arc::new(Mutex::new(
-            monocode_core::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
-        ));
-        let updater = cx.update(|cx| shared(store, cx));
+        let updater = cx.update(|cx| shared(memory(), cx));
         let gate = updater.read_with(cx, |updater, _| updater.gate.clone());
         gate.lock().unwrap().installing = true;
         assert!(cx.update(|cx| defer_quit(cx)));
@@ -438,9 +580,7 @@ mod tests {
     }
     #[gpui::test]
     fn windows_share_one_updater_and_busy_operations_cannot_start_again(cx: &mut TestAppContext) {
-        let store = Arc::new(Mutex::new(
-            monocode_core::store::Store::open(std::path::Path::new(":memory:")).unwrap(),
-        ));
+        let store = memory();
         let first = cx.update(|cx| shared(store.clone(), cx));
         let second = cx.update(|cx| shared(store, cx));
         assert_eq!(first.entity_id(), second.entity_id());
@@ -458,5 +598,45 @@ mod tests {
             view.phase = Phase::Current;
             assert!(!view.actionable());
         });
+    }
+    #[gpui::test]
+    fn a_ready_update_waits_for_a_restart_instead_of_checking_again(cx: &mut TestAppContext) {
+        let updater = cx.update(|cx| shared(memory(), cx));
+        updater.update(cx, |view, cx| {
+            view.phase = Phase::Ready;
+            view.check(true, cx);
+            assert_eq!(view.phase, Phase::Ready);
+            assert!(view.actionable());
+            // Nothing downloaded is waiting in the gate: a click does nothing.
+            view.install(cx);
+            assert_eq!(view.phase, Phase::Ready);
+        });
+        assert!(matches!(
+            cx.update(|cx| action(&updater, cx)),
+            Action::Restart(_)
+        ));
+    }
+    #[gpui::test]
+    fn a_failed_update_offers_the_installer_by_hand(cx: &mut TestAppContext) {
+        let updater = cx.update(|cx| shared(memory(), cx));
+        updater.update(cx, |view, cx| {
+            view.config = Some(
+                Config::new(
+                    "https://monobot-updates.example.workers.dev/latest.json",
+                    include_str!("../../../monocode-core/src/app_update/fixtures/public-key.txt"),
+                    "0.0.1",
+                )
+                .unwrap(),
+            );
+            view.fail("Update download was incomplete".into(), cx);
+            assert!(view.actionable());
+        });
+        match cx.update(|cx| action(&updater, cx)) {
+            Action::Manual(_, url) => assert!(
+                url.starts_with("https://monobot-updates.example.workers.dev/download/"),
+                "{url}"
+            ),
+            _ => panic!("expected the manual download"),
+        }
     }
 }

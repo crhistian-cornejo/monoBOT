@@ -40,8 +40,9 @@ Packaging and releases
   package <macos|linux|rpm|windows> <binary> <out dir> <arch>
                         Installers and updater packages (version from
                         MONOCODE_NATIVE_VERSION; macOS signs and notarizes)
-  preview-version <v>   Check a native preview version (0.16.0-preview.1)
-  release <dir>         Sign every updater package and write latest.json
+  release-version <v>   Check a release version (0.0.1 or 0.16.0-preview.1)
+  release <dir>         Sign every updater package; write latest.json and
+                        downloads.json (feed URL from MONOBOT_UPDATES_URL)
   verify-release <dir>  Check latest.json and the packages with the app's verifier
   update-keys <dir>     Create the update signing key pair
   sign <file>...        Write <file>.sig with the update signing key
@@ -206,11 +207,14 @@ fn run(args: &[String]) -> Result<()> {
             )
             .map(|_| ())
         }
-        "preview-version" => {
-            let parsed = release::preview_version(one("version")?)?;
+        "release-version" | "preview-version" => {
+            let parsed = release::release_version(one("version")?)?;
             println!(
                 "{} (base {}, preview {}, Windows {})",
-                parsed.version, parsed.base, parsed.sequence, parsed.windows
+                parsed.version,
+                parsed.base,
+                parsed.sequence.as_deref().unwrap_or("none"),
+                parsed.windows
             );
             Ok(())
         }

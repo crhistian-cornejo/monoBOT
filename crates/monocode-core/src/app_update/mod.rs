@@ -44,6 +44,43 @@ impl PackageKind {
     }
 }
 
+/// The installer `/download/<key>` serves for a package kind on this
+/// computer, or for this platform's usual one when the installation is
+/// unknown (a development build, or one detection could not read). The keys
+/// are the update Worker's (`deploy/cloudflare-updates`).
+pub fn download_key(kind: Option<PackageKind>) -> &'static str {
+    match (std::env::consts::OS, kind) {
+        ("windows", _) => "windows",
+        ("macos", _) if std::env::consts::ARCH == "aarch64" => "macos-arm64",
+        ("macos", _) => "macos-x64",
+        (_, Some(PackageKind::Deb)) => "linux-deb",
+        (_, Some(PackageKind::Rpm)) => "linux-rpm",
+        _ => "linux-appimage",
+    }
+}
+
+/// The feed URL the release workflow built into this app, if any.
+pub fn built_in_feed() -> Option<&'static str> {
+    option_env!("MONOCODE_NATIVE_UPDATER_ENDPOINT").filter(|v| !v.trim().is_empty())
+}
+
+/// The update Worker's base URL, from its feed URL (`<base>/latest.json`).
+pub fn updates_url(feed: &str) -> Option<String> {
+    let base = feed.trim().strip_suffix("/latest.json")?;
+    https_url(base).ok()?;
+    Some(base.to_owned())
+}
+
+/// Where a person downloads the latest installer by hand when an automatic
+/// update cannot finish.
+pub fn manual_download_url(feed: &str, kind: Option<PackageKind>) -> Option<String> {
+    Some(format!(
+        "{}/download/{}",
+        updates_url(feed)?,
+        download_key(kind)
+    ))
+}
+
 #[derive(Clone, Debug)]
 pub struct Installation {
     pub kind: PackageKind,
@@ -389,6 +426,26 @@ impl Update {
     ) -> Result<Installed, String> {
         // Reverify immediately before installation, including cached downloads.
         self.verify_file(&download.path)?;
-        install::install(self, download, installation)
+        install::install(self, download, installation, true)
+    }
+    /// Whether `install_on_quit` can finish this installation's update with
+    /// nobody watching: the Windows installer runs silently once the app has
+    /// exited. Other packages replace the app in place or ask for a password,
+    /// so they wait for the person to restart.
+    pub fn installs_on_quit(installation: &Installation) -> bool {
+        installation.kind == PackageKind::Nsis
+    }
+    /// Starts the installer for an app that is quitting: it waits for this
+    /// process to exit, installs, and leaves the app closed.
+    pub fn install_on_quit(
+        &self,
+        download: Download,
+        installation: &Installation,
+    ) -> Result<(), String> {
+        if !Self::installs_on_quit(installation) {
+            return Err("This installation updates on restart".into());
+        }
+        self.verify_file(&download.path)?;
+        install::install(self, download, installation, false).map(|_| ())
     }
 }

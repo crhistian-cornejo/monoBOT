@@ -179,6 +179,85 @@ fn compose(mark: &Mark, side: u32, width: f32, look: Look) -> String {
     )
 }
 
+/// One of the Windows installer's pictures (NSIS wants 24-bit BMPs).
+struct Banner {
+    path: &'static str,
+    size: (u32, u32),
+    /// The mark's height, as a part of the picture's height.
+    mark_height: f32,
+    /// The mark's centre, as parts of the width and height.
+    centre: (f32, f32),
+    /// The backdrop and mark colours.
+    colours: (&'static str, &'static str),
+}
+
+const BANNERS: &[Banner] = &[
+    // The welcome and finish pages' left column.
+    Banner {
+        path: "assets/installer/nsis-sidebar.bmp",
+        size: (164, 314),
+        mark_height: 0.2,
+        centre: (0.5, 0.4),
+        colours: ("#000", "#fff"),
+    },
+    // The other pages' header, whose text sits on the left.
+    Banner {
+        path: "assets/installer/nsis-header.bmp",
+        size: (150, 57),
+        mark_height: 0.62,
+        centre: (0.78, 0.5),
+        colours: ("#fff", "#000"),
+    },
+];
+
+/// The SVG of a `width` × `height` picture: the backdrop, and the mark
+/// `mark_height` of the height tall around `centre`.
+fn compose_banner(
+    mark: &Mark,
+    (width, height): (u32, u32),
+    mark_height: f32,
+    centre: (f32, f32),
+    (backdrop, fill): (&str, &str),
+) -> String {
+    let (width, height) = (width as f32, height as f32);
+    let scale = height * mark_height / mark.height.max(1.);
+    let x = width * centre.0 - mark.width * scale / 2. - mark.x * scale;
+    let y = height * centre.1 - mark.height * scale / 2. - mark.y * scale;
+    format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {width} {height}" width="{width}" height="{height}"><rect width="{width}" height="{height}" fill="{backdrop}"/><path fill="{fill}" fill-rule="evenodd" transform="translate({x} {y}) scale({scale})" d="{}"/></svg>"#,
+        mark.path
+    )
+}
+
+/// An uncompressed 24-bit bottom-up BMP of opaque RGB rows.
+fn bmp(width: u32, height: u32, rgb: &[[u8; 3]]) -> Vec<u8> {
+    let stride = (width * 3).div_ceil(4) * 4;
+    let size = 54 + stride * height;
+    let mut file = b"BM".to_vec();
+    file.extend(size.to_le_bytes());
+    file.extend([0; 4]);
+    file.extend(54u32.to_le_bytes());
+    file.extend(40u32.to_le_bytes());
+    file.extend((width as i32).to_le_bytes());
+    file.extend((height as i32).to_le_bytes());
+    file.extend(1u16.to_le_bytes());
+    file.extend(24u16.to_le_bytes());
+    file.extend([0; 4]);
+    file.extend((stride * height).to_le_bytes());
+    // 72 DPI.
+    file.extend(2835u32.to_le_bytes());
+    file.extend(2835u32.to_le_bytes());
+    file.extend([0; 8]);
+    for row in (0..height).rev() {
+        let start = (row * width) as usize;
+        for [r, g, b] in &rgb[start..start + width as usize] {
+            file.extend([*b, *g, *r]);
+        }
+        file.extend(std::iter::repeat_n(0, (stride - width * 3) as usize));
+    }
+    file
+}
+
 /// A Windows icon of PNG pictures, each with its side.
 fn ico(pictures: &[(u32, Vec<u8>)]) -> Vec<u8> {
     let mut file = vec![0, 0, 1, 0];
@@ -246,7 +325,22 @@ pub fn main(argv: &[String]) -> Result<()> {
         .map(|(kind, side)| (*kind, tiles[side].as_slice()))
         .collect();
     write(&root.join("assets/icons/icon.icns"), icns(&entries))?;
-    println!("Drew {} icons from {SOURCE}.", PICTURES.len() + 2);
+    for banner in BANNERS {
+        let svg = compose_banner(
+            &mark,
+            banner.size,
+            banner.mark_height,
+            banner.centre,
+            banner.colours,
+        );
+        let (width, height) = banner.size;
+        write(&root.join(banner.path), draw::bmp(&svg, width, height)?)?;
+    }
+    println!(
+        "Drew {} icons and {} installer pictures from {SOURCE}.",
+        PICTURES.len() + 2,
+        BANNERS.len()
+    );
     Ok(())
 }
 
@@ -289,6 +383,23 @@ mod draw {
             }
         }
         pixmap.encode_png().map_err(|e| e.to_string())
+    }
+
+    /// An opaque picture as a BMP; the SVG paints its own backdrop.
+    pub fn bmp(svg: &str, width: u32, height: u32) -> Result<Vec<u8>> {
+        let tree = tree(svg)?;
+        let mut pixmap = tiny_skia::Pixmap::new(width, height).ok_or("A picture needs a size")?;
+        resvg::render(
+            &tree,
+            tiny_skia::Transform::identity(),
+            &mut pixmap.as_mut(),
+        );
+        let rgb: Vec<[u8; 3]> = pixmap
+            .pixels()
+            .iter()
+            .map(|p| [p.red(), p.green(), p.blue()])
+            .collect();
+        Ok(super::bmp(width, height, &rgb))
     }
 }
 
@@ -350,6 +461,43 @@ mod tests {
         assert!(svg.contains("translate(75 75) scale(1)"));
         assert_eq!(ico_tile(32), (0., 0.8));
         assert_eq!(ico_tile(48), (ICO_INSET, TILE_MARK));
+    }
+
+    #[test]
+    fn writes_a_padded_bottom_up_bitmap() {
+        // Two rows of a 3-pixel picture: each 9 bytes, padded to 12.
+        let file = bmp(
+            3,
+            2,
+            &[[255, 0, 0]; 3]
+                .into_iter()
+                .chain([[0, 0, 255]; 3])
+                .collect::<Vec<_>>(),
+        );
+        assert_eq!(&file[..2], b"BM");
+        assert_eq!(file.len(), 54 + 12 * 2);
+        assert_eq!(u32::from_le_bytes(file[2..6].try_into().unwrap()), 78);
+        assert_eq!(u16::from_le_bytes(file[28..30].try_into().unwrap()), 24);
+        // The bottom row (blue) comes first, written as BGR.
+        assert_eq!(&file[54..57], &[255, 0, 0]);
+        assert_eq!(&file[66..69], &[0, 0, 255]);
+    }
+
+    #[test]
+    fn installer_banners_keep_the_mark_inside_the_picture() {
+        let mark = mark(10., 20., 100., 50.);
+        for banner in BANNERS {
+            let svg = compose_banner(
+                &mark,
+                banner.size,
+                banner.mark_height,
+                banner.centre,
+                banner.colours,
+            );
+            let scale = banner.size.1 as f32 * banner.mark_height / 50.;
+            assert!(100. * scale <= banner.size.0 as f32, "{svg}");
+            assert!(svg.contains(&format!(r#"fill="{}""#, banner.colours.0)));
+        }
     }
 
     #[test]

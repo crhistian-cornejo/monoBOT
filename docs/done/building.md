@@ -39,7 +39,7 @@ CI packages every platform with `cargo xtask package` after a release build:
 
 ```sh
 cargo build --locked -p monocode-gpui --release
-MONOCODE_NATIVE_VERSION=0.16.0-preview.1 \
+MONOCODE_NATIVE_VERSION=0.0.1 \
   cargo xtask package <macos|linux|rpm|windows> target/release/monocode-gpui native-dist <arch>
 ```
 
@@ -55,22 +55,39 @@ existing build in `monoBOT.app` without packaging it.
 
 ## Releases and updates
 
-Pushing a tag `native-vX.Y.Z` runs [native-release.yml](../../.github/workflows/native-release.yml).
-It builds all platforms, signs the update packages and the `latest.json`
-manifest (`cargo xtask release native-dist`), verifies them with the app's own
-update client (`cargo xtask verify-release native-dist`), publishes a GitHub
-release and uploads the files to the `monobot-releases` R2 bucket under
-`native-preview/`. The app reads its feed from
-`<R2_PUBLIC_BASE_URL>/native-preview/latest.json`.
+Releases come from Cloudflare, not GitHub Releases (the repository is
+private). Pushing a tag `vX.Y.Z` (or `vX.Y.Z-preview.N`) runs
+[native-release.yml](../../.github/workflows/native-release.yml). It builds
+every platform, signs the update packages, the feed `latest.json` and the
+download list `downloads.json` (`cargo xtask release native-dist`), verifies
+them with the app's own update client (`cargo xtask verify-release
+native-dist`) and uploads everything to the `monobot-releases` R2 bucket:
+the files under `releases/<version>/`, then `downloads.json` and
+`latest.json` at the top. A version already in the bucket is refused.
+
+The [update Worker](../../deploy/cloudflare-updates/README.md) serves the
+bucket. The app checks `<MONOBOT_UPDATES_URL>/latest.json` when it opens and
+every four hours. A newer version downloads by itself and is verified, and the
+sidebar offers **Restart to update**. On Windows it also installs when the app
+quits. If the download or the installation fails, the card turns into
+**Download by hand**, which opens `<MONOBOT_UPDATES_URL>/download/<platform>`.
+That link also serves the download page's buttons.
 
 Repository secrets the workflow needs:
 
 | Secret | Value |
 | --- | --- |
-| `R2_ACCOUNT_ID`, `R2_BUCKET_NAME`, `R2_PUBLIC_BASE_URL` | Cloudflare account, `monobot-releases`, its public `r2.dev` URL |
+| `MONOBOT_UPDATES_URL` | The update Worker's URL, such as `https://monobot-updates.<subdomain>.workers.dev` |
+| `R2_ACCOUNT_ID`, `R2_BUCKET_NAME` | Cloudflare account and `monobot-releases` |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | An R2 API token limited to `monobot-releases` (Object Read & Write) |
 | `MONOBOT_UPDATER_PRIVATE_KEY`, `MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD`, `MONOBOT_UPDATER_PUBKEY` | The minisign key pair that signs updates (`cargo xtask update-keys <dir>` creates one; the password comes from `MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD`) |
 | `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8` | Developer ID signing and notarization |
+
+The Windows installer's pictures (`assets/installer/`) and every icon come
+from `assets/logo/monobot.svg` through `cargo xtask logo`. The installer
+speaks English and Spanish, offers to open monoBOT when it finishes, and takes
+`/S /UPDATEPID=<pid>` (with `/NORELAUNCH` when the app is quitting) from the
+updater.
 
 `cargo xtask bump-version <x.y.z>` sets the version of the app, its crates and
 the remote host before a release.

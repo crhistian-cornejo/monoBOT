@@ -111,3 +111,52 @@ fn unsigned_tauri_production_feed_is_never_accepted_as_native() {
     )
     .is_err());
 }
+#[test]
+fn manual_downloads_come_from_the_update_worker() {
+    let feed = "https://monobot-updates.example.workers.dev/latest.json";
+    assert_eq!(
+        updates_url(feed).as_deref(),
+        Some("https://monobot-updates.example.workers.dev")
+    );
+    let url = manual_download_url(feed, Some(PackageKind::Deb)).unwrap();
+    assert!(
+        url.starts_with("https://monobot-updates.example.workers.dev/download/"),
+        "{url}"
+    );
+    assert!(url.ends_with(download_key(Some(PackageKind::Deb))));
+    for feed in [
+        "http://monobot-updates.example.workers.dev/latest.json",
+        "https://monobot-updates.example.workers.dev/feed.json",
+        "https://user:secret@example.test/latest.json",
+    ] {
+        assert_eq!(manual_download_url(feed, None), None, "{feed}");
+    }
+}
+#[test]
+fn each_platform_downloads_its_own_installer() {
+    let key = download_key(None);
+    if cfg!(windows) {
+        assert_eq!(key, "windows");
+    } else if cfg!(target_os = "macos") {
+        assert!(key.starts_with("macos-"));
+    } else {
+        assert_eq!(key, "linux-appimage");
+        assert_eq!(download_key(Some(PackageKind::Rpm)), "linux-rpm");
+    }
+}
+#[test]
+fn only_the_windows_installer_finishes_an_update_while_the_app_quits() {
+    let installation = |kind| Installation {
+        kind,
+        path: PathBuf::from("monocode-gpui"),
+    };
+    assert!(Update::installs_on_quit(&installation(PackageKind::Nsis)));
+    for kind in [
+        PackageKind::App,
+        PackageKind::Appimage,
+        PackageKind::Deb,
+        PackageKind::Rpm,
+    ] {
+        assert!(!Update::installs_on_quit(&installation(kind)));
+    }
+}

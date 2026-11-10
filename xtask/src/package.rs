@@ -4,7 +4,7 @@
 //! Writes `artifacts-<kind>-<arch>.json` next to them for `cargo xtask release`.
 use crate::{
     bundle::{bundle_macos, copy_notices, Bundle, DataMode, BUNDLE_NAME},
-    release::{preview_version, Artifact},
+    release::{release_version, Artifact},
     util::{copy, create_dir_all, set_mode, write, Result, Tool, ToolError, Tools},
 };
 use std::{
@@ -138,7 +138,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
         arch,
         env,
     } = *package;
-    let parsed = preview_version(version)?;
+    let parsed = release_version(version)?;
     let binary = std::path::absolute(binary).map_err(|e| e.to_string())?;
     let out = std::path::absolute(out).map_err(|e| e.to_string())?;
     let embedded = tools.run(&Tool::new(&binary).arg("--version").capture())?;
@@ -150,10 +150,11 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
     let work = out.join("work");
     create_dir_all(&work)?;
     let mut artifacts = Vec::new();
-    let mut add = |filename: String, target: Option<&str>| {
+    let mut add = |filename: String, target: Option<&str>, download: Option<&str>| {
         artifacts.push(Artifact {
             filename: filename.clone(),
             target: target.map(str::to_owned),
+            download: download.map(str::to_owned),
             signature: None,
         });
         out.join(filename)
@@ -234,6 +235,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             let archive = add(
                 format!("MonoBOT_{version}_{name}.app.tar.gz"),
                 Some(&target),
+                None,
             );
             tools.run(
                 &Tool::new("tar")
@@ -255,7 +257,16 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             #[cfg(unix)]
             std::os::unix::fs::symlink("/Applications", image_root.join("Applications"))
                 .map_err(|e| e.to_string())?;
-            let dmg = add(format!("MonoBOT_{version}_{name}.dmg"), None);
+            let download = if arch == "aarch64" {
+                "macos-arm64"
+            } else {
+                "macos-x64"
+            };
+            let dmg = add(
+                format!("MonoBOT_{version}_{name}.dmg"),
+                None,
+                Some(download),
+            );
             let size_mib = logical_bytes(&image_root)?.div_ceil(1_048_576) + 64;
             tools.run(
                 &Tool::new("hdiutil")
@@ -279,13 +290,14 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             write(
                 &deb_root.join("DEBIAN/control"),
                 format!(
-                    "Package: monocode-native\nVersion: {}\nArchitecture: amd64\nMaintainer: {PUBLISHER}\nSection: devel\nPriority: optional\nDepends: libasound2, libfontconfig1, libfreetype6, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-xcb1, libxcb1, libxcb-shape0, libxcb-xfixes0, libxcb-randr0, libegl1, libvulkan1, libdbus-1-3, pkexec | policykit-1\nDescription: monoBOT experimental preview\n",
+                    "Package: monocode-native\nVersion: {}\nArchitecture: amd64\nMaintainer: {PUBLISHER}\nSection: devel\nPriority: optional\nDepends: libasound2, libfontconfig1, libfreetype6, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-xcb1, libxcb1, libxcb-shape0, libxcb-xfixes0, libxcb-randr0, libegl1, libvulkan1, libdbus-1-3, pkexec | policykit-1\nDescription: monoBOT, a desktop workspace for coding agents\n",
                     version.replace("-preview.", "~preview.")
                 ),
             )?;
             let deb = add(
                 format!("monobot_{version}_amd64.deb"),
                 Some("linux-x86_64-deb"),
+                Some("linux-deb"),
             );
             tools.run(
                 &Tool::new("dpkg-deb")
@@ -309,6 +321,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             let image = add(
                 format!("MonoBOT_{version}_amd64.AppImage"),
                 Some("linux-x86_64-appimage"),
+                Some("linux-appimage"),
             );
             tools.run(
                 &Tool::new(env.appimagetool.as_deref().unwrap_or("appimagetool"))
@@ -328,8 +341,9 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             write(
                 &spec,
                 format!(
-                    "Name: monocode-native\nVersion: {}\nRelease: 0.preview.{}%{{?dist}}\nSummary: monoBOT experimental preview\nLicense: MIT AND Apache-2.0\nVendor: {PUBLISHER}\nBuildArch: x86_64\nRequires: polkit\n%description\nmonoBOT experimental preview.\n%install\nmkdir -p %{{buildroot}}\ncp -a %{{_sourcedir}}/tree/. %{{buildroot}}/\n%files\n/usr/bin/monocode-native\n/usr/lib/monocode-native\n/usr/share/applications/monocode-native.desktop\n/usr/share/icons/hicolor/256x256/apps/monocode-native.png\n",
-                    parsed.base, parsed.sequence
+                    "Name: monocode-native\nVersion: {}\nRelease: {}%{{?dist}}\nSummary: monoBOT, a desktop workspace for coding agents\nLicense: MIT AND Apache-2.0\nVendor: {PUBLISHER}\nBuildArch: x86_64\nRequires: polkit\n%description\nmonoBOT runs coding agents and personal bots from one desktop app.\n%install\nmkdir -p %{{buildroot}}\ncp -a %{{_sourcedir}}/tree/. %{{buildroot}}/\n%files\n/usr/bin/monocode-native\n/usr/lib/monocode-native\n/usr/share/applications/monocode-native.desktop\n/usr/share/icons/hicolor/256x256/apps/monocode-native.png\n",
+                    parsed.base,
+                    parsed.rpm_release()
                 ),
             )?;
             tools.run(
@@ -351,10 +365,14 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
                 return Err("Expected exactly one native rpm".into());
             };
             let name = format!(
-                "monobot-{}-0.preview.{}.x86_64.rpm",
-                parsed.base, parsed.sequence
+                "monobot-{}-{}.x86_64.rpm",
+                parsed.base,
+                parsed.rpm_release()
             );
-            copy(&built.join(rpm), &add(name, Some("linux-x86_64-rpm")))?;
+            copy(
+                &built.join(rpm),
+                &add(name, Some("linux-x86_64-rpm"), Some("linux-rpm")),
+            )?;
         }
         "windows" => {
             let stage = work.join("windows");
@@ -368,11 +386,12 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             let installer = add(
                 format!("MonoBOT_{version}_x64-setup.exe"),
                 Some("windows-x86_64-nsis"),
+                Some("windows"),
             );
             let script = nsis_script(
                 &stage,
                 &installer,
-                &root.join("assets/icons/icon.ico"),
+                &root.join("assets"),
                 version,
                 &parsed.windows,
             );
@@ -393,14 +412,14 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
 fn nsis_script(
     stage: &Path,
     installer: &Path,
-    icon: &Path,
+    assets: &Path,
     version: &str,
     windows: &str,
 ) -> String {
     NSIS_TEMPLATE
         .replace("@STAGE@", &nsis_quote(&stage.to_string_lossy()))
         .replace("@OUTFILE@", &nsis_quote(&installer.to_string_lossy()))
-        .replace("@ICON@", &nsis_quote(&icon.to_string_lossy()))
+        .replace("@ASSETS@", &nsis_quote(&assets.to_string_lossy()))
         .replace("@VERSION@", version)
         .replace("@WINDOWS_VERSION@", windows)
         .replace("@PUBLISHER@", PUBLISHER)
@@ -653,13 +672,15 @@ mod tests {
         let script = nsis_script(
             Path::new("C:\\stage $dir"),
             Path::new("C:\\out\\\"MonoBOT\".exe"),
-            Path::new("icon.ico"),
+            Path::new("C:\\repo\\assets"),
             "0.16.0-preview.2",
             "0.16.0.2",
         );
         assert!(script.contains("\"C:\\stage $$dir\\monocode-gpui.exe\""));
         assert!(script.contains("OutFile \"C:\\out\\$\\\"MonoBOT$\\\".exe\""));
         assert!(script.contains("VIProductVersion \"0.16.0.2\""));
+        assert!(script.contains("\"C:\\repo\\assets\\installer\\nsis-sidebar.bmp\""));
+        assert!(script.contains("LangString RunApp ${LANG_SPANISH} \"Abrir monoBOT\""));
         assert!(script.contains(PUBLISHER));
         assert!(!script.contains('@'), "every placeholder is filled");
     }

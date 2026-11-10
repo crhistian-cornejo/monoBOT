@@ -28,26 +28,41 @@ pub const NATIVE_TARGETS: [&str; 6] = [
 const KEY_COMMENT: &str = "MonoBOT update signing key";
 const SIGNATURE_COMMENT: &str = "signature from MonoBOT update signing key";
 
-/// A native preview version such as `0.16.0-preview.2`.
+/// A release version: `0.0.1`, or a preview such as `0.16.0-preview.2`.
 #[derive(Debug, PartialEq, Eq)]
-pub struct PreviewVersion {
+pub struct ReleaseVersion {
     pub version: String,
     /// `0.16.0`
     pub base: String,
-    /// `2`
-    pub sequence: String,
-    /// `0.16.0.2`, which fits a Windows version resource.
+    /// `2` for `-preview.2`; none for a regular release.
+    pub sequence: Option<String>,
+    /// `0.16.0.2`, or `0.0.1.0` for a regular release: fits a Windows version
+    /// resource.
     pub windows: String,
 }
 
-pub fn preview_version(version: &str) -> Result<PreviewVersion> {
-    let error = || "Expected a native preview version such as 0.16.0-preview.1".to_owned();
-    let (base, sequence) = version.split_once("-preview.").ok_or_else(error)?;
+impl ReleaseVersion {
+    /// The rpm `Release` field: `1` for a regular release, `0.preview.N` for a
+    /// preview, so a preview sorts before the release it leads to.
+    pub fn rpm_release(&self) -> String {
+        match &self.sequence {
+            Some(sequence) => format!("0.preview.{sequence}"),
+            None => "1".into(),
+        }
+    }
+}
+
+pub fn release_version(version: &str) -> Result<ReleaseVersion> {
+    let error = || "Expected a release version such as 0.0.1 or 0.16.0-preview.1".to_owned();
+    let (base, sequence) = match version.split_once('-') {
+        Some((base, rest)) => (base, Some(rest.strip_prefix("preview.").ok_or_else(error)?)),
+        None => (version, None),
+    };
     let mut parts: Vec<&str> = base.split('.').collect();
     if parts.len() != 3 {
         return Err(error());
     }
-    parts.push(sequence);
+    parts.push(sequence.unwrap_or("0"));
     for part in &parts {
         let number = part.bytes().all(|b| b.is_ascii_digit())
             && !part.is_empty()
@@ -56,13 +71,23 @@ pub fn preview_version(version: &str) -> Result<PreviewVersion> {
             return Err(error());
         }
     }
-    Ok(PreviewVersion {
+    Ok(ReleaseVersion {
         version: version.into(),
         base: base.into(),
-        sequence: sequence.into(),
+        sequence: sequence.map(str::to_owned),
         windows: parts.join("."),
     })
 }
+
+/// What `/download/<key>` serves: the installer a person downloads by hand.
+pub const DOWNLOAD_KEYS: [&str; 6] = [
+    "windows",
+    "macos-arm64",
+    "macos-x64",
+    "linux-appimage",
+    "linux-deb",
+    "linux-rpm",
+];
 
 /// One package a platform build produced (`artifacts-<kind>-<arch>.json`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -70,12 +95,14 @@ pub struct Artifact {
     pub filename: String,
     /// The updater target it serves, or none for download-only files (.dmg).
     pub target: Option<String>,
+    /// The `/download/<key>` it answers, if people download it by hand.
+    pub download: Option<String>,
     pub signature: Option<String>,
 }
 
 impl Artifact {
     pub fn to_json(&self) -> Value {
-        json!({ "filename": self.filename, "target": self.target })
+        json!({ "filename": self.filename, "target": self.target, "download": self.download })
     }
 
     fn from_json(value: &Value) -> Result<Self> {
@@ -85,6 +112,7 @@ impl Artifact {
                 .ok_or("Invalid artifact filename")?
                 .into(),
             target: value["target"].as_str().map(str::to_owned),
+            download: value["download"].as_str().map(str::to_owned),
             signature: None,
         })
     }
@@ -113,7 +141,7 @@ pub fn native_manifest(
     artifacts: &[Artifact],
     notes: &str,
 ) -> Result<Value> {
-    preview_version(version)?;
+    release_version(version)?;
     let insecure =
         || "The native download base must be an HTTPS URL without credentials, query or fragment";
     let base = url::Url::parse(base_url).map_err(|_| insecure())?;
@@ -147,7 +175,7 @@ pub fn native_manifest(
             target.clone(),
             json!({
                 "url": format!(
-                    "{base}/native-preview/{version}/{}",
+                    "{base}/releases/{version}/{}",
                     utf8_percent_encode(&artifact.filename, URI_COMPONENT)
                 ),
                 "signature": signature,
@@ -262,9 +290,36 @@ impl Signer {
     }
 }
 
+/// The installers people download by hand, by `/download/<key>`:
+/// `{ "version": …, "files": { "windows": "MonoBOT_…_x64-setup.exe", … } }`.
+/// Every key in `DOWNLOAD_KEYS` must have exactly one file.
+pub fn downloads_manifest(version: &str, artifacts: &[Artifact]) -> Result<Value> {
+    release_version(version)?;
+    let mut files = serde_json::Map::new();
+    for artifact in artifacts {
+        let Some(key) = &artifact.download else {
+            continue;
+        };
+        if !DOWNLOAD_KEYS.contains(&key.as_str()) || files.contains_key(key) {
+            return Err(format!("Duplicate or unexpected download: {key}"));
+        }
+        if !plain_filename(&artifact.filename) {
+            return Err("An artifact must be a plain filename".into());
+        }
+        files.insert(key.clone(), artifact.filename.clone().into());
+    }
+    for key in DOWNLOAD_KEYS {
+        if !files.contains_key(key) {
+            return Err(format!("Missing download: {key}"));
+        }
+    }
+    Ok(json!({ "version": version, "files": files }))
+}
+
 /// Signs every updater package listed in `artifacts-*.json` in `directory`,
-/// then writes the signed feed (`latest.json`) and the list of files to
-/// publish (`release-files.json`). Returns that list.
+/// then writes the signed feed (`latest.json`), the manual downloads
+/// (`downloads.json`) and the list of files to publish under
+/// `releases/<version>/` (`release-files.json`). Returns that list.
 pub fn prepare_release(
     directory: &Path,
     env: &HashMap<String, String>,
@@ -274,7 +329,7 @@ pub fn prepare_release(
         .get("MONOCODE_NATIVE_VERSION")
         .map(String::as_str)
         .unwrap_or_default();
-    preview_version(version)?;
+    release_version(version)?;
     if !env.contains_key("MONOBOT_UPDATER_PRIVATE_KEY")
         || !env.contains_key("MONOBOT_UPDATER_PUBKEY")
     {
@@ -317,17 +372,21 @@ pub fn prepare_release(
         None => fs::read_to_string(root.join("docs/done/release-notes.md"))
             .map_err(|e| format!("docs/done/release-notes.md: {e}"))?,
     };
+    // The update Worker (deploy/cloudflare-updates) that serves the bucket.
     let base_url = env
-        .get("R2_PUBLIC_BASE_URL")
+        .get("MONOBOT_UPDATES_URL")
         .map(String::as_str)
         .unwrap_or_default();
     let manifest = native_manifest(version, base_url, &records, &notes)?;
+    let downloads = downloads_manifest(version, &records)?;
     let payload = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
     let payload_path = directory.join("native-manifest.payload");
     fs::write(&payload_path, &payload).map_err(|e| e.to_string())?;
     let signature = signer.sign(&payload_path)?;
     let feed = json!({ "payload": STANDARD.encode(&payload), "signature": signature });
     fs::write(directory.join("latest.json"), feed.to_string()).map_err(|e| e.to_string())?;
+    fs::write(directory.join("downloads.json"), downloads.to_string())
+        .map_err(|e| e.to_string())?;
     fs::write(
         directory.join("release-files.json"),
         serde_json::to_string(&files).map_err(|e| e.to_string())?,
@@ -346,7 +405,20 @@ mod tests {
             .map(|target| Artifact {
                 target: Some(target.to_string()),
                 filename: format!("{target} with spaces.bin"),
+                download: None,
                 signature: Some("signed-package".into()),
+            })
+            .collect()
+    }
+
+    fn downloads() -> Vec<Artifact> {
+        DOWNLOAD_KEYS
+            .iter()
+            .map(|key| Artifact {
+                target: None,
+                filename: format!("{key}.installer"),
+                download: Some(key.to_string()),
+                signature: None,
             })
             .collect()
     }
@@ -378,7 +450,7 @@ mod tests {
         for artifact in platforms.values() {
             let url = artifact["url"].as_str().unwrap();
             assert!(
-                url.starts_with("https://dl.example.test/native-preview/0.16.0-preview.2/"),
+                url.starts_with("https://dl.example.test/releases/0.16.0-preview.2/"),
                 "{url}"
             );
             assert!(url.contains("%20"), "{url}");
@@ -419,19 +491,52 @@ mod tests {
     }
 
     #[test]
-    fn production_tags_and_insecure_download_bases_cannot_create_native_releases() {
+    fn every_manual_download_is_listed_once() {
+        let listed = downloads_manifest("0.0.1", &downloads()).unwrap();
+        assert_eq!(listed["version"], "0.0.1");
+        assert_eq!(listed["files"]["windows"], "windows.installer");
+        assert_eq!(
+            listed["files"].as_object().unwrap().len(),
+            DOWNLOAD_KEYS.len()
+        );
+        let mut missing = downloads();
+        missing.pop();
+        assert!(downloads_manifest("0.0.1", &missing)
+            .unwrap_err()
+            .contains("Missing download"));
+        let mut duplicate = downloads();
+        duplicate.push(duplicate[0].clone());
+        assert!(downloads_manifest("0.0.1", &duplicate)
+            .unwrap_err()
+            .contains("Duplicate"));
+    }
+
+    #[test]
+    fn regular_versions_are_releases() {
+        let parsed = release_version("0.0.1").unwrap();
+        assert_eq!(parsed.base, "0.0.1");
+        assert_eq!(parsed.sequence, None);
+        assert_eq!(parsed.windows, "0.0.1.0");
+        assert_eq!(parsed.rpm_release(), "1");
+        assert_eq!(
+            release_version("0.0.1-preview.3").unwrap().rpm_release(),
+            "0.preview.3"
+        );
+        manifest(Some("0.0.1"), None, None).unwrap();
+    }
+
+    #[test]
+    fn tags_and_insecure_download_bases_cannot_create_native_releases() {
         for version in [
-            "0.16.0",
             "v0.16.0",
+            "0.16",
+            "0.16.0-",
             "native-v0.16.0-preview.1",
             "0.16.0-beta.1",
             "0.16.0-preview.1/../latest.json",
         ] {
             let error = manifest(Some(version), None, None).unwrap_err();
-            assert!(
-                error.contains("native preview version"),
-                "{version}: {error}"
-            );
+            assert!(error.contains("release version"), "{version}: {error}");
         }
         for base in [
             "http://dl.example.test",
@@ -446,15 +551,15 @@ mod tests {
     #[test]
     fn preview_sequence_fits_native_windows_version_resources() {
         assert_eq!(
-            preview_version("0.16.0-preview.12").unwrap().windows,
+            release_version("0.16.0-preview.12").unwrap().windows,
             "0.16.0.12"
         );
-        assert!(preview_version("0.16.0-preview.65536").is_err());
-        assert!(preview_version("0.16.0-preview.01").is_err());
-        let parsed = preview_version("1.2.3-preview.4").unwrap();
+        assert!(release_version("0.16.0-preview.65536").is_err());
+        assert!(release_version("0.16.0-preview.01").is_err());
+        let parsed = release_version("1.2.3-preview.4").unwrap();
         assert_eq!(
-            (parsed.base.as_str(), parsed.sequence.as_str()),
-            ("1.2.3", "4")
+            (parsed.base.as_str(), parsed.sequence.as_deref()),
+            ("1.2.3", Some("4"))
         );
     }
 
@@ -482,8 +587,11 @@ mod tests {
             fs::write(dist.join(&name), target).unwrap();
             list.push(json!({ "filename": name, "target": target }));
         }
-        fs::write(dist.join("download.dmg"), "dmg").unwrap();
-        list.push(json!({ "filename": "download.dmg", "target": null }));
+        for key in DOWNLOAD_KEYS {
+            let name = format!("download {key}.installer");
+            fs::write(dist.join(&name), key).unwrap();
+            list.push(json!({ "filename": name, "target": null, "download": key }));
+        }
         fs::write(
             dist.join("artifacts-all-x86_64.json"),
             Value::from(list).to_string(),
@@ -494,15 +602,22 @@ mod tests {
             ("MONOBOT_UPDATER_PRIVATE_KEY".into(), private),
             ("MONOBOT_UPDATER_PUBKEY".into(), public.clone()),
             (
-                "R2_PUBLIC_BASE_URL".into(),
+                "MONOBOT_UPDATES_URL".into(),
                 "https://dl.example.test".into(),
             ),
             ("NATIVE_RELEASE_NOTES".into(), "Fixture notes".into()),
         ]);
         let files = prepare_release(&dist, &env, &crate::util::root()).unwrap();
-        assert_eq!(files.len(), 13, "{files:?}");
-        assert!(files.contains(&"download.dmg".to_owned()));
-        assert!(!files.contains(&"download.dmg.sig".to_owned()));
+        assert_eq!(files.len(), 12 + DOWNLOAD_KEYS.len(), "{files:?}");
+        assert!(files.contains(&"download windows.installer".to_owned()));
+        assert!(!files.contains(&"download windows.installer.sig".to_owned()));
+        let downloads: Value =
+            serde_json::from_str(&fs::read_to_string(dist.join("downloads.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            downloads["files"]["linux-rpm"],
+            "download linux-rpm.installer"
+        );
         let listed: Vec<String> =
             serde_json::from_str(&fs::read_to_string(dist.join("release-files.json")).unwrap())
                 .unwrap();

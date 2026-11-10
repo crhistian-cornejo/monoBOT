@@ -50,4 +50,5 @@ third-party license texts referenced from [NOTICE](../NOTICE).
 
 Other READMEs: [mobile](../mobile/README.md), [remote host](../host/README.md),
 [mail Worker](../deploy/cloudflare-mail/README.md),
+[update Worker](../deploy/cloudflare-updates/README.md),
 [generators](../scripts/generators/README.md).

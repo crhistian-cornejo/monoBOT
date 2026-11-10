@@ -288,14 +288,25 @@ impl SettingsView {
     }
 }
 impl SettingsView {
-    /// Check for updates, or once one is found, install it in place.
+    /// Check for updates; once one has downloaded, restart into it; if it
+    /// failed, download its installer by hand.
     fn app_update_button(&self, cx: &mut Context<Self>) -> AnyElement {
         let updater = cx
             .try_global::<updater::Shared>()
             .map(|shared| shared.0.clone());
         match updater.as_ref().map(|u| updater::action(u, cx)) {
-            Some(Action::Install(version)) => {
-                let label = format!("Update to {version}");
+            Some(Action::Manual(version, url)) => {
+                let label = format!("Download {version}");
+                let mut ink = shell_fill();
+                ink.a = 1.;
+                primary_button("check-updates", label.clone(), false)
+                    .child(icon("external-link", 14.).text_color(ink))
+                    .child(label)
+                    .on_click(move |_, _, cx| cx.open_url(&url))
+                    .into_any_element()
+            }
+            Some(Action::Restart(version)) => {
+                let label = format!("Restart to update to {version}");
                 let mut ink = shell_fill();
                 ink.a = 1.;
                 primary_button("check-updates", label.clone(), false)

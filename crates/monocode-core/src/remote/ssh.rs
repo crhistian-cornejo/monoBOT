@@ -398,7 +398,14 @@ pub fn bootstrap_script(platform: HostPlatform) -> String {
 
 fn bootstrap_script_from_template(platform: HostPlatform, template: &str) -> String {
     let version = env!("CARGO_PKG_VERSION");
-    let url = format!("https://github.com/crhistian-cornejo/monoBOT/releases/download/v{version}");
+    // The host packages are published beside the app's, behind the update
+    // Worker (deploy/cloudflare-updates) this build checks.
+    let url = crate::app_update::built_in_feed()
+        .and_then(crate::app_update::updates_url)
+        .map(|base| format!("{base}/releases/{version}"))
+        .unwrap_or_else(|| {
+            format!("https://github.com/crhistian-cornejo/monoBOT/releases/download/v{version}")
+        });
     match platform {
         // include_str! preserves checkout line endings, including Windows CRLF.
         HostPlatform::Unix => template

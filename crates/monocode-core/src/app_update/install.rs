@@ -9,7 +9,9 @@ pub(super) fn install(
     update: &Update,
     download: Download,
     installation: &Installation,
+    relaunch: bool,
 ) -> Result<Installed, String> {
+    let _ = relaunch;
     match installation.kind {
         #[cfg(target_os = "macos")]
         PackageKind::App => install_mac(update, &download.path, &installation.path),
@@ -48,9 +50,14 @@ pub(super) fn install(
                 .parent()
                 .ok_or("Cannot locate the installation")?;
             // NSIS requires /D to be last and unquoted, including paths with spaces.
-            Command::new(&installer)
+            let mut command = Command::new(&installer);
+            command
                 .arg("/S")
-                .arg(format!("/UPDATEPID={}", std::process::id()))
+                .arg(format!("/UPDATEPID={}", std::process::id()));
+            if !relaunch {
+                command.arg("/NORELAUNCH");
+            }
+            command
                 .raw_arg(format!("/D={}", directory.display()))
                 .spawn()
                 .map_err(|e| e.to_string())?;

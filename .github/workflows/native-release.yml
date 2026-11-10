@@ -1,8 +1,13 @@
-name: Native preview release
+name: Release
 
+# Builds every platform, signs the update packages and the feed, and publishes
+# them to the monobot-releases R2 bucket, which the update Worker
+# (deploy/cloudflare-updates) serves. No GitHub release: the repository is
+# private, so its assets would not be downloadable.
 on:
   push:
-    tags: ["native-v*"]
+    # v0.0.1, or v0.0.2-preview.1 for a preview.
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -13,7 +18,7 @@ concurrency:
 
 jobs:
   build:
-    name: Native preview (${{ matrix.target }})
+    name: Build (${{ matrix.target }})
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +46,7 @@ jobs:
     env:
       CARGO_BUILD_JOBS: 2
       MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}
-      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+      MONOBOT_UPDATES_URL: ${{ secrets.MONOBOT_UPDATES_URL }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -58,12 +63,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#native-v}"
-          cargo xtask preview-version "$VERSION"
+          VERSION="${GITHUB_REF_NAME#v}"
+          cargo xtask release-version "$VERSION"
           test -n "$MONOBOT_UPDATER_PUBKEY"
-          test -n "$R2_PUBLIC_BASE_URL"
+          test -n "$MONOBOT_UPDATES_URL"
           echo "MONOCODE_NATIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "MONOCODE_NATIVE_UPDATER_ENDPOINT=${R2_PUBLIC_BASE_URL%/}/native-preview/latest.json" >> "$GITHUB_ENV"
+          echo "MONOCODE_NATIVE_UPDATER_ENDPOINT=${MONOBOT_UPDATES_URL%/}/latest.json" >> "$GITHUB_ENV"
           echo "MONOCODE_NATIVE_UPDATER_PUBKEY=$MONOBOT_UPDATER_PUBKEY" >> "$GITHUB_ENV"
       - name: Install native Linux build dependencies
         if: runner.os == 'Linux'
@@ -173,13 +178,13 @@ jobs:
           rm -f "$RUNNER_TEMP/native-signing.p12" "$RUNNER_TEMP/native-notary.p8"
 
   rpm:
-    name: Native preview (Enterprise Linux rpm)
+    name: Build (Enterprise Linux rpm)
     runs-on: ubuntu-latest
     container: almalinux:10
     env:
       CARGO_BUILD_JOBS: 2
       MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}
-      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+      MONOBOT_UPDATES_URL: ${{ secrets.MONOBOT_UPDATES_URL }}
     steps:
       - run: dnf install -y git
       - uses: actions/checkout@v4
@@ -195,12 +200,12 @@ jobs:
       - name: Configure native rpm channel
         run: |
           set -euo pipefail
-          VERSION="${GITHUB_REF_NAME#native-v}"
-          cargo xtask preview-version "$VERSION"
+          VERSION="${GITHUB_REF_NAME#v}"
+          cargo xtask release-version "$VERSION"
           test -n "$MONOBOT_UPDATER_PUBKEY"
-          test -n "$R2_PUBLIC_BASE_URL"
+          test -n "$MONOBOT_UPDATES_URL"
           echo "MONOCODE_NATIVE_VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "MONOCODE_NATIVE_UPDATER_ENDPOINT=${R2_PUBLIC_BASE_URL%/}/native-preview/latest.json" >> "$GITHUB_ENV"
+          echo "MONOCODE_NATIVE_UPDATER_ENDPOINT=${MONOBOT_UPDATES_URL%/}/latest.json" >> "$GITHUB_ENV"
           echo "MONOCODE_NATIVE_UPDATER_PUBKEY=$MONOBOT_UPDATER_PUBKEY" >> "$GITHUB_ENV"
       - run: cargo test --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-core --profile native-dev app_update
       - run: cargo build --locked --manifest-path crates/monocode-gpui/Cargo.toml -p monocode-gpui --release
@@ -252,17 +257,14 @@ jobs:
           if-no-files-found: error
 
   publish:
-    name: Publish native preview and its update feed
+    name: Publish to R2 behind the update Worker
     needs: [build, rpm, host]
-    runs-on: macos-latest
-    permissions:
-      contents: write
+    runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       MONOBOT_UPDATER_PRIVATE_KEY: ${{ secrets.MONOBOT_UPDATER_PRIVATE_KEY }}
       MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD }}
       MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}
-      R2_PUBLIC_BASE_URL: ${{ secrets.R2_PUBLIC_BASE_URL }}
+      MONOBOT_UPDATES_URL: ${{ secrets.MONOBOT_UPDATES_URL }}
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
       AWS_DEFAULT_REGION: auto
@@ -286,30 +288,28 @@ jobs:
         with:
           workspaces: . -> target
           key: native-publication-verifier
-      - name: Sign all update packages and the native manifest
+      - name: Sign all update packages, the feed and the download list
         run: |
-          echo "MONOCODE_NATIVE_VERSION=${GITHUB_REF_NAME#native-v}" >> "$GITHUB_ENV"
-          MONOCODE_NATIVE_VERSION="${GITHUB_REF_NAME#native-v}" cargo xtask release native-dist
+          echo "MONOCODE_NATIVE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+          MONOCODE_NATIVE_VERSION="${GITHUB_REF_NAME#v}" cargo xtask release native-dist
       - name: Verify the signed feed and all packages with the native client
         run: cargo xtask verify-release native-dist
-      - name: Publish native preview assets
+      - name: Publish to R2
         run: |
           set -euo pipefail
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          jq -r '.[]' native-dist/release-files.json > "$RUNNER_TEMP/native-files.txt"
-          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --draft --prerelease --latest=false --target "$GITHUB_SHA" --title "monoBOT ${MONOCODE_NATIVE_VERSION}" --notes-file docs/done/release-notes.md
-          fi
-          IS_DRAFT=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)
-          if [ "$IS_DRAFT" != true ]; then
-            echo 'Published native previews are immutable. Use a new preview tag.' >&2
+          PREFIX="releases/${MONOCODE_NATIVE_VERSION}"
+          # A published version is immutable: a fix ships as a new version.
+          if aws s3api head-object --bucket "$R2_BUCKET_NAME" --key "$PREFIX/release-files.json" --endpoint-url "$ENDPOINT" >/dev/null 2>&1; then
+            echo "Version ${MONOCODE_NATIVE_VERSION} is already published. Tag a new version." >&2
             exit 1
           fi
-          FILES=()
-          while IFS= read -r file; do
-            aws s3 cp "native-dist/$file" "s3://${R2_BUCKET_NAME}/native-preview/${MONOCODE_NATIVE_VERSION}/$file" --cache-control 'public,max-age=31536000,immutable' --endpoint-url "$ENDPOINT"
-            FILES+=("native-dist/$file")
-          done < "$RUNNER_TEMP/native-files.txt"
+          upload() {
+            aws s3 cp "$1" "s3://${R2_BUCKET_NAME}/$PREFIX/$(basename "$1")" --cache-control 'public,max-age=31536000,immutable' --endpoint-url "$ENDPOINT"
+          }
+          jq -r '.[]' native-dist/release-files.json | while IFS= read -r file; do
+            upload "native-dist/$file"
+          done
           HOST_ARCHIVES=(host-packages/*.tar.gz host-packages/*.zip)
           if (( ${#HOST_ARCHIVES[@]} != 6 )); then
             echo "Expected six host archives" >&2
@@ -317,10 +317,16 @@ jobs:
           fi
           for archive in "${HOST_ARCHIVES[@]}"; do
             test -f "$archive.sha256" || { echo "Missing host checksum: $archive.sha256" >&2; exit 1; }
-            FILES+=("$archive" "$archive.sha256")
+            upload "$archive"
+            upload "$archive.sha256"
           done
-          gh release upload "$GITHUB_REF_NAME" "${FILES[@]}" --clobber
-          gh release edit "$GITHUB_REF_NAME" --draft=false --prerelease --latest=false
-          # This is the only mutable feed written by the native release job.
-          # Publish after every platform asset and the GitHub release exist.
-          aws s3 cp native-dist/latest.json "s3://${R2_BUCKET_NAME}/native-preview/latest.json" --content-type application/json --cache-control 'no-store,max-age=0,must-revalidate' --endpoint-url "$ENDPOINT"
+          upload native-dist/release-files.json
+          # The two mutable files go last, once every file they name exists.
+          aws s3 cp native-dist/downloads.json "s3://${R2_BUCKET_NAME}/downloads.json" --content-type application/json --cache-control 'no-store,max-age=0,must-revalidate' --endpoint-url "$ENDPOINT"
+          aws s3 cp native-dist/latest.json "s3://${R2_BUCKET_NAME}/latest.json" --content-type application/json --cache-control 'no-store,max-age=0,must-revalidate' --endpoint-url "$ENDPOINT"
+      - name: Check the Worker serves the new version
+        run: |
+          set -euo pipefail
+          BASE="${MONOBOT_UPDATES_URL%/}"
+          curl --fail --silent --show-error "$BASE/downloads.json" | jq -e --arg v "$MONOCODE_NATIVE_VERSION" '.version == $v'
+          curl --fail --silent --show-error --head "$BASE/download/windows" | grep -i '^location:'

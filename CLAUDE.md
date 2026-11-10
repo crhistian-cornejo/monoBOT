@@ -10,6 +10,7 @@ App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay R
 | `mobile/` | App Expo (iOS/Android). Proyecto pnpm propio con su lockfile; tiene su propio `AGENTS.md`. |
 | `host/` | Host remoto en Node (`monocode-host`) que instala la app por SSH. |
 | `deploy/cloudflare-mail/` | Worker opcional de correo entrante en Rust → WebAssembly (Cloudflare Email Routing → R2 + D1). Crate aparte, no está en el workspace. |
+| `deploy/cloudflare-updates/` | Worker de actualizaciones en Rust → WebAssembly: sirve desde R2 el feed firmado, los instaladores y `/download/<plataforma>`. Crate aparte, no está en el workspace. |
 | `vendor/gpui-pre*/` | GPUI fijado y parcheado. No lo actualices sin leer `docs/done/architecture.md`. |
 | `xtask/` | Herramientas del escritorio en Rust (`cargo xtask`): runner de desarrollo, build, `.app`, instaladores, firma y publicación de actualizaciones. |
 | `scripts/` | Solo lo que no puede ser Rust: `generators/` (fuentes JS de los bundles que la app ejecuta en QuickJS) y `perf/` (el `claude` simulado para perfilar). |
@@ -25,7 +26,7 @@ cargo xtask cargo test -p monocode-gpui --profile native-dev <filtro>
 cargo xtask help            # el resto: package, release, bump-version, icons, ssh-smoke, perf
 ```
 
-El escritorio no necesita Node ni Bun. Antes de hacer commit: `cargo fmt --all` y los tests de lo que tocaste con `cargo xtask cargo test … <filtro>` (si tocaste `xtask/`, `cargo test -p xtask`). Para el móvil, `pnpm --dir mobile exec tsc --noEmit` y `pnpm --dir mobile lint`. Para el host, `pnpm --dir host test` (incluye `tsc --noEmit`). Para el Worker de correo, `cargo test` dentro de `deploy/cloudflare-mail/`.
+El escritorio no necesita Node ni Bun. Antes de hacer commit: `cargo fmt --all` y los tests de lo que tocaste con `cargo xtask cargo test … <filtro>` (si tocaste `xtask/`, `cargo test -p xtask`). Para el móvil, `pnpm --dir mobile exec tsc --noEmit` y `pnpm --dir mobile lint`. Para el host, `pnpm --dir host test` (incluye `tsc --noEmit`). Para los Workers, `cargo test` dentro de `deploy/cloudflare-mail/` o `deploy/cloudflare-updates/`.
 
 ## Código
 

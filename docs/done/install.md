@@ -1,6 +1,6 @@
 # Linux installation
 
-Download the x86_64 `.deb`, `.rpm`, or AppImage from [GitHub Releases](https://github.com/crhistian-cornejo/monoBOT/releases/latest). Install and sign in to at least one [supported provider](providers.md) before starting a session.
+Download the x86_64 `.deb`, `.rpm`, or AppImage from the download page: `<updates URL>/download/linux-deb`, `linux-rpm` or `linux-appimage` (see the [update Worker](../../deploy/cloudflare-updates/README.md)). Install and sign in to at least one [supported provider](providers.md) before starting a session.
 
 ## Ubuntu / Debian packages
 
@@ -44,7 +44,7 @@ sudo dnf config-manager --set-enabled ol10_developer_EPEL
 sudo dnf install ./monobot-*.x86_64.rpm
 ```
 
-GitHub Releases builds the `.rpm` on Enterprise Linux 10 so it loads on Fedora and EL 10. EL 9 and older are unsupported (`webkit2gtk4.1-devel` only exists in EPEL 10).
+The release workflow builds the `.rpm` on Enterprise Linux 10 so it loads on Fedora and EL 10. EL 9 and older are unsupported (`webkit2gtk4.1-devel` only exists in EPEL 10).
 
 For native build dependencies and packaging commands, see [building from source](building.md#fedora--enterprise-linux-packages). Building on EL 10 also needs CRB; the repository’s setup helper enables it and EPEL automatically.
 
@@ -73,9 +73,9 @@ chmod +x MonoBOT_*.AppImage
 
 ## Updates
 
-The AppImage updates itself from **Settings → General**. The `.deb` and `.rpm` update through apt or dnf: download the newer package from [GitHub Releases](https://github.com/crhistian-cornejo/monoBOT/releases/latest) and install it with the same command used above.
+The AppImage updates itself from **Settings → General**. The `.deb` and `.rpm` update through apt or dnf: download the newer package from the same download page and install it with the same command used above.
 
-For beta release feeds and testing AppImage updates, see [release and updater details](building.md#beta-releases-and-updates).
+For beta release feeds and testing AppImage updates, see [release and updater details](building.md#releases-and-updates).
 
 ## Troubleshooting on Fedora / Wayland
 

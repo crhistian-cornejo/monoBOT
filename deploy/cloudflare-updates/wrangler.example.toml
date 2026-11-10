@@ -1,0 +1,23 @@
+# Copy to wrangler.toml (git-ignored). No account id is needed here: wrangler
+# takes it from `wrangler login` or from CLOUDFLARE_ACCOUNT_ID.
+name = "monobot-updates"
+main = "build/worker/shim.mjs"
+compatibility_date = "2025-06-01"
+
+# Public: the app and the download page read it. The URL is
+# https://monobot-updates.<your-subdomain>.workers.dev, which the release
+# workflow needs as the MONOBOT_UPDATES_URL secret.
+workers_dev = true
+preview_urls = false
+
+# Later, to serve it from the Pages site's domain instead:
+# routes = [{ pattern = "updates.REPLACE_WITH_YOUR_DOMAIN", custom_domain = true }]
+
+# Rust compiled to WebAssembly by worker-build (`cargo install worker-build`).
+[build]
+command = "worker-build --release"
+
+# The bucket `cargo xtask release` + native-release.yml fill. Read-only here.
+[[r2_buckets]]
+binding = "RELEASES"
+bucket_name = "monobot-releases"

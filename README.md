@@ -84,6 +84,7 @@ pnpm --dir mobile android   # Android Emulator
 ├── mobile/                  # React Native / Expo mobile companion app
 ├── host/                    # Remote host (Node) the desktop installs over SSH
 ├── deploy/cloudflare-mail/  # Optional inbound mail Worker (Rust → WebAssembly)
+├── deploy/cloudflare-updates/ # Update and download Worker (Rust → WebAssembly)
 ├── vendor/                  # Pinned and patched GPUI framework crates
 ├── xtask/                   # `cargo xtask`: dev runner, builds, packaging, releases
 ├── scripts/                 # JavaScript generators for embedded bundles, perf replay
