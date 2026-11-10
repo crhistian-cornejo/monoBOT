@@ -318,6 +318,27 @@ jobs:
       - name: Publish to R2
         run: |
           set -euo pipefail
+          # R2_ACCESS_KEY_ID may hold the R2 API token itself (cfat_…) rather
+          # than its 32-character S3 key id. R2's S3 credentials come from the
+          # token: the key id is the token's id, the secret is the SHA-256 of
+          # its value (https://developers.cloudflare.com/r2/api/tokens/).
+          if [ "${#AWS_ACCESS_KEY_ID}" -ne 32 ]; then
+            TOKEN="$AWS_ACCESS_KEY_ID"
+            ID=""
+            for VERIFY in "accounts/${R2_ACCOUNT_ID}/tokens/verify" "user/tokens/verify"; do
+              ID=$(curl --silent --show-error -H "Authorization: Bearer $TOKEN" "https://api.cloudflare.com/client/v4/$VERIFY" | jq -r '.result.id // empty') || true
+              [ -n "$ID" ] && break
+            done
+            if [ "${#ID}" -ne 32 ]; then
+              echo "R2_ACCESS_KEY_ID is neither an S3 access key id nor a working R2 API token." >&2
+              exit 1
+            fi
+            SECRET=$(printf %s "$TOKEN" | sha256sum | cut -d' ' -f1)
+            echo "::add-mask::$ID"
+            echo "::add-mask::$SECRET"
+            export AWS_ACCESS_KEY_ID="$ID" AWS_SECRET_ACCESS_KEY="$SECRET"
+            echo "Using the S3 credentials of the R2 API token."
+          fi
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           PREFIX="releases/${MONOCODE_NATIVE_VERSION}"
           # A published version is immutable: a fix ships as a new version.
