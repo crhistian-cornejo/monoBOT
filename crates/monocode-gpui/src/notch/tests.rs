@@ -484,6 +484,7 @@ fn what_plays_glides_past_at_rest_and_leads_home_with_its_player(cx: &mut TestAp
         position: Duration::from_secs(12),
         at: Instant::now(),
         art: None,
+        shuffle: None,
     };
     opened
         .window
@@ -549,6 +550,7 @@ fn agents_under_the_music_take_the_left_wing_and_keep_the_width(cx: &mut TestApp
         position: Duration::from_secs(12),
         at: Instant::now(),
         art: None,
+        shuffle: None,
     };
     opened
         .window
@@ -631,6 +633,7 @@ fn agents_lists_the_users_own_agents_and_chat_the_coding_chats(cx: &mut TestAppC
                         session: Some(20),
                         doing: Some("Reading files".into()),
                         needs_you: true,
+                        coding: false,
                     }],
                     activities: vec![working(4), agent_chat],
                     asks: vec![agent_ask, code_ask],
@@ -887,6 +890,7 @@ fn ivy() -> monocode_core::notch::Personal {
         session: Some(20),
         doing: None,
         needs_you: false,
+        coding: false,
     }
 }
 
@@ -1038,6 +1042,7 @@ fn lyrics_are_not_asked_for_while_lyrics_is_off(cx: &mut TestAppContext) {
                     position: Duration::from_secs(12),
                     at: Instant::now(),
                     art: None,
+                    shuffle: None,
                 }),
                 cx,
             );
@@ -1374,12 +1379,19 @@ fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
                     position: Duration::ZERO,
                     at: Instant::now(),
                     art: None,
+                    shuffle: None,
                 }),
                 cx,
             );
             notch.set_open(true, cx);
             let without = notch.body_height();
-            notch.set_queue(vec![next("One"), next("Two")], cx);
+            notch.set_snapshot(
+                monocode_core::notch::spotify::Snapshot {
+                    next: vec![next("One"), next("Two")],
+                    ..Default::default()
+                },
+                cx,
+            );
             (without, notch.body_height())
         })
         .unwrap();
@@ -1584,6 +1596,7 @@ fn the_open_player_leaves_the_lyrics_to_the_closed_notch(cx: &mut TestAppContext
                     position: Duration::from_secs(12),
                     at: Instant::now(),
                     art: None,
+                    shuffle: None,
                 }),
                 cx,
             );
@@ -1606,4 +1619,208 @@ fn the_open_player_leaves_the_lyrics_to_the_closed_notch(cx: &mut TestAppContext
     click(visual, "notch-media-lyrics");
     assert_eq!(moment(visual), None);
     assert_eq!(height(visual), with_lyrics);
+}
+
+#[gpui::test]
+fn the_player_leads_into_spotify_shuffles_and_keeps_liked_songs(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Playing, Track};
+    use monocode_core::notch::spotify::{Artist, Now, Snapshot};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let playing = |app: &str, shuffle| Playing {
+        track: Track {
+            app: app.into(),
+            title: "Song".into(),
+            artist: "Ana, Bo".into(),
+            album: "Album".into(),
+            duration: Some(Duration::from_secs(200)),
+        },
+        playing: false,
+        position: Duration::from_secs(12),
+        at: Instant::now(),
+        art: None,
+        shuffle,
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_media(Some(playing("Spotify.exe", Some(false))), cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    // Not signed in: the title and each artist lead to Spotify's search, and
+    // a line under the player says where "Playing next" comes from.
+    assert!(visual.debug_bounds("notch-queue-hint").is_some());
+    click(visual, "notch-player-open-track");
+    assert_eq!(
+        visual.opened_url().as_deref(),
+        Some("spotify:search:Song%20Ana%2C%20Bo")
+    );
+    click(visual, "notch-player-artist-1");
+    assert_eq!(visual.opened_url().as_deref(), Some("spotify:search:Bo"));
+    // Shuffle is the player's own word: off, then on at a click.
+    let shuffle = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| notch.shuffle())
+            .unwrap()
+    };
+    assert_eq!(shuffle(visual), Some(false));
+    assert!(visual.debug_bounds("notch-media-shuffle-on").is_none());
+    click(visual, "notch-media-shuffle");
+    assert_eq!(shuffle(visual), Some(true));
+    assert!(visual.debug_bounds("notch-media-shuffle-on").is_some());
+    // Signed in, Spotify says which track this is: its own addresses, its
+    // Liked Songs, and whether there is an order to shuffle.
+    let said = |can_shuffle| Snapshot {
+        now: Some(Now {
+            title: "Song".into(),
+            uri: "spotify:track:t1".into(),
+            artists: vec![Artist {
+                name: "Ana".into(),
+                uri: "spotify:artist:a1".into(),
+            }],
+            shuffle: true,
+            can_shuffle,
+        }),
+        liked: Some(false),
+        ..Snapshot::default()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.look.spotify_client = "0f".repeat(16);
+            notch.queue.connected = true;
+            notch.set_snapshot(said(true), cx);
+            assert_eq!(notch.like(), queue::Like::Known(false));
+        })
+        .unwrap();
+    assert!(visual.debug_bounds("notch-queue-hint").is_none());
+    click(visual, "notch-player-open-track");
+    assert_eq!(visual.opened_url().as_deref(), Some("spotify:track:t1"));
+    click(visual, "notch-player-artist-0");
+    assert_eq!(visual.opened_url().as_deref(), Some("spotify:artist:a1"));
+    click(visual, "notch-media-like");
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            assert_eq!(notch.like(), queue::Like::Known(true));
+            // A radio: Spotify says there is nothing to shuffle there.
+            notch.set_snapshot(said(false), cx);
+            assert_eq!(notch.shuffle(), None);
+            // The answer is still about the track before: nothing of it is
+            // shown for this one.
+            let mut other = playing("Spotify.exe", None);
+            other.track.title = "Another".into();
+            notch.set_media(Some(other), cx);
+            assert_eq!(notch.like(), queue::Like::Unknown);
+            assert_eq!(notch.shuffle(), None);
+            assert_eq!(
+                notch.track_link().as_deref(),
+                Some("spotify:search:Another%20Ana%2C%20Bo")
+            );
+            // A browser's video is not Spotify's: no heart, no links.
+            notch.set_media(Some(playing("chrome.exe", None)), cx);
+            assert_eq!(notch.track_link(), None);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-media-like").is_none());
+    assert!(visual.debug_bounds("notch-media-shuffle").is_none());
+    assert!(visual.debug_bounds("notch-media-play").is_some());
+}
+
+#[gpui::test]
+fn the_heart_leads_to_the_sign_in_until_spotify_is_connected(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Playing, Track};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_media(
+                Some(Playing {
+                    track: Track {
+                        app: "Spotify.exe".into(),
+                        title: "Song".into(),
+                        artist: "Ana".into(),
+                        album: String::new(),
+                        duration: None,
+                    },
+                    playing: false,
+                    position: Duration::ZERO,
+                    at: Instant::now(),
+                    art: None,
+                    shuffle: None,
+                }),
+                cx,
+            );
+            notch.set_open(true, cx);
+            assert_eq!(notch.like(), queue::Like::Connect);
+            // The player does not say how shuffle stands: dimmed, no click.
+            assert_eq!(notch.shuffle(), None);
+        })
+        .unwrap();
+    click(visual, "notch-media-shuffle");
+    assert!(visual.debug_bounds("notch-media-shuffle-on").is_none());
+    click(visual, "notch-media-like");
+    assert!(visual.debug_bounds("notch-music-page").is_some());
+}
+
+#[gpui::test]
+fn the_agents_page_lists_the_personal_agents_apart_from_the_ones_that_code(
+    cx: &mut TestAppContext,
+) {
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let crab = monocode_core::notch::Personal {
+        name: "MonoCrab".into(),
+        session: Some(21),
+        coding: true,
+        ..ivy()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    agents: vec![ivy()],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-agents");
+    // Only personal agents: one section, as before.
+    assert!(visual.debug_bounds("notch-agents-code").is_none());
+    let one = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            let one = notch.agents_height();
+            // The one that codes comes first in the feed and still lands
+            // under Code, below the personal ones.
+            notch.update_feed(
+                Feed {
+                    agents: vec![crab, ivy()],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            one
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let top = |visual: &mut VisualTestContext, selector: &'static str| {
+        visual.debug_bounds(selector).unwrap().top()
+    };
+    let code = top(visual, "notch-agents-code");
+    assert!(top(visual, "notch-agent-1") < code, "Ivy is personal");
+    assert!(code < top(visual, "notch-agent-0"), "MonoCrab codes");
+    let two = opened
+        .window
+        .update(visual, |notch, _, _| notch.agents_height())
+        .unwrap();
+    assert_eq!(two, one + CAPTION + ROW, "the page grows by Code's section");
 }

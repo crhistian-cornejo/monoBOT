@@ -1,5 +1,7 @@
-//! Spotify's own queue for the notch's player ("Playing next"). The system's
-//! media session tells what plays, never what comes after; Spotify's Web API
+//! What only Spotify itself knows, for the notch's player: its queue
+//! ("Playing next"), where the track and its artists live in Spotify, whether
+//! the track is among the Liked Songs, and how shuffle stands. The system's
+//! media session tells what plays, never any of that; Spotify's Web API
 //! does, once the user signs in with their own app's Client ID (Spotify
 //! gives every developer account one). The sign-in is OAuth with PKCE, so
 //! there is no client secret; the refresh token goes to the system keychain
@@ -14,7 +16,11 @@ use std::time::{Duration, Instant};
 /// their Spotify app's settings.
 pub const REDIRECT: &str = "http://127.0.0.1:43917/callback";
 const PORT: u16 = 43917;
-const SCOPES: &str = "user-read-playback-state user-read-currently-playing";
+/// Reading what plays and its queue, turning shuffle on or off, and reading
+/// and changing the Liked Songs. A sign-in from before the last three keeps
+/// working for the queue and is asked to connect again for the rest.
+const SCOPES: &str = "user-read-playback-state user-read-currently-playing \
+    user-modify-playback-state user-library-read user-library-modify";
 const ACCOUNT: &str = "spotify-refresh";
 /// How long the browser's sign-in may take.
 const SIGN_IN: Duration = Duration::from_secs(180);
@@ -27,6 +33,139 @@ const NOT_THE_ANSWER: &str = "Not the sign-in's answer.";
 pub struct Next {
     pub title: String,
     pub artist: String,
+}
+
+/// One of the playing track's artists, with Spotify's own address for them.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Artist {
+    pub name: String,
+    /// `spotify:artist:…`
+    pub uri: String,
+}
+
+/// What Spotify itself says plays now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Now {
+    pub title: String,
+    /// `spotify:track:…`, or an episode's.
+    pub uri: String,
+    pub artists: Vec<Artist>,
+    pub shuffle: bool,
+    /// Whether Spotify lets shuffle be changed where this plays from: it
+    /// does in a playlist or an album, not in a radio or between its own
+    /// suggestions.
+    pub can_shuffle: bool,
+}
+
+impl Now {
+    /// Whether this is the track the system's controls call `title`. The
+    /// Web API learns of a new track a moment after the player does, so an
+    /// answer may still be about the track before.
+    pub fn is(&self, title: &str) -> bool {
+        self.title.trim().to_lowercase() == title.trim().to_lowercase()
+    }
+
+    /// Whether it can be kept among the Liked Songs: a track can, an
+    /// episode cannot.
+    pub fn likeable(&self) -> bool {
+        self.uri.starts_with("spotify:track:")
+    }
+}
+
+/// What plays out of `GET /me/player`'s answer; none while nothing does
+/// (Spotify then answers with no body at all).
+pub fn parse_now(body: &str) -> Option<Now> {
+    let json: serde_json::Value = serde_json::from_str(body).ok()?;
+    let item = &json["item"];
+    let uri = item["uri"].as_str().filter(|uri| is_uri(uri))?;
+    let title = item["name"].as_str()?.trim();
+    if title.is_empty() {
+        return None;
+    }
+    let artists = item["artists"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|artist| {
+            Some(Artist {
+                name: artist["name"].as_str()?.trim().to_owned(),
+                uri: artist["uri"].as_str().filter(|uri| is_uri(uri))?.to_owned(),
+            })
+        })
+        .filter(|artist| !artist.name.is_empty())
+        .collect();
+    Some(Now {
+        title: title.to_owned(),
+        uri: uri.to_owned(),
+        artists,
+        shuffle: json["shuffle_state"].as_bool().unwrap_or(false),
+        can_shuffle: !json["actions"]["disallows"]["toggling_shuffle"]
+            .as_bool()
+            .unwrap_or(false),
+    })
+}
+
+/// Whether the first URI asked of `GET /me/library/contains` is saved.
+pub fn parse_contains(body: &str) -> Option<bool> {
+    serde_json::from_str::<serde_json::Value>(body).ok()?[0].as_bool()
+}
+
+/// A Spotify address as its app opens them: `spotify:` and only the
+/// letters, digits and colons Spotify writes, so nothing read from the
+/// network is handed to the system as some other kind of link.
+fn is_uri(uri: &str) -> bool {
+    uri.strip_prefix("spotify:").is_some_and(|rest| {
+        !rest.is_empty()
+            && rest
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b':')
+    })
+}
+
+fn encoded(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
+}
+
+/// Spotify's own search for `text`, opened in its app: where a title or an
+/// artist leads while Spotify's address for it is not known.
+pub fn search_link(text: &str) -> String {
+    format!("spotify:search:{}", encoded(text.trim()))
+}
+
+/// Where the playing track's title leads: the track itself once Spotify
+/// said which one it is, else a search for it.
+pub fn track_link(now: Option<&Now>, title: &str, artist: &str) -> String {
+    match now.filter(|now| now.is(title)) {
+        Some(now) => now.uri.clone(),
+        None => search_link(&format!("{} {}", title.trim(), artist.trim())),
+    }
+}
+
+/// The playing track's artists, each with where its name leads: Spotify's
+/// own list and addresses once it said them, else the names the system's
+/// controls give in one line ("A, B"), each leading to a search.
+pub fn artist_links(now: Option<&Now>, title: &str, artist: &str) -> Vec<(String, String)> {
+    match now.filter(|now| now.is(title) && !now.artists.is_empty()) {
+        Some(now) => now
+            .artists
+            .iter()
+            .map(|artist| (artist.name.clone(), artist.uri.clone()))
+            .collect(),
+        None => artist
+            .split(", ")
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(|name| (name.to_owned(), search_link(name)))
+            .collect(),
+    }
 }
 
 /// A Client ID as Spotify writes them: 32 hex digits.
@@ -261,6 +400,45 @@ pub fn parse_queue(body: &str) -> Vec<Next> {
         .collect()
 }
 
+/// Everything the player asks Spotify for about the track that plays.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Snapshot {
+    /// What plays next, in order.
+    pub next: Vec<Next>,
+    pub now: Option<Now>,
+    /// Whether the track is among the Liked Songs; none when it is not a
+    /// track or Spotify would not say.
+    pub liked: Option<bool>,
+    /// The sign-in is from before the Liked Songs were asked for.
+    pub reconnect: bool,
+    /// What went wrong first, if anything did.
+    pub problem: Option<String>,
+}
+
+/// Why Spotify did not do what was asked.
+enum Refusal {
+    /// The access ran out or was taken back.
+    SignIn,
+    /// Not allowed: the sign-in lacks the permission, or the account does.
+    Denied,
+    Other(String),
+}
+
+impl Refusal {
+    /// What to tell the user, with `denied` for what was not allowed.
+    fn said(self, denied: &str) -> String {
+        match self {
+            Refusal::SignIn => "Spotify asked to sign in again.".into(),
+            Refusal::Denied => denied.into(),
+            Refusal::Other(error) => error,
+        }
+    }
+}
+
+const NO_QUEUE: &str = "Spotify does not share this account's queue.";
+pub const NO_LIBRARY: &str = "Connect Spotify again to save songs from here.";
+const NO_SHUFFLE: &str = "Spotify changes shuffle from here only with Premium.";
+
 /// The signed-in user's access, renewed when it runs out.
 pub struct Session {
     client: String,
@@ -297,27 +475,82 @@ impl Session {
         Ok(tokens.access)
     }
 
-    /// What plays next, in order.
-    pub fn queue(&mut self) -> Result<Vec<Next>, String> {
-        let access = self.access()?;
-        let response = agent()
-            .get("https://api.spotify.com/v1/me/player/queue")
-            .set("Authorization", &format!("Bearer {access}"))
-            .call();
+    /// One request of the Web API as the signed-in user; the answer's body.
+    fn ask(&mut self, method: &str, path: &str) -> Result<String, Refusal> {
+        let access = self.access().map_err(Refusal::Other)?;
+        let request = agent()
+            .request(method, &format!("https://api.spotify.com/v1{path}"))
+            .set("Authorization", &format!("Bearer {access}"));
+        let response = if method == "GET" {
+            request.call()
+        } else {
+            // Spotify wants a length even when nothing is sent.
+            request.send_bytes(&[])
+        };
         match response {
-            Ok(response) => Ok(parse_queue(
-                &response.into_string().map_err(|error| error.to_string())?,
-            )),
+            Ok(response) => response
+                .into_string()
+                .map_err(|error| Refusal::Other(error.to_string())),
             Err(ureq::Error::Status(401, _)) => {
                 self.access = None;
-                Err("Spotify asked to sign in again.".into())
+                Err(Refusal::SignIn)
             }
-            Err(ureq::Error::Status(403, _)) => {
-                Err("Spotify does not share this account's queue.".into())
+            Err(ureq::Error::Status(403, _)) => Err(Refusal::Denied),
+            Err(ureq::Error::Status(429, _)) => {
+                Err(Refusal::Other("Spotify asked to slow down.".into()))
             }
-            Err(ureq::Error::Status(429, _)) => Err("Spotify asked to slow down.".into()),
-            Err(error) => Err(error.to_string()),
+            Err(error) => Err(Refusal::Other(error.to_string())),
         }
+    }
+
+    /// What plays next, in order.
+    pub fn queue(&mut self) -> Result<Vec<Next>, String> {
+        self.ask("GET", "/me/player/queue")
+            .map(|body| parse_queue(&body))
+            .map_err(|refusal| refusal.said(NO_QUEUE))
+    }
+
+    /// The track that plays as Spotify knows it, whether it is liked, and
+    /// what plays next. Each part is asked for by itself, so one that
+    /// Spotify refuses does not take the others with it.
+    pub fn snapshot(&mut self) -> Snapshot {
+        let mut snapshot = Snapshot::default();
+        match self.ask("GET", "/me/player") {
+            Ok(body) => snapshot.now = parse_now(&body),
+            Err(refusal) => snapshot.problem = Some(refusal.said(NO_QUEUE)),
+        }
+        if let Some(now) = snapshot.now.as_ref().filter(|now| now.likeable()) {
+            let path = format!("/me/library/contains?uris={}", encoded(&now.uri));
+            match self.ask("GET", &path) {
+                Ok(body) => snapshot.liked = parse_contains(&body),
+                Err(Refusal::Denied) => snapshot.reconnect = true,
+                Err(refusal) => {
+                    snapshot.problem.get_or_insert(refusal.said(NO_LIBRARY));
+                }
+            }
+        }
+        match self.queue() {
+            Ok(next) => snapshot.next = next,
+            Err(error) => {
+                snapshot.problem.get_or_insert(error);
+            }
+        }
+        snapshot
+    }
+
+    /// Keeps the track among the Liked Songs, or takes it out.
+    pub fn like(&mut self, uri: &str, liked: bool) -> Result<(), String> {
+        let method = if liked { "PUT" } else { "DELETE" };
+        self.ask(method, &format!("/me/library?uris={}", encoded(uri)))
+            .map(|_| ())
+            .map_err(|refusal| refusal.said(NO_LIBRARY))
+    }
+
+    /// Turns shuffle on or off where Spotify plays.
+    pub fn shuffle(&mut self, on: bool) -> Result<(), String> {
+        self.ask("PUT", &format!("/me/player/shuffle?state={on}"))
+            .map(|_| ())
+            .map_err(|refusal| refusal.said(NO_SHUFFLE))
     }
 }
 
@@ -377,5 +610,76 @@ mod tests {
         assert_eq!(queue[1].artist, "The Show");
         assert!(parse_queue("not json").is_empty());
         assert!(parse_queue("{}").is_empty());
+    }
+
+    const PLAYER: &str = r#"{"shuffle_state":true,
+        "context":{"type":"playlist","uri":"spotify:playlist:37i9dQ"},
+        "item":{"name":"Sirens Tritonia 539","uri":"spotify:track:4uLU6h",
+            "artists":[{"name":"anamē","uri":"spotify:artist:1aB"},
+                {"name":"Tritonal","uri":"spotify:artist:2cD"},
+                {"name":"Odd","uri":"https://evil.example/x"}]},
+        "actions":{"disallows":{"resuming":true}}}"#;
+
+    #[test]
+    fn what_plays_names_the_track_its_artists_and_how_shuffle_stands() {
+        let now = parse_now(PLAYER).unwrap();
+        assert_eq!(now.uri, "spotify:track:4uLU6h");
+        assert!(now.shuffle && now.can_shuffle && now.likeable());
+        // An address that is not Spotify's own is never kept.
+        let addresses: Vec<&str> = now.artists.iter().map(|a| a.uri.as_str()).collect();
+        assert_eq!(addresses, ["spotify:artist:1aB", "spotify:artist:2cD"]);
+        // A radio: Spotify says shuffle cannot be changed there.
+        let radio = PLAYER.replace(r#""resuming":true"#, r#""toggling_shuffle":true"#);
+        assert!(!parse_now(&radio).unwrap().can_shuffle);
+        let episode = parse_now(r#"{"item":{"name":"Talk","uri":"spotify:episode:9zZ"}}"#).unwrap();
+        assert!(!episode.likeable() && !episode.shuffle && episode.artists.is_empty());
+        // Nothing plays: no body, or no item.
+        assert_eq!(parse_now(""), None);
+        assert_eq!(parse_now(r#"{"item":null}"#), None);
+        assert_eq!(
+            parse_now(r#"{"item":{"name":"X","uri":"file:///etc"}}"#),
+            None
+        );
+        assert_eq!(parse_contains("[true]"), Some(true));
+        assert_eq!(parse_contains("[false, true]"), Some(false));
+        assert_eq!(parse_contains("[]"), None);
+        assert_eq!(parse_contains(r#"{"error":{}}"#), None);
+    }
+
+    #[test]
+    fn a_title_and_its_artists_lead_into_spotify() {
+        let now = parse_now(PLAYER).unwrap();
+        // Spotify said which track this is: its own addresses.
+        assert_eq!(
+            track_link(Some(&now), " sirens tritonia 539 ", "anamē"),
+            "spotify:track:4uLU6h"
+        );
+        assert_eq!(
+            artist_links(Some(&now), "Sirens Tritonia 539", "whatever"),
+            [
+                ("anamē".to_owned(), "spotify:artist:1aB".to_owned()),
+                ("Tritonal".to_owned(), "spotify:artist:2cD".to_owned())
+            ]
+        );
+        // Not signed in, or the answer is still about the track before: a
+        // search, with nothing that could end the link early.
+        assert_eq!(
+            track_link(Some(&now), "Time / Reload", "Swedish House Mafia"),
+            "spotify:search:Time%20%2F%20Reload%20Swedish%20House%20Mafia"
+        );
+        assert_eq!(
+            artist_links(None, "Song", "AC/DC, Beyoncé"),
+            [
+                ("AC/DC".to_owned(), "spotify:search:AC%2FDC".to_owned()),
+                (
+                    "Beyoncé".to_owned(),
+                    "spotify:search:Beyonc%C3%A9".to_owned()
+                )
+            ]
+        );
+        assert!(artist_links(None, "Song", "  ").is_empty());
+        // The sign-in asks for the Liked Songs and shuffle too.
+        let url = authorize_url(&"a".repeat(32), "challenge", "state");
+        assert!(url.contains("user-library-modify") && url.contains("user-modify-playback-state"));
     }
 }

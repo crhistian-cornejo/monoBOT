@@ -49,6 +49,9 @@ pub struct Playing {
     pub at: Instant,
     /// The cover as the app hands it over (PNG or JPEG bytes), if any.
     pub art: Option<std::sync::Arc<[u8]>>,
+    /// Whether the app shuffles, where the system's controls say so and let
+    /// it be changed here; none where they do not (a radio, most browsers).
+    pub shuffle: Option<bool>,
 }
 
 impl Playing {
@@ -119,7 +122,8 @@ impl Playhead {
 pub const SEEK: Duration = Duration::from_millis(350);
 
 /// Whether `now` says something `shown` does not: another track, play or
-/// pause, a seek, or the cover arriving. The playhead running on is not news.
+/// pause, a seek, shuffle turned on or off, or the cover arriving. The
+/// playhead running on is not news.
 pub fn is_news(shown: &Option<Playing>, now: &Option<Playing>) -> bool {
     match (shown, now) {
         (None, None) => false,
@@ -129,6 +133,7 @@ pub fn is_news(shown: &Option<Playing>, now: &Option<Playing>) -> bool {
             shown.track != now.track
                 || shown.playing != now.playing
                 || shown.art.is_some() != now.art.is_some()
+                || shown.shuffle != now.shuffle
                 || drift > SEEK
         }
         _ => true,
@@ -650,6 +655,7 @@ mod tests {
             position: Duration::from_secs(10),
             at,
             art: None,
+            shuffle: None,
         };
         assert_eq!(
             playing.position_at(at + Duration::from_secs(5)),
@@ -784,6 +790,7 @@ mod tests {
             position: Duration::from_secs(10),
             at,
             art: None,
+            shuffle: None,
         };
         let later = |seconds: f32, position: f32| Playing {
             position: Duration::from_secs_f32(position),
@@ -803,6 +810,11 @@ mod tests {
             ..later(1., 11.)
         };
         assert!(is_news(&Some(shown.clone()), &Some(covered)));
+        let shuffled = Playing {
+            shuffle: Some(true),
+            ..later(1., 11.)
+        };
+        assert!(is_news(&Some(shown.clone()), &Some(shuffled)));
         assert!(is_news(&Some(shown.clone()), &None));
         assert!(!is_news(&None, &None));
     }

@@ -236,6 +236,7 @@ impl Notch {
                     media.position = to;
                     media.at = now;
                 }
+                platform::MediaCommand::Shuffle(on) => media.shuffle = Some(on),
                 _ => {}
             }
         }
@@ -586,6 +587,90 @@ impl Notch {
                         .group_hover(id, |style| style.text_color(ink(1.))),
                 )
         };
+        // A control at the row's end that is on, off or out of reach: on
+        // wears the accent and a dot under it, as Spotify marks shuffle;
+        // out of reach is dimmed and takes no click. Its name is its tip.
+        let switch =
+            |id: &'static str, label: &'static str, glyph: &'static str, state: Option<bool>| {
+                let on = state == Some(true);
+                div()
+                    .id(id)
+                    .debug_selector(move || id.into())
+                    .role(Role::Button)
+                    .aria_label(label)
+                    .relative()
+                    .size(px(26.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .rounded(px(2.))
+                    .tooltip(chrome_tip(label, None))
+                    .when(state.is_some(), |button| {
+                        button
+                            .cursor_pointer()
+                            .hover(|style| style.bg(ink(0.18)))
+                            .active(|style| style.bg(ink(0.24)))
+                    })
+                    .child(icon(glyph, 13.).text_color(match state {
+                        Some(true) => accent,
+                        Some(false) => ink(0.75),
+                        None => ink(0.28),
+                    }))
+                    .when(on, |button| {
+                        button.child(
+                            div()
+                                .debug_selector(move || format!("{id}-on"))
+                                .absolute()
+                                .bottom(px(1.))
+                                .left(px(11.5))
+                                .size(px(3.))
+                                .rounded(px(1.5))
+                                .bg(accent),
+                        )
+                    })
+            };
+        let spotify = source == Source::Spotify;
+        // Shuffle shows wherever the player says how it stands, and for
+        // Spotify always, dimmed where there is no order to shuffle.
+        let shuffle = self.shuffle();
+        let shuffle = (spotify || shuffle.is_some()).then(|| {
+            switch(
+                "notch-media-shuffle",
+                match shuffle {
+                    Some(true) => "Disable shuffle",
+                    Some(false) => "Enable shuffle",
+                    None => "Shuffle is not available here",
+                },
+                "media-shuffle",
+                shuffle,
+            )
+            .on_click(cx.listener(|this, _, _, cx| this.toggle_shuffle(cx)))
+        });
+        // The heart is Spotify's: its Liked Songs, once signed in.
+        let like = spotify.then(|| {
+            let like = self.like();
+            let (label, glyph, state) = match like {
+                queue::Like::Known(true) => {
+                    ("Remove from Liked Songs", "media-heart-filled", Some(true))
+                }
+                queue::Like::Known(false) => ("Add to Liked Songs", "media-heart", Some(false)),
+                queue::Like::Connect => (
+                    "Connect Spotify to add to Liked Songs",
+                    "media-heart",
+                    Some(false),
+                ),
+                queue::Like::Unknown => ("Add to Liked Songs", "media-heart", None),
+            };
+            switch("notch-media-like", label, glyph, state)
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_like(cx)))
+        });
+        // Each end keeps its room with or without its control, so previous,
+        // play and next stay in the middle.
+        let end = |control: Option<gpui::Stateful<gpui::Div>>| {
+            div().size(px(26.)).flex_shrink_0().children(control)
+        };
+        let track_link = self.track_link();
+        let artists = self.artist_links();
         div()
             .debug_selector(|| "notch-player".into())
             .h(px(PLAYER_HEIGHT))
@@ -606,14 +691,30 @@ impl Notch {
                     .flex_col()
                     // In a row of its own: the glide grows sideways, never
                     // into the column's height.
-                    .child(div().flex_shrink_0().flex().child(glide(
-                        "notch-player-title",
-                        media.track.title.clone(),
-                        14.,
-                        gpui::FontWeight::SEMIBOLD,
-                        ink(0.96),
-                    )))
+                    // What Spotify plays leads into Spotify: the title to
+                    // the track, each artist's name to the artist.
                     .child(
+                        div()
+                            .id("notch-player-open-track")
+                            .flex_shrink_0()
+                            .flex()
+                            .when_some(track_link, |title, link| {
+                                title
+                                    .debug_selector(|| "notch-player-open-track".into())
+                                    .cursor_pointer()
+                                    .hover(|style| style.opacity(0.78))
+                                    .tooltip(chrome_tip("Open in Spotify", None))
+                                    .on_click(move |_, _, cx| cx.open_url(&link))
+                            })
+                            .child(glide(
+                                "notch-player-title",
+                                media.track.title.clone(),
+                                14.,
+                                gpui::FontWeight::SEMIBOLD,
+                                ink(0.96),
+                            )),
+                    )
+                    .child(if artists.is_empty() {
                         div()
                             .mt(px(1.))
                             .flex_shrink_0()
@@ -626,8 +727,35 @@ impl Notch {
                                 media.track.album.clone()
                             } else {
                                 media.track.artist.clone()
-                            }),
-                    )
+                            })
+                    } else {
+                        let mut names = div()
+                            .mt(px(1.))
+                            .flex_shrink_0()
+                            .h(px(17.))
+                            .line_height(px(17.))
+                            .flex()
+                            .overflow_hidden()
+                            .text_size(px(12.))
+                            .text_color(accent);
+                        for (index, (name, link)) in artists.into_iter().enumerate() {
+                            if index > 0 {
+                                names = names.child(div().flex_shrink_0().child(", "));
+                            }
+                            names = names.child(
+                                div()
+                                    .id(("notch-player-artist", index))
+                                    .debug_selector(move || format!("notch-player-artist-{index}"))
+                                    .min_w_0()
+                                    .truncate()
+                                    .cursor_pointer()
+                                    .hover(|style| style.underline())
+                                    .on_click(move |_, _, cx| cx.open_url(&link))
+                                    .child(name),
+                            );
+                        }
+                        names
+                    })
                     .child(
                         div()
                             .mt(px(3.))
@@ -666,6 +794,7 @@ impl Notch {
                             .items_center()
                             .justify_center()
                             .gap(px(14.))
+                            .child(end(shuffle))
                             .child(
                                 control(
                                     "notch-media-previous",
@@ -702,7 +831,8 @@ impl Notch {
                                         this.send_media(platform::MediaCommand::Next, cx)
                                     }),
                                 ),
-                            ),
+                            )
+                            .child(end(like)),
                     ),
             )
             .into_any_element()

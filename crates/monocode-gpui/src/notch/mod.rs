@@ -1758,7 +1758,7 @@ impl Notch {
                         .flex()
                         .flex_col()
                         .child(self.player_view(cx))
-                        .child(self.queue_view())
+                        .child(self.queue_view(cx))
                         .child(div().h(px(model::CELL_GAP)).flex_shrink_0())
                         .child(self.tray_view(cx))
                         .child(self.shelf_view(size.width, cx))

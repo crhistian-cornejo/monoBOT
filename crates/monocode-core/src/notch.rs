@@ -615,6 +615,9 @@ pub struct Personal {
     /// What it does now ("Reading files"); none while it rests.
     pub doing: Option<String>,
     pub needs_you: bool,
+    /// A coding Mono or a workstream, listed under Code; the bots and the
+    /// groups are the user's personal agents.
+    pub coding: bool,
 }
 
 /// One thing said in an agent's chat, as the notch's own chat shows it.

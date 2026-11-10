@@ -1,5 +1,6 @@
 //! The open notch's Agents and Chat pages. Agents is the user's own agents
-//! (Monos): who needs them, what each does now. Chat is the coding chats:
+//! (Monos): who needs them, what each does now, the personal ones apart from
+//! the ones that code. Chat is the coding chats:
 //! ask a new one from where the user is, answer what waits, follow what
 //! works and pick up a recent chat.
 use super::*;
@@ -186,8 +187,10 @@ impl Notch {
         if self.talking_with().is_some() {
             return AGENTS_MAX;
         }
+        let coding = self.feed.agents.iter().filter(|agent| agent.coding).count();
         (section(self.asks_of(true).len())
-            + section(self.feed.agents.len().max(1))
+            + section((self.feed.agents.len() - coding).max(1))
+            + section(coding)
             + section(self.other_agent_work().len())
             + 4.)
             .min(AGENTS_MAX)
@@ -229,18 +232,31 @@ impl Notch {
                 list = list.child(self.ask_row(ask, mark, cx));
             }
         }
+        // The personal agents (bots and groups) first, then the ones that
+        // code (Monos and workstreams), each under its own title. A row keeps
+        // its place in the feed as its id, whichever section it is in.
+        let agents: Vec<_> = self.feed.agents.iter().cloned().enumerate().collect();
+        let (coding, personal): (Vec<_>, Vec<_>) =
+            agents.into_iter().partition(|(_, agent)| agent.coding);
         list = list.child(caption("Your agents"));
-        let agents = self.feed.agents.clone();
-        if agents.is_empty() {
+        if personal.is_empty() {
             list = list.child(
                 div()
+                    .h(px(ROW))
                     .px(px(6.))
+                    .flex()
+                    .items_center()
                     .text_size(px(11.5))
                     .text_color(ink(0.4))
                     .child("No agents yet. Make one in Monos."),
             );
         }
-        for (index, agent) in agents.into_iter().enumerate() {
+        let mut titled = false;
+        for (index, agent) in personal.into_iter().chain(coding) {
+            if agent.coding && !titled {
+                titled = true;
+                list = list.child(caption("Code").debug_selector(|| "notch-agents-code".into()));
+            }
             let (detail, color) = match (&agent.doing, agent.needs_you) {
                 (_, true) => ("Needs you".to_owned(), accent_color()),
                 (Some(doing), _) => (doing.clone(), ink(0.6)),

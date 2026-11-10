@@ -767,6 +767,8 @@ while (!R.isNil() && $.getppid() === parent) {
                      $.MRMediaRemoteSetElapsedTime({:.3});",
                     to.as_secs_f64()
                 ),
+                // Never sent here: this reader reports no shuffle to change.
+                MediaCommand::Shuffle(_) => return,
             };
             let _ = osascript(&format!("{FRAMEWORK}{call}"))
                 .stdout(Stdio::null())
@@ -813,6 +815,9 @@ while (!R.isNil() && $.getppid() === parent) {
                 position,
                 at: now,
                 art: cover.art.clone(),
+                // The now playing service does not say; Spotify's own
+                // answer does, once signed in (`notch/queue.rs`).
+                shuffle: None,
             }
         }
 
@@ -1216,7 +1221,20 @@ mod win {
         fn read(session: &Session, cover: &mut Cover) -> windows::core::Result<Option<Playing>> {
             let properties = session.TryGetMediaPropertiesAsync()?.join()?;
             let timeline = session.GetTimelineProperties()?;
-            let playing = session.GetPlaybackInfo()?.PlaybackStatus()? == Status::Playing;
+            let info = session.GetPlaybackInfo()?;
+            let playing = info.PlaybackStatus()? == Status::Playing;
+            // Shuffle as the app reports it, only where it also lets the
+            // system change it: Spotify does in a playlist or an album.
+            let shuffle = info
+                .Controls()
+                .and_then(|controls| controls.IsShuffleEnabled())
+                .unwrap_or(false)
+                .then(|| {
+                    info.IsShuffleActive()
+                        .and_then(|active| active.Value())
+                        .ok()
+                })
+                .flatten();
             let start = span(timeline.StartTime()?.Duration);
             let end = span(timeline.EndTime()?.Duration);
             let raw = span(timeline.Position()?.Duration);
@@ -1264,6 +1282,7 @@ mod win {
                 position: position.saturating_sub(start),
                 at: now,
                 art: cover.art.clone(),
+                shuffle,
             }))
         }
 
@@ -1277,6 +1296,7 @@ mod win {
                     let ticks = start + (to.as_nanos() / 100) as i64;
                     session.TryChangePlaybackPositionAsync(ticks)?.join()
                 }
+                MediaCommand::Shuffle(on) => session.TryChangeShuffleActiveAsync(on)?.join(),
             }
         }
 
@@ -1641,6 +1661,8 @@ pub(crate) enum MediaCommand {
     Previous,
     /// Move the playhead to this point of the track.
     Seek(std::time::Duration),
+    /// Turn shuffle on or off, where the system's controls can.
+    Shuffle(bool),
 }
 
 /// The battery's charge (0 to 1) and whether it charges; none where there

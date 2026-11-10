@@ -316,6 +316,7 @@ impl Shell {
                     session: mono.session_id,
                     doing: busy.map(|activity| activity.step.clone()),
                     needs_you: asking || busy.is_some_and(|activity| activity.needs_you),
+                    coding: !mono.is_personal(),
                     name,
                 });
             }
