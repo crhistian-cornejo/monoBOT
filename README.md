@@ -20,6 +20,14 @@
   <img src="docs/screenshots/chat.png" alt="A monoBOT coding session: projects and sessions on the left, a reply with Markdown, code and a rendered Mermaid diagram" width="900" />
 </p>
 
+## Where monoBOT comes from
+
+monoBOT started as a fork of [**Monocode**](https://github.com/hardbeat920/monocode), Nick's MIT-licensed native GUI for coding agents, and keeps its copyright notice in [LICENSE](LICENSE). It has since gone its own way: monoBOT is about **getting things done with agents**, not only writing code with them. Personal bots with memory and habits, an orchestrator that hands work to specialists, mail and agenda triage, a daily brief and a notch that keeps you in the loop all sit next to the coding sessions.
+
+It is built on **native Rust**. The desktop app is Rust + GPUI with no web view, and its logic lives in a GPUI-free core crate. The mobile app (Expo) runs the same Rust for what matters underneath: the encrypted QUIC link to your desktop and the bots' 3D faces. The **mobile app keeps catching up** with each release, so the same agents, bots and features follow you from the desktop to your phone.
+
+---
+
 monoBOT is one interface for the agent CLIs you already pay for: **Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, Devin and Droid**. It runs each CLI on your machine with its own sign-in, so there are no API keys to paste and nothing sits in between. Your phone pairs with the desktop over end-to-end encrypted QUIC (TLS 1.3).
 
 ---
