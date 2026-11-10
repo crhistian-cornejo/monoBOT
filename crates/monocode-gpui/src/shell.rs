@@ -4437,6 +4437,9 @@ impl Shell {
             return;
         }
         self.navigation_revision += 1;
+        // Opening a finished reply is seeing it, whether or not the window
+        // was in front when it ended.
+        self.unseen_finished.remove(&id);
         self.replace_blank_pane(id, cx);
         self.activate_session(id, window, cx);
     }
