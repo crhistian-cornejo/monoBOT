@@ -42,7 +42,7 @@ impl Shell {
     pub(crate) fn mono_manager(&self) -> Entity<crate::monos::Monos> {
         self.monos.as_ref().unwrap().clone()
     }
-    #[cfg(all(target_os = "macos", not(test)))]
+    #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
     pub(crate) fn mono_quick_compose(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.show_quick_composer(window, cx);
     }

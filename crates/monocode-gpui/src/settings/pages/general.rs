@@ -113,13 +113,18 @@ impl SettingsView {
                 ],
             ),
         ];
-        if cfg!(target_os = "macos") {
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
+            let open = if cfg!(target_os = "macos") {
+                "⌘Return"
+            } else {
+                "Ctrl+Return"
+            };
             workspace.push(self.row(
                 Some("quick-composer"),
                 false,
                 "Quick composer",
                 Some(format!(
-                    "Press {} from any app. Return starts a session in the background; ⌘Return opens it. Change the shortcut in Keybindings.",
+                    "Press {} from any app. Return starts a session in the background; {open} opens it. Change the shortcut in Keybindings.",
                     super::keybindings::quick_composer_label(&p)
                 ).into()),
                 {let mut controls=Vec::new();if let Some(error)=&self.ctx.quick_error{controls.push(super::super::widgets::note(error.clone()));}controls.push(self.toggle(

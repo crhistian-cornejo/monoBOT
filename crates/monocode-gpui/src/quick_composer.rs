@@ -20,6 +20,19 @@ use monocode_core::{
 use std::{collections::HashMap, path::PathBuf};
 #[cfg(all(target_os = "macos", not(test)))]
 mod hotkey;
+// Built in tests too, so its shortcut parsing is tested.
+#[cfg(target_os = "windows")]
+#[cfg_attr(test, allow(dead_code))]
+#[path = "quick_composer/hotkey_windows.rs"]
+mod hotkey;
+
+/// The shortcut until the user picks another: ⌘⇧Space, Ctrl+Shift+Space on
+/// Windows.
+pub(crate) const DEFAULT_SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "cmd-shift-space"
+} else {
+    "ctrl-shift-space"
+};
 
 pub(crate) const WIDTH: f32 = 680.;
 pub(crate) const INITIAL_HEIGHT: f32 = 128.;
@@ -125,7 +138,7 @@ pub(crate) struct Controller {
     pub task: Option<Task<()>>,
     pub events: Option<Subscription>,
     config: String,
-    #[cfg(all(target_os = "macos", not(test)))]
+    #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
     registration: Option<hotkey::Registration>,
 }
 impl Controller {
@@ -136,7 +149,7 @@ impl Controller {
         let shortcut = match prefs.keybindings.get("App: Quick Composer") {
             Some(Some(v)) => v.clone(),
             Some(None) => String::new(),
-            None => "cmd-shift-space".into(),
+            None => DEFAULT_SHORTCUT.into(),
         };
         let config = format!("{}:{shortcut}", prefs.quick_composer);
         if self.config == config {
@@ -145,7 +158,7 @@ impl Controller {
         self.config = config;
         self.error = None;
         self.task = None;
-        #[cfg(all(target_os = "macos", not(test)))]
+        #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
         {
             self.registration = None;
             if prefs.quick_composer && !shortcut.is_empty() {

@@ -1,13 +1,19 @@
-//! The live item as one icon in the Windows tray. The tray has no room for
-//! rows, so the icon is a ring with the number inside (a plan's fullest
-//! window, the agents at work) or the item's mark, and the rows are the
-//! tooltip. It follows the taskbar's light or dark theme; one that needs the
-//! user wears the accent. A click reaches a message-only window.
+//! monoBOT's icon in the Windows tray. With no live item it is monoBOT's
+//! own logo (the executable's icon); with one it is a ring with the number
+//! inside (a plan's fullest window, the agents at work) or the item's mark,
+//! and the rows are the tooltip. The item follows the taskbar's light or
+//! dark theme; one that needs the user wears the accent. A left or right
+//! click shows monoBOT's menu, as the menu bar icon does on macOS.
+//!
+//! Windows keeps a new tray icon in the overflow until the user drags it to
+//! the taskbar or turns it on in Settings › Personalization › Taskbar; no
+//! app can do that for them.
+use super::Entry;
 use super::mark::{self, Pixels};
 use monocode_core::menu_bar::{Item, Mark};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
-use windows::Win32::Foundation::{ERROR_SUCCESS, HWND, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{ERROR_SUCCESS, HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     BI_RGB, BITMAPINFO, BITMAPINFOHEADER, CreateBitmap, CreateDIBSection, DIB_RGB_COLORS,
     DeleteObject, HGDIOBJ,
@@ -19,17 +25,22 @@ use windows::Win32::UI::Shell::{
     Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateIconIndirect, CreateWindowExW, DefWindowProcW, DestroyIcon, DestroyWindow,
-    GetSystemMetrics, HICON, HWND_MESSAGE, ICONINFO, RegisterClassW, SM_CXSMICON, WINDOW_EX_STYLE,
-    WINDOW_STYLE, WM_APP, WM_LBUTTONUP, WNDCLASSW,
+    AppendMenuW, CreateIconIndirect, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyIcon,
+    DestroyMenu, DestroyWindow, GetCursorPos, GetSystemMetrics, HICON, HMENU, ICONINFO, IMAGE_ICON,
+    LR_DEFAULTCOLOR, LoadImageW, MENU_ITEM_FLAGS, MF_CHECKED, MF_GRAYED, MF_POPUP, MF_SEPARATOR,
+    MF_STRING, PostMessageW, RegisterClassW, SM_CXSMICON, SetForegroundWindow, TPM_BOTTOMALIGN,
+    TPM_NONOTIFY, TPM_RETURNCMD, TPM_RIGHTBUTTON, TrackPopupMenuEx, WM_APP, WM_CONTEXTMENU,
+    WM_LBUTTONUP, WM_NULL, WM_RBUTTONUP, WNDCLASSW, WS_EX_TOOLWINDOW, WS_POPUP,
 };
-use windows::core::w;
+use windows::core::{PCWSTR, w};
 
 /// What the tray sends the window when an icon is used.
 const CALLBACK: u32 = WM_APP + 0x4C;
 
 thread_local! {
     static CLICKS: RefCell<Option<async_channel::Sender<()>>> = const { RefCell::new(None) };
+    /// The hidden window that owns the icon and its menu.
+    static OWNER: Cell<Option<HWND>> = const { Cell::new(None) };
 }
 
 unsafe extern "system" fn window_proc(
@@ -39,7 +50,8 @@ unsafe extern "system" fn window_proc(
     lparam: LPARAM,
 ) -> LRESULT {
     if message == CALLBACK {
-        if (lparam.0 & 0xffff) as u32 == WM_LBUTTONUP {
+        let event = (lparam.0 & 0xffff) as u32;
+        if matches!(event, WM_LBUTTONUP | WM_RBUTTONUP | WM_CONTEXTMENU) {
             CLICKS.with(|clicks| {
                 if let Some(clicks) = clicks.borrow().as_ref() {
                     let _ = clicks.try_send(());
@@ -51,9 +63,20 @@ unsafe extern "system" fn window_proc(
     unsafe { DefWindowProcW(window, message, wparam, lparam) }
 }
 
+/// What the icon shows now.
+#[derive(PartialEq)]
+enum Shown {
+    Logo,
+    Item(Item),
+}
+
 pub(super) struct Bar {
     window: HWND,
-    shown: Option<(Item, HICON)>,
+    visible: bool,
+    /// The live item, kept to redraw when the icon comes back.
+    item: Option<Item>,
+    accent: [u8; 3],
+    shown: Option<(Shown, HICON)>,
 }
 
 /// The tray icon's id within the window.
@@ -72,26 +95,35 @@ impl Bar {
             };
             // A second bar finds the class already there.
             RegisterClassW(&class);
+            // A real (never shown) window, not a message-only one: a tray
+            // menu needs an owner that can come to the foreground, or it
+            // stays open after a click elsewhere.
             CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                WS_EX_TOOLWINDOW,
                 w!("MonoBOTLiveItem"),
-                w!("monoBOT live item"),
-                WINDOW_STYLE::default(),
+                w!("monoBOT"),
+                WS_POPUP,
                 0,
                 0,
                 0,
                 0,
-                Some(HWND_MESSAGE),
+                None,
                 None,
                 Some(instance.into()),
                 None,
             )
             .ok()?
         };
-        Some(Self {
+        OWNER.with(|owner| owner.set(Some(window)));
+        let mut bar = Self {
             window,
+            visible: true,
+            item: None,
+            accent: [0, 0, 0],
             shown: None,
-        })
+        };
+        bar.redraw();
+        Some(bar)
     }
 
     fn data(&self) -> NOTIFYICONDATAW {
@@ -104,43 +136,79 @@ impl Bar {
     }
 
     pub(super) fn show(&mut self, item: Option<&Item>, accent: [u8; 3]) {
-        if self.shown.as_ref().map(|(shown, _)| shown) == item {
+        if self.item.as_ref() == item && self.accent == accent {
             return;
         }
-        let previous = self.shown.take();
-        let mut data = self.data();
-        let Some(item) = item else {
-            if let Some((_, icon)) = previous {
-                unsafe {
-                    let _ = Shell_NotifyIconW(NIM_DELETE, &data);
-                    let _ = DestroyIcon(icon);
-                }
+        self.item = item.cloned();
+        self.accent = accent;
+        self.redraw();
+    }
+
+    /// Settings › Monos › Tray icon.
+    pub(super) fn set_visible(&mut self, visible: bool) {
+        if self.visible != visible {
+            self.visible = visible;
+            self.redraw();
+        }
+    }
+
+    fn remove(&mut self) {
+        if let Some((_, icon)) = self.shown.take() {
+            let data = self.data();
+            unsafe {
+                let _ = Shell_NotifyIconW(NIM_DELETE, &data);
+                let _ = DestroyIcon(icon);
             }
+        }
+    }
+
+    fn redraw(&mut self) {
+        if !self.visible {
+            self.remove();
+            return;
+        }
+        let wanted = match &self.item {
+            Some(item) => Shown::Item(item.clone()),
+            None => Shown::Logo,
+        };
+        if self
+            .shown
+            .as_ref()
+            .is_some_and(|(shown, _)| *shown == wanted)
+        {
+            return;
+        }
+        let side = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
+        let (icon, tip) = match &wanted {
+            Shown::Logo => (logo(side), "monoBOT".to_owned()),
+            Shown::Item(item) => {
+                let ink = if light_taskbar() {
+                    [0, 0, 0]
+                } else {
+                    [255, 255, 255]
+                };
+                let color = if item.urgent { self.accent } else { ink };
+                // A logo leaves no room for the number: the tray shows the ring.
+                let mark = match (item.mark, item.fill) {
+                    (Mark::Logo(_), Some(fill)) => Mark::Ring(fill),
+                    (mark, _) => mark,
+                };
+                (
+                    icon(&mark::draw(mark, side as u32, item.figure, color)),
+                    format!("{}\n{}", item.rows.join(" · "), item.tooltip),
+                )
+            }
+        };
+        let Some(icon) = icon else {
             return;
         };
-        let ink = if light_taskbar() {
-            [0, 0, 0]
-        } else {
-            [255, 255, 255]
-        };
-        let color = if item.urgent { accent } else { ink };
-        let side = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16) as u32;
-        // A logo leaves no room for the number: the tray shows the ring.
-        let mark = match (item.mark, item.fill) {
-            (Mark::Logo(_), Some(fill)) => Mark::Ring(fill),
-            (mark, _) => mark,
-        };
-        let Some(icon) = icon(&mark::draw(mark, side, item.figure, color)) else {
-            return;
-        };
+        let mut data = self.data();
         data.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
         data.uCallbackMessage = CALLBACK;
         data.hIcon = icon;
-        let tip: Vec<u16> = format!("{}\n{}", item.rows.join(" · "), item.tooltip)
-            .encode_utf16()
-            .take(data.szTip.len() - 1)
-            .collect();
+        let tip: Vec<u16> = tip.encode_utf16().take(data.szTip.len() - 1).collect();
         data.szTip[..tip.len()].copy_from_slice(&tip);
+        let previous = self.shown.take();
         unsafe {
             let message = if previous.is_some() {
                 NIM_MODIFY
@@ -152,23 +220,104 @@ impl Bar {
                 let _ = DestroyIcon(old);
             }
         }
-        self.shown = Some((item.clone(), icon));
+        self.shown = Some((wanted, icon));
     }
 }
 
 impl Drop for Bar {
     fn drop(&mut self) {
-        if let Some((_, icon)) = self.shown.take() {
-            let data = self.data();
-            unsafe {
-                let _ = Shell_NotifyIconW(NIM_DELETE, &data);
-                let _ = DestroyIcon(icon);
-            }
-        }
+        self.remove();
         unsafe {
             let _ = DestroyWindow(self.window);
         }
+        OWNER.with(|owner| owner.set(None));
         CLICKS.with(|slot| *slot.borrow_mut() = None);
+    }
+}
+
+/// The executable's own icon (resource 1, from `assets/icons/icon.ico`),
+/// at the tray's size.
+fn logo(side: i32) -> Option<HICON> {
+    unsafe {
+        let instance = GetModuleHandleW(None).ok()?;
+        LoadImageW(
+            Some(instance.into()),
+            PCWSTR(std::ptr::without_provenance(1)),
+            IMAGE_ICON,
+            side,
+            side,
+            LR_DEFAULTCOLOR,
+        )
+        .ok()
+        .map(|handle| HICON(handle.0))
+    }
+}
+
+/// Shows the menu at the pointer and returns the chosen action's id.
+pub(super) fn popup(entries: &[Entry]) -> Option<String> {
+    let owner = OWNER.with(Cell::get)?;
+    let mut ids = Vec::new();
+    unsafe {
+        let menu = build(entries, &mut ids)?;
+        let mut point = POINT::default();
+        let _ = GetCursorPos(&mut point);
+        // Without this the menu would not close on a click elsewhere.
+        let _ = SetForegroundWindow(owner);
+        let chosen = TrackPopupMenuEx(
+            menu,
+            (TPM_RETURNCMD | TPM_RIGHTBUTTON | TPM_NONOTIFY | TPM_BOTTOMALIGN).0,
+            point.x,
+            point.y,
+            owner,
+            None,
+        );
+        let _ = PostMessageW(Some(owner), WM_NULL, WPARAM(0), LPARAM(0));
+        let _ = DestroyMenu(menu);
+        let index = usize::try_from(chosen.0).ok()?.checked_sub(1)?;
+        ids.get(index).cloned()
+    }
+}
+
+/// A Win32 menu for the entries; each action's command is its index in
+/// `ids` plus one (zero means nothing was chosen).
+unsafe fn build(entries: &[Entry], ids: &mut Vec<String>) -> Option<HMENU> {
+    unsafe {
+        let menu = CreatePopupMenu().ok()?;
+        for entry in entries {
+            match entry {
+                Entry::Action { label, id, checked } => {
+                    ids.push(id.clone());
+                    let flags = if *checked {
+                        MF_STRING | MF_CHECKED
+                    } else {
+                        MF_STRING
+                    };
+                    append(menu, flags, ids.len(), label);
+                }
+                Entry::Note(label) => append(menu, MF_STRING | MF_GRAYED, 0, label),
+                Entry::Separator => {
+                    let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+                }
+                Entry::Submenu { label, entries } => {
+                    if let Some(sub) = build(entries, ids) {
+                        append(menu, MF_STRING | MF_POPUP, sub.0 as usize, label);
+                    }
+                }
+            }
+        }
+        Some(menu)
+    }
+}
+
+unsafe fn append(menu: HMENU, flags: MENU_ITEM_FLAGS, id: usize, label: &str) {
+    // An ampersand would underline the next letter.
+    let text: Vec<u16> = label
+        .replace('&', "&&")
+        .encode_utf16()
+        .chain(Some(0))
+        .collect();
+    unsafe {
+        let _ = AppendMenuW(menu, flags, id, PCWSTR(text.as_ptr()));
     }
 }
 

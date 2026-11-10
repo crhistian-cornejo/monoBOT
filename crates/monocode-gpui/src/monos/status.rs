@@ -105,8 +105,7 @@ impl Status {
         beside: &str,
         run: Rc<dyn Fn(&str)>,
     ) {
-        let beside = live::normalized(beside);
-        let signature = format!("{monos:?} {beside}");
+        let signature = format!("{monos:?} {}", live::normalized(beside));
         if self.signature == signature {
             return;
         }
@@ -114,50 +113,8 @@ impl Status {
         let Some(mtm) = MainThreadMarker::new() else {
             return;
         };
-        let menu = NSMenu::new(mtm);
-        menu.setAutoenablesItems(false);
-        if monos.is_empty() {
-            let title = NSMenuItem::new(mtm);
-            title.setTitle(&NSString::from_str("No monos yet"));
-            title.setEnabled(false);
-            menu.addItem(&title);
-        }
-        for (id, name) in monos {
-            let item = Item::new(mtm, name, id.clone(), run.clone());
-            menu.addItem(&item);
-        }
-        menu.addItem(&NSMenuItem::separatorItem(mtm));
-        // What sits beside the icon: one at a time.
-        let choices = NSMenu::new(mtm);
-        choices.setAutoenablesItems(false);
-        for choice in live::CHOICES {
-            let item = Item::new(
-                mtm,
-                &live::name(choice),
-                format!("live:{choice}"),
-                run.clone(),
-            );
-            if choice == beside {
-                item.setState(NSControlStateValueOn);
-            }
-            choices.addItem(&item);
-            if choice.is_empty() || choice == "usage:kimi" {
-                choices.addItem(&NSMenuItem::separatorItem(mtm));
-            }
-        }
-        let parent = NSMenuItem::new(mtm);
-        parent.setTitle(&NSString::from_str("Beside the Icon"));
-        parent.setSubmenu(Some(&choices));
-        menu.addItem(&parent);
-        menu.addItem(&NSMenuItem::separatorItem(mtm));
-        menu.addItem(&Item::new(
-            mtm,
-            "Quick Composer",
-            "composer".into(),
-            run.clone(),
-        ));
-        menu.addItem(&NSMenuItem::separatorItem(mtm));
-        menu.addItem(&Item::new(mtm, "Quit monoBOT", "quit".into(), run));
+        let entries = crate::menu_bar::status_menu(monos, beside, false);
+        let menu = build(mtm, &entries, &run);
         self.item.setMenu(Some(&menu));
     }
 }
@@ -165,4 +122,40 @@ impl Drop for Status {
     fn drop(&mut self) {
         NSStatusBar::systemStatusBar().removeStatusItem(&self.item);
     }
+}
+
+/// An AppKit menu for the icon menu's entries (`crate::menu_bar::Entry`).
+fn build(
+    mtm: MainThreadMarker,
+    entries: &[crate::menu_bar::Entry],
+    run: &Rc<dyn Fn(&str)>,
+) -> Retained<NSMenu> {
+    use crate::menu_bar::Entry;
+    let menu = NSMenu::new(mtm);
+    menu.setAutoenablesItems(false);
+    for entry in entries {
+        match entry {
+            Entry::Action { label, id, checked } => {
+                let item = Item::new(mtm, label, id.clone(), run.clone());
+                if *checked {
+                    item.setState(NSControlStateValueOn);
+                }
+                menu.addItem(&item);
+            }
+            Entry::Note(label) => {
+                let note = NSMenuItem::new(mtm);
+                note.setTitle(&NSString::from_str(label));
+                note.setEnabled(false);
+                menu.addItem(&note);
+            }
+            Entry::Separator => menu.addItem(&NSMenuItem::separatorItem(mtm)),
+            Entry::Submenu { label, entries } => {
+                let parent = NSMenuItem::new(mtm);
+                parent.setTitle(&NSString::from_str(label));
+                parent.setSubmenu(Some(&build(mtm, entries, run)));
+                menu.addItem(&parent);
+            }
+        }
+    }
+    menu
 }

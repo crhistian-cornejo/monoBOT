@@ -1386,6 +1386,8 @@ fn spans_text(spans: &[PageSpan]) -> String {
 }
 
 fn extract_text_with_fallback(bytes: &[u8]) -> Result<monocode_core::papers::PaperText, String> {
+    // Only macOS improves on the first extraction.
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
     let mut extracted = monocode_core::papers::extract_pdf_text(bytes);
     #[cfg(target_os = "macos")]
     {

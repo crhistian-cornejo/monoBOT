@@ -305,7 +305,7 @@ impl Notch {
         if index >= self.queue.next.len() {
             return;
         }
-        let Some(chosen) = self.queue.next.drain(..=index).last() else {
+        let Some(chosen) = self.queue.next.drain(..=index).next_back() else {
             return;
         };
         self.want_art(cx);

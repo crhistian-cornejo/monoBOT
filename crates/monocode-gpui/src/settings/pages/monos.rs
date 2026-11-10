@@ -176,6 +176,24 @@ impl SettingsView {
         if cfg!(target_os = "macos") {
             rows.push(self.row(Some("mono-menu-bar-icon"),false,"Menu bar icon",Some("Chat with a Mono or open the quick composer from the macOS menu bar. Turn this off to hide the icon.".into()),vec![self.toggle("mono-menu-bar-icon","Menu bar icon",p.mono_menu_bar_icon,false,cx,|this,on,cx|this.update(cx,|p|p.mono_menu_bar_icon=on))]));
         }
+        if cfg!(target_os = "windows") {
+            // Windows keeps a new tray icon among the hidden ones; only the
+            // user can move it to the taskbar.
+            let taskbar =
+                secondary_button("open-taskbar-settings", "Taskbar settings", false, false)
+                    .child("Taskbar settings")
+                    .on_click(|_, _, cx| cx.open_url("ms-settings:taskbar"));
+            rows.push(self.row(
+                Some("mono-menu-bar-icon"),
+                false,
+                "Tray icon",
+                Some("Click monoBOT's icon in the system tray to chat with a Mono or open the quick composer. Windows hides new icons behind the arrow: drag it onto the taskbar, or turn on monoBOT in Taskbar settings › Other system tray icons.".into()),
+                vec![
+                    taskbar.into_any_element(),
+                    self.toggle("mono-menu-bar-icon","Tray icon",p.mono_menu_bar_icon,false,cx,|this,on,cx|this.update(cx,|p|p.mono_menu_bar_icon=on)),
+                ],
+            ));
+        }
         let mut roster = Vec::new();
         for (ix, mono) in self.ctx.monos.clone().into_iter().enumerate() {
             let show_id = mono.id.clone();
@@ -289,7 +307,7 @@ impl SettingsView {
                 )
             })
             .collect();
-        let off = cfg!(target_os = "macos") && !p.mono_menu_bar_icon;
+        let off = cfg!(any(target_os = "macos", target_os = "windows")) && !p.mono_menu_bar_icon;
         let select = self.select(
             "menu-bar-live",
             "Beside the icon",

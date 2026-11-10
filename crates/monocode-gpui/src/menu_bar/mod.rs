@@ -15,9 +15,9 @@ pub(crate) mod mark;
 #[cfg(all(target_os = "windows", not(test)))]
 mod windows;
 
-use crate::notch::{Notch, Tab};
+use crate::notch::Notch;
 use crate::settings::Preferences;
-use gpui::{AnyWindowHandle, App, AppContext, Context, Entity, Subscription, Task};
+use gpui::{App, AppContext, Context, Entity, Subscription, Task};
 use monocode_core::menu_bar::{self as model, Item, Now, System, Usage};
 use std::time::Duration;
 
@@ -34,6 +34,7 @@ impl Bar {
         Some(Self)
     }
     fn show(&mut self, _item: Option<&Item>, _accent: [u8; 3]) {}
+    fn set_visible(&mut self, _visible: bool) {}
 }
 
 /// How long after a change the item is worked out again, so a notch that
@@ -53,7 +54,6 @@ pub(crate) struct LiveBar {
     /// What sits beside the icon now.
     pub(crate) shown: Option<Item>,
     bar: Option<Bar>,
-    window: Option<AnyWindowHandle>,
     settle: Option<Task<()>>,
     system_task: Option<Task<()>>,
     notch_search: Option<Task<()>>,
@@ -62,11 +62,7 @@ pub(crate) struct LiveBar {
 }
 
 impl LiveBar {
-    pub(crate) fn new(
-        prefs: &Preferences,
-        window: Option<AnyWindowHandle>,
-        cx: &mut Context<Self>,
-    ) -> Self {
+    pub(crate) fn new(prefs: &Preferences, cx: &mut Context<Self>) -> Self {
         let (sender, clicks) = async_channel::unbounded::<()>();
         let clicks = cx.spawn(async move |this, cx| {
             while clicks.recv().await.is_ok() {
@@ -86,7 +82,6 @@ impl LiveBar {
             system: System::default(),
             shown: None,
             bar: Bar::new(sender),
-            window,
             settle: None,
             system_task: None,
             notch_search: None,
@@ -99,6 +94,10 @@ impl LiveBar {
     }
 
     pub(crate) fn set_preferences(&mut self, prefs: &Preferences, cx: &mut Context<Self>) {
+        // The Windows tray icon follows the same switch as the macOS one.
+        if let Some(bar) = &mut self.bar {
+            bar.set_visible(prefs.mono_menu_bar_icon);
+        }
         let choice = model::normalized(&prefs.menu_bar_live);
         if choice == self.choice && prefs.show_remaining_usage == self.remaining {
             return;
@@ -237,27 +236,109 @@ impl LiveBar {
         cx.notify();
     }
 
-    /// A click on the tray's item opens where it lives: the notch's agents
-    /// or player, or the app.
+    /// A click on the tray icon shows monoBOT's menu, as the menu bar icon
+    /// does on macOS; the Monos own it and run what is chosen.
     fn clicked(&mut self, cx: &mut Context<Self>) {
+        cx.emit(TrayClicked);
+    }
+
+    /// Opens the notch where the live item lives: its agents or player,
+    /// else Home. False when there is no notch.
+    #[cfg(all(target_os = "windows", not(test)))]
+    pub(crate) fn open_notch(&mut self, cx: &mut Context<Self>) -> bool {
         let tab = match self.choice {
-            "agents" => Some(Tab::Agents),
-            "music" => Some(Tab::Home),
-            _ => None,
+            "agents" => crate::notch::Tab::Agents,
+            _ => crate::notch::Tab::Home,
         };
-        match (tab, &self.notch) {
-            (Some(tab), Some(notch)) => {
-                notch.update(cx, |notch, cx| notch.open_on(tab, cx));
-            }
-            _ => {
-                cx.activate(true);
-                if let Some(window) = self.window {
-                    let _ = window.update(cx, |_, window, _| window.activate_window());
-                }
-            }
+        let Some(notch) = &self.notch else {
+            return false;
+        };
+        notch.update(cx, |notch, cx| notch.open_on(tab, cx));
+        true
+    }
+}
+
+/// One line of monoBOT's icon menu, the same on macOS (`monos::status`)
+/// and in the Windows tray (`windows::popup`). An action's `id` is what
+/// `Monos::run_status` receives.
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum Entry {
+    Action {
+        label: String,
+        id: String,
+        checked: bool,
+    },
+    /// A line that only informs.
+    Note(String),
+    Separator,
+    Submenu {
+        label: String,
+        entries: Vec<Entry>,
+    },
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+impl Entry {
+    fn action(label: impl Into<String>, id: impl Into<String>) -> Self {
+        Entry::Action {
+            label: label.into(),
+            id: id.into(),
+            checked: false,
         }
     }
 }
+
+#[cfg(any(target_os = "macos", target_os = "windows", test))]
+/// The icon's menu: each Mono opens its floating chat, then what sits
+/// beside the icon, the quick composer and quitting. `open_app` adds a way
+/// back to the window, which the Windows tray needs (macOS has the Dock).
+pub(crate) fn status_menu(monos: &[(String, String)], beside: &str, open_app: bool) -> Vec<Entry> {
+    let mut entries = Vec::new();
+    if monos.is_empty() {
+        entries.push(Entry::Note("No monos yet".into()));
+    }
+    for (id, name) in monos {
+        entries.push(Entry::action(name.clone(), id.clone()));
+    }
+    entries.push(Entry::Separator);
+    let beside = model::normalized(beside);
+    let mut choices = Vec::new();
+    for choice in model::CHOICES {
+        choices.push(Entry::Action {
+            label: model::name(choice),
+            id: format!("live:{choice}"),
+            checked: choice == beside,
+        });
+        if choice.is_empty() || choice == "usage:kimi" {
+            choices.push(Entry::Separator);
+        }
+    }
+    entries.push(Entry::Submenu {
+        label: "Beside the Icon".into(),
+        entries: choices,
+    });
+    entries.push(Entry::Separator);
+    entries.push(Entry::action("Quick Composer", "composer"));
+    if open_app {
+        entries.push(Entry::action("Open Notch", "notch"));
+        entries.push(Entry::action("Open monoBOT", "open"));
+    }
+    entries.push(Entry::Separator);
+    entries.push(Entry::action("Quit monoBOT", "quit"));
+    entries
+}
+
+/// Shows the menu at the pointer and returns the chosen action's id. It
+/// runs the system's own menu loop, so call it outside any entity update.
+#[cfg(all(target_os = "windows", not(test)))]
+pub(crate) fn popup(entries: &[Entry]) -> Option<String> {
+    windows::popup(entries)
+}
+
+/// Raised when the tray icon is clicked; the Monos show the menu.
+pub(crate) struct TrayClicked;
+impl gpui::EventEmitter<TrayClicked> for LiveBar {}
 
 /// The user's accent, for a mark that needs them.
 fn accent() -> [u8; 3] {
@@ -266,12 +347,8 @@ fn accent() -> [u8; 3] {
 }
 
 /// Starts the live item for these preferences.
-pub(crate) fn open(
-    prefs: &Preferences,
-    window: Option<AnyWindowHandle>,
-    cx: &mut App,
-) -> Entity<LiveBar> {
-    cx.new(|cx| LiveBar::new(prefs, window, cx))
+pub(crate) fn open(prefs: &Preferences, cx: &mut App) -> Entity<LiveBar> {
+    cx.new(|cx| LiveBar::new(prefs, cx))
 }
 
 #[cfg(test)]
@@ -279,13 +356,49 @@ mod tests {
     use super::*;
     use gpui::TestAppContext;
 
+    #[test]
+    fn the_icon_menu_opens_each_mono_then_the_composer_and_quit() {
+        let monos = [("m1".to_owned(), "Finance".to_owned())];
+        let entries = status_menu(&monos, "agents", true);
+        assert_eq!(entries[0], Entry::action("Finance", "m1"));
+        let ids: Vec<&str> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Action { id, .. } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids, ["m1", "composer", "notch", "open", "quit"]);
+        let Some(Entry::Submenu {
+            entries: choices, ..
+        }) = entries
+            .iter()
+            .find(|entry| matches!(entry, Entry::Submenu { .. }))
+        else {
+            panic!("the live item's choices");
+        };
+        let checked: Vec<&str> = choices
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Action {
+                    id, checked: true, ..
+                } => Some(id.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(checked, ["live:agents"]);
+        let mac = status_menu(&[], "", false);
+        assert_eq!(mac[0], Entry::Note("No monos yet".into()));
+        assert!(!mac.contains(&Entry::action("Open monoBOT", "open")));
+    }
+
     #[gpui::test]
     fn the_item_follows_the_choice(cx: &mut TestAppContext) {
         let mut prefs = Preferences {
             menu_bar_live: "system".into(),
             ..Preferences::default()
         };
-        let bar = cx.update(|cx| open(&prefs, None, cx));
+        let bar = cx.update(|cx| open(&prefs, cx));
         bar.update(cx, |bar, cx| {
             assert!(bar.shown.is_none(), "nothing to say yet");
             bar.system = System {

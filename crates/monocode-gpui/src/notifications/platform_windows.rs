@@ -20,6 +20,12 @@ static CLICKS: Mutex<VecDeque<Target>> = Mutex::new(VecDeque::new());
 
 pub fn initialize(cx: &App) -> bool {
     cx.set_app_identity(APP_ID, APP_NAME);
+    // Off the UI thread: a file and two registry values.
+    std::thread::spawn(|| {
+        if let Err(error) = register_icon() {
+            eprintln!("notification icon: {error}");
+        }
+    });
     cx.on_system_notification_response(|response, _| {
         if let Some(target) = Target::from_tag(&response.tag)
             && let Ok(mut queue) = CLICKS.lock()
@@ -28,6 +34,42 @@ pub fn initialize(cx: &App) -> bool {
         }
     });
     true
+}
+
+/// monoBOT's logo for its toasts. GPUI registers the AppUserModelID with a
+/// name only, so Windows drew a generic icon: an unpackaged app gives the
+/// picture as `IconUri`, a PNG on disk, beside that name.
+fn register_icon() -> Result<(), String> {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegSetKeyValueW};
+    use windows::core::HSTRING;
+    let folder = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .ok_or("LOCALAPPDATA is not set")?
+        .join("monoBOT");
+    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    let icon = folder.join("notification-icon.png");
+    let png = include_bytes!("../../../../assets/icons/icon.png");
+    if std::fs::read(&icon).ok().as_deref() != Some(png.as_slice()) {
+        std::fs::write(&icon, png).map_err(|e| e.to_string())?;
+    }
+    let key = HSTRING::from(format!(r"Software\Classes\AppUserModelId\{APP_ID}"));
+    let set = |name: &str, value: &str| -> Result<(), String> {
+        let wide: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
+        let status = unsafe {
+            RegSetKeyValueW(
+                HKEY_CURRENT_USER,
+                &key,
+                &HSTRING::from(name),
+                REG_SZ.0,
+                Some(wide.as_ptr().cast()),
+                (wide.len() * 2) as u32,
+            )
+        };
+        status.ok().map_err(|e| format!("{name}: {e}"))
+    };
+    set("IconUri", &icon.to_string_lossy())?;
+    // The logo's own tile is black: keep the square behind it black too.
+    set("IconBackgroundColor", "FF000000")
 }
 
 /// Windows has no prompt: toasts show unless the user, or a policy, turned

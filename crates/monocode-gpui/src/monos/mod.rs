@@ -123,6 +123,9 @@ pub(crate) struct Monos {
     /// Draws the live item into the icon as it changes.
     #[cfg(all(target_os = "macos", not(test)))]
     live_watch: Option<Subscription>,
+    /// Shows monoBOT's menu when the tray icon is clicked.
+    #[cfg(all(target_os = "windows", not(test)))]
+    tray_menu: Option<Subscription>,
     parent_window: Option<gpui::AnyWindowHandle>,
     owner: WeakEntity<Shell>,
     store: Database,
@@ -338,45 +341,11 @@ impl Monos {
             let entity = _cx.weak_entity();
             let app = std::cell::RefCell::new(_cx.to_async());
             let run = std::rc::Rc::new(move |id: &str| {
-                let _ = entity.update(&mut *app.borrow_mut(), |this, cx| {
-                    if id == "quit" {
-                        monocode_core::poki::shutdown();
-                        cx.quit();
-                    } else if id == "composer" {
-                        // The composer is its own panel: the workspace window
-                        // stays where it is, as in the Tauri menu.
-                        if let Some(handle) = this.parent_window {
-                            let owner = this.owner.clone();
-                            let app: &mut App = cx;
-                            app.defer(move |cx| {
-                                let _ = handle.update(cx, |_, window, cx| {
-                                    let _ =
-                                        owner.update(cx, |o, cx| o.mono_quick_compose(window, cx));
-                                });
-                            });
-                        }
-                    } else if let Some(choice) = id.strip_prefix("live:") {
-                        // Saved like any preference, after this update ends:
-                        // the shell hands the preferences back to the monos.
-                        let owner = this.owner.clone();
-                        let choice = choice.to_owned();
-                        let app: &mut App = cx;
-                        app.defer(move |cx| {
-                            let _ = owner.update(cx, |o, cx| o.set_menu_bar_live(choice, cx));
-                        });
-                    } else if this.roster.get(id).is_some() {
-                        // Only the floating chat opens; the workspace keeps
-                        // whichever Mono or session it was showing.
-                        this.open_floating(id.into(), cx);
-                    }
-                });
+                let _ = entity.update(&mut *app.borrow_mut(), |this, cx| this.run_status(id, cx));
             });
             // The menu opens the floating chat, which moves between the
             // personal agents only.
-            let monos = floating::personal_agents(&self.roster.monos)
-                .iter()
-                .map(|m| (m.id.clone(), m.label()))
-                .collect::<Vec<_>>();
+            let monos = self.menu_monos();
             if let Some(status) = &mut self.status {
                 status.update(&monos, &self.prefs.menu_bar_live, run);
             }
@@ -388,11 +357,21 @@ impl Monos {
             match &self.live {
                 Some(live) => live.update(_cx, |live, cx| live.set_preferences(&prefs, cx)),
                 None => {
-                    let live = crate::menu_bar::open(&prefs, self.parent_window, _cx);
+                    let live = crate::menu_bar::open(&prefs, _cx);
                     #[cfg(target_os = "macos")]
                     {
                         self.live_watch =
                             Some(_cx.observe(&live, |this, _, cx| this.show_live(cx)));
+                    }
+                    #[cfg(target_os = "windows")]
+                    {
+                        self.tray_menu =
+                            Some(_cx.subscribe(
+                                &live,
+                                |this, _, _: &crate::menu_bar::TrayClicked, cx| {
+                                    this.show_tray_menu(cx)
+                                },
+                            ));
                     }
                     self.live = Some(live);
                 }
@@ -400,6 +379,75 @@ impl Monos {
             #[cfg(target_os = "macos")]
             self.show_live(_cx);
         }
+    }
+    /// The Monos the icon's menu lists: the floating chat moves between the
+    /// personal agents only.
+    #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
+    fn menu_monos(&self) -> Vec<(String, String)> {
+        floating::personal_agents(&self.roster.monos)
+            .iter()
+            .map(|m| (m.id.clone(), m.label()))
+            .collect()
+    }
+    /// What the icon's menu does with the line chosen, on macOS and Windows.
+    #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
+    fn run_status(&mut self, id: &str, cx: &mut Context<Self>) {
+        if id == "quit" {
+            // The regular quit: it saves, stops the agents and lets a
+            // downloaded update install.
+            crate::quit(cx);
+        } else if id == "notch" {
+            #[cfg(target_os = "windows")]
+            if let Some(live) = self.live.clone()
+                && live.update(cx, |live, cx| live.open_notch(cx))
+            {
+                return;
+            }
+            self.run_status("open", cx);
+        } else if id == "open" {
+            cx.activate(true);
+            if let Some(handle) = self.parent_window {
+                let _ = handle.update(cx, |_, window, _| window.activate_window());
+            }
+        } else if id == "composer" {
+            // The composer is its own panel: the workspace window stays
+            // where it is, as in the Tauri menu.
+            if let Some(handle) = self.parent_window {
+                let owner = self.owner.clone();
+                let app: &mut App = cx;
+                app.defer(move |cx| {
+                    let _ = handle.update(cx, |_, window, cx| {
+                        let _ = owner.update(cx, |o, cx| o.mono_quick_compose(window, cx));
+                    });
+                });
+            }
+        } else if let Some(choice) = id.strip_prefix("live:") {
+            // Saved like any preference, after this update ends: the shell
+            // hands the preferences back to the monos.
+            let owner = self.owner.clone();
+            let choice = choice.to_owned();
+            let app: &mut App = cx;
+            app.defer(move |cx| {
+                let _ = owner.update(cx, |o, cx| o.set_menu_bar_live(choice, cx));
+            });
+        } else if self.roster.get(id).is_some() {
+            // Only the floating chat opens; the workspace keeps whichever
+            // Mono or session it was showing.
+            self.open_floating(id.into(), cx);
+        }
+    }
+    /// The tray's menu. Windows runs its own loop while the menu is open,
+    /// so it is shown from a task, outside any entity update.
+    #[cfg(all(target_os = "windows", not(test)))]
+    fn show_tray_menu(&mut self, cx: &mut Context<Self>) {
+        let entries =
+            crate::menu_bar::status_menu(&self.menu_monos(), &self.prefs.menu_bar_live, true);
+        cx.spawn(async move |this, cx| {
+            if let Some(id) = crate::menu_bar::popup(&entries) {
+                let _ = this.update(cx, |this, cx| this.run_status(&id, cx));
+            }
+        })
+        .detach();
     }
     /// Draws the live item into the menu bar icon.
     #[cfg(all(target_os = "macos", not(test)))]
@@ -485,6 +533,8 @@ impl Monos {
             live: None,
             #[cfg(all(target_os = "macos", not(test)))]
             live_watch: None,
+            #[cfg(all(target_os = "windows", not(test)))]
+            tray_menu: None,
             parent_window: None,
             owner,
             store,

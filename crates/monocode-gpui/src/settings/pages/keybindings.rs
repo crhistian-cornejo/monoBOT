@@ -318,7 +318,7 @@ pub(super) fn quick_composer_label(p: &Preferences) -> String {
         .get("App: Quick Composer")
         .and_then(|s| s.clone())
         .map(|s| shortcut_label(&s))
-        .unwrap_or_else(|| "⌘⇧Space".into())
+        .unwrap_or_else(|| shortcut_label(crate::quick_composer::DEFAULT_SHORTCUT))
 }
 /// A command's shortcut as shown, honoring the user's rebinding; `None`
 /// once they have disabled it.
@@ -379,7 +379,10 @@ impl SettingsView {
         let query = self.keybinding_query.trim().to_lowercase();
         let rows: Vec<_> = BINDINGS
             .iter()
-            .filter(|r| cfg!(target_os = "macos") || r.command != "App: Quick Composer")
+            .filter(|r| {
+                cfg!(any(target_os = "macos", target_os = "windows"))
+                    || r.command != "App: Quick Composer"
+            })
             .filter(|r| {
                 format!("{} {} {}", r.command, self.binding_label(r), r.when)
                     .to_lowercase()

@@ -71,7 +71,7 @@ pub(crate) fn defer_quit(cx: &mut App) -> bool {
     cx.spawn(async move |cx| {
         work.await;
         gate.lock().unwrap_or_else(|e| e.into_inner()).installing = false;
-        cx.update(|cx| crate::quit(cx));
+        cx.update(crate::quit);
     })
     .detach();
     true
@@ -573,10 +573,10 @@ mod tests {
         let updater = cx.update(|cx| shared(memory(), cx));
         let gate = updater.read_with(cx, |updater, _| updater.gate.clone());
         gate.lock().unwrap().installing = true;
-        assert!(cx.update(|cx| defer_quit(cx)));
+        assert!(cx.update(defer_quit));
         assert!(gate.lock().unwrap().quitting);
         gate.lock().unwrap().installing = false;
-        assert!(!cx.update(|cx| defer_quit(cx)));
+        assert!(!cx.update(defer_quit));
     }
     #[gpui::test]
     fn windows_share_one_updater_and_busy_operations_cannot_start_again(cx: &mut TestAppContext) {

@@ -22,7 +22,9 @@ impl Notch {
         })
     }
 
-    /// A click on a live item opens the notch where that item lives.
+    /// The Windows tray's "Open Notch" opens the notch where the live item
+    /// lives.
+    #[cfg_attr(any(test, not(target_os = "windows")), allow(dead_code))]
     pub(crate) fn open_on(&mut self, tab: Tab, cx: &mut Context<Self>) {
         self.tab = tab;
         self.editing = false;
