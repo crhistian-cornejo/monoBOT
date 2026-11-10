@@ -53,6 +53,18 @@ an NSIS installer on Windows, all under `native-dist/` and named
 `xtask/packaging/native-installer.nsi`. `cargo xtask bundle-macos` wraps an
 existing build in `monoBOT.app` without packaging it.
 
+The Windows installer is not signed yet. Endpoint protection such as Sophos
+(HitmanPro.Alert "Lockdown", policy `LockdownNewFile`, type
+`BrowserAncestorPowershell`) treats a freshly downloaded unsigned installer as
+untrusted and passes that verdict to every process it starts. An app the
+installer started directly was killed the first time it opened a PowerShell
+terminal or an agent CLI that runs PowerShell (Cursor Agent, Droid, Claude
+Code hooks). So the installer, on the finish page and after an update, opens
+the app through `explorer.exe`, which makes it an ordinary app, as if it had
+been opened from the Start menu. On macOS the updater already relaunches with
+`/usr/bin/open`, so launchd is the parent. Signing the Windows installer and
+executable is still to do (see `docs/in-progress/limitations.md`).
+
 ## Releases and updates
 
 Releases come from Cloudflare, not GitHub Releases (the repository is

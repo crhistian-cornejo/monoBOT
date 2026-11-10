@@ -27,7 +27,8 @@ VIAddVersionKey /LANG=0 "LegalCopyright" "@PUBLISHER@"
 !define MUI_HEADERIMAGE_BITMAP "@ASSETS@\installer\nsis-header.bmp"
 !define MUI_HEADERIMAGE_UNBITMAP "@ASSETS@\installer\nsis-header.bmp"
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\monocode-gpui.exe"
+!define MUI_FINISHPAGE_RUN
+!define MUI_FINISHPAGE_RUN_FUNCTION LaunchApp
 !define MUI_FINISHPAGE_RUN_TEXT "$(RunApp)"
 !define MUI_FINISHPAGE_NOREBOOTSUPPORT
 
@@ -123,17 +124,26 @@ Section "monoBOT"
   Abort
   install_done:
 SectionEnd
+; Open the app through Explorer so it is not a child of this installer.
+; Endpoint protection (Sophos Lockdown, for one) treats a freshly downloaded,
+; unsigned installer as untrusted and passes that to everything it starts:
+; the app would then be killed the first time it opens a PowerShell terminal
+; or an agent CLI that uses PowerShell. Started by Explorer, it is a normal
+; app, like one opened from the Start menu.
+Function LaunchApp
+  Exec '"$WINDIR\explorer.exe" "$INSTDIR\monocode-gpui.exe"'
+FunctionEnd
 Function .onInstFailed
   StrCmp $UpdatePID "" failed_done
   StrCmp $NoRelaunch 1 failed_done
   IfFileExists "$INSTDIR\monocode-gpui.exe" 0 failed_done
-  Exec '"$INSTDIR\monocode-gpui.exe"'
+  Call LaunchApp
   failed_done:
 FunctionEnd
 Function .onInstSuccess
   StrCmp $UpdatePID "" done
   StrCmp $NoRelaunch 1 done
-  Exec '"$INSTDIR\monocode-gpui.exe"'
+  Call LaunchApp
   done:
 FunctionEnd
 Section "Uninstall"

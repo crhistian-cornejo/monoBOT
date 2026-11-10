@@ -666,6 +666,11 @@ mod tests {
             r#"{"app_id":"dev.usemono.gpui","kind":"deb"}"#
         );
     }
+}
+
+#[cfg(test)]
+mod nsis_tests {
+    use super::*;
 
     #[test]
     fn the_windows_installer_quotes_paths_and_carries_the_version() {
@@ -683,5 +688,29 @@ mod tests {
         assert!(script.contains("LangString RunApp ${LANG_SPANISH} \"Abrir monoBOT\""));
         assert!(script.contains(PUBLISHER));
         assert!(!script.contains('@'), "every placeholder is filled");
+    }
+
+    /// Endpoint protection passes an untrusted installer's verdict to every
+    /// process it starts, so the app must be opened by Explorer, never directly.
+    #[test]
+    fn the_windows_installer_opens_the_app_through_explorer() {
+        let script = nsis_script(
+            Path::new("C:\\stage"),
+            Path::new("C:\\out\\setup.exe"),
+            Path::new("C:\\repo\\assets"),
+            "0.16.0",
+            "0.16.0.0",
+        );
+        let launches: Vec<&str> = script
+            .lines()
+            .map(str::trim)
+            .filter(|line| line.starts_with("Exec") && line.contains("monocode-gpui.exe"))
+            .collect();
+        assert_eq!(
+            launches,
+            [r#"Exec '"$WINDIR\explorer.exe" "$INSTDIR\monocode-gpui.exe"'"#]
+        );
+        assert!(script.contains("!define MUI_FINISHPAGE_RUN_FUNCTION LaunchApp"));
+        assert_eq!(script.matches("Call LaunchApp").count(), 2);
     }
 }

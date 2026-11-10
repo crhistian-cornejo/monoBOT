@@ -64,6 +64,19 @@ a Windows 10 x64 source build passed manual title-bar interaction checks;
 broader Windows GUI behavior and the downloadable packages still need runtime
 testing.
 
+The Windows installer and `monocode-gpui.exe` are not code-signed. On Nov 10,
+Sophos Lockdown killed monoBOT 0.0.1 the first time it opened a PowerShell
+terminal, along with the agent CLIs it had started, because the app had been
+opened by a freshly downloaded unsigned installer. The installer now opens the
+app through Explorer, which removes that chain. A packaged installer run as an
+update (`/S /UPDATEPID`) started the app as `explorer.exe` ← `svchost.exe`, with
+no installer in its ancestry; the finish-page checkbox uses the same function
+but was not clicked, and no real release has been through Sophos yet. An
+Authenticode signature (Azure Trusted Signing or an OV certificate, through
+`signtool` in
+`cargo xtask package windows`) would give the files a publisher and a
+reputation, as VS Code, Windows Terminal and Claude Code have.
+
 On Windows, HTML panels are hosted in an InPrivate WebView2 and notifications
 are delivered as toasts; both still need runtime checks on more machines. On
 Linux, HTML panels use a text fallback and native notification delivery is
