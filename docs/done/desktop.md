@@ -115,6 +115,33 @@ To look at every species and outfit, write a contact sheet:
 MONOBOT_PERSONA_SHEET=sheet.png cargo xtask cargo test -p monocode-core mono::persona -- --ignored
 ```
 
+## Menu bar, tray and quick composer
+
+monoBOT's icon sits in the macOS menu bar and in the Windows tray. A click
+opens the same menu on both (`menu_bar::status_menu`): each Mono, which opens
+its floating chat; **Beside the Icon**, the live item (a provider's usage, the
+agents at work, what plays, the system's load); **Quick Composer**; and
+**Quit monoBOT**, which takes the regular quit path, so a downloaded update
+installs. On Windows the menu also has **Open Notch** and **Open monoBOT**.
+In the tray the logo is the executable's own icon; a live item replaces it with
+its ring or mark, and its rows become the tooltip. Settings › Monos › Menu bar
+icon (Tray icon on Windows) turns it off.
+
+Windows keeps a new tray icon behind the overflow arrow, and no app can move
+it out: drag it onto the taskbar, or turn monoBOT on in Settings ›
+Personalization › Taskbar › Other system tray icons. The Tray icon row's
+**Taskbar settings** button opens that page.
+
+The quick composer floats over other apps. Its global shortcut is ⌘⇧Space on
+macOS (HIToolbox) and Ctrl+Shift+Space on Windows (`RegisterHotKey`,
+`quick_composer/hotkey_windows.rs`). Change it in Keybindings; Settings ›
+General shows an error when another app already owns it.
+
+Windows toasts show monoBOT's logo: at startup the app writes it to
+`%LOCALAPPDATA%\monoBOT\notification-icon.png` and registers it as the
+`IconUri` of its AppUserModelID (`dev.usemono.gpui`), which GPUI registers by
+name only.
+
 ## Dictation
 
 Dictation runs on this machine: the microphone feeds a Silero voice detector
