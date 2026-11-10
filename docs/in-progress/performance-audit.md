@@ -69,11 +69,26 @@ waits `OPEN_DELAY` and opens, five times, after the app settles) on the
 | --- | --- | --- |
 | **The panel opened up to a second late, and the whole app froze meanwhile.** Each resize of the notch's window (opening, and before this pass every change of the state word's width) made AppKit draw the layer inside its own transaction; GPUI keeps 2 drawables and both were still held, so `nextDrawable` blocked the main thread 100 ms to 1 s. A 10 s `sample` of the running app had the main thread waiting there about half of its busy time. The notch's layer now keeps 3. Hover to open went from 90 ms + 100–1000 ms to 91 ms every time, the first frame within 18 ms, 60 frames/s throughout | `notch/platform.rs` (`style`) | The tour's trace; not covered by a test (tests draw no Metal) |
 | **The wings changed width with every state word** ("Running", "Delegating"…), each change a resize and a possible stall above. One width per state now; see [notch.md](notch.md) | `core/notch.rs` (`AGENT_WING`), `notch/media.rs` (`MEDIA_WING`, `music_wing`) | `agents_under_the_music_take_the_left_wing_and_keep_the_width`, `the_wings_show_who_works_and_what_the_lead_does` |
-| **AppKit rewrote its saved window state off the main thread, about 23 % of a core** in the running app while agents worked. The notch's window is no longer restorable; with the fixed widths it also resizes far less. Read in the `sample`; the share after the fix was not measured | `notch/platform.rs` (`style`) | Not covered by a test |
+| The notch's window is not restorable: there is nothing to bring back, and AppKit no longer records it. A `sample` of the running app showed AppKit's state saving on 23 % of the samples, but `sample` counts a thread waiting for a core as busy and the Mac was compiling; real thread times (`ps -M`) of the bundled app while a reply streams give 12 % of a core in all, 11 % of it the main thread, and no other thread over 3 %. So no saving was measured | `notch/platform.rs` (`style`) | Not covered by a test |
+| **With the closed notch animating (music, agents), the main thread waited for a drawable 16 % of the time** (446 of 2843 samples at rest with music). With the third drawable: 0 of 2720 | Same | `sample` of the main thread, before and after |
 | The content came in a little sooner: fade delay 40 → 20 ms, the widgets' stagger 30 → 20 ms, the opening spring's response 0.34 → 0.30 s | `notch/mod.rs` | Taste; tests run under reduced motion |
 
 Tried and left: keeping the notch's window at the panel's size for good also
 removed the stall, but doubled the app's CPU at rest and grew its footprint.
+
+Seen and left:
+
+- The main window keeps GPUI's 2 drawables, and waits for one about 11 % of
+  the time while a reply streams (88 of about 770 samples). A third would
+  cost one more window of pixels, about 25 MB at this size; frames already
+  hold 53 a second, so only latency would change. Yours to decide.
+- The first frosted surface of a kind (`MPSImageGaussianBlur` for a new
+  sigma) can hold the main thread about 0.5 s while Apple's library warms
+  up, once. Seen once with a sampler attached, not again without it.
+- While a reply streams, `native-dev` spends 40–48 % of the main thread
+  (the optimized build 20–23 %) on about 53 frames a second per window:
+  the session marks, the composer's runner, the transcript and the notch
+  each ask for them. That is the 60 frames/s choice above.
 
 The `native-dev` build (opt-level 1) is what `cargo xtask dev` runs; draws in
 it cost about twice the optimized build's (0.6–1.5 ms against 0.6–0.9 ms for
