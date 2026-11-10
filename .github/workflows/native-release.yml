@@ -298,7 +298,7 @@ jobs:
           ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
           jq -r '.[]' native-dist/release-files.json > "$RUNNER_TEMP/native-files.txt"
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --draft --prerelease --latest=false --target "$GITHUB_SHA" --title "MonoBOT Native ${MONOCODE_NATIVE_VERSION}" --notes-file docs/done/release-notes.md
+            gh release create "$GITHUB_REF_NAME" --draft --prerelease --latest=false --target "$GITHUB_SHA" --title "monoBOT ${MONOCODE_NATIVE_VERSION}" --notes-file docs/done/release-notes.md
           fi
           IS_DRAFT=$(gh release view "$GITHUB_REF_NAME" --json isDraft --jq .isDraft)
           if [ "$IS_DRAFT" != true ]; then

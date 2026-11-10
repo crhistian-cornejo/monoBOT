@@ -221,7 +221,7 @@ unsafe extern "system" fn clip_procedure(
 /// Create the environment and the controller asynchronously; both callbacks
 /// arrive on this UI thread through GPUI's message loop.
 fn start(clip: HWND, page: Rc<RefCell<Page>>) {
-    let folder = std::env::temp_dir().join("MonoBOT Native").join("WebView2");
+    let folder = std::env::temp_dir().join("monoBOT").join("WebView2");
     let options: ICoreWebView2EnvironmentOptions = CoreWebView2EnvironmentOptions::default().into();
     let created = CreateCoreWebView2EnvironmentCompletedHandler::create(Box::new(
         move |result, environment| {

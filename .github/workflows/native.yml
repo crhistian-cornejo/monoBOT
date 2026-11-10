@@ -1,4 +1,4 @@
-name: MonoBOT Native Preview
+name: monoBOT Preview
 
 on:
   push:
@@ -52,7 +52,7 @@ jobs:
       - run: cargo test --manifest-path crates/monocode-gpui/Cargo.toml --locked -p monocode-core --profile native-dev
 
   desktop:
-    name: MonoBOT Native (macOS)
+    name: monoBOT (macOS)
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4

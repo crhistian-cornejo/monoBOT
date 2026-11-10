@@ -974,9 +974,8 @@ esac
                 let app = f.launches()[0].clone();
                 assert_eq!(
                     PathBuf::from(&app.program),
-                    f.root.join(
-                        "custom-target/native-dev/MonoBOT Native.app/Contents/MacOS/monocode-gpui"
-                    )
+                    f.root
+                        .join("custom-target/native-dev/monoBOT.app/Contents/MacOS/monocode-gpui")
                 );
                 assert_eq!(app.args, strings(&args));
                 let events = f.events();

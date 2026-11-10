@@ -11,7 +11,7 @@ use std::{
 
 const USAGE: &str =
     "usage: cargo xtask perf <frame-run|stream-profile> [path/to/monocode-gpui] [seconds]";
-const INSTALLED: &str = "/Applications/MonoBOT Native.app/Contents/MacOS/monocode-gpui";
+const INSTALLED: &str = "/Applications/monoBOT.app/Contents/MacOS/monocode-gpui";
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key)

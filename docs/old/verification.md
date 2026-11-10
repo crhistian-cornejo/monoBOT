@@ -284,7 +284,7 @@ Checked locally on macOS Apple Silicon with Rust 1.99.0:
 - Core tests: 1141 passed, 8 ignored. GPUI tests, serially: 972 passed, 17 ignored
   (`title_particle_frames_only_invalidate_the_sidebar` failed once while a release
   build ran in parallel and passed alone).
-- `cargo xtask build`: the optimized app and `MonoBOT Native.app`; layout,
+- `cargo xtask build`: the optimized app and `monoBOT.app`; layout,
   Info.plist, resources and the ad-hoc signed executable are byte-identical to
   the previous `bundle-native-macos.sh` output for the same binary.
 - Release dry run with a throwaway key: `cargo xtask release` signed six fake

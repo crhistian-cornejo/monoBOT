@@ -87,7 +87,7 @@ fn logical_bytes(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
-const DESKTOP_ENTRY: &str = "[Desktop Entry]\nType=Application\nName=MonoBOT Native\nExec=monocode-native %F\nIcon=monocode-native\nCategories=Development;\nTerminal=false\nStartupWMClass=dev.usemono.gpui\n";
+const DESKTOP_ENTRY: &str = "[Desktop Entry]\nType=Application\nName=monoBOT\nExec=monocode-native %F\nIcon=monocode-native\nCategories=Development;\nTerminal=false\nStartupWMClass=dev.usemono.gpui\n";
 
 /// The installed file tree shared by the deb, rpm and AppImage. Package
 /// names and paths stay `monocode-native` so existing installs upgrade.
@@ -142,7 +142,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
     let binary = std::path::absolute(binary).map_err(|e| e.to_string())?;
     let out = std::path::absolute(out).map_err(|e| e.to_string())?;
     let embedded = tools.run(&Tool::new(&binary).arg("--version").capture())?;
-    if embedded.trim() != format!("MonoBOT Native {version}") {
+    if embedded.trim() != format!("monoBOT {version}") {
         return Err(format!(
             "Native executable version does not match {version}"
         ));
@@ -259,7 +259,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             let size_mib = logical_bytes(&image_root)?.div_ceil(1_048_576) + 64;
             tools.run(
                 &Tool::new("hdiutil")
-                    .args(["create", "-volname", "MonoBOT Native", "-srcfolder"])
+                    .args(["create", "-volname", "monoBOT", "-srcfolder"])
                     .arg(&image_root)
                     .args(["-ov", "-format", "UDZO", "-fs", "HFS+", "-size"])
                     .arg(format!("{size_mib}m"))
@@ -279,7 +279,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             write(
                 &deb_root.join("DEBIAN/control"),
                 format!(
-                    "Package: monocode-native\nVersion: {}\nArchitecture: amd64\nMaintainer: {PUBLISHER}\nSection: devel\nPriority: optional\nDepends: libasound2, libfontconfig1, libfreetype6, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-xcb1, libxcb1, libxcb-shape0, libxcb-xfixes0, libxcb-randr0, libegl1, libvulkan1, libdbus-1-3, pkexec | policykit-1\nDescription: MonoBOT Native experimental preview\n",
+                    "Package: monocode-native\nVersion: {}\nArchitecture: amd64\nMaintainer: {PUBLISHER}\nSection: devel\nPriority: optional\nDepends: libasound2, libfontconfig1, libfreetype6, libxkbcommon0, libxkbcommon-x11-0, libwayland-client0, libx11-xcb1, libxcb1, libxcb-shape0, libxcb-xfixes0, libxcb-randr0, libegl1, libvulkan1, libdbus-1-3, pkexec | policykit-1\nDescription: monoBOT experimental preview\n",
                     version.replace("-preview.", "~preview.")
                 ),
             )?;
@@ -328,7 +328,7 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
             write(
                 &spec,
                 format!(
-                    "Name: monocode-native\nVersion: {}\nRelease: 0.preview.{}%{{?dist}}\nSummary: MonoBOT Native experimental preview\nLicense: MIT AND Apache-2.0\nVendor: {PUBLISHER}\nBuildArch: x86_64\nRequires: polkit\n%description\nMonoBOT Native experimental preview.\n%install\nmkdir -p %{{buildroot}}\ncp -a %{{_sourcedir}}/tree/. %{{buildroot}}/\n%files\n/usr/bin/monocode-native\n/usr/lib/monocode-native\n/usr/share/applications/monocode-native.desktop\n/usr/share/icons/hicolor/256x256/apps/monocode-native.png\n",
+                    "Name: monocode-native\nVersion: {}\nRelease: 0.preview.{}%{{?dist}}\nSummary: monoBOT experimental preview\nLicense: MIT AND Apache-2.0\nVendor: {PUBLISHER}\nBuildArch: x86_64\nRequires: polkit\n%description\nmonoBOT experimental preview.\n%install\nmkdir -p %{{buildroot}}\ncp -a %{{_sourcedir}}/tree/. %{{buildroot}}/\n%files\n/usr/bin/monocode-native\n/usr/lib/monocode-native\n/usr/share/applications/monocode-native.desktop\n/usr/share/icons/hicolor/256x256/apps/monocode-native.png\n",
                     parsed.base, parsed.sequence
                 ),
             )?;
@@ -494,11 +494,7 @@ mod tests {
         let release = directory.path().join("target/release");
         fs::create_dir_all(&release).unwrap();
         let binary = release.join("monocode-gpui");
-        fs::write(
-            &binary,
-            "#!/bin/sh\nprintf 'MonoBOT Native 0.16.0-preview.2\\n'\n",
-        )
-        .unwrap();
+        fs::write(&binary, "#!/bin/sh\nprintf 'monoBOT 0.16.0-preview.2\\n'\n").unwrap();
         set_mode(&binary, 0o755).unwrap();
         let tools = FakeApple {
             notary_status: RefCell::new("Accepted".into()),
@@ -560,8 +556,7 @@ mod tests {
             "capacity covers logical bytes and filesystem headroom"
         );
         assert!(mib < 256, "Applications symlink is not traversed");
-        let plist =
-            fs::read_to_string(release.join("MonoBOT Native.app/Contents/Info.plist")).unwrap();
+        let plist = fs::read_to_string(release.join("monoBOT.app/Contents/Info.plist")).unwrap();
         assert!(plist.contains("<key>CFBundleShortVersionString</key><string>0.16.0</string>"));
         assert!(plist.contains("<key>CFBundleVersion</key><string>2</string>"));
         assert!(plist.contains("<key>MonocodeNativeVersion</key><string>0.16.0-preview.2</string>"));
@@ -603,11 +598,7 @@ mod tests {
             error.contains("executable version does not match"),
             "{error}"
         );
-        fs::write(
-            &binary,
-            "#!/bin/sh\nprintf 'MonoBOT Native 0.16.0-preview.3\\n'\n",
-        )
-        .unwrap();
+        fs::write(&binary, "#!/bin/sh\nprintf 'monoBOT 0.16.0-preview.3\\n'\n").unwrap();
         let error = package("rejected", "0.16.0-preview.3").unwrap_err();
         assert!(error.contains("Apple did not accept"), "{error}");
     }
@@ -616,11 +607,7 @@ mod tests {
     fn mac_packages_need_a_developer_id() {
         let directory = tempfile::tempdir().unwrap();
         let binary = directory.path().join("monocode-gpui");
-        fs::write(
-            &binary,
-            "#!/bin/sh\nprintf 'MonoBOT Native 0.16.0-preview.2\\n'\n",
-        )
-        .unwrap();
+        fs::write(&binary, "#!/bin/sh\nprintf 'monoBOT 0.16.0-preview.2\\n'\n").unwrap();
         set_mode(&binary, 0o755).unwrap();
         let error = package_native(
             &Package {

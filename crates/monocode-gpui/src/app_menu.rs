@@ -144,7 +144,7 @@ fn menus(prefs: &crate::settings::Preferences) -> Vec<Menu> {
             MenuItem::action("Report a Bug…", OpenUrl(BUG_REPORT)),
             MenuItem::action("Request a Feature…", OpenUrl(FEATURE_REQUEST)),
             MenuItem::action("Check for Updates…", CheckForUpdates),
-            MenuItem::action("About MonoBOT Native", About),
+            MenuItem::action("About monoBOT", About),
         ]),
     ]
 }
@@ -152,17 +152,17 @@ fn menus(prefs: &crate::settings::Preferences) -> Vec<Menu> {
 #[cfg(not(target_os = "windows"))]
 fn menus(prefs: &crate::settings::Preferences) -> Vec<Menu> {
     vec![
-        Menu::new("MonoBOT Native").items([
-            MenuItem::action("About MonoBOT Native", About),
+        Menu::new("monoBOT").items([
+            MenuItem::action("About monoBOT", About),
             MenuItem::separator(),
             MenuItem::action("Settings…", OpenSettings),
             MenuItem::action("Check for Updates…", CheckForUpdates),
             MenuItem::separator(),
-            MenuItem::action("Hide MonoBOT Native", Hide),
+            MenuItem::action("Hide monoBOT", Hide),
             MenuItem::action("Hide Others", HideOthers),
             MenuItem::action("Show All", ShowAll),
             MenuItem::separator(),
-            MenuItem::action("Quit MonoBOT Native", Quit),
+            MenuItem::action("Quit monoBOT", Quit),
         ]),
         Menu::new("File").items([
             MenuItem::action("Open Project…", OpenProject),

@@ -51,7 +51,7 @@ an NSIS installer on Windows, all under `native-dist/` and named
 (`codesign`, `notarytool`, `hdiutil`, `dpkg-deb`, `appimagetool`, `rpmbuild`,
 `makensis`) must be installed; the NSIS script template is
 `xtask/packaging/native-installer.nsi`. `cargo xtask bundle-macos` wraps an
-existing build in `MonoBOT Native.app` without packaging it.
+existing build in `monoBOT.app` without packaging it.
 
 ## Releases and updates
 

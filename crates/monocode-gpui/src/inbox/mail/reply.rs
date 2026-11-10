@@ -1319,7 +1319,7 @@ mod tests {
         .unwrap();
         let (mailbox, cx) = cx.add_window_view(|_, cx| {
             Mailbox::new(
-                std::env::temp_dir().join("monobot-native-reply-loading"),
+                std::env::temp_dir().join("monobot-reply-loading"),
                 false,
                 cx,
             )
@@ -1369,11 +1369,7 @@ mod tests {
         }))
         .unwrap();
         let (mailbox, cx) = cx.add_window_view(|_, cx| {
-            Mailbox::new(
-                std::env::temp_dir().join("monobot-native-reply-layout"),
-                false,
-                cx,
-            )
+            Mailbox::new(std::env::temp_dir().join("monobot-reply-layout"), false, cx)
         });
         cx.update(|window, cx| {
             mailbox.update(cx, |mailbox, cx| {
@@ -1450,7 +1446,7 @@ mod tests {
             "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
         }))
         .unwrap();
-        let service = model::Service::new(std::env::temp_dir().join("monobot-native-reply-ai"));
+        let service = model::Service::new(std::env::temp_dir().join("monobot-reply-ai"));
         let (reply, cx) = cx.add_window_view(|window, cx| {
             MailReply::new(service, message, None, None, None, window, cx)
         });
@@ -1484,7 +1480,7 @@ mod tests {
             "at": 0, "unread": false, "starred": false, "triage": "routine", "labels": []
         }))
         .unwrap();
-        let service = model::Service::new(std::env::temp_dir().join("monobot-native-reply"));
+        let service = model::Service::new(std::env::temp_dir().join("monobot-reply"));
         let (reply, cx) = cx.add_window_view(|window, cx| {
             MailReply::new(service, message, None, None, None, window, cx)
         });

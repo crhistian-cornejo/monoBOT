@@ -28,7 +28,7 @@ Development
   dev [app args]        Build (native-dev), run on separate data; r + Enter rebuilds
                         and restarts. App args pass through: --cwd <dir>, --fixture,
                         --monocode-data, --dev-data.
-  build                 Optimized build (and MonoBOT Native.app on macOS)
+  build                 Optimized build (and monoBOT.app on macOS)
   test [core|gpui]      Core and GPUI tests (GPUI single-threaded)
   check                 fmt --check, clippy -D warnings, xtask tests
   cargo <args>          cargo with the dictation libraries already on disk found
@@ -36,7 +36,7 @@ Development
 
 Packaging and releases
   bundle-macos [profile] [target dir] [version] [dev-data|monocode-data]
-                        Wrap a built executable in MonoBOT Native.app and sign it
+                        Wrap a built executable in monoBOT.app and sign it
   package <macos|linux|rpm|windows> <binary> <out dir> <arch>
                         Installers and updater packages (version from
                         MONOCODE_NATIVE_VERSION; macOS signs and notarizes)

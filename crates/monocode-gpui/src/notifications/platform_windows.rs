@@ -15,7 +15,7 @@ use super::{Notification, Permission, Target, resolved};
 
 /// The installed app's AppUserModelID, as the NSIS shortcut and the macOS bundle.
 const APP_ID: &str = "dev.usemono.gpui";
-const APP_NAME: &str = "MonoBOT Native";
+const APP_NAME: &str = "monoBOT";
 static CLICKS: Mutex<VecDeque<Target>> = Mutex::new(VecDeque::new());
 
 pub fn initialize(cx: &App) -> bool {

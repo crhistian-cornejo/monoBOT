@@ -1751,10 +1751,8 @@ mod calendar_tests {
     use std::sync::{Arc, Mutex};
 
     fn agenda(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext, PathBuf) {
-        let dir = std::env::temp_dir().join(format!(
-            "monobot-native-agenda-{}",
-            monocode_core::mono::new_id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("monobot-agenda-{}", monocode_core::mono::new_id()));
         std::fs::create_dir_all(&dir).unwrap();
         let store: Database = Arc::new(Mutex::new(
             monocode_core::store::Store::open(&dir.join("native.sqlite")).unwrap(),

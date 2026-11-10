@@ -147,7 +147,7 @@ Type `r` then Enter in the terminal to rebuild and restart. The current app stay
 open until the new build succeeds. Ctrl+C stops the app and runner. There is no
 hot reload or automatic rebuild on save.
 
-On macOS, the command packages and launches `MonoBOT Native.app`. Other
+On macOS, the command packages and launches `monoBOT.app`. Other
 platforms launch the executable directly.
 
 Dictation links sherpa-onnx, whose build script downloads its prebuilt libraries
@@ -169,17 +169,18 @@ installed MonoBOT database, and changes save there.** No extra flags are needed.
 On macOS, open:
 
 ```sh
-open "target/release/MonoBOT Native.app"
+open "target/release/monoBOT.app"
 ```
 
-The app has a separate name and application ID (`dev.usemono.gpui`) so it can be
-installed alongside MonoBOT. Local source builds are signed locally, without
+The app has its own application ID (`dev.usemono.gpui`) but no longer a separate
+name: on macOS it cannot share a folder with the earlier `MonoBOT.app`, which it
+replaces. Local source builds are signed locally, without
 Apple notarization or configured automatic updates. Linux and Windows builds
 produce a standalone executable
 under `target/release/`. `CARGO_TARGET_DIR` and
 `CARGO_BUILD_TARGET` can change these output paths.
 
-The **MonoBOT Native Preview** GitHub Actions workflow runs checks and build
+The **monoBOT Preview** GitHub Actions workflow runs checks and build
 verification.
 
 ## Data and configuration

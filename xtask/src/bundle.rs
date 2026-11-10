@@ -4,7 +4,7 @@
 use crate::util::{copy, create_dir_all, write, Result, Tool, Tools};
 use std::path::{Path, PathBuf};
 
-pub const BUNDLE_NAME: &str = "MonoBOT Native.app";
+pub const BUNDLE_NAME: &str = "monoBOT.app";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DataMode {
@@ -70,8 +70,8 @@ pub fn info_plist(version: &str, data_mode: DataMode) -> String {
 <key>CFBundleExecutable</key><string>monocode-gpui</string>
 <key>MonocodeDataMode</key><string>{mode}</string>
 <key>CFBundleIdentifier</key><string>dev.usemono.gpui</string>
-<key>CFBundleName</key><string>MonoBOT Native</string>
-<key>CFBundleDisplayName</key><string>MonoBOT Native</string>
+<key>CFBundleName</key><string>monoBOT</string>
+<key>CFBundleDisplayName</key><string>monoBOT</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>{short}</string>
 <key>CFBundleVersion</key><string>{build}</string>
@@ -126,7 +126,7 @@ pub fn copy_notices(root: &Path, directory: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Builds `<profile_dir>/MonoBOT Native.app` and signs it. Returns its path.
+/// Builds `<profile_dir>/monoBOT.app` and signs it. Returns its path.
 /// macOS 26 draws the Liquid Glass icon from Assets.car, which only Xcode's
 /// actool compiles. Without Xcode the bundle has none, and the .icns that
 /// covers older releases is the icon there too.
@@ -282,7 +282,7 @@ mod tests {
                 &FakeCodesign,
             )
             .unwrap();
-            let bundle = output.join("MonoBOT Native.app/Contents");
+            let bundle = output.join("monoBOT.app/Contents");
             let plist = std::fs::read_to_string(bundle.join("Info.plist")).unwrap();
             assert!(
                 plist.contains(&format!(

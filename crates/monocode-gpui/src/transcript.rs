@@ -9,7 +9,7 @@ pub(crate) mod git_turns;
 mod history;
 pub(crate) use history::{HistoryPager, PreparedHistory};
 mod links;
-mod live_phase;
+pub(crate) mod live_phase;
 mod mascot;
 pub(crate) use mascot::subagent_mascot;
 mod measurements;
@@ -7268,7 +7268,7 @@ mod scroll_tests {
         let start = serde_json::to_string(&ToolCall {
             id: "t".into(),
             name: "exec_command".into(),
-            input: r#"{"cmd":"'/Applications/MonoBOT Native.app/Contents/MacOS/monocode-gpui' app sessions.start --json '{}'"}"#.into(),
+            input: r#"{"cmd":"'/Applications/monoBOT.app/Contents/MacOS/monocode-gpui' app sessions.start --json '{}'"}"#.into(),
             output: r#"{"ok":true,"result":{"sessionId":776,"accepted":true}}"#.into(),
             state: ToolState::Completed,
             panel: None,

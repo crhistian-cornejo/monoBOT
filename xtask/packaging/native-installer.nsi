@@ -1,15 +1,15 @@
 Unicode True
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
-Name "MonoBOT Native"
+Name "monoBOT"
 OutFile "@OUTFILE@"
-InstallDir "$LOCALAPPDATA\Programs\MonoBOT Native"
-InstallDirRegKey HKCU "Software\MonoBOT Native" "InstallDir"
+InstallDir "$LOCALAPPDATA\Programs\monoBOT"
+InstallDirRegKey HKCU "Software\monoBOT" "InstallDir"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 VIProductVersion "@WINDOWS_VERSION@"
-VIAddVersionKey "ProductName" "MonoBOT Native"
-VIAddVersionKey "FileDescription" "MonoBOT Native preview installer"
+VIAddVersionKey "ProductName" "monoBOT"
+VIAddVersionKey "FileDescription" "monoBOT preview installer"
 VIAddVersionKey "FileVersion" "@VERSION@"
 VIAddVersionKey "CompanyName" "@PUBLISHER@"
 !define MUI_ICON "@ICON@"
@@ -22,6 +22,11 @@ VIAddVersionKey "CompanyName" "@PUBLISHER@"
 Var UpdatePID
 Var HadPrevious
 Function .onInit
+  ReadRegStr $R1 HKCU "Software\MonoBOT Native" "InstallDir"
+  StrCmp $R1 "" previous_install_done
+  StrCmp $INSTDIR "$LOCALAPPDATA\Programs\monoBOT" 0 previous_install_done
+  StrCpy $INSTDIR $R1
+  previous_install_done:
   ${GetParameters} $R0
   ${GetOptions} $R0 "/UPDATEPID=" $UpdatePID
   StrCmp $UpdatePID "" ready
@@ -30,10 +35,10 @@ Function .onInit
   System::Call 'kernel32::WaitForSingleObject(p r1, i 120000) i .r2'
   System::Call 'kernel32::CloseHandle(p r1)'
   StrCmp $2 0 ready
-  Abort "MonoBOT Native did not close. Please try updating again."
+  Abort "monoBOT did not close. Please try updating again."
   ready:
 FunctionEnd
-Section "MonoBOT Native"
+Section "monoBOT"
   SetOutPath "$INSTDIR"
   ClearErrors
   File /oname=monocode-gpui.next.exe "@STAGE@\monocode-gpui.exe"
@@ -52,13 +57,16 @@ Section "MonoBOT Native"
   File "@STAGE@\native-install.json"
   File /r "@STAGE@\licenses"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKCU "Software\MonoBOT Native" "InstallDir" "$INSTDIR"
-  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "DisplayName" "MonoBOT Native"
+  WriteRegStr HKCU "Software\monoBOT" "InstallDir" "$INSTDIR"
+  WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "DisplayName" "monoBOT"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "DisplayVersion" "@VERSION@"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "Publisher" "@PUBLISHER@"
   WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative" "UninstallString" '"$INSTDIR\Uninstall.exe"'
-  CreateShortcut "$SMPROGRAMS\MonoBOT Native.lnk" "$INSTDIR\monocode-gpui.exe"
-  CreateShortcut "$DESKTOP\MonoBOT Native.lnk" "$INSTDIR\monocode-gpui.exe"
+  CreateShortcut "$SMPROGRAMS\monoBOT.lnk" "$INSTDIR\monocode-gpui.exe"
+  CreateShortcut "$DESKTOP\monoBOT.lnk" "$INSTDIR\monocode-gpui.exe"
+  Delete "$SMPROGRAMS\MonoBOT Native.lnk"
+  Delete "$DESKTOP\MonoBOT Native.lnk"
+  DeleteRegKey HKCU "Software\MonoBOT Native"
   Delete "$INSTDIR\monocode-gpui.previous.exe"
   Goto install_done
   rollback_binary:
@@ -66,7 +74,7 @@ Section "MonoBOT Native"
   Rename "$INSTDIR\monocode-gpui.previous.exe" "$INSTDIR\monocode-gpui.exe"
   install_failed:
   Delete "$INSTDIR\monocode-gpui.next.exe"
-  MessageBox MB_ICONSTOP "MonoBOT Native could not be updated. The previous executable was retained. Close other MonoBOT Native processes and try again."
+  MessageBox MB_ICONSTOP "monoBOT could not be updated. The previous executable was retained. Close other monoBOT processes and try again."
   Abort
   install_done:
 SectionEnd
@@ -82,13 +90,13 @@ Function .onInstSuccess
   done:
 FunctionEnd
 Section "Uninstall"
-  Delete "$SMPROGRAMS\MonoBOT Native.lnk"
-  Delete "$DESKTOP\MonoBOT Native.lnk"
+  Delete "$SMPROGRAMS\monoBOT.lnk"
+  Delete "$DESKTOP\monoBOT.lnk"
   Delete "$INSTDIR\monocode-gpui.exe"
   Delete "$INSTDIR\native-install.json"
   Delete "$INSTDIR\Uninstall.exe"
   RMDir /r "$INSTDIR\licenses"
   RMDir "$INSTDIR"
-  DeleteRegKey HKCU "Software\MonoBOT Native"
+  DeleteRegKey HKCU "Software\monoBOT"
   DeleteRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\MonocodeNative"
 SectionEnd

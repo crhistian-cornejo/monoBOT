@@ -1867,8 +1867,7 @@ mod tests {
         cx: &'a mut TestAppContext,
         name: &str,
     ) -> (Entity<Mailbox>, &'a mut VisualTestContext) {
-        let dir =
-            std::env::temp_dir().join(format!("monobot-native-mail-{name}-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("monobot-mail-{name}-{}", std::process::id()));
         cx.add_window_view(move |_, cx| Mailbox::new(dir, true, cx))
     }
 

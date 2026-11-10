@@ -362,7 +362,7 @@ mod tests {
         }];
         let (compose, cx) = cx.add_window_view(|window, cx| {
             MailCompose::new(
-                model::Service::new(std::env::temp_dir().join("monobot-native-compose")),
+                model::Service::new(std::env::temp_dir().join("monobot-compose")),
                 accounts,
                 Some("a"),
                 Some(("Fwd: Factura".into(), "\n\nHola".into())),
