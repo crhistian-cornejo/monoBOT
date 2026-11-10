@@ -78,18 +78,21 @@ pub mod keychain {
     /// What the Keychain's own dialog calls the app's secrets.
     #[cfg(target_os = "macos")]
     const ITEM_NAME: &str = "monoBOT";
+    /// On an item this module made under its name: its dialog reads right.
+    #[cfg(target_os = "macos")]
+    const ITEM_NOTE: &str = "monoBOT's own; made under its name";
 
-    /// Gives the Keychain item its name. macOS shows it when it asks to use
-    /// a secret ("… stored in “monoBOT”"), and a store that names nothing
-    /// leaves the service's internal id there. Only the name changes: the
-    /// service and the account, which find the secret, and the secret itself
-    /// stay as they are. Done once per item and run, when it is not named
-    /// yet; an item that does not exist yet is named the next time.
+    /// Makes sure the Keychain's dialog names the app. macOS words it from
+    /// the access list an item was made with ("monoBOT wants to use … stored
+    /// in “com.monocode.desktop”"), and a store that names nothing leaves the
+    /// service's internal id there. Giving the item a name afterwards changes
+    /// what Keychain Access shows and not what the dialog says, so an item
+    /// not made under the name is made again ([`remake`]). The service and
+    /// the account, which find the secret, stay as they are. Once per item
+    /// and run; an item that does not exist yet is seen to the next time.
     #[cfg(target_os = "macos")]
     fn name_item(service: &str, account: &str) {
-        use security_framework::item::{
-            ItemClass, ItemSearchOptions, ItemUpdateOptions, SearchResult, update_item,
-        };
+        use security_framework::item::{ItemClass, ItemSearchOptions};
         static NAMED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
         let key = format!("{service}\n{account}");
         let named = NAMED.get_or_init(Default::default);
@@ -100,38 +103,56 @@ pub mod keychain {
         {
             return;
         }
-        let item = || {
-            let mut search = ItemSearchOptions::new();
-            search
-                .class(ItemClass::generic_password())
-                .service(service)
-                .account(account);
-            search
-        };
         // Reading an item's attributes asks the user nothing.
-        let Ok(found) = item().load_attributes(true).search() else {
+        let mut search = ItemSearchOptions::new();
+        search
+            .class(ItemClass::generic_password())
+            .service(service)
+            .account(account)
+            .load_attributes(true);
+        let Ok(found) = search.search() else {
             return;
         };
-        let label = found.iter().find_map(|result| match result {
-            SearchResult::Dict(_) => result
-                .simplify_dict()
-                .and_then(|attributes| attributes.get("labl").cloned()),
-            _ => None,
-        });
-        if found.is_empty() {
+        let Some(attributes) = found.iter().find_map(|result| result.simplify_dict()) else {
             return;
-        }
-        if label.as_deref() != Some(ITEM_NAME) {
-            let mut update = ItemUpdateOptions::new();
-            update.set_label(ITEM_NAME);
-            if update_item(&item(), &update).is_err() {
-                return;
-            }
+        };
+        let ours = |attribute: &str, value: &str| {
+            attributes.get(attribute).map(String::as_str) == Some(value)
+        };
+        if !(ours("labl", ITEM_NAME) && ours("icmt", ITEM_NOTE)) && !remake(service, account) {
+            return;
         }
         named
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .insert(key);
+    }
+
+    /// Makes the item again under the app's name, with the same secret. The
+    /// secret is read first, which asks the user exactly as the read that
+    /// follows was about to, and for the last time under the old name. If
+    /// the named item cannot be added, the secret goes back as it was rather
+    /// than be lost. False when nothing was changed.
+    #[cfg(target_os = "macos")]
+    fn remake(service: &str, account: &str) -> bool {
+        use security_framework::passwords::{
+            PasswordOptions, delete_generic_password, get_generic_password, set_generic_password,
+            set_generic_password_options,
+        };
+        let Ok(secret) = get_generic_password(service, account) else {
+            return false;
+        };
+        if delete_generic_password(service, account).is_err() {
+            return false;
+        }
+        let mut named = PasswordOptions::new_generic_password(service, account);
+        named.set_label(ITEM_NAME);
+        named.set_comment(ITEM_NOTE);
+        if set_generic_password_options(&secret, named).is_ok() {
+            return true;
+        }
+        let _ = set_generic_password(service, account, &secret);
+        false
     }
 
     #[cfg(not(target_os = "macos"))]

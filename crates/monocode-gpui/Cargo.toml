@@ -20,6 +20,8 @@ async-channel = "2"
 base64 = "0.22"
 # Attachment chips build their thumbnail sprites directly.
 image = { version = "0.25", default-features = false }
+# The menu bar's live item draws the provider's logo (GPUI already builds resvg).
+resvg = { version = "0.46", default-features = false }
 # The terminal dock: PTY, VT parser and grid (as Zed's terminal uses).
 alacritty_terminal = "0.26"
 libc = "0.2"
@@ -68,7 +70,7 @@ zip = { version = "4.6", default-features = false, features = ["deflate-flate2"]
 
 # Toast settings, and the WebView2 host for generated HTML documents.
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.62", features = ["Data_Pdf", "Foundation", "Media_Control", "Storage_Streams", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Power", "Win32_UI_Accessibility", "Win32_Media_Audio", "Win32_System_LibraryLoader", "Win32_System_WinRT", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
+windows = { version = "0.62", features = ["Data_Pdf", "Foundation", "Media_Control", "Storage_Streams", "UI_Notifications", "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Registry", "Win32_UI_Shell", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Power", "Win32_UI_Accessibility", "Win32_Media_Audio", "Win32_System_LibraryLoader", "Win32_System_WinRT", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_Media_Audio_Endpoints", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant"] }
 webview2-com = "0.39"
 raw-window-handle = "0.6"
 
@@ -78,7 +80,7 @@ gpui_apple = { package = "gpui-pre-apple", version = "=0.3.9" }
 # Pins the native traffic lights to the Tauri app's spacing.
 objc2 = "0.6"
 block2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSEvent", "NSApplication", "NSDockTile", "NSButton", "NSControl", "NSLayoutAnchor", "NSLayoutConstraint", "NSResponder", "NSView", "NSWindow", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSImage", "NSScreen", "NSWorkspace", "NSAccessibility", "NSPasteboard", "NSImageRep", "NSBitmapImageRep"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "block2", "NSEvent", "NSApplication", "NSDockTile", "NSButton", "NSControl", "NSLayoutAnchor", "NSLayoutConstraint", "NSResponder", "NSView", "NSWindow", "NSStatusBar", "NSStatusItem", "NSStatusBarButton", "NSMenu", "NSMenuItem", "NSImage", "NSScreen", "NSWorkspace", "NSAccessibility", "NSPasteboard", "NSImageRep", "NSBitmapImageRep", "NSCell", "NSFont", "NSFontDescriptor", "NSStringDrawing", "NSAttributedString", "NSColor", "objc2-core-foundation"] }
 raw-window-handle = "0.6"
 objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "objc2-app-kit", "objc2-core-foundation", "WKWebView", "WKWebViewConfiguration", "WKPreferences", "WKWebsiteDataStore", "WKNavigation", "WKNavigationDelegate", "WKNavigationAction", "block2"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSData", "NSRange", "NSArray", "NSSet", "NSError", "NSBundle", "NSProcessInfo", "NSDictionary", "NSEnumerator"] }

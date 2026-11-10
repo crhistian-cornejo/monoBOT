@@ -765,10 +765,14 @@ impl SettingsView {
                             .when(is_selected, |d| {
                                 d.child(icon("check-hi", 14.).text_color(content(1.)))
                             })
-                            .on_mouse_move(cx.listener(move |this, _, _, cx| {
-                                if this.select_active != ix {
-                                    this.select_active = ix;
-                                    cx.notify();
+                            .on_mouse_move(cx.listener({
+                                let option = option.clone();
+                                move |this, _, _, cx| {
+                                    this.select_highlighted(id, &option, cx);
+                                    if this.select_active != ix {
+                                        this.select_active = ix;
+                                        cx.notify();
+                                    }
                                 }
                             }))
                             .on_click(cx.listener(move |this, _, window, cx| {
@@ -871,6 +875,11 @@ impl SettingsView {
                                             window.focus(&this.focus, cx);
                                         }
                                         _ => return,
+                                    }
+                                    if this.select_open == Some(id)
+                                        && let Some(value) = values.get(this.select_active)
+                                    {
+                                        this.select_highlighted(id, value, cx);
                                     }
                                     this.select_scroll.scroll_to_item(this.select_active);
                                     cx.stop_propagation();

@@ -110,6 +110,9 @@ pub(crate) struct Preferences {
     pub monos: bool,
     pub rail_monos_pinned: bool,
     pub mono_menu_bar_icon: bool,
+    /// What sits beside the menu bar icon (the tray on Windows): one of
+    /// `monocode_core::menu_bar::CHOICES`, "" for nothing.
+    pub menu_bar_live: String,
     // Archive
     pub show_archived: bool,
     // Keybindings: a changed shortcut, or `None` for a disabled one.
@@ -197,6 +200,7 @@ impl Default for Preferences {
             monos: true,
             rail_monos_pinned: false,
             mono_menu_bar_icon: true,
+            menu_bar_live: monocode_core::menu_bar::DEFAULT.into(),
             show_archived: false,
             keybindings: HashMap::new(),
         }

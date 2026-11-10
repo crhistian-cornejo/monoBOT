@@ -570,8 +570,12 @@ pub(crate) fn provider_glyph(provider: &str, side: f32) -> AnyElement {
         .into_any_element()
 }
 
-pub(crate) fn provider_icon(provider: &str, side: f32) -> Div {
-    let (path, monochrome, scale) = match provider {
+/// The provider's logo, as `provider_icon` draws it.
+pub(crate) fn provider_logo(provider: &str) -> &'static str {
+    provider_mark(provider).0
+}
+fn provider_mark(provider: &str) -> (&'static str, bool, f32) {
+    match provider {
         "claude" => ("claude.svg", false, 1.),
         "cursor" => ("cursor.svg", true, 1.),
         "grok" => ("grok.svg", true, 1.),
@@ -585,7 +589,10 @@ pub(crate) fn provider_icon(provider: &str, side: f32) -> Div {
         "droid" => ("droid.svg", true, 0.9),
         "kimi" => ("kimi.svg", true, 0.88),
         _ => ("codex.svg", false, 1.),
-    };
+    }
+}
+pub(crate) fn provider_icon(provider: &str, side: f32) -> Div {
+    let (path, monochrome, scale) = provider_mark(provider);
     // Like React's currentColor / CSS masks, GPUI's SVG mask follows the theme.
     // Image rendering preserves brand colors but has no inherited currentColor.
     let mark = if monochrome {

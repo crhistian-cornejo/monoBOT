@@ -719,6 +719,83 @@ fn the_clipboard_page_keeps_what_was_copied_a_click_from_copying_again(cx: &mut 
     assert!(visual.debug_bounds("notch-tab-clips").is_none());
 }
 
+/// The card above the list shows one copy large: the newest, or the one the
+/// pointer is on. What can be done with it depends on what it is.
+#[gpui::test]
+fn the_clipboard_card_shows_the_copy_pointed_at_and_what_to_do_with_it(cx: &mut TestAppContext) {
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.copied("#ff8800", cx);
+            notch.copied("fn main() {\n    run();\n}", cx);
+            notch.copied("https://docs.rs/gpui/latest", cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-clips");
+    let shown = |visual: &mut VisualTestContext| {
+        visual.run_until_parked();
+        opened
+            .window
+            .update(visual, |notch, _, _| notch.shown_clip())
+            .unwrap()
+    };
+    let point_at = |visual: &mut VisualTestContext, row: &'static str| {
+        let bounds = visual.debug_bounds(row).expect("the row is drawn");
+        visual.simulate_mouse_move(bounds.center(), None, Default::default());
+        visual.run_until_parked();
+    };
+    // The newest is shown without pointing at anything: a link, to open.
+    let card = visual.debug_bounds("notch-clip-card").expect("the card");
+    assert_eq!(shown(visual), Some(0));
+    assert!(visual.debug_bounds("notch-clip-open").is_some());
+    // The rows are under the card, which keeps its place and its size.
+    let first = visual.debug_bounds("notch-clip-0").unwrap();
+    assert!(first.top() >= card.bottom());
+    // Pointing at the code shows it: copied again from the card.
+    point_at(visual, "notch-clip-1");
+    assert_eq!(shown(visual), Some(1));
+    assert!(visual.debug_bounds("notch-clip-open").is_none());
+    assert_eq!(visual.debug_bounds("notch-clip-card").unwrap(), card);
+    click(visual, "notch-clip-copy");
+    assert_eq!(
+        visual.read_from_clipboard().and_then(|item| item.text()),
+        Some("fn main() {\n    run();\n}".into())
+    );
+    // It became the newest, and the card went with it.
+    assert_eq!(shown(visual), Some(0));
+    let newest = opened
+        .window
+        .update(visual, |notch, _, _| notch.clips.clips()[0].text.clone())
+        .unwrap();
+    assert!(newest.starts_with("fn main"));
+    // A color is copied the way it will be written.
+    point_at(visual, "notch-clip-2");
+    assert_eq!(shown(visual), Some(2));
+    assert!(visual.debug_bounds("notch-clip-copy").is_none());
+    click(visual, "notch-clip-format-1");
+    assert_eq!(
+        visual.read_from_clipboard().and_then(|item| item.text()),
+        Some("rgb(255, 136, 0)".into())
+    );
+    // Removing the copy shown leaves the card on the newest.
+    click(visual, "notch-clip-remove-2");
+    assert_eq!(shown(visual), Some(0));
+    // A new copy takes the card.
+    point_at(visual, "notch-clip-1");
+    assert_eq!(shown(visual), Some(1));
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.copied("ana@ejemplo.test", cx))
+        .unwrap();
+    assert_eq!(shown(visual), Some(0));
+    assert!(visual.debug_bounds("notch-clip-write").is_some());
+    click(visual, "notch-clips-clear");
+    assert!(visual.debug_bounds("notch-clip-card").is_none());
+}
+
 #[gpui::test]
 fn the_battery_shows_on_the_wings_like_a_level(cx: &mut TestAppContext) {
     use monocode_core::notch::system::Level;

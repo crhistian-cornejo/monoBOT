@@ -258,6 +258,70 @@ impl SettingsView {
         if roster.is_empty() {
             roster.push(super::super::widgets::note("No monos yet."));
         }
-        vec![self.group(None,true,"Monos",None,None,rows),self.group(Some("mono-list"),false,"Your monos",Some("Show or hide sessions started by each Mono. Hidden sessions remain available from the Mono's chat.".into()),None,roster),self.bots_group(cx)]
+        let mut groups = vec![self.group(None,true,"Monos",None,None,rows),self.group(Some("mono-list"),false,"Your monos",Some("Show or hide sessions started by each Mono. Hidden sessions remain available from the Mono's chat.".into()),None,roster),self.bots_group(cx)];
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
+            groups.push(self.live_group(&p, cx));
+        }
+        groups
+    }
+
+    /// What sits beside the menu bar icon (the tray on Windows).
+    fn live_group(
+        &mut self,
+        p: &crate::settings::Preferences,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use monocode_core::menu_bar as live;
+        let description = if cfg!(target_os = "windows") {
+            "One thing in the tray while it has something to say: a plan's usage, the agents at work, what plays, or the processor and memory. Its number shows in the icon and the rest in its tooltip. Windows may keep a new icon in the overflow until you drag it out."
+        } else {
+            "One thing beside the menu bar icon, as part of it, while it has something to say: a plan's usage (its logo and each window), the agents at work, what plays, or the processor and memory. The icon's menu changes it too."
+        };
+        let options = live::CHOICES
+            .into_iter()
+            .map(|choice| {
+                let icon = live::usage_kind(choice)
+                    .map(|kind| provider_icon(kind.id(), 14.).into_any_element());
+                (
+                    choice.to_owned(),
+                    SharedString::from(live::name(choice)),
+                    icon,
+                )
+            })
+            .collect();
+        let off = cfg!(target_os = "macos") && !p.mono_menu_bar_icon;
+        let select = self.select(
+            "menu-bar-live",
+            "Beside the icon",
+            live::normalized(&p.menu_bar_live),
+            options,
+            Some(200.),
+            cx,
+            |this, choice, cx| this.update(cx, |p| p.menu_bar_live = choice),
+        );
+        let row = self.row(
+            Some("menu-bar-live"),
+            true,
+            "Beside the icon",
+            Some(description.into()),
+            vec![
+                div()
+                    .when(off, |d| d.opacity(0.4))
+                    .child(select)
+                    .into_any_element(),
+            ],
+        );
+        self.group(
+            Some("menu-bar-live-group"),
+            false,
+            if cfg!(target_os = "windows") {
+                "Tray"
+            } else {
+                "Menu bar"
+            },
+            None,
+            None,
+            vec![row],
+        )
     }
 }

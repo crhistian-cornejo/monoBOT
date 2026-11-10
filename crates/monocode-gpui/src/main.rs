@@ -47,6 +47,7 @@ mod markdown;
 mod markdown_model;
 #[cfg(target_os = "macos")]
 mod memory_log;
+mod menu_bar;
 #[cfg(all(test, target_os = "macos"))]
 mod metal_tests;
 mod mobile;

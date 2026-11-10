@@ -220,6 +220,14 @@ impl Shell {
                         .harness
                         .update(cx, |notice, cx| notice.check_now(hidden, cx));
                 }
+                SettingsEvent::PreviewTheme(theme) => {
+                    // Only the colors change, and only on screen: no
+                    // preference is touched, nothing is saved.
+                    if this.theme_preview != *theme {
+                        this.theme_preview = theme.clone();
+                        cx.notify();
+                    }
+                }
                 SettingsEvent::Changed(prefs) => {
                     #[cfg(target_os = "linux")]
                     if this.workspace.preferences.wayland_window_decorations
@@ -358,6 +366,8 @@ impl Shell {
         self.settings = None;
         self.settings_events = None;
         self.settings_overlay_watch = None;
+        // Settings closed with its theme list open: back to the saved theme.
+        self.theme_preview = None;
         // A code nobody can see should not stay usable.
         if self.mobile.invite.is_some() {
             self.mobile_cancel_invite(cx);
@@ -401,6 +411,18 @@ impl Shell {
             }
         })
         .detach();
+    }
+    /// The menu bar icon's menu picked what sits beside it: saved like any
+    /// preference, and shown in Settings if it is open.
+    pub(crate) fn set_menu_bar_live(&mut self, choice: String, cx: &mut Context<Self>) {
+        if self.workspace.preferences.menu_bar_live == choice {
+            return;
+        }
+        self.workspace.preferences.menu_bar_live = choice;
+        self.apply_preferences(cx);
+        self.persist(cx);
+        self.sync_settings(cx);
+        cx.notify();
     }
     pub(super) fn apply_preferences(&mut self, cx: &mut Context<Self>) {
         self.refresh_notification_permission();

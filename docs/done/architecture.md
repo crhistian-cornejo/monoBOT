@@ -43,12 +43,20 @@ switch keeps tests away from Claude Code's own Keychain item
 because a crate's `cfg(test)` is off when it is built as a dependency, and
 macOS asked the user to let `monocode_gpui-<hash>` in.
 
-On macOS each item is named "monoBOT" (`kSecAttrLabel`) the first time it is
-touched in a run, so the system's dialog reads "… stored in “monoBOT”" instead
-of the internal id. Only the name changes: the service and account that find
-the secret, and the secret, stay as they are. A development build is signed
-anew on every build, so macOS asks again after each one; an installed, signed
-release is asked once.
+On macOS the system's dialog must name the app, not an internal id
+("monoBOT wants to use … stored in “monoBOT”"). macOS words that dialog from
+the access list an item is created with, which keeps the name the item had
+then: naming the item afterwards changes what Keychain Access shows and not
+what the dialog says (checked on a real Keychain with a throwaway item). So an
+item not made under the name is made again the first time it is touched in a
+run (`keychain::remake`): the secret is read, which asks the user exactly as
+the read that follows was about to and for the last time under the old id,
+then the item is deleted and added again named "monoBOT" with a note that marks
+it as done. If the named item cannot be added, the secret goes back as it was.
+The service and account that find the secret never change.
+
+A development build is signed anew on every build, so macOS asks again after
+each one; an installed, signed release is asked once.
 
 ## Rendering and responsiveness
 

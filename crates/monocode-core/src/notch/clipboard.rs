@@ -70,6 +70,239 @@ impl Clip {
     }
 }
 
+impl Clip {
+    /// A few short things to say about the copy beside its preview: a
+    /// picture's size and shape, how much text there is, where a link goes.
+    pub fn facts(&self) -> Vec<String> {
+        let text = self.text.trim();
+        let count =
+            |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+        let size = || {
+            let mut facts = Vec::new();
+            let lines = text.lines().count();
+            if lines > 1 {
+                facts.push(count(lines, "line", "lines"));
+            }
+            facts.push(count(text.split_whitespace().count(), "word", "words"));
+            facts.push(count(text.chars().count(), "character", "characters"));
+            facts
+        };
+        match self.kind {
+            Kind::Image(width, height) => {
+                let mut facts = vec![format!("{width} × {height}")];
+                let pixels = width as f64 * height as f64;
+                if pixels >= 1_000_000. {
+                    facts.push(format!("{:.1} MP", pixels / 1_000_000.));
+                }
+                facts.push(
+                    match width.cmp(&height) {
+                        std::cmp::Ordering::Greater => "Landscape",
+                        std::cmp::Ordering::Less => "Portrait",
+                        std::cmp::Ordering::Equal => "Square",
+                    }
+                    .into(),
+                );
+                facts
+            }
+            Kind::Link => {
+                let mut facts: Vec<String> = host(text).map(str::to_owned).into_iter().collect();
+                facts.push(
+                    if text.starts_with("https://") {
+                        "Secure (https)"
+                    } else {
+                        "Not secure (http)"
+                    }
+                    .into(),
+                );
+                facts
+            }
+            Kind::Path => {
+                let (name, folder) = path_parts(text);
+                let mut facts = vec![name.to_owned()];
+                if !folder.is_empty() {
+                    facts.push(format!("in {folder}"));
+                }
+                facts
+            }
+            Kind::Email => text
+                .split_once('@')
+                .map(|(_, domain)| vec![domain.to_owned()])
+                .unwrap_or_default(),
+            Kind::Code => {
+                let mut facts: Vec<String> =
+                    language(text).map(str::to_owned).into_iter().collect();
+                let lines = text.lines().count();
+                facts.push(count(lines, "line", "lines"));
+                facts.push(count(text.chars().count(), "character", "characters"));
+                facts
+            }
+            Kind::Color(_) => Vec::new(),
+            Kind::Text => size(),
+        }
+    }
+
+    /// The copy's first `most` lines as code shows them: tabs as four
+    /// spaces, the indentation every line shares taken off, blank lines at
+    /// the ends left out. With them, how many lines did not fit.
+    pub fn code_lines(&self, most: usize) -> (Vec<String>, usize) {
+        let lines: Vec<String> = self
+            .text
+            .lines()
+            .map(|line| line.trim_end().replace('\t', "    "))
+            .collect();
+        let first = lines.iter().position(|line| !line.is_empty()).unwrap_or(0);
+        let last = lines
+            .iter()
+            .rposition(|line| !line.is_empty())
+            .map_or(0, |at| at + 1);
+        let lines = &lines[first.min(last)..last];
+        let shared = lines
+            .iter()
+            .filter(|line| !line.is_empty())
+            .map(|line| line.len() - line.trim_start().len())
+            .min()
+            .unwrap_or(0);
+        let shown = lines
+            .iter()
+            .take(most)
+            .map(|line| line.get(shared..).unwrap_or("").to_owned())
+            .collect();
+        (shown, lines.len().saturating_sub(most))
+    }
+}
+
+/// Where a link goes: `docs.rs` of `https://docs.rs/gpui/latest`.
+pub fn host(link: &str) -> Option<&str> {
+    let rest = link.trim().split_once("://")?.1;
+    let host = rest.split(['/', '?', '#']).next()?;
+    // Past any `user@`, before any `:port`.
+    let host = host.rsplit('@').next()?;
+    let host = host.split(':').next()?;
+    (!host.is_empty()).then_some(host)
+}
+
+/// A path's last name and the folder it is in.
+pub fn path_parts(path: &str) -> (&str, &str) {
+    let path = path.trim();
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    match trimmed.rfind(['/', '\\']) {
+        Some(at) if at + 1 < trimmed.len() => (&trimmed[at + 1..], &trimmed[..at.max(1)]),
+        _ => (path, ""),
+    }
+}
+
+/// A color as it is written in code: hex, `rgb()` and `hsl()`.
+pub fn color_formats(color: u32) -> [String; 3] {
+    let (r, g, b) = ((color >> 16) & 0xff, (color >> 8) & 0xff, color & 0xff);
+    let (rf, gf, bf) = (r as f32 / 255., g as f32 / 255., b as f32 / 255.);
+    let (max, min) = (rf.max(gf).max(bf), rf.min(gf).min(bf));
+    let lightness = (max + min) / 2.;
+    let spread = max - min;
+    let saturation = if spread == 0. {
+        0.
+    } else {
+        spread / (1. - (2. * lightness - 1.).abs())
+    };
+    let hue = if spread == 0. {
+        0.
+    } else if max == rf {
+        60. * ((gf - bf) / spread).rem_euclid(6.)
+    } else if max == gf {
+        60. * ((bf - rf) / spread + 2.)
+    } else {
+        60. * ((rf - gf) / spread + 4.)
+    };
+    [
+        format!("#{color:06X}"),
+        format!("rgb({r}, {g}, {b})"),
+        format!(
+            "hsl({}, {}%, {}%)",
+            hue.round() as u32 % 360,
+            (saturation * 100.).round() as u32,
+            (lightness * 100.).round() as u32
+        ),
+    ]
+}
+
+/// The language a snippet reads as, when a line of it gives it away. A
+/// guess for a label, nothing depends on it.
+pub fn language(code: &str) -> Option<&'static str> {
+    let text = code.trim();
+    let starts = |words: &[&str]| {
+        text.lines()
+            .any(|line| words.iter().any(|word| line.trim_start().starts_with(word)))
+    };
+    if (text.starts_with('{') || text.starts_with('['))
+        && serde_json::from_str::<serde_json::Value>(text).is_ok()
+    {
+        return Some("JSON");
+    }
+    if starts(&[
+        "fn ",
+        "impl ",
+        "pub fn ",
+        "pub struct ",
+        "let mut ",
+        "use std::",
+        "#[derive",
+    ]) {
+        return Some("Rust");
+    }
+    if starts(&["def ", "elif ", "from __future__", "import numpy", "print("])
+        || (starts(&["import ", "from "]) && !text.contains(';') && !text.contains('{'))
+    {
+        return Some("Python");
+    }
+    if starts(&["#include", "int main("]) {
+        return Some("C");
+    }
+    if starts(&[
+        "<!doctype",
+        "<!DOCTYPE",
+        "<html",
+        "<div",
+        "<span",
+        "<script",
+    ]) {
+        return Some("HTML");
+    }
+    if starts(&[
+        "SELECT ",
+        "select ",
+        "INSERT INTO",
+        "CREATE TABLE",
+        "UPDATE ",
+    ]) && text.to_ascii_lowercase().contains(" from ")
+        || starts(&["INSERT INTO", "CREATE TABLE"])
+    {
+        return Some("SQL");
+    }
+    if starts(&[
+        "$ ", "sudo ", "git ", "cargo ", "npm ", "pnpm ", "curl ", "docker ", "brew ", "cd ",
+        "#!/bin/",
+    ]) {
+        return Some("Shell");
+    }
+    if starts(&["interface ", "type ", "export type ", "export interface "])
+        || text.contains(": string")
+        || text.contains(": number")
+    {
+        return Some("TypeScript");
+    }
+    if starts(&[
+        "function ",
+        "const ",
+        "export ",
+        "import ",
+        "var ",
+        "async function ",
+    ]) || text.contains("=>")
+    {
+        return Some("JavaScript");
+    }
+    None
+}
+
 /// `#rgb` or `#rrggbb`, alone.
 fn color(text: &str) -> Option<u32> {
     let hex = text.strip_prefix('#')?;
@@ -321,6 +554,106 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn clip(text: &str) -> Clip {
+        Clip {
+            kind: kind_of(text),
+            text: text.into(),
+            at: 0,
+            image: None,
+        }
+    }
+
+    #[test]
+    fn a_copy_says_a_few_things_about_itself() {
+        let picture = Clip {
+            kind: Kind::Image(1920, 1080),
+            text: String::new(),
+            at: 0,
+            image: None,
+        };
+        assert_eq!(picture.facts(), ["1920 × 1080", "2.1 MP", "Landscape"]);
+        let small = Clip {
+            kind: Kind::Image(64, 64),
+            ..picture.clone()
+        };
+        assert_eq!(small.facts(), ["64 × 64", "Square"]);
+        assert_eq!(
+            clip("https://user@docs.rs:443/gpui/latest?x=1").facts(),
+            ["docs.rs", "Secure (https)"]
+        );
+        assert_eq!(
+            clip("http://example.com").facts(),
+            ["example.com", "Not secure (http)"]
+        );
+        assert_eq!(
+            clip("/Users/me/notes/plan.md").facts(),
+            ["plan.md", "in /Users/me/notes"]
+        );
+        assert_eq!(clip("ana@ejemplo.test").facts(), ["ejemplo.test"]);
+        assert_eq!(
+            clip("One line of plain words").facts(),
+            ["5 words", "23 characters"]
+        );
+        assert_eq!(
+            clip("Two lines\nof words").facts(),
+            ["2 lines", "4 words", "18 characters"]
+        );
+        assert_eq!(
+            clip("fn main() {\n    run();\n}").facts(),
+            ["Rust", "3 lines", "24 characters"]
+        );
+        assert!(clip("#ff8800").facts().is_empty());
+    }
+
+    #[test]
+    fn code_is_shown_without_the_indentation_its_lines_share() {
+        let snippet = clip("\n\n        if ready {\n\t\t\tgo();\n        }\n\n");
+        let (lines, more) = snippet.code_lines(8);
+        assert_eq!(lines, ["if ready {", "    go();", "}"]);
+        assert_eq!(more, 0);
+        let (lines, more) = snippet.code_lines(2);
+        assert_eq!((lines.len(), more), (2, 1));
+        assert_eq!(clip("   ").code_lines(4), (Vec::new(), 0));
+    }
+
+    #[test]
+    fn a_color_is_written_three_ways() {
+        assert_eq!(
+            color_formats(0xff8800),
+            ["#FF8800", "rgb(255, 136, 0)", "hsl(32, 100%, 50%)"]
+        );
+        assert_eq!(
+            color_formats(0x000000),
+            ["#000000", "rgb(0, 0, 0)", "hsl(0, 0%, 0%)"]
+        );
+        assert_eq!(color_formats(0xffffff)[2], "hsl(0, 0%, 100%)");
+        assert_eq!(color_formats(0x3366cc)[2], "hsl(220, 60%, 50%)");
+    }
+
+    #[test]
+    fn a_snippets_language_is_guessed_only_when_a_line_gives_it_away() {
+        assert_eq!(language("fn main() {}"), Some("Rust"));
+        assert_eq!(language("def run():\n    pass"), Some("Python"));
+        assert_eq!(language("{\"a\": [1, 2]}"), Some("JSON"));
+        assert_eq!(language("git status"), Some("Shell"));
+        assert_eq!(language("SELECT id FROM users"), Some("SQL"));
+        assert_eq!(language("const a = () => 1;"), Some("JavaScript"));
+        assert_eq!(language("interface A { b: string }"), Some("TypeScript"));
+        assert_eq!(language("x == y && z"), None);
+    }
+
+    #[test]
+    fn a_path_is_its_name_and_its_folder() {
+        assert_eq!(path_parts("/usr/local/bin/"), ("bin", "/usr/local"));
+        assert_eq!(path_parts("~/notes"), ("notes", "~"));
+        assert_eq!(
+            path_parts("C:\\Users\\me\\a.txt"),
+            ("a.txt", "C:\\Users\\me")
+        );
+        assert_eq!(path_parts("/tmp"), ("tmp", "/"));
+        assert_eq!(path_parts("name"), ("name", ""));
+    }
 
     #[test]
     fn a_copy_is_told_apart_by_what_it_is() {

@@ -187,3 +187,73 @@ fn mono_mascot_is_beside_name_and_sidebar_switch_stays_visible(cx: &mut TestAppC
     assert_eq!(switch.size, size(px(36.), px(20.)));
     assert!(switch.right() <= px(700.));
 }
+
+/// Each workspace theme is tried on as the pointer reaches it in the list, and the saved one comes back when the list closes unchosen.
+#[gpui::test]
+fn a_workspace_theme_is_tried_on_while_its_list_is_walked(cx: &mut TestAppContext) {
+    use std::{cell::RefCell, rc::Rc};
+    let window = window(Section::Appearance, cx);
+    cx.update(|cx| {
+        crate::input::bind(cx);
+        crate::popover::bind(cx);
+        cx.set_reduce_motion(true);
+    });
+    let entity = window.update(cx, |_, _, cx| cx.entity()).unwrap();
+    let previews: Rc<RefCell<Vec<Option<String>>>> = Default::default();
+    let chosen: Rc<RefCell<Vec<String>>> = Default::default();
+    let _events = cx.update(|cx| {
+        let (previews, chosen) = (previews.clone(), chosen.clone());
+        cx.subscribe(&entity, move |_, event: &SettingsEvent, _| match event {
+            SettingsEvent::PreviewTheme(theme) => previews.borrow_mut().push(theme.clone()),
+            SettingsEvent::Changed(prefs) => {
+                chosen.borrow_mut().push(prefs.workspace_theme.clone())
+            }
+            _ => {}
+        })
+    });
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    let ids: Vec<&str> = PALETTES.iter().map(|palette| palette.0).collect();
+    let open = |visual: &mut VisualTestContext| {
+        let select = visual
+            .debug_bounds("settings-select-workspace-theme")
+            .expect("the workspace theme select");
+        visual.simulate_click(select.center(), Default::default());
+        visual.run_until_parked();
+    };
+    let point_at = |visual: &mut VisualTestContext, index: usize| {
+        let option = visual
+            .debug_bounds(Box::leak(
+                format!("settings-option-workspace-theme-{index}").into_boxed_str(),
+            ))
+            .expect("the option is drawn");
+        visual.simulate_mouse_move(option.center(), None, Default::default());
+        visual.run_until_parked();
+    };
+    open(visual);
+    assert!(previews.borrow().is_empty(), "opening tries nothing on");
+    // The pointer reaches the second theme, then the third.
+    point_at(visual, 1);
+    point_at(visual, 2);
+    assert_eq!(
+        *previews.borrow(),
+        vec![Some(ids[1].to_owned()), Some(ids[2].to_owned())]
+    );
+    // Moving within the same row tries nothing on again.
+    point_at(visual, 2);
+    assert_eq!(previews.borrow().len(), 2);
+    // Escape closes it unchosen: the saved theme comes back, nothing saved.
+    visual.simulate_keystrokes("escape");
+    visual.run_until_parked();
+    assert_eq!(previews.borrow().last(), Some(&None));
+    assert!(chosen.borrow().is_empty());
+    // A click chooses: that is the one change saved, and the trying on ends.
+    open(visual);
+    point_at(visual, 2);
+    let option = visual
+        .debug_bounds("settings-option-workspace-theme-2")
+        .unwrap();
+    visual.simulate_click(option.center(), Default::default());
+    visual.run_until_parked();
+    assert_eq!(*chosen.borrow(), vec![ids[2].to_owned()]);
+    assert_eq!(previews.borrow().last(), Some(&None));
+}

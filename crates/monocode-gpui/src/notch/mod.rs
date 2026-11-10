@@ -12,6 +12,7 @@
 mod clips;
 mod face;
 pub(crate) mod levels;
+mod live;
 mod media;
 mod pages;
 mod platform;
@@ -309,6 +310,9 @@ pub(crate) struct Notch {
     fed: bool,
     /// The copy just made from the history says so until this ends.
     clip_copied: Option<Task<()>>,
+    /// The copy the Clipboard page shows large, by when it was copied: the
+    /// one last pointed at. None shows the newest.
+    clip_shown: Option<u64>,
     /// Kept pictures as drawn.
     thumbnails: clips::Thumbnails,
     /// The agent the notch chats with, and the field to answer it.
@@ -492,6 +496,7 @@ impl Notch {
             clips_task: None,
             fed: false,
             clip_copied: None,
+            clip_shown: None,
             thumbnails: Vec::new(),
             talk: None,
             talk_field,

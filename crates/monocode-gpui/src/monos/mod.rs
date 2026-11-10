@@ -117,6 +117,12 @@ struct RunningHabit {
 pub(crate) struct Monos {
     #[cfg(all(target_os = "macos", not(test)))]
     status: Option<status::Status>,
+    /// The live items beside the menu bar icon (the tray on Windows).
+    #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
+    live: Option<Entity<crate::menu_bar::LiveBar>>,
+    /// Draws the live item into the icon as it changes.
+    #[cfg(all(target_os = "macos", not(test)))]
+    live_watch: Option<Subscription>,
     parent_window: Option<gpui::AnyWindowHandle>,
     owner: WeakEntity<Shell>,
     store: Database,
@@ -321,6 +327,8 @@ impl Monos {
         #[cfg(all(target_os = "macos", not(test)))]
         {
             if !self.prefs.mono_menu_bar_icon {
+                self.live_watch = None;
+                self.live = None;
                 self.status = None;
                 return;
             }
@@ -347,6 +355,15 @@ impl Monos {
                                 });
                             });
                         }
+                    } else if let Some(choice) = id.strip_prefix("live:") {
+                        // Saved like any preference, after this update ends:
+                        // the shell hands the preferences back to the monos.
+                        let owner = this.owner.clone();
+                        let choice = choice.to_owned();
+                        let app: &mut App = cx;
+                        app.defer(move |cx| {
+                            let _ = owner.update(cx, |o, cx| o.set_menu_bar_live(choice, cx));
+                        });
                     } else if this.roster.get(id).is_some() {
                         // Only the floating chat opens; the workspace keeps
                         // whichever Mono or session it was showing.
@@ -361,8 +378,34 @@ impl Monos {
                 .map(|m| (m.id.clone(), m.label()))
                 .collect::<Vec<_>>();
             if let Some(status) = &mut self.status {
-                status.update(&monos, run);
+                status.update(&monos, &self.prefs.menu_bar_live, run);
             }
+        }
+        // What sits beside the icon (macOS) or in the tray (Windows).
+        #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
+        {
+            let prefs = self.prefs.clone();
+            match &self.live {
+                Some(live) => live.update(_cx, |live, cx| live.set_preferences(&prefs, cx)),
+                None => {
+                    let live = crate::menu_bar::open(&prefs, self.parent_window, _cx);
+                    #[cfg(target_os = "macos")]
+                    {
+                        self.live_watch = Some(_cx.observe(&live, |this, _, cx| this.show_live(cx)));
+                    }
+                    self.live = Some(live);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            self.show_live(_cx);
+        }
+    }
+    /// Draws the live item into the menu bar icon.
+    #[cfg(all(target_os = "macos", not(test)))]
+    fn show_live(&mut self, cx: &mut Context<Self>) {
+        let item = self.live.as_ref().and_then(|live| live.read(cx).shown.clone());
+        if let Some(status) = &mut self.status {
+            status.set_live(item.as_ref());
         }
     }
     pub(crate) fn hide_html(&self, cx: &App) {
@@ -434,6 +477,10 @@ impl Monos {
         let mut this = Self {
             #[cfg(all(target_os = "macos", not(test)))]
             status: None,
+            #[cfg(all(any(target_os = "macos", target_os = "windows"), not(test)))]
+            live: None,
+            #[cfg(all(target_os = "macos", not(test)))]
+            live_watch: None,
             parent_window: None,
             owner,
             store,
@@ -597,6 +644,7 @@ impl Monos {
         if was && !self.prefs.monos {
             self.active = None;
         }
+        self.sync_status(cx);
         cx.notify();
     }
     pub(crate) fn set_original_chrome(&mut self, original: bool, cx: &mut Context<Self>) {

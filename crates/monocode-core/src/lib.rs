@@ -25,6 +25,7 @@ pub mod inbox;
 pub mod introduction;
 pub mod keep_awake;
 pub mod loop_guard;
+pub mod menu_bar;
 pub mod mobile;
 pub mod mono;
 pub mod notch;

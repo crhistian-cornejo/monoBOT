@@ -4429,6 +4429,7 @@ dependencies = [
  "pulldown-cmark",
  "qrcode",
  "raw-window-handle",
+ "resvg",
  "rquickjs",
  "serde",
  "serde_json",

@@ -128,9 +128,9 @@ impl SettingsView {
             Some("workspace-theme"),
             false,
             "Workspace theme",
-            Some("Choose a color preset.".into()),
+            Some("Choose a color preset. Each one is tried on as you point at it.".into()),
             vec![self.select(
-                "workspace-theme",
+                crate::settings::THEME_SELECT,
                 "Workspace theme",
                 &p.workspace_theme,
                 options,

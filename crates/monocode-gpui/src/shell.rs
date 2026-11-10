@@ -55,6 +55,8 @@ mod terminal_panes;
 #[cfg(test)]
 mod tooltip_tests;
 use terminal_panes::terminal_drag_ghost;
+#[cfg(test)]
+mod theme_preview_tests;
 mod title_tabs;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 mod window_chrome;
@@ -787,6 +789,9 @@ pub(crate) struct Shell {
     window_glass: Option<bool>,
     /// The project whose colors were last painted; leaving it blends colors.
     theme_project: Option<String>,
+    /// The workspace theme Settings is trying on (the one under the pointer
+    /// in its list). It is painted with and never saved.
+    theme_preview: Option<String>,
     quit_prompted: bool,
     pub(crate) menu: Option<ShellMenu>,
     background_dialog: Option<project_settings::OpenBackground>,
@@ -1184,6 +1189,7 @@ impl Shell {
             window_active: false,
             window_glass: None,
             theme_project: None,
+            theme_preview: None,
             quit_prompted: false,
             menu: None,
             background_dialog: None,
@@ -8962,6 +8968,24 @@ impl Render for Shell {
             .project_appearance
             .get(project)
             .and_then(|a| a.theme.as_ref());
+        // A theme being tried on in Settings paints at once, in place of the
+        // saved one. A project with colors of its own keeps them: the app's
+        // theme does not show there, tried on or chosen.
+        let preview = self
+            .theme_preview
+            .as_ref()
+            .filter(|_| project_theme.is_none())
+            .map(|id| {
+                let (hue, saturation, dark_lightness) = crate::settings::preset_tint(id);
+                monocode_core::project_appearance::ProjectTheme {
+                    workspace_theme: id.clone(),
+                    accent_color: p.accent_color.clone(),
+                    hue,
+                    saturation,
+                    dark_lightness,
+                }
+            });
+        let project_theme = preview.as_ref().or(project_theme);
         // Repainting bypasses cached views, so every surface follows the blend.
         if configure_project(p, project_theme, system_light, animate) {
             cx.refresh_windows();

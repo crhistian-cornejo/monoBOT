@@ -113,12 +113,20 @@ pub(crate) struct MonoSetting {
     pub folders: bool,
 }
 
+/// The Appearance page's list of workspace themes, whose options are tried
+/// on as the highlight reaches them.
+const THEME_SELECT: &str = "workspace-theme";
+
 pub(crate) enum SettingsEvent {
     WhatsNew,
     CheckAppUpdates,
     CheckHarnessUpdates,
     ManageInboxProvider(String),
     Changed(Box<Preferences>),
+    /// The workspace theme under the pointer in the Appearance page's list,
+    /// to paint with while the list is open; none when it closes. Nothing is
+    /// saved: choosing one is `Changed`.
+    PreviewTheme(Option<String>),
     /// The Appearance page's Layout picker: true for Focused, false for Classic.
     NewLayout(bool),
     Section(Section),
@@ -246,6 +254,8 @@ pub(crate) struct SettingsView {
     /// The sample cue a volume change plays once the slider rests.
     volume_cue: Option<Task<()>>,
     select_open: Option<&'static str>,
+    /// The workspace theme being tried on while its list is open.
+    theme_preview: Option<String>,
     select_active: usize,
     select_focus: FocusHandle,
     /// Filter field atop long selects, and the open select's list scroll.
@@ -404,6 +414,7 @@ impl SettingsView {
             slider_drag: None,
             volume_cue: None,
             select_open: None,
+            theme_preview: None,
             select_active: 0,
             select_focus: cx.focus_handle(),
             select_filter,
@@ -583,6 +594,22 @@ impl SettingsView {
         false
     }
     /// Change preferences and tell the shell to keep them.
+    /// The option a select's highlight moved to, by pointer or by key. The
+    /// workspace theme is tried on at once, so the app shows each one as the
+    /// list is walked, before any is chosen.
+    fn select_highlighted(&mut self, id: &'static str, value: &str, cx: &mut Context<Self>) {
+        if id == THEME_SELECT && self.theme_preview.as_deref() != Some(value) {
+            self.theme_preview = Some(value.to_owned());
+            cx.emit(SettingsEvent::PreviewTheme(Some(value.to_owned())));
+        }
+    }
+    /// Back to the saved theme once its list is closed, however it closed.
+    fn end_theme_preview(&mut self, cx: &mut Context<Self>) {
+        if self.theme_preview.is_some() && self.select_open != Some(THEME_SELECT) {
+            self.theme_preview = None;
+            cx.emit(SettingsEvent::PreviewTheme(None));
+        }
+    }
     fn update(&mut self, cx: &mut Context<Self>, change: impl FnOnce(&mut Preferences)) {
         change(&mut self.prefs);
         self.notification_deadline(cx);
@@ -1102,6 +1129,9 @@ pub(crate) fn nav(
 
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // Every way a select closes redraws this view, so this one place
+        // puts the saved theme back.
+        self.end_theme_preview(cx);
         if self.pending_scroll {
             let weak = cx.weak_entity();
             window.on_next_frame(move |_, cx| {

@@ -146,6 +146,23 @@ per-frame animations. Panes keep their spring in `pane_motion.rs` and tabs
 their widths in `tab_motion.rs`. Everything draws
 its final state under reduced motion.
 
+A short label that changes morphs instead of jumping (`text_morph.rs`): the
+letters both texts share slide to their new places and the rest trade places,
+over `motion::NORMAL`, on the shared clock. The notch uses it for its state
+word, counts, clock, row labels and pills; see
+[notch.md](../in-progress/notch.md).
+
+## Trying a theme on
+
+In Settings › Appearance, each workspace theme is tried on as the pointer
+reaches it in the list: the whole app repaints with it at once, with no blend.
+(The arrow keys do not walk that list yet: its filter field keeps them.) Nothing is saved until one is chosen; closing the list, or
+Settings, puts the saved theme back. The list says which option is highlighted
+(`SettingsEvent::PreviewTheme`) and the shell paints with it in place of the
+saved theme (`Shell::theme_preview`), skipping the work a real change does
+(keybindings, the menu, the store). A project with colors of its own keeps
+them, tried on or chosen, since the app's theme does not show there.
+
 ## Develop
 
 From the repository root:
