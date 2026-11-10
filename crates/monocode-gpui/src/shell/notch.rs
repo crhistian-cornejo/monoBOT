@@ -45,6 +45,11 @@ impl Shell {
     /// Claude Code's and Codex's own sessions: a socket the hooks write to,
     /// and the hooks added to their settings (once; see `notch::hooks`).
     fn start_notch_hooks(&mut self, data: &Path, cx: &mut Context<Self>) {
+        // A throwaway run (`cargo xtask perf`) leaves the user's agents'
+        // settings alone: its socket goes with its folder.
+        if std::env::var_os("MONOCODE_NOTCH_HOOKS").is_some_and(|value| value == "off") {
+            return;
+        }
         #[cfg(unix)]
         {
             use monocode_core::notch::hooks;

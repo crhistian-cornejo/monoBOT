@@ -1,8 +1,10 @@
 //! What plays, in the notch. Closed, while a song or a video plays: its
 //! cover, its title gliding past and a small equalizer. Open, the player
 //! leads Home: the cover with the app's mark, the title, the artist in the
-//! accent, the lyric line, a bar to drag through the track and the buttons.
-//! The track comes from the platform (`platform::watch_media`, Windows), the
+//! accent, the Lyrics switch, a bar to drag through the track and the
+//! buttons; the lyrics themselves play on the closed notch.
+//! The track comes from the platform (`platform::watch_media`: the media
+//! session on Windows, MediaRemote on macOS), the
 //! synced lyrics from LRCLIB (`monocode_core::notch::media`), fetched off
 //! the interface thread once per track.
 use super::*;
@@ -51,10 +53,13 @@ impl Source {
         } else if [
             "chrome",
             "msedge",
+            "edgemac",
             "firefox",
             "brave",
             "opera",
             "vivaldi",
+            "safari",
+            "thebrowser",
             "308046b0af4a39cb",
         ]
         .iter()
@@ -68,7 +73,7 @@ impl Source {
 }
 
 impl Notch {
-    /// Starts watching the player (Windows only, never in tests).
+    /// Starts watching the player (never in tests).
     pub(super) fn watch_media(&mut self, cx: &mut Context<Self>) {
         if cfg!(test) {
             return;
@@ -119,18 +124,19 @@ impl Notch {
                     gpui::ImageFormat::Png
                 };
                 let image = Arc::new(gpui::Image::from_bytes(format, bytes.to_vec()));
-                self.art = Some((bytes, image));
+                let before = self.art.replace((bytes, image));
+                Self::forget_cover(before, cx);
             }
             Some(_) => {}
-            None => self.art = None,
+            None => {
+                let before = self.art.take();
+                Self::forget_cover(before, cx);
+            }
         }
         let track = playing.as_ref().map(|playing| playing.track.clone());
         self.media = playing;
-        if let Some(track) = track
-            && self.lyrics_for.as_ref() != Some(&track)
-        {
-            self.fetch_lyrics(track, cx);
-        }
+        let _ = track;
+        self.want_lyrics(cx);
         self.read_queue(false, cx);
         // The open player's line and progress move a few times a second,
         // only while something plays.
@@ -159,6 +165,27 @@ impl Notch {
         }
         self.keep_responsive();
         cx.notify();
+    }
+
+    /// Lets go of a cover that is no longer shown: its decoded picture and
+    /// its texture, which GPUI would otherwise keep for every track played.
+    fn forget_cover(cover: Option<(Arc<[u8]>, Arc<gpui::Image>)>, cx: &mut App) {
+        if let Some((_, image)) = cover {
+            gpui::ImageSource::Image(image).evict(cx);
+        }
+    }
+
+    /// Asks for the lyrics of what plays, once per track, and only while
+    /// Lyrics is on: off, no title leaves this Mac for them.
+    pub(super) fn want_lyrics(&mut self, cx: &mut Context<Self>) {
+        if !self.look.lyrics {
+            return;
+        }
+        if let Some(track) = self.media.as_ref().map(|media| media.track.clone())
+            && self.lyrics_for.as_ref() != Some(&track)
+        {
+            self.fetch_lyrics(track, cx);
+        }
     }
 
     fn fetch_lyrics(&mut self, track: Track, cx: &mut Context<Self>) {
@@ -324,64 +351,6 @@ impl Notch {
         }
     }
 
-    /// Whether the open player shows the lyrics under it: timed ones, with
-    /// Lyrics on.
-    fn player_lyrics(&self) -> bool {
-        self.look.lyrics
-            && self.player_shown()
-            && matches!(self.current_lyrics(), Some(Lyrics::Synced(lines)) if !lines.is_empty())
-    }
-
-    /// The room the lyrics take under the open player.
-    pub(super) fn player_lyrics_height(&self) -> f32 {
-        if self.player_lyrics() {
-            LYRICS_HEIGHT + model::CELL_GAP
-        } else {
-            0.
-        }
-    }
-
-    /// The lines around the playhead under the open player.
-    pub(super) fn player_lyrics_view(&self) -> AnyElement {
-        if !self.player_lyrics() {
-            return div().into_any_element();
-        }
-        let (Some(media), Some(Lyrics::Synced(lines))) =
-            (self.media.as_ref(), self.current_lyrics())
-        else {
-            return div().into_any_element();
-        };
-        let text = |index: Option<usize>| {
-            let line = lines.get(index?)?.text.trim();
-            Some(if line.is_empty() {
-                "♪".to_owned()
-            } else {
-                line.to_owned()
-            })
-        };
-        let position = media.position_at(Instant::now());
-        let (shown, since) = match media_model::line_at(lines, position + LYRIC_LEAD) {
-            Some(at) => (
-                [
-                    text(at.checked_sub(2)),
-                    text(at.checked_sub(1)),
-                    text(Some(at)),
-                    text(Some(at + 1)),
-                ],
-                (position + LYRIC_LEAD)
-                    .saturating_sub(lines[at].at)
-                    .as_secs_f32(),
-            ),
-            // Before the first line: a note, and the line to come.
-            None => ([None, None, Some("♪".to_owned()), text(Some(0))], 1.),
-        };
-        div()
-            .pt(px(model::CELL_GAP))
-            .flex_shrink_0()
-            .child(lyric_stack(shown, since, self.lyric_sung(), media.playing))
-            .into_any_element()
-    }
-
     /// The cover on its way from the wing to the open player, drawn over
     /// the island while it springs open: it moves and grows with the
     /// island's own spring. `island` is the island now and `rest` the open
@@ -458,11 +427,7 @@ impl Notch {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .font(media_glyphs())
-                    .text_size(px(side * 0.36))
-                    .text_color(ink(0.45))
-                    // Audio
-                    .child("\u{e8d6}")
+                    .child(icon("media-note", side * 0.36).text_color(ink(0.45)))
                     .into_any_element(),
             })
             .when(badge, |cover| {
@@ -554,6 +519,8 @@ impl Notch {
         let source = Source::of(&media.track);
         // The lyrics play on the closed notch; here only whether they do.
         let (lyrics_label, timed) = match self.current_lyrics() {
+            // Off, nothing was asked for: the switch turns them on.
+            _ if !self.look.lyrics => ("Lyrics", true),
             None => ("Lyrics…", false),
             Some(Lyrics::Synced(_)) => ("Lyrics", true),
             Some(Lyrics::Instrumental) => ("Instrumental", false),
@@ -573,6 +540,7 @@ impl Notch {
             let side = if big { 30. } else { 26. };
             div()
                 .id(id)
+                .group(id)
                 .debug_selector(move || id.into())
                 .role(Role::Button)
                 .aria_label(label)
@@ -582,13 +550,14 @@ impl Notch {
                 .justify_center()
                 .cursor_pointer()
                 .rounded(px(2.))
-                .font(media_glyphs())
-                .text_size(px(if big { 15. } else { 12. }))
-                .text_color(ink(0.92))
                 .when(big, |button| button.bg(ink(0.12)))
-                .hover(|style| style.bg(ink(0.18)).text_color(ink(1.)))
+                .hover(|style| style.bg(ink(0.18)))
                 .active(|style| style.bg(ink(0.24)))
-                .child(glyph)
+                .child(
+                    icon(glyph, if big { 15. } else { 12. })
+                        .text_color(ink(0.92))
+                        .group_hover(id, |style| style.text_color(ink(1.))),
+                )
         };
         div()
             .debug_selector(|| "notch-player".into())
@@ -671,19 +640,26 @@ impl Notch {
                             .justify_center()
                             .gap(px(14.))
                             .child(
-                                control("notch-media-previous", "Previous", "\u{e892}", false)
-                                    .on_click(cx.listener(|this, _, _, cx| {
+                                control(
+                                    "notch-media-previous",
+                                    "Previous",
+                                    "media-previous",
+                                    false,
+                                )
+                                .on_click(cx.listener(
+                                    |this, _, _, cx| {
                                         this.send_media(platform::MediaCommand::Previous, cx)
-                                    })),
+                                    },
+                                )),
                             )
                             .child(
                                 control(
                                     "notch-media-play",
                                     if media.playing { "Pause" } else { "Play" },
                                     if media.playing {
-                                        "\u{e769}"
+                                        "media-pause"
                                     } else {
-                                        "\u{e768}"
+                                        "media-play"
                                     },
                                     true,
                                 )
@@ -694,7 +670,7 @@ impl Notch {
                                 )),
                             )
                             .child(
-                                control("notch-media-next", "Next", "\u{e893}", false).on_click(
+                                control("notch-media-next", "Next", "media-next", false).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         this.send_media(platform::MediaCommand::Next, cx)
                                     }),
@@ -808,14 +784,6 @@ fn time_label(at: Duration) -> impl IntoElement {
         .child(format!("{}:{:02}", seconds / 60, seconds % 60))
 }
 
-/// The player's glyphs: the ones Windows draws in its own media flyout.
-fn media_glyphs() -> gpui::Font {
-    #[cfg(target_os = "windows")]
-    return crate::fonts::caption_glyphs();
-    #[cfg(not(target_os = "windows"))]
-    gpui::font(crate::fonts::UI)
-}
-
 /// The app's mark on the cover: Spotify's own, a globe for a browser, a
 /// note for anything else. Drawn, so no logo file ships.
 fn source_mark(source: Source, side: f32) -> AnyElement {
@@ -856,15 +824,17 @@ fn source_mark(source: Source, side: f32) -> AnyElement {
             .justify_center()
             .rounded(px(2.))
             .bg(black(0.7))
-            .font(media_glyphs())
-            .text_size(px(side * 0.55))
-            .text_color(ink(0.95))
-            // Globe, or Audio.
-            .child(if other == Source::Browser {
-                "\u{e774}"
-            } else {
-                "\u{e8d6}"
-            })
+            .child(
+                icon(
+                    if other == Source::Browser {
+                        "media-globe"
+                    } else {
+                        "media-note"
+                    },
+                    side * 0.55,
+                )
+                .text_color(ink(0.95)),
+            )
             .into_any_element(),
     }
 }
@@ -919,7 +889,9 @@ fn equalizer(playing: bool) -> impl IntoElement {
                 );
             }
             if moving {
-                window.request_animation_frame();
+                // On the shared clock: 60 a second at most, and the frame keeps its
+                // measurements instead of laying the notch out again.
+                crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
             }
         },
     )
@@ -1001,99 +973,6 @@ fn paint_sung(
             });
         }
     });
-}
-
-/// The open player's lyrics: this many lines, the one at the playhead in
-/// the middle.
-pub(super) const LYRICS_HEIGHT: f32 = 60.;
-
-/// The lines around the playhead in the open player: the one before, the
-/// one sung now (brighter, filling with the accent) and the one after. When
-/// the song reaches a new line they all move up one place. `lines` are the
-/// two before, the current and the next.
-fn lyric_stack(
-    lines: [Option<String>; 4],
-    since: f32,
-    sung: f32,
-    playing: bool,
-) -> impl IntoElement {
-    const SIZE: f32 = 12.5;
-    const ROW: f32 = 19.;
-    div()
-        .debug_selector(|| "notch-player-lyrics".into())
-        .h(px(LYRICS_HEIGHT))
-        .flex_shrink_0()
-        .child(
-            canvas(
-                |_, _, _| (),
-                move |bounds, _, window, cx| {
-                    let still = cx.reduce_motion();
-                    let t = if still {
-                        1.
-                    } else {
-                        (since / LYRIC_IN).clamp(0., 1.)
-                    };
-                    let eased = 1. - (1. - t).powi(3);
-                    // Each line sits `place` rows from the middle: on a new
-                    // line they start one row lower and rise into place.
-                    let middle = bounds.top() + (bounds.size.height - px(ROW)) / 2.;
-                    let mut moving = t < 1.;
-                    window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
-                        for (index, text) in lines.iter().enumerate() {
-                            let Some(text) = text.as_deref() else {
-                                continue;
-                            };
-                            let place = index as f32 - 2. + (1. - eased);
-                            // Brightest in the middle, gone a row past the edge.
-                            let near = (1. - place.abs()).clamp(0., 1.);
-                            let shown = (2. - place.abs()).clamp(0., 1.);
-                            let current = index == 2;
-                            let fills = current && !still && text != "♪";
-                            let base = if fills { 0.55 } else { 0.34 + 0.58 * near };
-                            let alpha = base * shown;
-                            if alpha <= 0. {
-                                continue;
-                            }
-                            let weight = gpui::FontWeight::MEDIUM;
-                            let line = lyric_line(text, SIZE, weight, ink(alpha), window);
-                            let width = f32::from(line.width);
-                            let room = f32::from(bounds.size.width);
-                            let front = (width + EDGE) * sung.clamp(0., 1.);
-                            // Too long: the line sung now moves with its fill.
-                            let offset = if fills && width > room {
-                                (front - room * 0.55).clamp(0., width - room)
-                            } else {
-                                0.
-                            };
-                            let origin =
-                                point(bounds.left() - px(offset), middle + px(place * ROW));
-                            let _ = line.paint(
-                                origin,
-                                px(ROW),
-                                gpui::TextAlign::Left,
-                                None,
-                                window,
-                                cx,
-                            );
-                            if fills {
-                                let row = Bounds::new(
-                                    point(bounds.left(), origin.y),
-                                    gpui::size(bounds.size.width, px(ROW)),
-                                );
-                                paint_sung(
-                                    text, SIZE, weight, origin, front, near, row, window, cx,
-                                );
-                                moving |= playing && sung < 1.;
-                            }
-                        }
-                    });
-                    if moving {
-                        window.request_animation_frame();
-                    }
-                },
-            )
-            .size_full(),
-        )
 }
 
 /// How long a new lyric line takes to come in.
@@ -1228,7 +1107,9 @@ fn lyric_flow(
                         moving |= fills && playing && sung < 1.;
                     });
                     if moving {
-                        window.request_animation_frame();
+                        // On the shared clock: 60 a second at most, and the frame keeps its
+                        // measurements instead of laying the notch out again.
+                        crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
                     }
                 },
             )
@@ -1305,7 +1186,9 @@ fn glide(
                         }
                     });
                     if !still {
-                        window.request_animation_frame();
+                        // On the shared clock: 60 a second at most, and the frame keeps its
+                        // measurements instead of laying the notch out again.
+                        crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
                     }
                 },
             )
@@ -1435,14 +1318,7 @@ pub(super) fn battery_chip() -> Option<AnyElement> {
                     .child(div().w(px(1.5)).h(px(4.)).bg(ink(0.45))),
             )
             .when(charging, |chip| {
-                chip.child(
-                    div()
-                        .font(media_glyphs())
-                        .text_size(px(10.))
-                        .text_color(charge_color(charge, true))
-                        // LightningBolt
-                        .child("\u{e945}"),
-                )
+                chip.child(icon("media-charging", 10.).text_color(charge_color(charge, true)))
             })
             .into_any_element(),
     )

@@ -911,13 +911,20 @@ fn clock_widget() -> AnyElement {
                 .text_size(px(22.))
                 .font_weight(gpui::FontWeight::SEMIBOLD)
                 .text_color(ink(0.95))
-                .child(now.format("%H:%M").to_string()),
+                // The minute rolls over instead of jumping.
+                .child(crate::text_morph::text_morph(
+                    "notch-clock",
+                    now.format("%H:%M").to_string(),
+                )),
         )
         .child(
             div()
                 .text_size(px(10.5))
                 .text_color(ink(0.5))
-                .child(now.format("%a %e %b").to_string()),
+                .child(crate::text_morph::text_morph(
+                    "notch-clock-date",
+                    now.format("%a %e %b").to_string(),
+                )),
         )
         .into_any_element()
 }

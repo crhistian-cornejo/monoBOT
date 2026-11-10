@@ -6,7 +6,7 @@ App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay R
 | --- | --- |
 | `crates/monocode-gpui/` | App de escritorio (interfaz GPUI). Miembro del workspace de Cargo de la raíz (`Cargo.toml`, `Cargo.lock`, salida en `target/`). |
 | `crates/monocode-core/` | Lógica sin interfaz: proveedores, persistencia, Git/archivos, bots, correo, enlace móvil. No depende de GPUI. |
-| `crates/{mobile-link,email,http,dictation,voice,visual}` | Crates compartidos que enlaza el core o la app. |
+| `crates/{mobile-link,persona,email,http,dictation,voice,visual}` | Crates compartidos que enlaza el core o la app. `persona` dibuja las caras 3D de los bots en el escritorio y en el móvil. |
 | `mobile/` | App Expo (iOS/Android). Proyecto pnpm propio con su lockfile; tiene su propio `AGENTS.md`. |
 | `host/` | Host remoto en Node (`monocode-host`) que instala la app por SSH. |
 | `deploy/cloudflare-mail/` | Worker opcional de correo entrante en Rust → WebAssembly (Cloudflare Email Routing → R2 + D1). Crate aparte, no está en el workspace. |

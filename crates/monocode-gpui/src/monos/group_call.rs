@@ -325,7 +325,21 @@ impl Monos {
             live: None,
             in_ears: false,
         });
-        let group = group.id.clone();
+        self.call_check_ears(cx);
+    }
+
+    /// Asks, off the interface thread, whether the voice goes into the user's
+    /// ears. Asked again when a call starts and each time the members finish
+    /// speaking: headphones taken off mid-call must close the microphone
+    /// while the speakers play.
+    fn call_check_ears(&mut self, cx: &mut Context<Self>) {
+        // Tests say where the voice goes themselves (`call_test_in_ears`).
+        if cfg!(test) {
+            return;
+        }
+        let Some(group) = self.call.as_ref().map(|call| call.group.clone()) else {
+            return;
+        };
         let ears = cx
             .background_executor()
             .spawn(async move { monobot_dictation::devices::in_ears() });
@@ -350,6 +364,7 @@ impl Monos {
         }
         call.error = None;
         call.lines.clear();
+        self.call_check_ears(cx);
         if let Some(provider) = choice {
             self.call_start_live(provider, cx);
             return;
@@ -600,6 +615,11 @@ impl Monos {
         let Some(call) = self.call.as_ref() else {
             return;
         };
+        // A live call has its own microphone, straight to the model: this
+        // Mac's ear stays shut, or it would hear the call a second time.
+        if call.live.is_some() {
+            return;
+        }
         if call.muted || !(call.phase == Phase::Listening || call.overhears()) {
             return;
         }
@@ -736,11 +756,36 @@ impl Monos {
             return;
         };
         let text = call.input.read(cx).content.trim().to_owned();
-        if !text.is_empty() {
-            call.input
-                .update(cx, |input, cx| input.set_text(String::new(), cx));
-            self.call_say(text, cx);
+        if text.is_empty() {
+            return;
         }
+        call.input
+            .update(cx, |input, cx| input.set_text(String::new(), cx));
+        // In a live call the words go to the model, not to this Mac's round.
+        if let Some(call) = self.call.as_mut()
+            && let Some(live) = call.live.as_mut()
+        {
+            if live.say(&text) {
+                call.lines.push(Line {
+                    value: CallLine {
+                        who: "user".into(),
+                        name: "You".into(),
+                        text,
+                        status: LineStatus::Said,
+                    },
+                    note: None,
+                });
+                call.error = None;
+            } else {
+                call.error = Some(format!(
+                    "{} takes no typed text in a call. Say it instead.",
+                    live.provider.label()
+                ));
+            }
+            cx.notify();
+            return;
+        }
+        self.call_say(text, cx);
     }
 
     fn call_voice_event(&mut self, group: &str, event: VoiceEvent, cx: &mut Context<Self>) {
@@ -773,6 +818,7 @@ impl Monos {
                 call.speaking = None;
                 call.phase = Phase::Listening;
                 self.call_listen(cx);
+                self.call_check_ears(cx);
             }
             _ => {}
         }
@@ -1092,6 +1138,11 @@ impl Monos {
             return;
         };
         call.muted = !call.muted;
+        if let Some(live) = call.live.as_ref() {
+            live.set_muted(call.muted);
+            cx.notify();
+            return;
+        }
         if call.muted {
             call.transcribing = false;
             call.dictated
@@ -1105,6 +1156,14 @@ impl Monos {
 
     fn call_interrupt(&mut self, cx: &mut Context<Self>) {
         if !self.call.as_ref().is_some_and(CallState::live) {
+            return;
+        }
+        if let Some(call) = self.call.as_mut()
+            && let Some(live) = call.live.as_mut()
+        {
+            live.hush();
+            call.phase = Phase::Listening;
+            cx.notify();
             return;
         }
         self.call_abort_round(cx);
@@ -1508,6 +1567,17 @@ impl Monos {
     #[cfg(test)]
     pub(super) fn call_test_interrupt(&mut self, cx: &mut Context<Self>) {
         self.call_interrupt(cx);
+    }
+
+    #[cfg(test)]
+    pub(super) fn call_test_type(&mut self, text: &str, cx: &mut Context<Self>) {
+        let Some(call) = self.call.as_ref() else {
+            return;
+        };
+        let group = call.group.clone();
+        call.input
+            .update(cx, |input, cx| input.set_text(text.to_owned(), cx));
+        self.call_submit_text(&group, cx);
     }
 
     #[cfg(test)]

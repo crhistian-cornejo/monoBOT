@@ -147,3 +147,60 @@ fn saving_a_clean_file_still_applies_the_format_on_save_preference(cx: &mut Test
     );
     std::fs::remove_file(path).unwrap();
 }
+
+#[gpui::test]
+fn the_poll_reads_the_file_again_only_when_it_changed_on_disk(cx: &mut TestAppContext) {
+    let path = std::env::temp_dir().join(format!("monocode-poll-stamp-{}.txt", std::process::id()));
+    std::fs::write(&path, "first\n").unwrap();
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    let window = cx.update(|cx| {
+        cx.open_window(Default::default(), |_, cx| {
+            let git = cx
+                .new(|cx| ProjectGit::new(std::env::temp_dir().to_string_lossy().into_owned(), cx));
+            cx.new(|cx| FileEditor::new(path.to_string_lossy().into_owned(), git, cx))
+        })
+        .unwrap()
+    });
+    window
+        .update(cx, |editor, _, cx| editor.set_visible(true, cx))
+        .unwrap();
+    cx.run_until_parked();
+    let poll = |cx: &mut TestAppContext| {
+        cx.executor().advance_clock(Duration::from_secs(2));
+        cx.run_until_parked();
+        window
+            .update(cx, |editor, _, cx| {
+                (
+                    editor.polled_reads,
+                    editor.input.read(cx).content.to_string(),
+                )
+            })
+            .unwrap()
+    };
+    // The first poll learns the file's size and time; after it an unchanged
+    // file costs a stat and nothing more.
+    assert_eq!(poll(cx), (1, "first\n".into()));
+    assert_eq!(poll(cx), (1, "first\n".into()));
+    assert_eq!(poll(cx), (1, "first\n".into()));
+    // Written by something else: the next poll shows it.
+    std::fs::write(&path, "second, and longer\n").unwrap();
+    assert_eq!(poll(cx), (2, "second, and longer\n".into()));
+    assert_eq!(poll(cx), (2, "second, and longer\n".into()));
+    // Hidden, it is left alone; shown again, it is read at once.
+    window
+        .update(cx, |editor, _, cx| editor.set_visible(false, cx))
+        .unwrap();
+    std::fs::write(&path, "third\n").unwrap();
+    assert_eq!(poll(cx).0, 2);
+    window
+        .update(cx, |editor, _, cx| editor.set_visible(true, cx))
+        .unwrap();
+    cx.run_until_parked();
+    let shown = window
+        .update(cx, |editor, _, cx| {
+            editor.input.read(cx).content.to_string()
+        })
+        .unwrap();
+    assert_eq!(shown, "third\n");
+    std::fs::remove_file(path).unwrap();
+}

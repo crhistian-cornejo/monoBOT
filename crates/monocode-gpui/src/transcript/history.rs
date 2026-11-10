@@ -225,6 +225,8 @@ impl TranscriptView {
         let mut source = page.rows;
         source.append(&mut self.source);
         self.source = source;
+        // Every row moved down: what was read by row index no longer fits.
+        *self.tool_kinds.get_mut() = Default::default();
         for (turn, info) in page.turns {
             self.turns.entry(turn).or_insert(info);
         }
@@ -411,6 +413,7 @@ impl TranscriptView {
         });
         self.source = Vec::new();
         self.source_bytes = 0;
+        *self.tool_kinds.get_mut() = Default::default();
         self.history_start = 0;
         self.history_loading = false;
         self.history_requested = false;
@@ -462,6 +465,7 @@ impl TranscriptView {
         // Reopening also handles a source that became empty in another window.
         self.source = Vec::new();
         self.source_bytes = 0;
+        *self.tool_kinds.get_mut() = Default::default();
         self.messages = Vec::new();
         self.rows = Vec::new();
         self.history_start = 0;

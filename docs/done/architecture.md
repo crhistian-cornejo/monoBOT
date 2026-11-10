@@ -25,6 +25,31 @@ Provider transports use Codex app-server, Claude stream-json, OpenCode HTTP/SSE,
 ACP for Cursor/Grok/Antigravity/fx/Hermes/Devin, and Pi/omp RPC. They reuse the
 providers' CLI authentication and conversation IDs.
 
+## Secrets
+
+Every secret (mail passwords and tokens, voice keys, a sign-in's refresh token,
+the phone link's identity) goes through one door, `monocode_core::secrets::entry`
+(`crates/email/src/base.rs`, `keychain`), to the system's store: the Keychain
+on macOS, Credential Manager on Windows, the secret service on Linux. The
+service ids stay internal (`com.monocode.desktop`, `com.monocode.mobile`),
+because changing them would lose what users saved.
+
+The system's store is used only after the app says so
+(`secrets::use_system_keychain()`, the first line of its `main`). Until then
+secrets live in the process's memory. A test binary never calls it, so no test
+of any crate reads the user's secrets or makes macOS ask for them; the same
+switch keeps tests away from Claude Code's own Keychain item
+(`usage/claude.rs`). Before this, the GPUI tests reached the real Keychain,
+because a crate's `cfg(test)` is off when it is built as a dependency, and
+macOS asked the user to let `monocode_gpui-<hash>` in.
+
+On macOS each item is named "monoBOT" (`kSecAttrLabel`) the first time it is
+touched in a run, so the system's dialog reads "… stored in “monoBOT”" instead
+of the internal id. Only the name changes: the service and account that find
+the secret, and the secret, stay as they are. A development build is signed
+anew on every build, so macOS asks again after each one; an installed, signed
+release is asked once.
+
 ## Rendering and responsiveness
 
 Keep provider I/O, parsing, file access and persistence off the UI thread.

@@ -47,6 +47,10 @@ pub struct Options {
     pub setup_timeout: Duration,
     /// Reconnects allowed in a minute before the call gives up.
     pub reconnects: usize,
+    /// The wait before the first reconnect after a drop; each one after it
+    /// waits twice as long, up to four seconds, so a network that is away
+    /// for a moment has time to come back.
+    pub backoff: Duration,
 }
 
 impl Default for Options {
@@ -56,7 +60,8 @@ impl Default for Options {
             remind_every: None,
             most_tools: 3,
             setup_timeout: Duration::from_secs(10),
-            reconnects: 3,
+            reconnects: 5,
+            backoff: Duration::from_millis(500),
         }
     }
 }
@@ -98,6 +103,22 @@ impl Recover for crate::phonic::Phonic {}
 
 enum Out {
     Audio(Vec<f32>),
+    /// What the user typed.
+    Text(String),
+}
+
+/// Where the microphone sends what it hears. The capture thread keeps one
+/// of its own, so the call's owner can hold, move and end the [`Session`]
+/// without the microphone losing its way to it.
+#[derive(Clone)]
+pub struct Microphone(Sender<Out>);
+
+impl Microphone {
+    /// Microphone audio, mono at `INPUT_RATE`. After the call ends it goes
+    /// nowhere.
+    pub fn send(&self, samples: Vec<f32>) {
+        let _ = self.0.send(Out::Audio(samples));
+    }
 }
 
 pub struct Session {
@@ -131,6 +152,7 @@ impl Session {
                         tools: HashMap::new(),
                         done: mpsc::channel(),
                         reconnects: Vec::new(),
+                        was_live: false,
                     };
                     let why = run.go();
                     run.cancel_tools();
@@ -148,6 +170,17 @@ impl Session {
     /// Microphone audio, mono at `INPUT_RATE`.
     pub fn send_audio(&self, samples: Vec<f32>) {
         let _ = self.outgoing.send(Out::Audio(samples));
+    }
+
+    /// What the user typed instead of saying it, as a turn of theirs. A
+    /// protocol that takes no text drops it.
+    pub fn send_text(&self, text: String) {
+        let _ = self.outgoing.send(Out::Text(text));
+    }
+
+    /// The way in for a microphone that runs on a thread of its own.
+    pub fn microphone(&self) -> Microphone {
+        Microphone(self.outgoing.clone())
     }
 
     pub fn live(&self) -> bool {
@@ -193,6 +226,9 @@ struct Run<P, C> {
     tools: HashMap<String, Running>,
     done: (Sender<Finished>, Receiver<Finished>),
     reconnects: Vec<Instant>,
+    /// The call was live at least once: a connection that fails now is a
+    /// drop to recover from, not a call that never began.
+    was_live: bool,
 }
 
 /// Why a connection ended.
@@ -201,6 +237,9 @@ enum End {
     Stopped,
     /// The far end asked to move, or dropped; worth reconnecting.
     Moved,
+    /// The far end refused this model before the call began; the next one
+    /// down the ladder is tried at once.
+    Stepped,
     /// It failed for good, in the user's words.
     Failed(String),
 }
@@ -212,7 +251,7 @@ impl<P: Protocol + Recover, C: Connect> Run<P, C> {
             match self.connection() {
                 End::Stopped => return None,
                 End::Failed(why) => return Some(why),
-                End::Moved => {
+                end @ (End::Moved | End::Stepped) => {
                     let now = Instant::now();
                     self.reconnects
                         .retain(|at| now.duration_since(*at) < Duration::from_secs(60));
@@ -221,6 +260,19 @@ impl<P: Protocol + Recover, C: Connect> Run<P, C> {
                     }
                     self.reconnects.push(now);
                     self.host.state(State::Reconnecting);
+                    // A drop waits a little longer each time; hanging up
+                    // meanwhile ends the wait.
+                    if matches!(end, End::Moved) {
+                        let doubled = 1u32 << (self.reconnects.len() - 1).min(3);
+                        let wait = (self.options.backoff * doubled).min(Duration::from_secs(4));
+                        let until = now + wait;
+                        while Instant::now() < until {
+                            if self.stop.load(Ordering::Acquire) {
+                                return None;
+                            }
+                            std::thread::sleep(Duration::from_millis(20).min(wait));
+                        }
+                    }
                 }
             }
         }
@@ -232,6 +284,9 @@ impl<P: Protocol + Recover, C: Connect> Run<P, C> {
             .connect(self.protocol.url(), &self.protocol.headers())
         {
             Ok(socket) => socket,
+            // The network went away mid-call: try again, within the same
+            // allowance, rather than ending a call that was going well.
+            Err(_) if self.was_live && self.protocol.resumes() => return End::Moved,
             Err(why) => return End::Failed(why),
         };
         let resume = if self.protocol.resumes() {
@@ -246,6 +301,10 @@ impl<P: Protocol + Recover, C: Connect> Run<P, C> {
             Ok(()) => {}
             Err(end) => return end,
         }
+        // What the microphone heard while this connected was said to nobody:
+        // sent now it would arrive late and all at once.
+        while self.incoming.try_recv().is_ok() {}
+        self.was_live = true;
         self.host.state(State::Live);
         let mut leaving = false;
         let mut last_audio = Instant::now();
@@ -254,8 +313,12 @@ impl<P: Protocol + Recover, C: Connect> Run<P, C> {
                 socket.close();
                 return End::Stopped;
             }
-            while let Ok(Out::Audio(samples)) = self.incoming.try_recv() {
-                for message in self.protocol.audio(&samples) {
+            while let Ok(out) = self.incoming.try_recv() {
+                let messages = match out {
+                    Out::Audio(samples) => self.protocol.audio(&samples),
+                    Out::Text(text) => self.protocol.text(&text).into_iter().collect(),
+                };
+                for message in messages {
                     if socket.send(&message).is_err() {
                         return End::Moved;
                     }
@@ -344,7 +407,7 @@ impl<P: Protocol + Recover, C: Connect> Run<P, C> {
     /// The far end closed before the call began.
     fn refused(&mut self, closed: Closed) -> End {
         if self.protocol.fall_back(&closed.reason) {
-            End::Moved
+            End::Stepped
         } else {
             End::Failed(describe(&closed))
         }
@@ -478,6 +541,8 @@ mod tests {
         /// Per connection: messages to deliver, or a close.
         scripts: Arc<Mutex<Vec<Vec<Step>>>>,
         live: Arc<Mutex<Option<Sender<Step>>>>,
+        /// How many of the next connections fail, as with the network away.
+        offline: Arc<Mutex<usize>>,
     }
 
     #[derive(Clone)]
@@ -512,6 +577,13 @@ mod tests {
             _: &str,
             _: &[(&'static str, String)],
         ) -> Result<Box<dyn Transport>, String> {
+            {
+                let mut offline = self.offline.lock().unwrap();
+                if *offline > 0 {
+                    *offline -= 1;
+                    return Err("The network is unreachable.".into());
+                }
+            }
             let mut sent = self.sent.lock().unwrap();
             let index = sent.len();
             sent.push(Vec::new());
@@ -583,6 +655,7 @@ mod tests {
         Options {
             patience: Duration::from_millis(80),
             setup_timeout: Duration::from_millis(500),
+            backoff: Duration::from_millis(5),
             ..Options::default()
         }
     }
@@ -624,6 +697,34 @@ mod tests {
             host.states.lock().unwrap().last(),
             Some(&State::Ended(None))
         );
+    }
+
+    #[test]
+    fn a_microphone_keeps_its_way_in_after_the_session_moves() {
+        // No READY yet: the call is still connecting.
+        let far = Far::default();
+        let host = Arc::new(Recorder::default());
+        let session = Session::start(gemini(), far.clone(), host.clone(), quick());
+        let microphone = session.microphone();
+        // The session goes to its owner, as the app hands it to the call.
+        let owner = Mutex::new(Some(session));
+        let session = owner.lock().unwrap().take().unwrap();
+        eventually("the setup", || far.sent(0).len() == 1);
+        // Heard while connecting: never sent, not even late.
+        microphone.send(vec![0.1; 640]);
+        far.say(READY);
+        eventually("live", || {
+            host.states.lock().unwrap().contains(&State::Live)
+        });
+        microphone.send(vec![0.2; 640]);
+        eventually("two frames", || far.sent(0).len() == 3);
+        std::thread::sleep(Duration::from_millis(60));
+        let sent = far.sent(0);
+        assert_eq!(sent.len(), 3, "only what was heard once live");
+        assert!(sent[1].contains("realtimeInput") && sent[2].contains("realtimeInput"));
+        session.hang_up();
+        // After the call it goes nowhere, and does not fail.
+        microphone.send(vec![0.3; 640]);
     }
 
     #[test]
@@ -736,6 +837,74 @@ mod tests {
                 == 2
         });
         assert!(host.states.lock().unwrap().contains(&State::Reconnecting));
+        session.hang_up();
+    }
+
+    #[test]
+    fn a_network_that_is_away_for_a_moment_does_not_end_the_call() {
+        let far = Far::default().script(vec![vec![say(READY)], vec![say(READY)]]);
+        let host = Arc::new(Recorder::default());
+        let session = Session::start(gemini(), far.clone(), host.clone(), quick());
+        eventually("live", || {
+            host.states.lock().unwrap().contains(&State::Live)
+        });
+        // The line drops, and the first two tries to come back find no
+        // network.
+        *far.offline.lock().unwrap() = 2;
+        far.say(r#"{"goAway":{"timeLeft":"5s"}}"#);
+        eventually("live again", || {
+            host.states
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|state| **state == State::Live)
+                .count()
+                >= 2
+        });
+        assert!(
+            !host
+                .states
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|state| matches!(state, State::Ended(_))),
+            "the call went on"
+        );
+        session.hang_up();
+    }
+
+    #[test]
+    fn a_call_that_cannot_begin_says_so_at_once() {
+        let far = Far::default();
+        *far.offline.lock().unwrap() = 1;
+        let host = Arc::new(Recorder::default());
+        let session = Session::start(gemini(), far.clone(), host.clone(), quick());
+        eventually("ended", || {
+            matches!(
+                host.states.lock().unwrap().last(),
+                Some(State::Ended(Some(why))) if why.contains("unreachable")
+            )
+        });
+        assert_eq!(far.connections(), 0);
+        drop(session);
+    }
+
+    #[test]
+    fn typed_text_goes_up_as_a_turn_of_the_users() {
+        let far = Far::default().script(vec![vec![say(READY)]]);
+        let host = Arc::new(Recorder::default());
+        let session = Session::start(gemini(), far.clone(), host.clone(), quick());
+        eventually("live", || {
+            host.states.lock().unwrap().contains(&State::Live)
+        });
+        session.send_text("¿Cuánto gasté?".into());
+        eventually("the turn", || far.sent(0).len() == 2);
+        let turn: serde_json::Value = serde_json::from_str(&far.sent(0)[1]).unwrap();
+        assert_eq!(
+            turn["clientContent"]["turns"][0]["parts"][0]["text"],
+            "¿Cuánto gasté?"
+        );
+        assert_eq!(turn["clientContent"]["turnComplete"], true);
         session.hang_up();
     }
 

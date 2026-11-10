@@ -275,9 +275,14 @@ impl Shell {
         if let Some(monos) = self.monos.clone() {
             self.observations.push(cx.subscribe(
                 &monos,
-                |this, _, _: &crate::monos::NotificationChanged, cx| {
-                    this.process_notification_inputs(cx);
-                    cx.notify()
+                |this, _, changed: &crate::monos::NotificationChanged, cx| {
+                    // The notch's chat shows what is said as it streams; it
+                    // catches up at its own pace and only when it changed.
+                    this.sync_notch(cx);
+                    if *changed == crate::monos::NotificationChanged::Request {
+                        this.process_notification_inputs(cx);
+                        cx.notify()
+                    }
                 },
             ));
             self.observations.push(cx.subscribe(

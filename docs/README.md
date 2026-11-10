@@ -33,6 +33,7 @@ things were, move it to `old/`.
 | [mail-workspace.md](in-progress/mail-workspace.md) | Mail, bot inboxes and agenda with Cloudflare and Mailflare; deployment checklist |
 | [workstreams.md](in-progress/workstreams.md) | Workstreams (beta): multi-day work run by an orchestrator |
 | [ivy-review.md](in-progress/ivy-review.md) | What to take from IVY: harness and agent gaps, Decider, live and group calls, dictation |
+| [performance-audit.md](in-progress/performance-audit.md) | Audit of Nov 9: measured cost at rest and at work, what was fixed in live calls, the notch and polling, what is left, and what macOS 27 adds |
 | [notch.md](in-progress/notch.md) | The notch on macOS and Windows: what is built, checked and next |
 | [voice-and-hands.md](in-progress/voice-and-hands.md) | Voice: done so far are the Neural Engine ear, call fixes, Settings › Voice, Gemini Live and Phonic calls, and Mac actions; done too are JOSIE-style turns with Smart Turn; left are speaker echo, the wake word and CUA |
 

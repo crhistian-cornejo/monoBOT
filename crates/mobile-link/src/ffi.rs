@@ -71,6 +71,16 @@ enum Call {
     TranscriptDrop {
         transcript_id: u64,
     },
+    /// A bot's 3D face as a PNG in `directory`; answers the file's name.
+    Persona {
+        face: String,
+        color: String,
+        pose: String,
+        side: u32,
+        #[serde(default)]
+        portrait: bool,
+        directory: String,
+    },
 }
 fn runtime() -> &'static tokio::runtime::Runtime {
     static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
@@ -196,6 +206,16 @@ fn execute(input: &str) -> LinkResult<Value> {
             transcripts().lock().unwrap().remove(&transcript_id);
             Ok(Value::Null)
         }
+        Call::Persona {
+            face,
+            color,
+            pose,
+            side,
+            portrait,
+            directory,
+        } => Ok(json!({
+            "name": crate::persona::picture(&face, &color, &pose, side, portrait, &directory)?
+        })),
     }
 }
 fn call(input: &str) -> String {
@@ -273,5 +293,45 @@ mod tests {
             )["ok"],
             false
         );
+    }
+    #[test]
+    fn a_persona_is_rendered_once_into_the_phones_folder() {
+        let invoke =
+            |input: Value| -> Value { serde_json::from_str(&call(&input.to_string())).unwrap() };
+        let directory =
+            std::env::temp_dir().join(format!("monobot-personas-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
+        std::fs::create_dir_all(&directory).unwrap();
+        // What an older renderer drew goes; anything else in the folder stays.
+        let stale = directory.join("0123456789abcdef-Cat-Quill-38bdf8-Rest-48.png");
+        let other = directory.join("notes.txt");
+        std::fs::write(&stale, b"old").unwrap();
+        std::fs::write(&other, b"keep").unwrap();
+        let request = |pose: &str| {
+            json!({"operation":"persona","face":"3d:cat:writer","color":"#38bdf8","pose":pose,
+                "side":48,"portrait":false,"directory":directory.to_str().unwrap()})
+        };
+        let rendered = invoke(request("talk"));
+        assert_eq!(rendered["ok"], true, "{rendered}");
+        let name = rendered["result"]["name"].as_str().unwrap().to_owned();
+        let file = directory.join(&name);
+        let decoder =
+            png::Decoder::new(std::io::BufReader::new(std::fs::File::open(&file).unwrap()));
+        let reader = decoder.read_info().unwrap();
+        assert_eq!((reader.info().width, reader.info().height), (48, 48));
+        assert!(!stale.exists() && other.exists());
+        // Asked again, the file it left is the answer, not drawn anew.
+        let written = std::fs::metadata(&file).unwrap().modified().unwrap();
+        assert_eq!(invoke(request("talk"))["result"]["name"], name.as_str());
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().modified().unwrap(),
+            written
+        );
+        // Each pose is its own picture; a pixel mascot is not a persona.
+        assert_ne!(invoke(request("rest"))["result"]["name"], name.as_str());
+        let mut mascot = request("rest");
+        mascot["face"] = json!("cat");
+        assert_eq!(invoke(mascot)["ok"], false);
+        let _ = std::fs::remove_dir_all(&directory);
     }
 }

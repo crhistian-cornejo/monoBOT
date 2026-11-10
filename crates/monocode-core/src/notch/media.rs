@@ -1,6 +1,8 @@
 //! What plays on the computer, for the notch: the track the system's media
-//! controls report (Spotify, a browser's video, the media player) and its
-//! synced lyrics from LRCLIB (`lrclib.net`, free and without a key).
+//! controls report (Spotify, a browser's video, the media player), its
+//! synced lyrics from LRCLIB (`lrclib.net`, free and without a key) and,
+//! where the system keeps the cover to itself, the cover from Apple's
+//! catalog search (also free and without a key).
 //!
 //! The platform reads the track; this module keeps the rules: where the
 //! playhead is now, which lyric line it is on, and how to ask LRCLIB.
@@ -112,6 +114,65 @@ impl Playhead {
     }
 }
 
+/// A difference this large from where the notch thinks the playhead is gets
+/// reported: lyrics show it well before a second.
+pub const SEEK: Duration = Duration::from_millis(350);
+
+/// Whether `now` says something `shown` does not: another track, play or
+/// pause, a seek, or the cover arriving. The playhead running on is not news.
+pub fn is_news(shown: &Option<Playing>, now: &Option<Playing>) -> bool {
+    match (shown, now) {
+        (None, None) => false,
+        (Some(shown), Some(now)) => {
+            let expected = shown.position_at(now.at);
+            let drift = expected.max(now.position) - expected.min(now.position);
+            shown.track != now.track
+                || shown.playing != now.playing
+                || shown.art.is_some() != now.art.is_some()
+                || drift > SEEK
+        }
+        _ => true,
+    }
+}
+
+/// What macOS's now playing service says, one JSON object a line as the
+/// notch's reader prints it (`{}` while nothing plays): the track, whether it
+/// plays, and the position with the moment the app stamped it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Report {
+    pub track: Track,
+    pub playing: bool,
+    pub elapsed: Duration,
+    /// When the app stamped `elapsed`, in seconds since 1970.
+    pub stamped: Option<f64>,
+}
+
+fn seconds(value: &serde_json::Value) -> Option<Duration> {
+    Duration::try_from_secs_f64(value.as_f64()?.max(0.)).ok()
+}
+
+/// One line of the reader; `None` for nothing playing or nothing worth
+/// showing.
+pub fn parse_report(line: &str) -> Option<Report> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let text = |key: &str| value[key].as_str().unwrap_or_default().trim().to_owned();
+    let track = Track {
+        app: text("app"),
+        title: text("title"),
+        artist: text("artist"),
+        album: text("album"),
+        duration: seconds(&value["duration"]).filter(|duration| !duration.is_zero()),
+    };
+    if !track.is_known() {
+        return None;
+    }
+    Some(Report {
+        track,
+        playing: value["playing"].as_bool().unwrap_or(false),
+        elapsed: seconds(&value["elapsed"]).unwrap_or_default(),
+        stamped: value["stamp"].as_f64().filter(|stamp| stamp.is_finite()),
+    })
+}
 /// One timed line of synced lyrics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
@@ -354,14 +415,7 @@ pub fn from_search(records: &serde_json::Value, duration: Option<Duration>) -> L
 /// Asks LRCLIB for `track`'s lyrics: the exact lookup, then the search.
 /// Blocking; run it off the interface thread, once per track.
 pub fn fetch(track: &Track) -> Result<Lyrics, String> {
-    let agent = monobot_http::agent()
-        .timeout(Duration::from_secs(10))
-        .user_agent(concat!(
-            "MonoBOT/",
-            env!("CARGO_PKG_VERSION"),
-            " (https://github.com/crhistian-cornejo/monoBOT)"
-        ))
-        .build();
+    let agent = agent();
     let get = |url: &str| -> Result<Option<serde_json::Value>, String> {
         match agent.get(url).call() {
             Ok(response) => {
@@ -389,6 +443,112 @@ pub fn fetch(track: &Track) -> Result<Lyrics, String> {
         None => Ok(Lyrics::Missing),
     }
 }
+
+fn agent() -> ureq::Agent {
+    monobot_http::agent()
+        .timeout(Duration::from_secs(10))
+        .user_agent(concat!(
+            "MonoBOT/",
+            env!("CARGO_PKG_VERSION"),
+            " (https://github.com/crhistian-cornejo/monoBOT)"
+        ))
+        .build()
+}
+
+const ITUNES: &str = "https://itunes.apple.com/search";
+
+/// The catalog search for `track`'s cover, where the system hands over none
+/// (macOS keeps it from other apps): the artist and the title.
+pub fn cover_search_url(track: &Track) -> Option<String> {
+    if !track.is_known() || track.artist.trim().is_empty() {
+        return None;
+    }
+    let mut url = url::Url::parse(ITUNES).ok()?;
+    url.query_pairs_mut()
+        .append_pair(
+            "term",
+            &format!("{} {}", track.artist.trim(), track.title.trim()),
+        )
+        .append_pair("media", "music")
+        .append_pair("entity", "song")
+        .append_pair("limit", "10");
+    Some(url.into())
+}
+
+/// Letters and digits only, lowercased: "Live Again (Remix)" and "live
+/// again remix" read the same.
+fn plain(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// The cover of the search's song that is `track`: the same title and the
+/// same lead artist, the one as long as the track first. A song that is not
+/// the one playing gives no cover rather than a wrong one.
+pub fn cover_from_search(results: &serde_json::Value, track: &Track) -> Option<String> {
+    let title = plain(&track.title);
+    let lead = track
+        .artist
+        .split([',', '&'])
+        .next()
+        .map(plain)
+        .unwrap_or_default();
+    if title.is_empty() || lead.is_empty() {
+        return None;
+    }
+    let same = |result: &&serde_json::Value| {
+        let name = plain(result["trackName"].as_str().unwrap_or_default());
+        let artist = plain(result["artistName"].as_str().unwrap_or_default());
+        name == title && !artist.is_empty() && (artist.contains(&lead) || lead.contains(&artist))
+    };
+    let fits =
+        |result: &&&serde_json::Value| match (track.duration, result["trackTimeMillis"].as_f64()) {
+            (Some(duration), Some(millis)) => (duration.as_secs_f64() - millis / 1000.).abs() <= 3.,
+            _ => false,
+        };
+    let songs: Vec<&serde_json::Value> =
+        results["results"].as_array()?.iter().filter(same).collect();
+    let song = songs.iter().find(fits).or_else(|| songs.first())?;
+    let small = song["artworkUrl100"].as_str()?;
+    Some(small.replace("100x100bb", "600x600bb"))
+}
+
+/// Looks `track`'s cover up in the catalog and downloads it (JPEG bytes).
+/// Blocking; run it off the interface thread, once per track.
+pub fn fetch_cover(track: &Track) -> Result<Option<Vec<u8>>, String> {
+    use std::io::Read;
+    let Some(search) = cover_search_url(track) else {
+        return Ok(None);
+    };
+    let agent = agent();
+    let body = agent
+        .get(&search)
+        .call()
+        .map_err(|error| error.to_string())?
+        .into_string()
+        .map_err(|error| error.to_string())?;
+    let results: serde_json::Value =
+        serde_json::from_str(&body).map_err(|error| error.to_string())?;
+    let Some(art) = cover_from_search(&results, track) else {
+        return Ok(None);
+    };
+    let mut bytes = Vec::new();
+    agent
+        .get(&art)
+        .call()
+        .map_err(|error| error.to_string())?
+        .into_reader()
+        .take(COVER_LARGEST + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    // Nothing, or something no cover is.
+    Ok((!bytes.is_empty() && bytes.len() as u64 <= COVER_LARGEST).then_some(bytes))
+}
+
+/// A cover is a few hundred kilobytes; more is not one.
+const COVER_LARGEST: u64 = 8 << 20;
 
 #[cfg(test)]
 mod tests {
@@ -589,5 +749,96 @@ mod tests {
             from_search(&cuts, Some(Duration::from_secs(198))),
             Lyrics::Synced(lines) if lines[0].text == "radio edit"
         ));
+    }
+
+    #[test]
+    fn a_report_line_reads_as_the_track_and_its_stamp() {
+        let report = parse_report(
+            r#"{"app":"com.spotify.client","title":"Live Again","artist":"HALŌ","album":"Live Again","duration":214.697,"elapsed":18.528,"stamp":1794268677.35,"playing":false,"art":"ddc1"}"#,
+        )
+        .unwrap();
+        assert_eq!(report.track.app, "com.spotify.client");
+        assert_eq!(report.track.label(), "Live Again · HALŌ");
+        assert_eq!(
+            report.track.duration,
+            Some(Duration::from_secs_f64(214.697))
+        );
+        assert_eq!(report.elapsed, Duration::from_secs_f64(18.528));
+        assert_eq!(report.stamped, Some(1794268677.35));
+        assert!(!report.playing);
+        // Nothing playing, a title-less session, or a broken line.
+        assert_eq!(parse_report("{}"), None);
+        assert_eq!(parse_report(r#"{"app":"x","title":"  "}"#), None);
+        assert_eq!(parse_report("not json"), None);
+        // Odd numbers are no position, never a panic.
+        let odd = parse_report(r#"{"title":"t","elapsed":-4,"duration":null}"#).unwrap();
+        assert_eq!((odd.elapsed, odd.track.duration), (Duration::ZERO, None));
+    }
+
+    #[test]
+    fn news_is_a_new_track_a_pause_a_seek_or_the_cover() {
+        let at = Instant::now();
+        let shown = Playing {
+            track: track(),
+            playing: true,
+            position: Duration::from_secs(10),
+            at,
+            art: None,
+        };
+        let later = |seconds: f32, position: f32| Playing {
+            position: Duration::from_secs_f32(position),
+            at: at + Duration::from_secs_f32(seconds),
+            ..shown.clone()
+        };
+        // The playhead running on is not news; a jump is.
+        assert!(!is_news(&Some(shown.clone()), &Some(later(2., 12.1))));
+        assert!(is_news(&Some(shown.clone()), &Some(later(2., 40.))));
+        let paused = Playing {
+            playing: false,
+            ..later(1., 11.)
+        };
+        assert!(is_news(&Some(shown.clone()), &Some(paused)));
+        let covered = Playing {
+            art: Some(std::sync::Arc::from(&[1u8][..])),
+            ..later(1., 11.)
+        };
+        assert!(is_news(&Some(shown.clone()), &Some(covered)));
+        assert!(is_news(&Some(shown.clone()), &None));
+        assert!(!is_news(&None, &None));
+    }
+
+    #[test]
+    fn the_cover_is_the_same_song_by_the_same_artist() {
+        let mut track = track();
+        track.artist = "HALŌ, Third ≡ Party".into();
+        track.title = "Live Again".into();
+        track.duration = Some(Duration::from_millis(214_697));
+        assert_eq!(
+            cover_search_url(&track).unwrap(),
+            "https://itunes.apple.com/search?term=HAL%C5%8C%2C+Third+%E2%89%A1+Party+Live+Again\
+             &media=music&entity=song&limit=10"
+        );
+        let art = |name: &str| format!("https://is1.mzstatic.com/{name}/100x100bb.jpg");
+        let results = serde_json::json!({ "results": [
+            { "trackName": "Live Again (Extended Mix)", "artistName": "HALŌ", "trackTimeMillis": 300_000, "artworkUrl100": art("extended") },
+            { "trackName": "Live Again", "artistName": "Someone Else", "trackTimeMillis": 214_697, "artworkUrl100": art("cover") },
+            { "trackName": "Live Again", "artistName": "HALŌ, Third ≡ Party, DubVision", "trackTimeMillis": 260_000, "artworkUrl100": art("long") },
+            { "trackName": "Live Again", "artistName": "HALŌ, Third ≡ Party, DubVision", "trackTimeMillis": 214_697, "artworkUrl100": art("single") },
+        ]});
+        assert_eq!(
+            cover_from_search(&results, &track).as_deref(),
+            Some("https://is1.mzstatic.com/single/600x600bb.jpg")
+        );
+        // Without a length, the first of the same song.
+        track.duration = None;
+        assert_eq!(
+            cover_from_search(&results, &track).as_deref(),
+            Some("https://is1.mzstatic.com/long/600x600bb.jpg")
+        );
+        // Another song gives no cover rather than a wrong one.
+        track.title = "Something Else".into();
+        assert_eq!(cover_from_search(&results, &track), None);
+        track.artist.clear();
+        assert_eq!(cover_search_url(&track), None);
     }
 }

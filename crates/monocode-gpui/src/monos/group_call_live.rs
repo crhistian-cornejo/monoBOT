@@ -21,12 +21,45 @@ const MEMBER_PATIENCE: Duration = Duration::from_secs(10 * 60);
 pub(in crate::monos) struct LiveCall {
     pub(in crate::monos) provider: Provider,
     session: Option<Session>,
-    _duplex: Option<Arc<Duplex>>,
+    duplex: Option<Arc<Duplex>>,
     asks: Vec<Ask>,
     /// The lines being written now: the user's words and the host's.
     heard: Option<usize>,
     said: Option<usize>,
     _messages: Option<Task<()>>,
+}
+
+impl LiveCall {
+    /// Mutes the microphone the live model hears.
+    pub(in crate::monos) fn set_muted(&self, muted: bool) {
+        if let Some(duplex) = &self.duplex {
+            duplex.gate().set_muted(muted);
+        }
+    }
+
+    /// What the user typed, as a turn of theirs. False where the provider
+    /// takes no text.
+    pub(in crate::monos) fn say(&mut self, text: &str) -> bool {
+        if self.provider != Provider::Gemini {
+            return false;
+        }
+        if let Some(session) = &self.session {
+            session.send_text(text.to_owned());
+        }
+        // The next words heard or said start lines of their own.
+        self.heard = None;
+        self.said = None;
+        true
+    }
+
+    /// Cuts the host off: its voice stops, and the rest of that answer is
+    /// not played.
+    pub(in crate::monos) fn hush(&mut self) {
+        if let Some(duplex) = &self.duplex {
+            duplex.hush();
+        }
+        self.said = None;
+    }
 }
 
 struct Ask {
@@ -76,18 +109,36 @@ impl Host for LiveHost {
             Event::Interrupted => {
                 if let Some(duplex) = duplex {
                     duplex.flush();
+                    duplex.resume();
                 }
                 Message::Interrupted
             }
             Event::Heard(text) => Message::Heard(text.clone()),
             Event::Said(text) => Message::Said(text.clone()),
-            Event::TurnDone => Message::TurnDone,
+            Event::TurnDone => {
+                // An answer the user cut off is over: the next one plays.
+                if let Some(duplex) = duplex {
+                    duplex.resume();
+                }
+                Message::TurnDone
+            }
             _ => return,
         };
         let _ = self.messages.try_send(message);
     }
 
     fn state(&self, state: State) {
+        // A line that dropped during an answer the user cut off never says
+        // that answer is done: back on the line, the voice plays again.
+        if state == State::Live
+            && let Some(duplex) = self
+                .duplex
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_ref()
+        {
+            duplex.resume();
+        }
         let _ = self.messages.try_send(Message::State(state));
     }
 
@@ -182,6 +233,9 @@ impl Monos {
             let Some(key) = keys::get(provider) else {
                 return Err(None);
             };
+            // Without the user's yes CoreAudio records silence, and the call
+            // would look live while the model heard nothing.
+            crate::dictation::permission::microphone().map_err(Some)?;
             let rate = match provider {
                 Provider::Gemini => gemini::OUTPUT_RATE,
                 Provider::Phonic => phonic::OUTPUT_RATE,
@@ -209,25 +263,12 @@ impl Monos {
                     },
                 ),
             };
-            let session = Arc::new(Mutex::new(Some(session)));
-            let mic_session = session.clone();
-            let duplex = Duplex::start(move |frame| {
-                if let Some(session) = mic_session
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .as_ref()
-                {
-                    session.send_audio(frame);
-                }
-            })
-            .map_err(Some)?;
+            // The microphone keeps its own way in to the session, which goes
+            // back to the call's owner.
+            let microphone = session.microphone();
+            let duplex = Duplex::start(move |frame| microphone.send(frame)).map_err(Some)?;
             let duplex = Arc::new(duplex);
             *host.duplex.lock().unwrap_or_else(|e| e.into_inner()) = Some(duplex.clone());
-            let session = session
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take()
-                .ok_or(None)?;
             Ok((session, duplex))
         });
         cx.spawn(async move |this, cx| {
@@ -289,7 +330,7 @@ impl Monos {
         call.live = Some(LiveCall {
             provider,
             session: Some(session),
-            _duplex: Some(duplex),
+            duplex: Some(duplex),
             asks: Vec::new(),
             heard: None,
             said: None,
@@ -323,8 +364,19 @@ impl Monos {
             }
             Message::State(State::Connecting | State::Reconnecting) => {}
             Message::State(State::Ended(why)) => {
-                call.error = why;
+                let group = call.group.clone();
                 self.call_hang_up(cx);
+                // The call is over, and the panel says why: a refused key,
+                // a spent quota or a line that kept dropping.
+                if let Some(why) = why
+                    && let Some(group) = self.roster.get(&group).cloned()
+                {
+                    self.ensure_call(&group, cx);
+                    if let Some(call) = self.call.as_mut() {
+                        call.error = Some(why);
+                    }
+                }
+                cx.notify();
                 return;
             }
             Message::Heard(text) => {
@@ -546,7 +598,17 @@ impl Monos {
         group: &str,
         cx: &mut Context<Self>,
     ) {
-        let LiveCall { session, asks, .. } = live;
+        let LiveCall {
+            session,
+            asks,
+            duplex,
+            ..
+        } = live;
+        // The microphone and the voice close now. The session may still be
+        // connecting, and its thread holds them until it ends.
+        if let Some(duplex) = duplex {
+            duplex.stop();
+        }
         for ask in asks {
             let _ = ask.reply.send(Err("The call ended.".into()));
             self.cancel_call_seat(group, &ask.member, &ask.request, cx);
@@ -580,7 +642,7 @@ impl Monos {
         call.live = Some(LiveCall {
             provider,
             session: None,
-            _duplex: None,
+            duplex: None,
             asks: Vec::new(),
             heard: None,
             said: None,

@@ -91,12 +91,24 @@ species still reads beside a name in a list. A working bot hops and trades its
 resting picture for one with its mouth open and its hands up, three times a
 second, as the pixel mascots trade frames.
 
-The character is a signed distance field marched in software
-(`monocode-core/src/mono/persona.rs`), so there is no shader and it is the same
-picture on every platform. The app renders each pose (resting, blinking,
-talking) once per size on a background thread and paints it as a picture from
-then on; the hop, the breath and the blink only move or swap that picture.
-The phone still receives the mascot name and draws its own pixel mascots.
+The character is a signed distance field marched in software (the
+`monobot-persona` crate in `crates/persona`, which the core re-exports as
+`mono::persona`), so there is no shader and it is the same picture on every
+platform. The app renders each pose (resting, blinking, talking) once per size
+on a background thread and paints it as a picture from then on; the hop, the
+breath and the blink only move or swap that picture.
+
+The phone draws the same faces. The desktop sends each Mono's `face` with its
+mascot, and the phone's native link (`crates/mobile-link`, operation
+`persona`) renders each pose with the same crate into the app's cache, a few
+at a time and every resting picture first; a file is drawn once and named by
+the renderer's revision, so a new renderer draws them again. Until a picture
+lands the avatar shows a soft dot in the bot's colour, and where none can be
+drawn (an older desktop, a build without the renderer) it wears its pixel
+mascot. Pixel mascots and personas move as on the desktop, on the UI thread:
+they hop at work, breathe and blink at rest except in lists, and hold still
+when the Mono needs you or with Reduce Motion on.
+
 To look at every species and outfit, write a contact sheet:
 
 ```sh

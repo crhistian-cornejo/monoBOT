@@ -26,6 +26,8 @@ pub struct Gate {
     start: Instant,
     audible_until: Arc<AtomicU64>,
     in_ears: Arc<AtomicBool>,
+    /// The user muted the call: nothing the microphone hears goes up.
+    muted: Arc<AtomicBool>,
 }
 
 impl Gate {
@@ -34,7 +36,13 @@ impl Gate {
             start: Instant::now(),
             audible_until: Arc::new(AtomicU64::new(0)),
             in_ears: Arc::new(AtomicBool::new(false)),
+            muted: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Mutes or unmutes the microphone, headphones or not.
+    pub fn set_muted(&self, muted: bool) {
+        self.muted.store(muted, Ordering::Release);
     }
 
     fn now(&self) -> u64 {
@@ -59,6 +67,9 @@ impl Gate {
 
     /// Whether the microphone may go up now.
     pub fn open(&self) -> bool {
+        if self.muted.load(Ordering::Acquire) {
+            return false;
+        }
         if self.in_ears.load(Ordering::Acquire) {
             return true;
         }
@@ -76,6 +87,8 @@ impl Default for Gate {
 
 pub struct Duplex {
     speech: Sender<Play>,
+    /// The user cut the voice: the rest of that answer is not played.
+    hushed: AtomicBool,
     gate: Gate,
     stop: Arc<AtomicBool>,
     threads: Vec<JoinHandle<()>>,
@@ -110,6 +123,7 @@ impl Duplex {
         }
         Ok(Self {
             speech,
+            hushed: AtomicBool::new(false),
             gate,
             stop,
             threads,
@@ -118,7 +132,22 @@ impl Duplex {
 
     /// Plays speech (mono, at `rate`) after what is queued.
     pub fn play(&self, samples: Vec<f32>, rate: u32) {
+        if self.hushed.load(Ordering::Acquire) {
+            return;
+        }
         let _ = self.speech.send(Play::Speech(samples, rate));
+    }
+
+    /// The user cut the voice off: what is queued goes, and what still
+    /// arrives of the same answer is dropped until [`Self::resume`].
+    pub fn hush(&self) {
+        self.hushed.store(true, Ordering::Release);
+        self.flush();
+    }
+
+    /// A new answer plays again.
+    pub fn resume(&self) {
+        self.hushed.store(false, Ordering::Release);
     }
 
     /// Drops what is still queued to play.
@@ -129,6 +158,13 @@ impl Duplex {
 
     pub fn gate(&self) -> &Gate {
         &self.gate
+    }
+
+    /// Closes the microphone and the voice now, without waiting for them:
+    /// their threads end within a moment, whoever still holds this.
+    pub fn stop(&self) {
+        self.gate.silenced();
+        self.stop.store(true, Ordering::Release);
     }
 }
 
@@ -198,6 +234,18 @@ mod tests {
         assert!(!gate.open(), "the room still rings");
         std::thread::sleep(player::echo_tail(false));
         assert!(gate.open());
+    }
+
+    #[test]
+    fn a_muted_call_sends_nothing_up_even_with_headphones() {
+        let gate = Gate::new();
+        gate.set_in_ears(true);
+        gate.set_muted(true);
+        assert!(!gate.open());
+        // Every copy of the gate is the same gate: the mic thread's too.
+        let mic = gate.clone();
+        gate.set_muted(false);
+        assert!(mic.open());
     }
 
     #[test]

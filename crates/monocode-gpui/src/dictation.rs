@@ -3,7 +3,7 @@
 //! toolbar with the waveform and the words heard so far, the model download,
 //! or an error. Escape drops a dictation in progress.
 mod engine;
-mod permission;
+pub(crate) mod permission;
 
 use crate::{input::Input, right_panel::RED_400, theme::*};
 use gpui::{

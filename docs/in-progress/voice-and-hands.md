@@ -43,6 +43,22 @@ the TDT decoding is ported from FluidAudio's `TdtDecoderV3`.
 
 The other ears in the table (Whisper, Qwen3, Scribe) are out of scope.
 
+**Fixed Nov 9: the live call could not hear.** An audit
+([performance-audit.md](performance-audit.md)) found that a Gemini Live or
+Phonic call connected and then dropped every microphone frame: the session was
+taken out of the place the microphone thread looked for it. Now the microphone
+keeps its own way in (`Session::microphone`), audio heard while connecting is
+dropped, Mute closes the gate the model hears through, Interrupt stops the
+host's voice for the rest of that answer, this Mac's own ear stays shut during
+a live call, and the reason a call ended stays on the panel. A second pass added typed
+text as a turn of the user's (Gemini), the microphone's permission check
+before connecting, audio that stops at hang up even while the session still
+connects, reconnects that wait (0.5 s, doubling to 4 s) and no longer end a
+call the network left for a moment, and the headphones check repeated through
+the call. All by test; no call was placed against Google or Phonic. What is
+left (a lost microphone, a stall watchdog, the setup's differences from IVY,
+audio quality) is listed in that audit.
+
 ## Principles
 
 - **Nothing heavy by default.** Every engine, key and model is opt-in from

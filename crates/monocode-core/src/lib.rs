@@ -42,6 +42,7 @@ pub mod resources;
 pub mod response;
 pub mod scheduled_send;
 pub mod scm;
+pub mod secrets;
 pub mod session_filters;
 pub mod session_groups;
 pub mod session_title;

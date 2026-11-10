@@ -1658,7 +1658,7 @@ impl Monos {
         .detach();
     }
     pub(super) fn habit_changed(&mut self, session: i64, cx: &mut Context<Self>) {
-        cx.emit(NotificationChanged);
+        cx.emit(NotificationChanged::Request);
         let Some(run) = self.running.get(&session) else {
             return;
         };

@@ -9,7 +9,7 @@ fn name(dir: &Path, kind: &str) -> String {
 }
 #[cfg(not(test))]
 pub(super) fn set(dir: &Path, kind: &str, value: &str) -> Result<(), String> {
-    let entry = keyring::Entry::new("com.monocode.desktop", &name(dir, kind))
+    let entry = crate::secrets::entry("com.monocode.desktop", &name(dir, kind))
         .map_err(|_| "System credential store is unavailable.")?;
     if value.is_empty() {
         match entry.delete_credential() {
@@ -24,7 +24,7 @@ pub(super) fn set(dir: &Path, kind: &str, value: &str) -> Result<(), String> {
 }
 #[cfg(not(test))]
 pub(super) fn get(dir: &Path, kind: &str) -> Result<String, String> {
-    keyring::Entry::new("com.monocode.desktop", &name(dir, kind))
+    crate::secrets::entry("com.monocode.desktop", &name(dir, kind))
         .and_then(|entry| entry.get_password())
         .map_err(|_| format!("Configure the {kind} token in the mail workspace settings."))
 }

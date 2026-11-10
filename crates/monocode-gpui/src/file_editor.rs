@@ -202,6 +202,9 @@ pub(crate) struct FileEditor {
     error: Option<String>,
     disk_changed: bool,
     loading: bool,
+    /// How many times the poll read the file, for its test.
+    #[cfg(test)]
+    polled_reads: usize,
     pub saving: bool,
     pub dirty: bool,
     visible: bool,
@@ -285,18 +288,49 @@ impl FileEditor {
             }),
         ];
         let poll = cx.spawn(async move |this, cx| {
+            // The file as the last poll that read it found it. While its size
+            // and modification time stay the same a poll costs one stat, off
+            // the interface thread, instead of reading it whole and asking
+            // Git about it. Git's own changes arrive as `GitChanged`.
+            let mut seen: Option<(PathBuf, Option<office::Stamp>)> = None;
             loop {
                 cx.background_executor().timer(Duration::from_secs(2)).await;
-                if this
-                    .update(cx, |this, cx| {
-                        if this.visible && !this.saving {
-                            this.load(false, cx);
-                            this.refresh_git(cx);
-                        }
-                    })
-                    .is_err()
-                {
+                let Ok(wanted) = this.update(cx, |this, _| {
+                    (this.visible && !this.saving && !this.loading)
+                        // What could not be read is tried again.
+                        .then(|| (PathBuf::from(&this.path), this.error.is_some()))
+                }) else {
                     break;
+                };
+                let Some((path, failed)) = wanted else {
+                    continue;
+                };
+                let now = cx
+                    .background_executor()
+                    .spawn(async move {
+                        let stamp = office::stamp(&path);
+                        (path, stamp)
+                    })
+                    .await;
+                if !failed && seen.as_ref() == Some(&now) {
+                    continue;
+                }
+                let Ok(read) = this.update(cx, |this, cx| {
+                    let read = this.visible && !this.saving && !this.loading;
+                    if read {
+                        #[cfg(test)]
+                        {
+                            this.polled_reads += 1;
+                        }
+                        this.load(false, cx);
+                        this.refresh_git(cx);
+                    }
+                    read
+                }) else {
+                    break;
+                };
+                if read {
+                    seen = Some(now);
                 }
             }
         });
@@ -343,6 +377,8 @@ impl FileEditor {
             paper_focus: None,
             office: None,
             office_stamp: None,
+            #[cfg(test)]
+            polled_reads: 0,
             sheet_preview: None,
             sheet_task: None,
             svg_preview: None,

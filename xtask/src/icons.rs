@@ -5,19 +5,29 @@
 //! cargo xtask icons hugeicons <@hugeicons/core-free-icons dir> <out dir> name=Icon@stroke …
 //! # The file, extension and folder tables and SVGs of material-icons.json.
 //! cargo xtask icons material <react-material-icon-theme dir> <out.json>
+//! # SVGs in crates/monocode-gpui/assets/fluent, filled white.
+//! cargo xtask icons fluent <@fluentui/svg-icons dir> <out dir> name=file …
 //! ```
 //!
-//! Both packages ship JavaScript, so QuickJS reads them (the optional `icons`
-//! feature; this command turns it on by itself).
+//! The first two packages ship JavaScript, so QuickJS reads them (the
+//! optional `icons` feature; this command turns it on by itself). Fluent's
+//! are plain SVG files.
 // Without the feature only the re-run and the tests use these helpers.
 #![cfg_attr(not(feature = "icons"), allow(dead_code))]
 use crate::util::Result;
 
-const USAGE: &str = "usage: cargo xtask icons hugeicons <package dir> <out dir> name=Icon@stroke …\n       cargo xtask icons material <package dir> <out.json>";
+const USAGE: &str = "usage: cargo xtask icons hugeicons <package dir> <out dir> name=Icon@stroke …\n       cargo xtask icons material <package dir> <out.json>\n       cargo xtask icons fluent <package dir> <out dir> name=file …";
 
 #[cfg(not(feature = "icons"))]
 pub fn main(argv: &[String]) -> Result<()> {
-    crate::util::rerun_with_feature("icons", argv)
+    match argv.split_first() {
+        Some((kind, rest)) if kind == "fluent" && rest.len() >= 2 => fluent(
+            std::path::Path::new(&rest[0]),
+            std::path::Path::new(&rest[1]),
+            &rest[2..],
+        ),
+        _ => crate::util::rerun_with_feature("icons", argv),
+    }
 }
 
 #[cfg(feature = "icons")]
@@ -30,8 +40,46 @@ pub fn main(argv: &[String]) -> Result<()> {
         Some((kind, rest)) if kind == "material" && rest.len() == 2 => {
             js::material(Path::new(&rest[0]), Path::new(&rest[1]))
         }
+        Some((kind, rest)) if kind == "fluent" && rest.len() >= 2 => {
+            fluent(Path::new(&rest[0]), Path::new(&rest[1]), &rest[2..])
+        }
         _ => Err(USAGE.into()),
     }
+}
+
+/// Copies each `name=file` from the package's `icons/<file>.svg` to
+/// `<out>/<name>.svg`, filled white.
+fn fluent(dir: &std::path::Path, out: &std::path::Path, specs: &[String]) -> Result<()> {
+    for spec in specs {
+        let (name, file) = spec
+            .split_once('=')
+            .ok_or_else(|| format!("Expected name=file, found {spec}"))?;
+        let path = dir.join("icons").join(format!("{file}.svg"));
+        let source =
+            std::fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
+        let svg = fluent_svg(&source).ok_or_else(|| format!("{}: not an SVG", path.display()))?;
+        let target = out.join(format!("{name}.svg"));
+        std::fs::write(&target, svg).map_err(|e| format!("{}: {e}", target.display()))?;
+    }
+    Ok(())
+}
+
+/// A Fluent icon filled white, as the app tints every icon; its fixed
+/// width and height go, so it scales to the box it is drawn in.
+fn fluent_svg(source: &str) -> Option<String> {
+    let start = source.find("<svg")?;
+    let end = start + source[start..].find('>')?;
+    let attributes: Vec<&str> = source[start + 4..end]
+        .split_whitespace()
+        .filter(|a| {
+            !a.starts_with("width=") && !a.starts_with("height=") && !a.starts_with("fill=")
+        })
+        .collect();
+    Some(format!(
+        "<svg {} fill=\"white\">{}",
+        attributes.join(" "),
+        source[end + 1..].trim_end()
+    ))
 }
 
 /// `strokeLinecap` → `stroke-linecap`.
@@ -376,6 +424,17 @@ mod tests {
         );
         assert_eq!(fold("FoldVertical").unwrap().len(), 6);
         assert!(fold("Home01Icon").is_none());
+    }
+
+    #[test]
+    fn fluent_icons_are_filled_white_and_scale() {
+        let source = r#"<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><path d="M5 5z"/></svg>
+"#;
+        assert_eq!(
+            fluent_svg(source).unwrap(),
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white"><path d="M5 5z"/></svg>"#
+        );
+        assert!(fluent_svg("not an icon").is_none());
     }
 
     #[test]

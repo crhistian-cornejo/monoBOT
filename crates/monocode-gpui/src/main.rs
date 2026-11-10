@@ -93,6 +93,7 @@ mod tab_label;
 mod tab_motion;
 mod tab_tile;
 mod terminal;
+mod text_morph;
 mod theme;
 #[cfg(target_os = "macos")]
 mod traffic_lights;
@@ -187,6 +188,9 @@ fn plist_data_mode(plist: &str) -> Option<bool> {
     }
 }
 fn main() {
+    // The app itself keeps its secrets in the system's keychain. Tests never
+    // get here, so theirs stay in memory.
+    monocode_core::secrets::use_system_keychain();
     if let Some(code) = monocode_core::remote::ssh_askpass::maybe_run() {
         std::process::exit(code);
     }

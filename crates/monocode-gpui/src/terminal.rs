@@ -289,6 +289,10 @@ impl Terminal {
         });
         // TerminalView's 1s foreground poll; a hidden dock has no title to paint.
         let poll = cx.spawn(async move |this, cx| {
+            // The job last found in front and its name. While the same job
+            // stays there its name is not asked for again: that costs a `ps`
+            // process a second for as long as a server or a build runs.
+            let mut front: Option<(i32, Option<String>, u8)> = None;
             loop {
                 cx.background_executor().timer(Duration::from_secs(1)).await;
                 let Ok(Some((fd, pid))) = this.update(cx, |this, _| {
@@ -299,10 +303,27 @@ impl Terminal {
                     }
                     continue;
                 };
-                let label = cx
+                let known = front.take();
+                let (found, label) = cx
                     .background_executor()
-                    .spawn(async move { foreground_label(fd, pid) })
+                    .spawn(async move {
+                        match (foreground_group(fd, pid), known) {
+                            (None, _) => (None, None),
+                            // Asked again now and then: a job can `exec`
+                            // into another command under the same id.
+                            (Some(group), Some((was, label, polls)))
+                                if was == group && polls < FRONT_NAME_KEPT =>
+                            {
+                                (Some((group, label.clone(), polls + 1)), label)
+                            }
+                            (Some(group), _) => {
+                                let label = group_label(group);
+                                (Some((group, label.clone(), 0)), label)
+                            }
+                        }
+                    })
                     .await;
+                front = found;
                 if this
                     .update(cx, |this, cx| this.set_foreground(label, cx))
                     .is_err()
@@ -1396,14 +1417,28 @@ fn working_dir(cwd: &str) -> std::path::PathBuf {
 /// pty.rs's foreground_label: the command holding the terminal, unless it
 /// is the shell itself.
 #[cfg(unix)]
+#[cfg_attr(not(test), allow(dead_code))]
 fn foreground_label(master_fd: i32, shell_pid: u32) -> Option<String> {
+    group_label(foreground_group(master_fd, shell_pid)?)
+}
+/// How many polls a job's name is kept before it is asked for again.
+const FRONT_NAME_KEPT: u8 = 10;
+/// The process group holding the terminal, unless it is the shell's own.
+#[cfg(unix)]
+fn foreground_group(master_fd: i32, shell_pid: u32) -> Option<i32> {
     if master_fd < 0 {
         return None;
     }
     let pgrp = unsafe { libc::tcgetpgrp(master_fd) };
-    if pgrp <= 0 || pgrp == shell_pid as i32 {
-        return None;
-    }
+    (pgrp > 0 && pgrp != shell_pid as i32).then_some(pgrp)
+}
+#[cfg(not(unix))]
+fn foreground_group(_: i32, _: u32) -> Option<i32> {
+    None
+}
+/// The name of the command leading process group `pgrp`.
+#[cfg(unix)]
+fn group_label(pgrp: i32) -> Option<String> {
     let output = std::process::Command::new("ps")
         .args(["-p", &pgrp.to_string(), "-o", "args="])
         .output()
@@ -1415,7 +1450,7 @@ fn foreground_label(master_fd: i32, shell_pid: u32) -> Option<String> {
     (!is_shell_name(&label)).then_some(label)
 }
 #[cfg(not(unix))]
-fn foreground_label(_: i32, _: u32) -> Option<String> {
+fn group_label(_: i32) -> Option<String> {
     None
 }
 /// Interpreters name the script they run: `node vite.js` reads `vite.js`.

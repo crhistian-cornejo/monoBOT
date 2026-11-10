@@ -5,7 +5,7 @@
 
 /// Ok once the user allowed the microphone; asks the first time.
 #[cfg(target_os = "macos")]
-pub(super) fn microphone() -> Result<(), String> {
+pub(crate) fn microphone() -> Result<(), String> {
     use block2::RcBlock;
     use objc2::{msg_send, runtime::AnyClass, runtime::Bool};
     use objc2_foundation::NSString;
@@ -55,6 +55,6 @@ pub(super) fn microphone() -> Result<(), String> {
 /// Windows asks nothing up front: its privacy switch fails the open, and
 /// cpal's error says so.
 #[cfg(not(target_os = "macos"))]
-pub(super) fn microphone() -> Result<(), String> {
+pub(crate) fn microphone() -> Result<(), String> {
     Ok(())
 }

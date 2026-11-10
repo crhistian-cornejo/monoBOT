@@ -141,6 +141,56 @@ pub fn merge(
         .map_err(|error| error.to_string())
 }
 
+/// The socket one of monoBOT's commands writes to.
+fn socket_of(command: &str) -> Option<std::path::PathBuf> {
+    let (_, rest) = command.split_once("nc -U -w 1 '")?;
+    let (socket, _) = rest.rsplit_once("' >/dev/null")?;
+    Some(socket.replace(r"'\''", "'").into())
+}
+
+/// The hook file without monoBOT's entries for sockets that are `gone`:
+/// another copy's (a development or profiling run), whose data folder was
+/// deleted. Left in, each would run on every hook for nothing. `keep` is
+/// this copy's own socket and always stays. `None` when nothing leaves.
+pub fn forget(
+    file: &str,
+    keep: &Path,
+    gone: impl Fn(&Path) -> bool,
+) -> Result<Option<String>, String> {
+    let mut root: Value =
+        serde_json::from_str(file).map_err(|error| format!("not JSON: {error}"))?;
+    let mut changed = false;
+    if let Some(hooks) = root["hooks"].as_object_mut() {
+        for groups in hooks.values_mut() {
+            let Some(groups) = groups.as_array_mut() else {
+                continue;
+            };
+            groups.retain_mut(|group| {
+                let Some(handlers) = group.get_mut("hooks").and_then(Value::as_array_mut) else {
+                    return true;
+                };
+                let before = handlers.len();
+                handlers.retain(|handler| {
+                    let stale = handler["command"]
+                        .as_str()
+                        .and_then(socket_of)
+                        .is_some_and(|socket| socket != keep && gone(&socket));
+                    !(ours(handler) && stale)
+                });
+                changed |= handlers.len() != before;
+                // Only a group this emptied goes; the others are not ours.
+                handlers.len() == before || !handlers.is_empty()
+            });
+        }
+    }
+    if !changed {
+        return Ok(None);
+    }
+    serde_json::to_string_pretty(&root)
+        .map(Some)
+        .map_err(|error| error.to_string())
+}
+
 /// The hook file without any of monoBOT's entries; everything else stays.
 pub fn remove(file: &str) -> Result<String, String> {
     let mut root: Value = serde_json::from_str(file).map_err(|error| error.to_string())?;
@@ -204,8 +254,23 @@ fn install_file(
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(error.to_string()),
     };
-    let Some(merged) = merge(&current, source, events, socket)? else {
-        return Ok(false);
+    // Entries for sockets whose folder is gone leave with the same write.
+    let pruned = if current.trim().is_empty() {
+        None
+    } else {
+        forget(&current, socket, |socket| !socket.exists())?
+    };
+    let merged = match merge(
+        pruned.as_deref().unwrap_or(&current),
+        source,
+        events,
+        socket,
+    )? {
+        Some(merged) => merged,
+        None => match pruned {
+            Some(pruned) => pruned,
+            None => return Ok(false),
+        },
     };
     if !current.is_empty() {
         let backup = path.with_extension("json.monobot-backup");
@@ -657,6 +722,54 @@ mod tests {
         assert_eq!(second, Ok(false), "already there");
         let backup = std::fs::read_to_string(claude.join("settings.json.monobot-backup")).unwrap();
         assert_eq!(backup, r#"{"model":"x"}"#);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn entries_for_sockets_that_are_gone_leave_and_everything_else_stays() {
+        let gone = Path::new("/tmp/monocode-perf-gone/it's data/notch.sock");
+        let other = Path::new("/tmp/another copy/notch.sock");
+        let mut file =
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"say done"}]}]}}"#
+                .to_owned();
+        for socket in [gone, other, socket()] {
+            file = merge(&file, "claude", CLAUDE_EVENTS, socket)
+                .unwrap()
+                .unwrap();
+        }
+        assert_eq!(socket_of(&command("claude", gone)).as_deref(), Some(gone));
+        let kept = forget(&file, socket(), |socket| socket != other)
+            .unwrap()
+            .expect("the gone socket's entries leave");
+        // This copy's own socket stays even though it is "gone" to the check.
+        assert!(!kept.contains("monocode-perf-gone"));
+        assert!(kept.contains("another copy") && kept.contains("say done"));
+        let root: Value = serde_json::from_str(&kept).unwrap();
+        assert_eq!(root["hooks"]["Stop"].as_array().unwrap().len(), 3);
+        assert_eq!(root["hooks"]["PreToolUse"].as_array().unwrap().len(), 2);
+        // Nothing gone: nothing to write.
+        assert_eq!(forget(&kept, socket(), |socket| socket != other), Ok(None));
+    }
+
+    #[test]
+    fn installing_forgets_a_deleted_copys_hooks() {
+        let home = std::env::temp_dir().join(format!("monobot-forget-{}", std::process::id()));
+        let claude = home.join(".claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        let settings = claude.join("settings.json");
+        let deleted = home.join("deleted/notch.sock");
+        let stale = merge("", "claude", CLAUDE_EVENTS, &deleted)
+            .unwrap()
+            .unwrap();
+        std::fs::write(&settings, stale).unwrap();
+        assert_eq!(
+            install_file(&settings, "claude", CLAUDE_EVENTS, socket()),
+            Ok(true)
+        );
+        let written = std::fs::read_to_string(&settings).unwrap();
+        assert!(!written.contains("deleted/notch.sock"));
+        let root: Value = serde_json::from_str(&written).unwrap();
+        assert_eq!(root["hooks"]["Stop"].as_array().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(home);
     }
 

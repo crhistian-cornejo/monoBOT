@@ -1023,9 +1023,14 @@ impl Monos {
                 ));
                 let source = id.clone();
                 this.observations
-                    .push(cx.observe(&view, move |this, _, cx| {
+                    .push(cx.observe(&view, move |this, view, cx| {
                         if this.active.as_ref() == Some(&source) {
                             cx.notify();
+                        }
+                        // A streaming turn redraws its chat on each update;
+                        // what was said is news for the notch too.
+                        if view.read(cx).busy {
+                            cx.emit(NotificationChanged::Content);
                         }
                         this.dispatch(&source, cx);
                     }));
@@ -1384,7 +1389,7 @@ impl Monos {
                 habit: false,
                 was_cancelled: view.notification_was_cancelled(),
             });
-        cx.emit(NotificationChanged);
+        cx.emit(NotificationChanged::Request);
         if let Some(completion) = completion {
             cx.emit(completion);
         }

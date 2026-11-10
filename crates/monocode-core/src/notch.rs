@@ -6,6 +6,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashSet, VecDeque};
 
+#[cfg(target_os = "macos")]
+mod cf;
 pub mod clipboard;
 pub mod face;
 pub mod hooks;

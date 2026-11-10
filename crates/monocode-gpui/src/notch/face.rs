@@ -38,9 +38,11 @@ impl Notch {
         model::wears_face(&self.look, &self.screen(cx).screen)
     }
 
-    /// Blinks every few seconds while the look asks for the face.
+    /// Blinks every few seconds while the look asks for the face and this
+    /// screen's notch wears one. A camera housing has none, and then nothing
+    /// here wakes the interface.
     pub(super) fn start_face(&mut self, cx: &mut Context<Self>) {
-        if !self.look.face {
+        if !self.look.face || !self.wears_face(cx) {
             self.face = Face::default();
             return;
         }

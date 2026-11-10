@@ -464,8 +464,10 @@ fn a_volume_change_opens_the_wings_for_a_moment(cx: &mut TestAppContext) {
 #[gpui::test]
 fn what_plays_glides_past_at_rest_and_leads_home_with_its_player(cx: &mut TestAppContext) {
     use monocode_core::notch::media::{Lyrics, Playing, Track, parse_lrc};
-    let mut look = Look::default();
-    look.shelf = vec![monocode_core::notch::Widget::new("calendar", 3)];
+    let look = Look {
+        shelf: vec![monocode_core::notch::Widget::new("calendar", 3)],
+        ..Look::default()
+    };
     let opened = open_notch(look, cx);
     let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
     leave(visual);
@@ -791,11 +793,19 @@ fn an_agents_row_opens_its_chat_in_the_notch_and_sends_without_the_app(cx: &mut 
                 })),
                 cx,
             );
-            notch
-                .talk_field
-                .update(cx, |field, cx| field.set_text("  Thanks  ".into(), cx));
         })
         .unwrap();
+    // Typed as the user types: into the focused field, keys and all.
+    click(visual, "notch-talk-field");
+    visual.simulate_input("  Thanks  ");
+    visual.run_until_parked();
+    let typed = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.talk_field.read(cx).content.to_string()
+        })
+        .unwrap();
+    assert_eq!(typed, "  Thanks  ");
     click(visual, "notch-talk-send");
     assert!(matches!(
         opened.events.borrow().as_slice(),
@@ -825,6 +835,28 @@ fn an_agents_row_opens_its_chat_in_the_notch_and_sends_without_the_app(cx: &mut 
         })
         .unwrap();
     assert_eq!(typed, "Thanks");
+    // Closed, the chat is no longer followed; open again, it is.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_open(false, cx))
+        .unwrap();
+    assert!(matches!(
+        opened.events.borrow().last(),
+        Some(NotchEvent::Watch(None))
+    ));
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_open(true, cx);
+            notch.set_tab(Tab::Agents, cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(matches!(
+        opened.events.borrow().last(),
+        Some(NotchEvent::Watch(Some(20)))
+    ));
+    assert!(visual.debug_bounds("notch-talk").is_some());
     // Back to the agents; Open in app is the one way that raises the app.
     click(visual, "notch-talk-open");
     click(visual, "notch-talk-back");
@@ -833,6 +865,280 @@ fn an_agents_row_opens_its_chat_in_the_notch_and_sends_without_the_app(cx: &mut 
         opened.events.borrow().as_slice(),
         [.., NotchEvent::OpenSession(20), NotchEvent::Watch(None)]
     ));
+}
+
+/// With Lyrics off, what plays is not looked up anywhere: no title leaves
+/// this Mac for lyrics nobody asked to see.
+#[gpui::test]
+fn lyrics_are_not_asked_for_while_lyrics_is_off(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Playing, Track};
+    let look = Look {
+        lyrics: false,
+        ..Look::default()
+    };
+    let opened = open_notch(look, cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let track = Track {
+        app: "Spotify.exe".into(),
+        title: "Song".into(),
+        artist: "Artist".into(),
+        album: "Album".into(),
+        duration: Some(Duration::from_secs(200)),
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_media(
+                Some(Playing {
+                    track: track.clone(),
+                    playing: true,
+                    position: Duration::from_secs(12),
+                    at: Instant::now(),
+                    art: None,
+                }),
+                cx,
+            );
+            assert!(notch.lyrics_for.is_none(), "nothing was asked for");
+            assert!(notch.lyric_moment().is_none());
+            // In hand already (as after turning them on): nothing more is
+            // asked for the same track.
+            notch.lyrics_for = Some(track.clone());
+            notch.change_look(|look| look.lyrics = true, cx);
+            assert_eq!(notch.lyrics_for.as_ref(), Some(&track));
+        })
+        .unwrap();
+    visual.run_until_parked();
+}
+
+#[test]
+fn content_leaves_with_the_fold_only_when_the_shape_becomes_another_kind() {
+    // A shorter state word or a shorter page shows at once: no blink.
+    assert!(!leaves(
+        Shape::Busy {
+            left: 73,
+            right: 135
+        },
+        Shape::Busy {
+            left: 73,
+            right: 96
+        }
+    ));
+    assert!(!leaves(
+        Shape::Open { body: 300 },
+        Shape::Open { body: 180 }
+    ));
+    // The panel closing to its wings, or the wings going quiet, fade out.
+    assert!(leaves(
+        Shape::Open { body: 300 },
+        Shape::Busy {
+            left: 73,
+            right: 96
+        }
+    ));
+    assert!(leaves(
+        Shape::Busy {
+            left: 73,
+            right: 96
+        },
+        Shape::Quiet
+    ));
+}
+
+/// A wheel over the chat, in points; negative moves toward the end.
+fn wheel(visual: &mut VisualTestContext, at: gpui::Point<Pixels>, delta: f32) {
+    visual.simulate_event(gpui::ScrollWheelEvent {
+        position: at,
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(delta))),
+        modifiers: Default::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    visual.run_until_parked();
+}
+
+#[gpui::test]
+fn the_chat_with_an_agent_scrolls_and_follows_the_answer_as_it_streams(cx: &mut TestAppContext) {
+    use monocode_core::notch::{Said, Talk};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let said = |answer: &str| {
+        let mut said: Vec<Said> = (0..7)
+            .map(|n| Said {
+                mine: n % 2 == 0,
+                text: format!("Message {n}: {}", "a line of what was said ".repeat(6)),
+            })
+            .collect();
+        said.push(Said {
+            mine: false,
+            text: answer.to_owned(),
+        });
+        said
+    };
+    let feed = |said: Vec<Said>, busy: bool| Feed {
+        agents: vec![ivy()],
+        talk: Some(Talk {
+            session: 20,
+            said,
+            busy,
+        }),
+        ..Feed::default()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    agents: vec![ivy()],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-agents");
+    click(visual, "notch-agent-0");
+    // A short chat rests on the field, with nothing to scroll.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    agents: vec![ivy()],
+                    talk: Some(Talk {
+                        session: 20,
+                        said: vec![Said {
+                            mine: true,
+                            text: "Hi".into(),
+                        }],
+                        busy: false,
+                    }),
+                    ..Feed::default()
+                },
+                cx,
+            )
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let viewport = visual.debug_bounds("notch-talk-said").unwrap();
+    let lines = visual.debug_bounds("notch-talk-lines").unwrap();
+    assert_eq!(lines.bottom(), viewport.bottom());
+    let (max, _) = scroll_of(&opened, visual);
+    assert_eq!(max, px(0.));
+    // A long one opens at its end.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(said("Reading the shell"), true), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let (max, offset) = scroll_of(&opened, visual);
+    assert!(
+        max > px(100.),
+        "the history is taller than the chat: {max:?}"
+    );
+    assert_eq!(offset, -max);
+    // The answer grows while it streams, and the end stays in view.
+    let longer = format!("Reading the shell. {}", "More of the answer. ".repeat(20));
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(said(&longer), true), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let (grown, offset) = scroll_of(&opened, visual);
+    assert!(grown > max);
+    assert_eq!(offset, -grown);
+    // Up to read: the first message is reached, and what streams in after
+    // leaves the reader where they are.
+    let at = viewport.center();
+    wheel(visual, at, 10_000.);
+    let (_, offset) = scroll_of(&opened, visual);
+    assert_eq!(offset, px(0.));
+    let first = visual.debug_bounds("notch-talk-lines").unwrap();
+    assert_eq!(first.top(), viewport.top());
+    wheel(visual, at, -40.);
+    let (_, reading) = scroll_of(&opened, visual);
+    assert_eq!(reading, px(-40.));
+    let longest = format!("{longer} {}", "Still going. ".repeat(20));
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(said(&longest), true), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let (max, offset) = scroll_of(&opened, visual);
+    assert!(max > grown);
+    assert_eq!(
+        offset, reading,
+        "streaming must not move a reader who scrolled up"
+    );
+    assert!(!following(&opened, visual));
+    // Back down to the end, and it follows again.
+    wheel(visual, at, -10_000.);
+    let done = format!("{longest} Done.");
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(said(&done), false), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let (max, offset) = scroll_of(&opened, visual);
+    assert_eq!(offset, -max);
+    // Up again, then a message sent: the chat goes back to its end.
+    wheel(visual, at, 200.);
+    assert!(scroll_of(&opened, visual).1 > -max);
+    click(visual, "notch-talk-field");
+    visual.simulate_input("Thanks");
+    click(visual, "notch-talk-send");
+    let mut sent = said(&done);
+    sent.push(Said {
+        mine: true,
+        text: "Thanks".into(),
+    });
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(sent, true), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let (max, offset) = scroll_of(&opened, visual);
+    assert_eq!(offset, -max);
+    assert!(following(&opened, visual));
+    assert!(matches!(
+        opened.events.borrow().last(),
+        Some(NotchEvent::Tell { session: 20, text }) if text == "Thanks"
+    ));
+}
+
+/// Whether the chat keeps to its end as more arrives.
+fn following(opened: &Opened, visual: &mut VisualTestContext) -> bool {
+    opened
+        .window
+        .update(visual, |notch, _, _| {
+            notch
+                .talk
+                .as_ref()
+                .expect("the chat is open")
+                .scroll
+                .following()
+        })
+        .unwrap()
+}
+
+/// The chat's room to scroll and where it is (negative is further down).
+fn scroll_of(opened: &Opened, visual: &mut VisualTestContext) -> (Pixels, Pixels) {
+    opened
+        .window
+        .update(visual, |notch, _, _| {
+            let handle = &notch.talk.as_ref().expect("the chat is open").scroll.handle;
+            (handle.max_offset().y, handle.offset().y)
+        })
+        .unwrap()
 }
 
 #[gpui::test]
@@ -964,8 +1270,10 @@ fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
 fn the_catalog_steps_through_the_widgets_that_do_not_fit_its_row(cx: &mut TestAppContext) {
     // One widget on the shelf: nearly every other one can be added, more
     // than the row shows at once.
-    let mut look = Look::default();
-    look.shelf = vec![monocode_core::notch::Widget::new("clock", 1)];
+    let look = Look {
+        shelf: vec![monocode_core::notch::Widget::new("clock", 1)],
+        ..Look::default()
+    };
     let opened = open_notch(look, cx);
     let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
     opened
@@ -1013,8 +1321,10 @@ fn the_catalog_steps_through_the_widgets_that_do_not_fit_its_row(cx: &mut TestAp
 #[gpui::test]
 fn the_system_widget_shows_the_processor_the_memory_and_the_graphics(cx: &mut TestAppContext) {
     use monocode_core::notch::stats::{Memory, Stats};
-    let mut look = Look::default();
-    look.shelf = vec![monocode_core::notch::Widget::new("system", 2)];
+    let look = Look {
+        shelf: vec![monocode_core::notch::Widget::new("system", 2)],
+        ..Look::default()
+    };
     let opened = open_notch(look, cx);
     let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
     opened
@@ -1104,7 +1414,7 @@ fn files_dragged_onto_the_notch_open_it_and_wait_on_its_tray(cx: &mut TestAppCon
 }
 
 #[gpui::test]
-fn the_open_player_shows_the_lines_around_the_playhead(cx: &mut TestAppContext) {
+fn the_open_player_leaves_the_lyrics_to_the_closed_notch(cx: &mut TestAppContext) {
     use monocode_core::notch::media::{Lyrics, Playing, Track, parse_lrc};
     let opened = open_notch(Look::default(), cx);
     let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
@@ -1139,13 +1449,18 @@ fn the_open_player_shows_the_lines_around_the_playhead(cx: &mut TestAppContext) 
         .unwrap();
     visual.run_until_parked();
     assert!(visual.debug_bounds("notch-player").is_some());
-    assert!(visual.debug_bounds("notch-player-lyrics").is_some());
+    let moment = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| {
+                notch.lyric_moment().map(|(_, line, _)| line)
+            })
+            .unwrap()
+    };
+    // The closed notch has the line; the open player only its switch.
+    assert_eq!(moment(visual).as_deref(), Some("first line"));
     let with_lyrics = height(visual);
-    // With Lyrics off the player keeps its own height.
     click(visual, "notch-media-lyrics");
-    assert!(visual.debug_bounds("notch-player-lyrics").is_none());
-    assert_eq!(
-        with_lyrics - height(visual),
-        media::LYRICS_HEIGHT + model::CELL_GAP
-    );
+    assert_eq!(moment(visual), None);
+    assert_eq!(height(visual), with_lyrics);
 }

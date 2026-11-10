@@ -618,8 +618,14 @@ impl Notch {
         }
         let keys_changed = look.system_keys != self.look.system_keys;
         let clips_changed = look.clipboard != self.look.clipboard;
-        let face_changed = look.face != self.look.face;
+        // The face is worn by the island, not by a camera housing: a change
+        // of style starts or ends it as the switch itself does.
+        let face_changed = look.face != self.look.face || look.island() != self.look.island();
+        let lyrics_on = look.lyrics && !self.look.lyrics;
         self.look = look;
+        if lyrics_on {
+            self.want_lyrics(cx);
+        }
         if clips_changed {
             self.watch_clipboard(cx);
         }
@@ -668,6 +674,11 @@ impl Notch {
             self.editing = false;
             self.tab = Tab::Home;
             self.ticker = None;
+        }
+        // The chat with an agent is only followed while the panel shows:
+        // closed, a streaming answer would redraw the notch for nobody.
+        if let Some(session) = self.talking_with() {
+            cx.emit(NotchEvent::Watch(open.then_some(session)));
         }
         cx.notify();
     }
@@ -802,10 +813,7 @@ impl Notch {
                         0.
                     }
                     + if self.player_shown() {
-                        media::PLAYER_HEIGHT
-                            + model::CELL_GAP
-                            + self.player_lyrics_height()
-                            + self.queue_height()
+                        media::PLAYER_HEIGHT + model::CELL_GAP + self.queue_height()
                     } else {
                         0.
                     }
@@ -982,9 +990,8 @@ impl Notch {
         (model::shelf_height(model::MAX_ROWS as usize)
             + tray::TRAY_HEIGHT
             + model::CELL_GAP
-            + (CATALOG_HEIGHT + model::CELL_GAP).max(
-                media::PLAYER_HEIGHT + 2. * model::CELL_GAP + media::LYRICS_HEIGHT + queue::TALLEST,
-            ))
+            + (CATALOG_HEIGHT + model::CELL_GAP)
+                .max(media::PLAYER_HEIGHT + model::CELL_GAP + queue::TALLEST))
         .max(SETTINGS_HEIGHT)
         // Agents and Chat both scroll past this.
         .max(AGENTS_MAX)
@@ -1262,7 +1269,8 @@ pub(crate) fn pill(
                 .text_color(ink(0.85))
                 .hover(|style| style.bg(ink(0.18)))
         })
-        .child(label.to_owned())
+        // A button that changes its word (Copy to Copied) grows the letters.
+        .child(crate::text_morph::text_morph("label", label.to_owned()))
 }
 
 /// An icon button on the notch's black.
@@ -1308,18 +1316,28 @@ pub(crate) fn face_or_provider(
     face: Option<&model::Face>,
     provider: &str,
     side: f32,
+    working: bool,
     cx: &App,
 ) -> AnyElement {
     match face {
+        // At work it hops; at rest it stands still and asks for no frames.
         Some(face) => crate::monos::avatar::avatar(
             &face.mascot,
             face.color,
-            "working",
+            if working { "working" } else { "idle" },
             side,
-            cx.reduce_motion(),
+            !working || cx.reduce_motion(),
         ),
         None => provider_glyph(provider, side - 2.),
     }
+}
+
+/// Whether the island's content leaves with the fold from `old` to `new`: only
+/// when it becomes another kind of shape, as the panel closing to its wings.
+/// The same kind a little smaller (a shorter state word, a shorter page) just
+/// shows what is new; fading it out and back would blink.
+fn leaves(old: Shape, new: Shape) -> bool {
+    std::mem::discriminant(&old) != std::mem::discriminant(&new)
 }
 
 /// One session's mark: its work, its question, or its finish.
@@ -1332,7 +1350,7 @@ pub(crate) fn activity_mark(activity: &model::Activity, cx: &App) -> AnyElement 
         work_mark("notch-activity-ask", true, cx)
     } else if activity.face.is_some() {
         // An agent at work is its own face, hopping.
-        face_or_provider(activity.face.as_ref(), &activity.provider, 14., cx)
+        face_or_provider(activity.face.as_ref(), &activity.provider, 14., true, cx)
     } else {
         div()
             .id(("notch-activity", activity.id as u64))
@@ -1362,6 +1380,7 @@ impl Notch {
                         mark.face.as_ref(),
                         &mark.provider,
                         15.,
+                        true,
                         cx,
                     )),
             );
@@ -1378,21 +1397,23 @@ impl Notch {
                         .text_size(px(10.5))
                         .font_weight(gpui::FontWeight::MEDIUM)
                         .text_color(ink(0.6))
-                        .child(format!("+{}", rest.more())),
+                        .child(crate::text_morph::text_morph(
+                            "notch-more",
+                            format!("+{}", rest.more()),
+                        )),
                 )
             });
         let right: AnyElement = match (&rest.lead_text, rest.lead_steps) {
             (Some(text), steps) => {
                 // What the lead does sweeps with light while it works, as
                 // the transcript's live step; a question holds still.
-                let words: AnyElement = if rest.asking > 0 || cx.reduce_motion() {
-                    div().child(text.clone()).into_any_element()
+                // A new step grows out of the one before: the letters they
+                // share slide over, the rest trade places.
+                let words = crate::text_morph::text_morph("notch-lead", text.clone());
+                let words = if rest.asking > 0 || cx.reduce_motion() {
+                    words
                 } else {
-                    crate::activity::shimmer_in(
-                        text.clone(),
-                        self.epoch.elapsed().as_secs_f32(),
-                        ink,
-                    )
+                    words.shimmer(self.epoch.elapsed().as_secs_f32(), ink)
                 };
                 let line = div()
                     .min_w_0()
@@ -1414,7 +1435,10 @@ impl Notch {
                             .flex_shrink_0()
                             .text_size(px(10.5))
                             .text_color(ink(0.5))
-                            .child(format!("{done}/{all}"))
+                            .child(crate::text_morph::text_morph(
+                                "notch-lead-steps",
+                                format!("{done}/{all}"),
+                            ))
                     }));
                 div()
                     .min_w_0()
@@ -1619,7 +1643,7 @@ impl Notch {
                     .text_size(px(13.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(ink(0.95))
-                    .child(title),
+                    .child(crate::text_morph::text_morph("notch-title", title)),
             )
             .child(
                 div()
@@ -1628,7 +1652,7 @@ impl Notch {
                     .truncate()
                     .text_size(px(11.5))
                     .text_color(ink(0.45))
-                    .child(summary),
+                    .child(crate::text_morph::text_morph("notch-summary", summary)),
             )
             .when(self.tab == Tab::Home, |header| {
                 header.child(
@@ -1692,7 +1716,6 @@ impl Notch {
                         .flex()
                         .flex_col()
                         .child(self.player_view(cx))
-                        .child(self.player_lyrics_view())
                         .child(self.queue_view())
                         .child(div().h(px(model::CELL_GAP)).flex_shrink_0())
                         .child(self.tray_view(cx))
@@ -1777,12 +1800,15 @@ impl Notch {
         if !folding {
             self.leaving = None;
         } else if self.leaving.is_none() {
-            self.leaving = self.drawn.filter(|(drawn, _, _)| *drawn != shape);
+            self.leaving = self.drawn.filter(|(drawn, _, _)| leaves(*drawn, shape));
         }
         let (drawn_shape, drawn_tab, size, opacity, rise) = match self.leaving {
             Some((old, tab, size)) => {
-                let span = (size.height - target.height).max(1.);
-                let folded = ((size.height - island.height) / span).clamp(0., 1.);
+                // Measured from where this fold began: closing a panel that
+                // was still opening starts at full ink, not part faded.
+                let from = self.motion.map_or(size.height, |motion| motion.from.height);
+                let span = (from - target.height).max(1.);
+                let folded = ((from - island.height) / span).clamp(0., 1.);
                 (old, tab, size, (1. - folded / 0.55).clamp(0., 1.), 0.)
             }
             None => {

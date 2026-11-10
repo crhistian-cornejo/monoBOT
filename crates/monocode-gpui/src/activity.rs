@@ -22,6 +22,14 @@ pub(crate) fn shimmer_in(text: String, elapsed: f32, ink: fn(f32) -> gpui::Hsla)
     .into_any_element()
 }
 
+/// How lit a glyph is by the sweep of light: `x` is its place along the line
+/// (0 to 1) and `elapsed` the seconds on the sweep's clock. One pass takes
+/// 1.6 s. The text morph's shimmer shares it.
+pub(crate) fn sweep(x: f32, elapsed: f32) -> f32 {
+    let center = -0.25 + (elapsed / 1.6).fract() * 1.5;
+    (1. - (x - center).abs() / (2. / 7.)).max(0.)
+}
+
 struct Shimmer {
     text: StyledText,
     elapsed: f32,
@@ -85,11 +93,10 @@ impl Element for Shimmer {
                     let line = &wrapped.unwrapped_layout;
                     let baseline = (line_height - line.ascent - line.descent) / 2. + line.ascent;
                     let width = f32::from(line.width).max(1.);
-                    let center = -0.25 + (self.elapsed / 1.6).fract() * 1.5;
                     for run in &line.runs {
                         for glyph in &run.glyphs {
                             let x = f32::from(glyph.position.x + line.font_size * 0.25) / width;
-                            let sweep = (1. - (x - center).abs() / (2. / 7.)).max(0.);
+                            let sweep = sweep(x, self.elapsed);
                             let origin = bounds.origin
                                 + point(glyph.position.x, baseline + glyph.position.y);
                             if glyph.is_emoji {

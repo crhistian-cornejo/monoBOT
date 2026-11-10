@@ -24,6 +24,8 @@ mod new_chat_choice;
 #[cfg(test)]
 mod new_chat_choice_tests;
 mod notch;
+#[cfg(test)]
+mod notch_tests;
 mod notifications;
 mod orchestration;
 mod picker_preferences;

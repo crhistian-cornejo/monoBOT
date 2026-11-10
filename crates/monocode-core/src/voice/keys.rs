@@ -170,7 +170,7 @@ mod store {
             };
             return Ok(());
         }
-        let entry = keyring::Entry::new(SERVICE, account).map_err(|_| KeyError::Keychain)?;
+        let entry = crate::secrets::entry(SERVICE, account).map_err(|_| KeyError::Keychain)?;
         match value {
             Some(value) => entry.set_password(value).map_err(|_| KeyError::Keychain),
             None => match entry.delete_credential() {
@@ -188,7 +188,7 @@ mod store {
                 .get(account)
                 .cloned();
         }
-        keyring::Entry::new(SERVICE, account)
+        crate::secrets::entry(SERVICE, account)
             .and_then(|entry| entry.get_password())
             .ok()
     }

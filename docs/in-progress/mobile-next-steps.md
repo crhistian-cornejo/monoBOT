@@ -11,6 +11,10 @@ escritorio en agentes personales (monos) y grupos. Pendiente, no terminado.
 - Ya existe: lista de monos, chat de mono, perfil del mono (documentos,
   archivo, modelo, proyectos, hábitos, subsesiones), crear, editar, reiniciar
   y borrar monos, y leer/guardar SOUL.md y MEMORY.md.
+- Caras como en el escritorio: los bots llevan su persona 3D, que el móvil
+  dibuja con el mismo crate (`crates/persona`, vía `crates/mobile-link`), y
+  las mascotas se mueven en el hilo de la interfaz. Ver «Faces» en
+  `docs/done/desktop.md`.
 - Métodos que la app puede pedir al escritorio: `APP_METHODS` en
   `crates/monocode-core/src/mobile/host.rs`.
 

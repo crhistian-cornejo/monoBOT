@@ -23,6 +23,20 @@ pub(super) fn session_row(
     detail: String,
     detail_color: gpui::Hsla,
 ) -> gpui::Stateful<gpui::Div> {
+    session_row_keyed(id, "detail", mark, title, detail, detail_color)
+}
+
+/// [`session_row`] for a list whose rows change places: `detail_id` follows
+/// the thing the row is about, so its word morphs only when that thing's own
+/// word changes.
+pub(super) fn session_row_keyed(
+    id: impl Into<gpui::ElementId>,
+    detail_id: impl Into<gpui::ElementId>,
+    mark: AnyElement,
+    title: &str,
+    detail: String,
+    detail_color: gpui::Hsla,
+) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
         .h(px(ROW))
@@ -56,7 +70,9 @@ pub(super) fn session_row(
                 .truncate()
                 .text_size(px(11.))
                 .text_color(detail_color)
-                .child(detail),
+                // The word on the right changes in place: "Text · 2m" to
+                // "Copied", a state to the next, a minute to the one after.
+                .child(crate::text_morph::text_morph(detail_id, detail).within(px(150.))),
         )
 }
 
@@ -209,7 +225,7 @@ impl Notch {
                     .iter()
                     .find(|agent| agent.session == Some(ask.session))
                     .map(|agent| agent.face.clone());
-                let mark = face_or_provider(face.as_ref(), &ask.provider, 14., cx);
+                let mark = face_or_provider(face.as_ref(), &ask.provider, 14., false, cx);
                 list = list.child(self.ask_row(ask, mark, cx));
             }
         }
@@ -232,7 +248,13 @@ impl Notch {
             };
             let mut row = session_row(
                 ("notch-agent", index as u64),
-                face_or_provider(Some(&agent.face), "", 14., cx),
+                face_or_provider(
+                    Some(&agent.face),
+                    "",
+                    14.,
+                    agent.doing.is_some() && !agent.needs_you,
+                    cx,
+                ),
                 &agent.name,
                 detail,
                 color,
@@ -370,9 +392,10 @@ impl Notch {
                     .items_center()
                     .gap(px(6.))
                     .child(
-                        // The field keeps the theme's own surface, so what is
-                        // typed reads in any theme.
+                        // The field keeps the theme's own surface and ink, so
+                        // what is typed reads in any theme.
                         div()
+                            .debug_selector(|| "notch-chat-field".into())
                             .flex_1()
                             .min_w_0()
                             .h(px(32.))
@@ -380,6 +403,7 @@ impl Notch {
                             .flex()
                             .items_center()
                             .bg(background_base())
+                            .text_color(crate::theme::content(0.95))
                             .border_1()
                             .border_color(ink(0.16))
                             .child(field),

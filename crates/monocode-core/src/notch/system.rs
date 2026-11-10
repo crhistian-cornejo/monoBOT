@@ -150,6 +150,16 @@ pub fn read() -> Levels {
     Levels::default()
 }
 
+/// The battery's charge and whether the charger is in, as the levels thread
+/// last read it (macOS); never asks the system itself, so the interface can
+/// call it while it draws.
+pub fn battery() -> Option<(f32, bool)> {
+    #[cfg(target_os = "macos")]
+    return mac::cached_power(false);
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
 #[cfg(target_os = "macos")]
 mod mac {
     use super::Levels;
@@ -323,11 +333,59 @@ mod mac {
         }
     }
 
+    /// The internal battery's charge and whether the charger is in, from
+    /// the power sources IOKit lists; `None` on a Mac without a battery.
+    fn power() -> Option<(f32, bool)> {
+        use crate::notch::cf::{self, Owned};
+        #[link(name = "IOKit", kind = "framework")]
+        unsafe extern "C" {
+            fn IOPSCopyPowerSourcesInfo() -> cf::Ref;
+            fn IOPSCopyPowerSourcesList(blob: cf::Ref) -> cf::Ref;
+            fn IOPSGetPowerSourceDescription(blob: cf::Ref, source: cf::Ref) -> cf::Ref;
+        }
+        // SAFETY: the info and its list are owned here; each description is
+        // borrowed from the info, which outlives the loop.
+        unsafe {
+            let info = Owned::new(IOPSCopyPowerSourcesInfo())?;
+            let list = Owned::new(IOPSCopyPowerSourcesList(info.0))?;
+            cf::items(list.0).into_iter().find_map(|source| {
+                let description = IOPSGetPowerSourceDescription(info.0, source);
+                if description.is_null() || !cf::says(description, c"Type", c"InternalBattery") {
+                    return None;
+                }
+                let current = cf::number(description, c"Current Capacity")?;
+                let most = cf::number(description, c"Max Capacity").filter(|most| *most > 0.)?;
+                let plugged = cf::says(description, c"Power Source State", c"AC Power");
+                Some(((current / most).clamp(0., 1.) as f32, plugged))
+            })
+        }
+    }
+
+    /// The battery as last read. The levels are read five times a second,
+    /// and the power sources come from another process, so they are asked
+    /// again only every two seconds.
+    pub(super) fn cached_power(refresh: bool) -> Option<(f32, bool)> {
+        use std::sync::Mutex;
+        use std::time::{Duration, Instant};
+        type Power = Option<(f32, bool)>;
+        static LAST: Mutex<Option<(Instant, Power)>> = Mutex::new(None);
+        let mut last = LAST.lock().unwrap_or_else(|error| error.into_inner());
+        match *last {
+            Some((at, power)) if !refresh || at.elapsed() < Duration::from_secs(2) => power,
+            None if !refresh => None,
+            _ => {
+                let power = power();
+                *last = Some((Instant::now(), power));
+                power
+            }
+        }
+    }
+
     pub(super) fn read() -> Levels {
         Levels {
             volume: volume(),
             brightness: brightness(),
-            power: None,
+            power: cached_power(true),
         }
     }
 }
@@ -451,5 +509,9 @@ mod tests {
         if let Some(brightness) = levels.brightness {
             assert!((0. ..=1.).contains(&brightness));
         }
+        if let Some((charge, _)) = levels.power {
+            assert!((0. ..=1.).contains(&charge));
+        }
+        assert_eq!(battery(), levels.power, "the cached reading");
     }
 }

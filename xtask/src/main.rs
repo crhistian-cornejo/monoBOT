@@ -49,6 +49,7 @@ Packaging and releases
 Tools
   icons hugeicons <package dir> <out dir> name=Icon@stroke...
   icons material <package dir> <out.json>
+  icons fluent <package dir> <out dir> name=file...
   logo                  Redraw every app icon from assets/logo/monobot.svg
   ssh-smoke [--desktop <bin>] [--host <monocode-host>] [--profile <p>]
                         Native SSH transport against a disposable loopback sshd

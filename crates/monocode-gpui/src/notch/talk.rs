@@ -3,7 +3,13 @@
 //! forward: the latest things said, a field to answer, and a way back. What
 //! is typed goes straight to the agent's own chat in the app, which stays
 //! where it is. The app fills in what was said (`Feed::talk`).
+//!
+//! What was said scrolls. The chat opens at its end and stays there while
+//! the answer streams in; scrolling up to read leaves it where it is until
+//! the reader comes back down or sends something. It follows the way the
+//! transcript's live phases do (`transcript::live_phase::LiveScroll`).
 use super::*;
+use crate::transcript::live_phase::LiveScroll;
 
 /// The chat's header: back, who it is, and Open.
 const TALK_HEADER: f32 = 30.;
@@ -19,6 +25,8 @@ pub(super) struct Talking {
     since: Instant,
     /// Why the last message could not be sent.
     error: Option<String>,
+    /// What was said, and whether it follows the end.
+    pub(super) scroll: LiveScroll,
 }
 
 impl Notch {
@@ -38,6 +46,7 @@ impl Notch {
             face: agent.face.clone(),
             since: Instant::now(),
             error: None,
+            scroll: LiveScroll::default(),
         });
         self.talk_field.update(cx, |field, cx| {
             field.set_placeholder(format!("Message {}", agent.name), cx);
@@ -65,6 +74,8 @@ impl Notch {
             return;
         }
         talk.error = None;
+        // What was sent is read where it lands, at the end.
+        talk.scroll.follow();
         let session = talk.session;
         self.talk_field
             .update(cx, |field, cx| field.set_text(String::new(), cx));
@@ -96,6 +107,14 @@ impl Notch {
     }
 
     pub(super) fn talk_page(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let Some(talk) = self.talk.as_mut() else {
+            return div().into_any_element();
+        };
+        // Following, the end is kept in view after this frame's layout, so
+        // a longer answer is read as it grows.
+        talk.scroll.enable(true);
+        let wheel = talk.scroll.wheeler();
+        let scroll = talk.scroll.handle.clone();
         let Some(talk) = self.talk.as_ref() else {
             return div().into_any_element();
         };
@@ -130,7 +149,7 @@ impl Notch {
                 .size(px(22.))
                 .on_click(cx.listener(|this, _, _, cx| this.close_talk(cx))),
             )
-            .child(face_or_provider(Some(&talk.face), "", 16., cx))
+            .child(face_or_provider(Some(&talk.face), "", 16., busy, cx))
             .child(
                 div()
                     .min_w_0()
@@ -147,22 +166,32 @@ impl Notch {
                     .truncate()
                     .text_size(px(11.))
                     .text_color(if busy { accent_color() } else { ink(0.4) })
-                    .child(if busy { "Answering…" } else { "Resting" }),
+                    .child(crate::text_morph::text_morph(
+                        "notch-talk-status",
+                        if busy { "Answering…" } else { "Resting" },
+                    )),
             )
             .child(pill("notch-talk-open", "Open in app", false).on_click(
                 cx.listener(move |this, _, _, cx| this.emit(NotchEvent::OpenSession(session), cx)),
             ));
-        // The latest words rest on the field; older ones leave at the top.
+        // A few words rest on the field; a longer history scrolls up to its
+        // first line. The wheel is used here before the scroller sees it.
+        let view = cx.entity_id();
         let mut lines = div()
-            .debug_selector(|| "notch-talk-said".into())
-            .flex_1()
-            .min_h_0()
-            .overflow_hidden()
+            .id("notch-talk-lines")
+            .debug_selector(|| "notch-talk-lines".into())
+            .min_h_full()
             .flex()
             .flex_col()
             .justify_end()
             .gap(px(6.))
-            .py(px(4.));
+            .py(px(4.))
+            .on_scroll_wheel(move |event, window, cx| {
+                if wheel(event.delta.pixel_delta(window.line_height()).y) {
+                    cx.notify(view);
+                    cx.stop_propagation();
+                }
+            });
         match said {
             None => {
                 lines = lines.child(note("Loading the chat…"));
@@ -184,7 +213,6 @@ impl Notch {
                                     .py(px(4.))
                                     .text_size(px(12.))
                                     .line_height(px(16.))
-                                    .line_clamp(if said.mine { 3 } else { 8 })
                                     .when(said.mine, |bubble| {
                                         bubble.bg(ink(0.12)).text_color(ink(0.95))
                                     })
@@ -207,7 +235,16 @@ impl Notch {
             .flex()
             .flex_col()
             .child(header)
-            .child(lines)
+            .child(
+                div()
+                    .id("notch-talk-said")
+                    .debug_selector(|| "notch-talk-said".into())
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&scroll)
+                    .child(lines),
+            )
             .children(error.map(|error| {
                 div()
                     .debug_selector(|| "notch-talk-error".into())
@@ -225,9 +262,10 @@ impl Notch {
                     .items_center()
                     .gap(px(6.))
                     .child(
-                        // The field keeps the theme's own surface, so what
-                        // is typed reads in any theme.
+                        // The field keeps the theme's own surface and ink,
+                        // so what is typed reads in any theme.
                         div()
+                            .debug_selector(|| "notch-talk-field".into())
                             .flex_1()
                             .min_w_0()
                             .h(px(32.))
@@ -235,6 +273,7 @@ impl Notch {
                             .flex()
                             .items_center()
                             .bg(background_base())
+                            .text_color(crate::theme::content(0.95))
                             .border_1()
                             .border_color(ink(0.16))
                             .child(self.talk_field.clone()),

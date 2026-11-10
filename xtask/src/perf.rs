@@ -85,6 +85,9 @@ fn start(binary: &Path, work: PathBuf, env: &[(&str, String)]) -> Result<Run> {
         .arg(work.join("project"))
         .env("MONOCODE_NATIVE_DATA_DIR", work.join("data"))
         .env("MONOCODE_CLAUDE_BINARY", replay)
+        // A throwaway run adds nothing to the user's Claude Code and Codex
+        // hooks; they would point at a folder that goes with the run.
+        .env("MONOCODE_NOTCH_HOOKS", "off")
         .env("REPLAY_MARK", work.join("streaming"))
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdout(log.try_clone().map_err(|e| e.to_string())?)

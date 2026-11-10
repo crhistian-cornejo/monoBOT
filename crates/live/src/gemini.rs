@@ -117,6 +117,18 @@ impl Protocol for Gemini {
             .collect()
     }
 
+    fn text(&self, text: &str) -> Option<String> {
+        Some(
+            json!({
+                "clientContent": {
+                    "turns": [{"role": "user", "parts": [{"text": text}]}],
+                    "turnComplete": true,
+                }
+            })
+            .to_string(),
+        )
+    }
+
     fn tool_result(&self, call: &ToolCall, result: &Value) -> String {
         response(call, result, "INTERRUPT")
     }

@@ -6117,6 +6117,84 @@ fn a_live_call_asks_a_member_through_its_seat_and_answers_the_model(cx: &mut Tes
     });
 }
 
+/// A live call has its own microphone: muting, unmuting and interrupting
+/// never open this Mac's ear beside it, and a call the service ended says why.
+#[gpui::test]
+fn a_live_call_keeps_the_local_ear_shut_and_says_why_it_ended(cx: &mut TestAppContext) {
+    use super::group_call::live_test::{Message, State};
+    use monocode_core::mono::groups::Group;
+    use monocode_core::voice::Provider;
+    let s = setup(cx);
+    let fake_mic = crate::dictation::tests::Fake::installed("");
+    cx.update(|cx| cx.set_global(crate::dictation::Engines(fake_mic)));
+    let epoch = s.manager.update(cx, |m, cx| {
+        let member = m
+            .roster
+            .create_bot(&m.root, "finance", false)
+            .unwrap()
+            .id
+            .clone();
+        let group = m.roster.get_mut(&s.id).unwrap();
+        group.kind = Some("group".into());
+        group.group = Some(Group {
+            members: vec![member],
+            ..Group::default()
+        });
+        let group = m.roster.get(&s.id).unwrap().clone();
+        m.overview_tab = OverviewTab::Call;
+        let epoch = m.call_test_live(&group, Provider::Gemini, cx);
+        m.call_live_message(&s.id, epoch, Message::State(State::Live), cx);
+        assert!(m.call_test_live_listening());
+        epoch
+    });
+    cx.run_until_parked();
+    let idle = |cx: &mut TestAppContext| {
+        cx.run_until_parked();
+        s.manager.read_with(cx, |m, cx| {
+            m.call_test_mic().read(cx).phase() == monocode_core::dictation::Phase::Idle
+        })
+    };
+    assert!(idle(cx), "the live model listens, not this Mac");
+    s.manager.update(cx, |m, cx| m.call_test_mute(cx));
+    assert!(idle(cx));
+    s.manager.update(cx, |m, cx| m.call_test_mute(cx));
+    assert!(idle(cx), "unmuting does not start the local ear");
+    s.manager.update(cx, |m, cx| {
+        m.call_live_message(&s.id, epoch, Message::Said("Hola".into()), cx);
+        m.call_test_interrupt(cx);
+        assert!(m.call_test_live_listening(), "cut off: the user's turn");
+    });
+    assert!(idle(cx), "interrupting does not start it either");
+    // Typed instead of said: a line of the user's, sent to the model, and
+    // never a round on this Mac.
+    s.manager.update(cx, |m, cx| {
+        m.call_test_type("¿Cuánto gasté?", cx);
+        let lines = m.call_test_lines();
+        let last = lines.last().unwrap();
+        assert_eq!(
+            (last.who.as_str(), last.text.as_str()),
+            ("user", "¿Cuánto gasté?")
+        );
+        assert_eq!(m.call_test_voice_error(), None);
+        assert!(m.call_test_input().read(cx).content.is_empty());
+    });
+    assert!(idle(cx));
+    // The service ends the call: the panel keeps the reason.
+    s.manager.update(cx, |m, cx| {
+        m.call_live_message(
+            &s.id,
+            epoch,
+            Message::State(State::Ended(Some("The key was refused.".into()))),
+            cx,
+        );
+        assert!(!m.call_test_live_listening());
+        assert_eq!(
+            m.call_test_voice_error().as_deref(),
+            Some("The key was refused.")
+        );
+    });
+}
+
 /// An ask the model makes for someone not on the call is refused at once,
 /// without reaching any seat.
 #[gpui::test]

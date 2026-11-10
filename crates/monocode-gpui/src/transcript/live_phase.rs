@@ -9,7 +9,7 @@ use std::{
 };
 
 #[derive(Default)]
-pub(super) struct LiveScroll {
+pub(crate) struct LiveScroll {
     pub handle: ScrollHandle,
     following: Rc<Cell<bool>>,
     enabled: bool,
@@ -26,6 +26,25 @@ impl LiveScroll {
             // newly measured bottom rather than last frame's content height.
             self.handle.scroll_to_bottom();
         }
+    }
+
+    /// Back to the end, and staying there as more arrives.
+    pub fn follow(&self) {
+        self.following.set(true);
+    }
+
+    /// A wheel listener's work, for a scroller outside the transcript: moves
+    /// by the delta when there is room, pausing or resuming follow as
+    /// `wheel` does. True when the wheel was used.
+    pub fn wheeler(&self) -> impl Fn(Pixels) -> bool + 'static {
+        let handle = self.handle.clone();
+        let following = self.following.clone();
+        move |delta| wheel(&handle, &following, delta)
+    }
+
+    #[cfg(test)]
+    pub fn following(&self) -> bool {
+        self.following.get()
     }
 }
 
@@ -245,6 +264,92 @@ mod tests {
         call.input = format!(r#"{{"file_path":"src/file-{i}.rs"}}"#);
         row("tool", &serde_json::to_string(&call).unwrap())
     }
+    fn todos(id: &str, statuses: &[&str]) -> String {
+        let mut call = ToolCall::new(id, "TodoWrite");
+        let items: Vec<_> = statuses
+            .iter()
+            .enumerate()
+            .map(|(at, status)| serde_json::json!({"content": format!("Step {at}"), "status": status}))
+            .collect();
+        call.input = serde_json::json!({ "todos": items }).to_string();
+        serde_json::to_string(&call).unwrap()
+    }
+
+    /// The notch asks for the task list's progress several times a second:
+    /// each call is read once, and a patch to it is seen at once.
+    #[gpui::test]
+    fn the_steps_of_a_turn_follow_every_patch_to_its_task_list(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|_| TranscriptView::new())
+            })
+            .unwrap()
+        });
+        let steps =
+            |cx: &mut TestAppContext| window.update(cx, |view, _, _| view.live_steps()).unwrap();
+        window
+            .update(cx, |view, _, cx| {
+                view.streaming(true, cx);
+                view.patch(
+                    0,
+                    vec![
+                        row("user", "Plan it"),
+                        tool(0),
+                        row("tool", &todos("plan", &["completed", "pending"])),
+                    ],
+                    cx,
+                );
+            })
+            .unwrap();
+        assert_eq!(steps(cx), Some((1, 2)));
+        assert_eq!(steps(cx), Some((1, 2)), "asked again, the same answer");
+        // The same call, rewritten in place with the same length of text.
+        window
+            .update(cx, |view, _, cx| {
+                view.patch(
+                    2,
+                    vec![row("tool", &todos("plan", &["completed", "skipped"]))],
+                    cx,
+                );
+            })
+            .unwrap();
+        assert_eq!(steps(cx), Some((1, 1)), "the skipped step is not counted");
+        // A call split over two rows: a patch to its second row is seen too.
+        let whole = todos("plan", &["completed", "pending", "pending"]);
+        let later = todos("plan", &["completed", "completed", "pending"]);
+        let (cut, later_cut) = (whole.len() / 2, later.len() / 2);
+        let tail = |text: &str, at: usize| Row {
+            first: false,
+            ..row("tool", &text[at..])
+        };
+        window
+            .update(cx, |view, _, cx| {
+                view.patch(3, vec![row("tool", &whole[..cut]), tail(&whole, cut)], cx);
+            })
+            .unwrap();
+        assert_eq!(steps(cx), Some((1, 3)));
+        window
+            .update(cx, |view, _, cx| {
+                view.patch(
+                    3,
+                    vec![row("tool", &later[..later_cut]), tail(&later, later_cut)],
+                    cx,
+                );
+            })
+            .unwrap();
+        assert_eq!(steps(cx), Some((2, 3)));
+        // Only the second row changes: the call it belongs to is read again.
+        let done = todos("plan", &["completed", "completed", "skipped"]);
+        assert_eq!(done.len(), later.len());
+        window
+            .update(cx, |view, _, cx| {
+                view.patch(4, vec![tail(&done, later_cut)], cx)
+            })
+            .unwrap();
+        assert_eq!(done[..later_cut], later[..later_cut]);
+        assert_eq!(steps(cx), Some((2, 2)));
+    }
+
     fn wheel_event(position: gpui::Point<Pixels>, delta: f32) -> ScrollWheelEvent {
         ScrollWheelEvent {
             position,

@@ -8,6 +8,7 @@ members = [
   "crates/http",
   "crates/live",
   "crates/mobile-link",
+  "crates/persona",
   "crates/voice",
   "xtask",
 ]

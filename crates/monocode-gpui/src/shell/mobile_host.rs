@@ -200,6 +200,25 @@ fn project_id(path: &str) -> String {
 fn hex(color: u32) -> String {
     format!("#{:06x}", color & 0xff_ffff)
 }
+/// A Mono as the phone lists it, before its chat's live state. `face` is
+/// what its avatar draws (`Mono::face`): a personal bot's 3D persona, which
+/// the phone renders itself, or the mascot's name.
+fn catalog_mono(mono: &monocode_core::mono::Mono, live: bool) -> Value {
+    json!({
+        "id": mono.id,
+        "name": mono.label(),
+        "mascot": mono.mascot,
+        "face": mono.face(),
+        "color": hex(mono.color),
+        "projectIds": mono.projects.iter().map(|p| project_id(p)).collect::<Vec<_>>(),
+        "unread": 0,
+        "status": "idle",
+        "busy": false,
+        "live": live,
+        "lastMessage": "",
+        "lastActiveAt": 0,
+    })
+}
 fn string(params: &Value, key: &str) -> Option<String> {
     params[key].as_str().map(str::to_owned)
 }
@@ -567,19 +586,7 @@ impl Shell {
             let monos: Vec<Value> = monos
                 .into_iter()
                 .map(|(mono, live)| {
-                    let mut value = json!({
-                        "id": mono.id,
-                        "name": mono.label(),
-                        "mascot": mono.mascot,
-                        "color": hex(mono.color),
-                        "projectIds": mono.projects.iter().map(|p| project_id(p)).collect::<Vec<_>>(),
-                        "unread": 0,
-                        "status": "idle",
-                        "busy": false,
-                        "live": live.is_some(),
-                        "lastMessage": "",
-                        "lastActiveAt": 0,
-                    });
+                    let mut value = catalog_mono(&mono, live.is_some());
                     if let Some(session) = mono.session_id.and_then(|id| ids.get(&id)) {
                         value["sessionId"] = json!(session);
                     }
@@ -2776,5 +2783,27 @@ mod tests {
         let settings = model_settings(&json!({"modelSettings": {"effort": "high", "bad": 3}}));
         assert_eq!(settings.len(), 1);
         assert_eq!(settings["effort"], "high");
+    }
+
+    #[test]
+    fn the_phone_gets_the_face_each_mono_wears() {
+        let mut mono = monocode_core::mono::Mono {
+            id: "m".into(),
+            mascot: "cat".into(),
+            color: 0x38bdf8,
+            ..Default::default()
+        };
+        let coding = catalog_mono(&mono, false);
+        assert_eq!(
+            (&coding["mascot"], &coding["face"]),
+            (&json!("cat"), &json!("cat"))
+        );
+        assert_eq!(coding["color"], "#38bdf8");
+        mono.kind = Some("bot".into());
+        mono.bot_role = Some("writer".into());
+        let bot = catalog_mono(&mono, true);
+        assert_eq!(bot["mascot"], "cat");
+        assert_eq!(bot["face"], "3d:cat:writer");
+        assert_eq!(bot["live"], true);
     }
 }

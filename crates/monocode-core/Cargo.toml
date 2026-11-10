@@ -30,6 +30,8 @@ unicode-width = "0.2"
 # Group mentions read "@Análisis" as "@Analisis", as the desktop app does.
 unicode-normalization = "0.1"
 monocode-mobile-link = { path = "../mobile-link" }
+# The 3D faces personal bots wear, shared with the phone.
+monobot-persona = { path = "../persona" }
 # The user's mail, shared with the desktop app: the same accounts, secrets and snapshot.
 monobot-email = { path = "../email" }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }

@@ -8,7 +8,10 @@ crate-type = ["rlib", "staticlib", "cdylib"]
 
 [dependencies]
 base64 = "0.22"
+# A personal bot's 3D face, drawn on the phone as the desktop draws it.
+monobot-persona = { path = "../persona" }
 p256 = { version = "0.14", features = ["ecdsa", "pkcs8"] }
+png = "0.18"
 pulldown-cmark = { version = "0.13.5", default-features = false }
 quinn = { version = "0.11", default-features = false, features = ["runtime-tokio", "rustls-ring"] }
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "ring"] }

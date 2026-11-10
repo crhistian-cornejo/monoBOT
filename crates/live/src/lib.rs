@@ -62,6 +62,11 @@ pub trait Protocol: Send + 'static {
     fn setup(&self, handle: Option<&str>) -> String;
     /// Microphone audio (mono, `INPUT_RATE`), as one or more messages.
     fn audio(&self, samples: &[f32]) -> Vec<String>;
+    /// What the user typed instead of saying it, as a turn of theirs. `None`
+    /// where the protocol has no way to take text.
+    fn text(&self, _text: &str) -> Option<String> {
+        None
+    }
     /// The answer to a tool call that finished in time.
     fn tool_result(&self, call: &ToolCall, result: &Value) -> String;
     /// What tells the model a slow tool is still running, if the protocol

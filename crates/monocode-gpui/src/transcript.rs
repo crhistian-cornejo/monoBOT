@@ -682,6 +682,16 @@ impl PhaseLayout {
     }
 }
 
+/// What the tool calls of a transcript were found to be, each by the index of
+/// its first row.
+#[derive(Default)]
+struct ToolKinds {
+    /// Whether the call shows as an agent's panel.
+    agent: HashMap<usize, bool>,
+    /// A task list's steps done and in all; none for any other call.
+    steps: HashMap<usize, Option<(u32, u32)>>,
+}
+
 pub(crate) struct TranscriptView {
     selection: selection::Selection,
     selection_focus: Option<gpui::FocusHandle>,
@@ -689,6 +699,10 @@ pub(crate) struct TranscriptView {
     work_item_cards: user_links::Cards,
     source: Vec<Row>,
     source_bytes: usize,
+    /// What each tool call of `source` was found to be, by its first row, so
+    /// a call's JSON is read once and not on every frame or notch sync.
+    /// `forget_tools_from` drops what a patch may have changed.
+    tool_kinds: std::cell::RefCell<ToolKinds>,
     attachment_images: HashMap<String, gpui::Entity<attachments::Photo>>,
     visuals: HashMap<usize, visuals::CachedVisual>,
     /// Visual ids the answers place in their prose.
@@ -1092,7 +1106,7 @@ impl TranscriptView {
         let starts: Vec<usize> = (prompt + 1..self.source.len())
             .filter(|&at| self.source[at].first && self.source[at].role == "tool")
             .collect();
-        starts.into_iter().rev().find_map(|at| {
+        let read = |at: usize| {
             let end = (at + 1..self.source.len())
                 .find(|&i| self.source[i].first)
                 .unwrap_or(self.source.len());
@@ -1113,6 +1127,16 @@ impl TranscriptView {
                 .filter(|task| task.status == TaskStatus::Completed)
                 .count() as u32;
             (total > 0).then_some((done, total))
+        };
+        // The notch asks several times a second while a turn runs: each
+        // call's JSON is read once, until a patch changes it.
+        starts.into_iter().rev().find_map(|at| {
+            if let Some(known) = self.tool_kinds.borrow().steps.get(&at) {
+                return *known;
+            }
+            let steps = read(at);
+            self.tool_kinds.borrow_mut().steps.insert(at, steps);
+            steps
         })
     }
     /// Follow-ups delivered during a provider run share its original receipt.
@@ -2660,6 +2684,7 @@ impl TranscriptView {
             work_item_cards: Default::default(),
             source: Vec::new(),
             source_bytes: 0,
+            tool_kinds: Default::default(),
             attachment_images: HashMap::new(),
             visuals: HashMap::new(),
             placed: HashSet::new(),
@@ -3088,6 +3113,18 @@ impl TranscriptView {
         self.patch_view(self.source.len(), submitted.rows, cx);
     }
 
+    /// Forgets what was read of the tool calls a patch from `start` may
+    /// change: the call `start` belongs to (a call can span rows) and every
+    /// later one.
+    fn forget_tools_from(&mut self, start: usize) {
+        let from = (0..(start + 1).min(self.source.len()))
+            .rev()
+            .find(|&at| self.source[at].first)
+            .unwrap_or(0);
+        let kinds = self.tool_kinds.get_mut();
+        kinds.agent.retain(|&at, _| at < from);
+        kinds.steps.retain(|&at, _| at < from);
+    }
     /// Patch the store's window from `start`, a row of `source_rows`.
     pub(crate) fn patch(&mut self, start: usize, rows: Vec<Row>, cx: &mut Context<Self>) {
         self.patch_view(self.base + start, rows, cx);
@@ -3101,6 +3138,7 @@ impl TranscriptView {
             "transcript patches must be contiguous"
         );
         let known = self.source.len();
+        self.forget_tools_from(start);
         for (ix, row) in rows.into_iter().enumerate() {
             let ix = start + ix;
             let bytes = row.text.capacity().saturating_add(row.role.capacity());
@@ -3381,11 +3419,21 @@ impl TranscriptView {
             }
         }
         if !self.mono
-            && (self.source[current_turn..current_end].iter().any(|row| {
+            && ((current_turn..current_end).any(|at| {
+                let row = &self.source[at];
+                // This runs on every patch and every reveal frame: a call's
+                // JSON is read once, until a patch changes it.
                 row.role == "tool"
                     && row.first
-                    && serde_json::from_str::<ToolCall>(&row.text)
-                        .is_ok_and(|call| matches!(call.panel(), Some(Panel::Agent(_))))
+                    && *self
+                        .tool_kinds
+                        .borrow_mut()
+                        .agent
+                        .entry(at)
+                        .or_insert_with(|| {
+                            serde_json::from_str::<ToolCall>(&row.text)
+                                .is_ok_and(|call| matches!(call.panel(), Some(Panel::Agent(_))))
+                        })
             }) || self.rows.iter().any(|row| {
                 self.messages
                     .get(row.message)

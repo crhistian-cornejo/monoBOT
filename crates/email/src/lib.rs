@@ -29,6 +29,7 @@ pub mod unsubscribe;
 mod watch;
 
 pub use account::{Account, MAX_ACCOUNTS, valid_address};
+pub use base::keychain;
 pub use model::{
     AccountView, Action, Attachment, BoxTotal, Folder, Message, Opened, Overview, Triage,
     Unsubscribe,

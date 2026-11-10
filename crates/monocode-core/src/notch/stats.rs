@@ -112,11 +112,152 @@ pub fn read() -> Stats {
     #[cfg(not(windows))]
     {
         let usage = crate::resources::usage();
+        #[cfg(target_os = "macos")]
+        let (memory, gpu) = (mac::memory(), mac::gpu());
+        #[cfg(not(target_os = "macos"))]
+        let (memory, gpu) = (None, None);
         Stats {
             cpu: usage.cpu_percent.map(|cpu| cpu as f32),
-            memory: None,
+            memory,
             pressure: usage.memory_pressure,
-            gpu: None,
+            gpu,
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::Memory;
+    use crate::notch::cf::{self, Owned};
+
+    /// `vm_statistics64` as the kernel fills it.
+    #[repr(C, align(8))]
+    #[derive(Default)]
+    struct VmStatistics {
+        free: u32,
+        active: u32,
+        inactive: u32,
+        wired: u32,
+        zero_fill: u64,
+        reactivations: u64,
+        pageins: u64,
+        pageouts: u64,
+        faults: u64,
+        cow_faults: u64,
+        lookups: u64,
+        hits: u64,
+        purges: u64,
+        purgeable: u32,
+        speculative: u32,
+        decompressions: u64,
+        compressions: u64,
+        swapins: u64,
+        swapouts: u64,
+        compressor: u32,
+        throttled: u32,
+        external: u32,
+        internal: u32,
+        uncompressed_in_compressor: u64,
+    }
+
+    /// HOST_VM_INFO64.
+    const VM_INFO: i32 = 4;
+
+    unsafe extern "C" {
+        fn mach_host_self() -> u32;
+        fn host_statistics64(host: u32, flavor: i32, info: *mut i32, count: *mut u32) -> i32;
+        fn host_page_size(host: u32, size: *mut usize) -> i32;
+    }
+
+    /// The memory in use as Activity Monitor counts it: the apps' memory,
+    /// the wired memory and what the compressor holds.
+    pub(super) fn memory() -> Option<Memory> {
+        let mut total = 0u64;
+        let mut length = std::mem::size_of_val(&total);
+        // SAFETY: plain kernel reads into values sized for them.
+        unsafe {
+            if libc::sysctlbyname(
+                c"hw.memsize".as_ptr(),
+                (&raw mut total).cast(),
+                &mut length,
+                std::ptr::null_mut(),
+                0,
+            ) != 0
+                || total == 0
+            {
+                return None;
+            }
+            let host = mach_host_self();
+            let mut page = 0usize;
+            if host_page_size(host, &mut page) != 0 || page == 0 {
+                return None;
+            }
+            let mut vm = VmStatistics::default();
+            let mut count = (std::mem::size_of::<VmStatistics>() / 4) as u32;
+            if host_statistics64(host, VM_INFO, (&raw mut vm).cast(), &mut count) != 0 {
+                return None;
+            }
+            let pages = u64::from(vm.internal.saturating_sub(vm.purgeable))
+                + u64::from(vm.wired)
+                + u64::from(vm.compressor);
+            Some(Memory {
+                used: (pages * page as u64).min(total),
+                total,
+            })
+        }
+    }
+
+    /// The graphics card's load, from its accelerator's own statistics
+    /// (`Device Utilization %` on Apple silicon, `GPU Activity(%)` on some
+    /// others); the busiest card where there are several.
+    pub(super) fn gpu() -> Option<f32> {
+        #[link(name = "IOKit", kind = "framework")]
+        unsafe extern "C" {
+            fn IOServiceMatching(name: *const i8) -> cf::Ref;
+            fn IOServiceGetMatchingServices(main: u32, matching: cf::Ref, found: *mut u32) -> i32;
+            fn IOIteratorNext(iterator: u32) -> u32;
+            fn IOObjectRelease(object: u32) -> i32;
+            fn IORegistryEntryCreateCFProperty(
+                entry: u32,
+                key: cf::Ref,
+                allocator: cf::Ref,
+                options: u32,
+            ) -> cf::Ref;
+        }
+        let key = cf::string(c"PerformanceStatistics")?;
+        // SAFETY: the matching dictionary is consumed by the lookup; every
+        // entry and the iterator are released, and each property is owned.
+        unsafe {
+            let matching = IOServiceMatching(c"IOAccelerator".as_ptr());
+            if matching.is_null() {
+                return None;
+            }
+            let mut iterator = 0u32;
+            if IOServiceGetMatchingServices(0, matching, &mut iterator) != 0 {
+                return None;
+            }
+            let mut busiest: Option<f64> = None;
+            loop {
+                let entry = IOIteratorNext(iterator);
+                if entry == 0 {
+                    break;
+                }
+                if let Some(statistics) = Owned::new(IORegistryEntryCreateCFProperty(
+                    entry,
+                    key.0,
+                    std::ptr::null(),
+                    0,
+                )) {
+                    let load = cf::number(statistics.0, c"Device Utilization %")
+                        .or_else(|| cf::number(statistics.0, c"GPU Activity(%)"));
+                    if let Some(load) = load {
+                        busiest = Some(busiest.map_or(load, |most| most.max(load)));
+                    }
+                }
+                IOObjectRelease(entry);
+            }
+            IOObjectRelease(iterator);
+            busiest.map(|load| load.clamp(0., 100.) as f32)
         }
     }
 }
@@ -367,5 +508,17 @@ mod tests {
             assert!((0. ..=100.).contains(&gpu));
         }
         eprintln!("stats: {stats:?}");
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn this_mac_gives_the_memory_and_the_graphics_load() {
+        let stats = read();
+        let memory = stats.memory.expect("memory");
+        assert!(memory.total > 0 && memory.used > 0 && memory.used <= memory.total);
+        if let Some(gpu) = stats.gpu {
+            assert!((0. ..=100.).contains(&gpu));
+        }
+        eprintln!("stats: {stats:?} memory {}", memory.label());
     }
 }

@@ -1,7 +1,16 @@
 use super::*;
 
-/// Forward request-level changes even when the attention boolean is unchanged.
-pub(crate) struct NotificationChanged;
+/// An agent's chat changed. `Request` forwards request-level changes (a turn
+/// beginning or ending, an approval or question asked or answered) even when
+/// the attention boolean is unchanged. `Content` is what was said changing
+/// while a turn streams, for views that show the words, such as the notch's
+/// chat with an agent; it comes once per streamed update, so listeners keep
+/// their own pace and do not redraw for it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum NotificationChanged {
+    Request,
+    Content,
+}
 impl EventEmitter<NotificationChanged> for Monos {}
 
 /// Capture before dispatch starts another queued turn or a finished run is

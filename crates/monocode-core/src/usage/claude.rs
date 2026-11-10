@@ -101,6 +101,10 @@ pub(crate) fn delete_keychain(config: &std::path::Path) -> Result<(), String> {
         process::{Command, Stdio},
         time::Instant,
     };
+    // Claude Code's own Keychain item is the user's: a test leaves it alone.
+    if !crate::secrets::uses_system_keychain() {
+        return Ok(());
+    }
     let service = keychain_service(Some(config));
     let mut command = Command::new("/usr/bin/security");
     command
@@ -182,6 +186,11 @@ fn keychain_query(args: &[&str]) -> Option<String> {
         time::Instant,
     };
 
+    // Claude Code's own Keychain item is the user's: a test never asks the
+    // system for it.
+    if !crate::secrets::uses_system_keychain() {
+        return None;
+    }
     let mut command = Command::new("/usr/bin/security");
     command
         .args(args)

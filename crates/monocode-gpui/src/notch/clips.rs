@@ -65,7 +65,7 @@ impl Notch {
         }
     }
 
-    /// A picture was copied (a BMP file and its size).
+    /// A picture was copied (a `platform::PICTURE` file and its size).
     pub(crate) fn copied_picture(
         &mut self,
         bmp: Vec<u8>,
@@ -86,7 +86,7 @@ impl Notch {
         };
         let item = match &clip.image {
             Some(bytes) => gpui::ClipboardItem::new_image(&gpui::Image::from_bytes(
-                gpui::ImageFormat::Bmp,
+                platform::PICTURE,
                 bytes.to_vec(),
             )),
             None => gpui::ClipboardItem::new_string(clip.text.clone()),
@@ -120,10 +120,7 @@ impl Notch {
         {
             return image.clone();
         }
-        let image = Arc::new(gpui::Image::from_bytes(
-            gpui::ImageFormat::Bmp,
-            bytes.to_vec(),
-        ));
+        let image = Arc::new(gpui::Image::from_bytes(platform::PICTURE, bytes.to_vec()));
         self.thumbnails.push((bytes.clone(), image.clone()));
         image
     }
@@ -227,23 +224,33 @@ impl Notch {
                     cx.notify();
                 }));
             list = list.child(
-                pages::session_row(("notch-clip", index), mark, &clip.preview(), detail, color)
-                    .debug_selector(move || format!("notch-clip-{index}"))
-                    .role(Role::Button)
-                    .aria_label(format!(
-                        "Copy this {} again",
-                        clip.kind.label().to_lowercase()
-                    ))
-                    .when(just_copied, |row| {
-                        row.bg(ink(0.07)).child(
-                            div()
-                                .debug_selector(|| "notch-clip-copied".into())
-                                .flex_shrink_0()
-                                .child(icon("check", 11.).text_color(accent_color())),
-                        )
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| this.copy_clip(index, cx)))
-                    .child(remove),
+                // The label is told apart by the copy, not by its place: a
+                // new copy slides the rows down without each one's label
+                // turning into the next one's.
+                pages::session_row_keyed(
+                    ("notch-clip", index),
+                    ("notch-clip-detail", clip.at),
+                    mark,
+                    &clip.preview(),
+                    detail,
+                    color,
+                )
+                .debug_selector(move || format!("notch-clip-{index}"))
+                .role(Role::Button)
+                .aria_label(format!(
+                    "Copy this {} again",
+                    clip.kind.label().to_lowercase()
+                ))
+                .when(just_copied, |row| {
+                    row.bg(ink(0.07)).child(
+                        div()
+                            .debug_selector(|| "notch-clip-copied".into())
+                            .flex_shrink_0()
+                            .child(icon("check", 11.).text_color(accent_color())),
+                    )
+                })
+                .on_click(cx.listener(move |this, _, _, cx| this.copy_clip(index, cx)))
+                .child(remove),
             );
         }
         list.into_any_element()
