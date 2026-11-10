@@ -413,6 +413,7 @@ fn serve_loopback_for(
 
 /// How many programs up from the hook's sender are kept: `curl`, its shell,
 /// the agent, the shell or app that started it, and a few more.
+#[cfg(windows)]
 const SENDERS: usize = 12;
 
 /// A hook's app as the programs it came from: `pids-<sender>-<parent>-…`,
