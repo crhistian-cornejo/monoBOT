@@ -599,6 +599,262 @@ fn agents_under_the_music_take_the_left_wing_and_keep_the_width(cx: &mut TestApp
     );
 }
 
+fn open_music_bar(cx: &mut TestAppContext) -> Opened {
+    use monocode_core::notch::media::{Playing, Track};
+    let opened = open_notch(
+        Look {
+            finished_notices: false,
+            lyrics: false,
+            ..Look::default()
+        },
+        cx,
+    );
+    opened
+        .window
+        .update(cx, |notch, _, cx| {
+            notch.screen_override = Some(Screen {
+                safe_top: 0.,
+                ..macbook()
+            });
+            notch.set_media(
+                Some(Playing {
+                    track: Track {
+                        app: "Spotify.exe".into(),
+                        title: "Four Seasons".into(),
+                        artist: "Digitalism".into(),
+                        album: String::new(),
+                        duration: Some(Duration::from_secs(200)),
+                    },
+                    playing: true,
+                    position: Duration::from_secs(12),
+                    at: Instant::now(),
+                    art: Some(std::sync::Arc::from(
+                        include_bytes!("../../../../assets/icons/icon.png").as_slice(),
+                    )),
+                    shuffle: None,
+                }),
+                cx,
+            );
+            notch.update_feed(
+                Feed {
+                    activities: vec![working(1)],
+                    ..Feed::default()
+                },
+                cx,
+            );
+        })
+        .unwrap();
+    opened
+}
+
+fn music_frame(
+    opened: &Opened,
+    visual: &mut VisualTestContext,
+    elapsed: Duration,
+) -> (Bounds<Pixels>, Bounds<Pixels>) {
+    visual.executor().advance_clock(elapsed);
+    opened
+        .window
+        .update(visual, |_, window, cx| {
+            window.simulate_next_frame(cx);
+            window.refresh();
+        })
+        .unwrap();
+    visual.run_until_parked();
+    (
+        visual.debug_bounds("notch-music-cover").unwrap(),
+        visual.debug_bounds("notch-music-wave").unwrap(),
+    )
+}
+
+fn finish_music_agent(opened: &Opened, visual: &mut VisualTestContext) {
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    activities: vec![Activity {
+                        done: true,
+                        ..working(1)
+                    }],
+                    ..Feed::default()
+                },
+                cx,
+            )
+        })
+        .unwrap();
+    visual.run_until_parked();
+}
+
+#[gpui::test]
+fn finishing_the_agent_carries_one_cover_left_in_200ms(cx: &mut TestAppContext) {
+    let opened = open_music_bar(cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    let busy = music_frame(&opened, visual, Duration::ZERO);
+    let island = size(opened.window, visual);
+    let art = opened
+        .window
+        .update(visual, |notch, _, _| notch.art.as_ref().unwrap().1.clone())
+        .unwrap();
+    assert_eq!(busy.0.size.width, px(16.));
+    // While the agent works the music keeps the right half, past the
+    // hairline: its cover, then the lyric or title, then the waveform.
+    let bar = visual.debug_bounds("notch-media").unwrap();
+    let divider = visual.debug_bounds("notch-music-divider").unwrap();
+    let agents = visual.debug_bounds("notch-music-agents").unwrap();
+    assert!(agents.right() <= divider.left());
+    assert_eq!(busy.0.left(), divider.left() + px(8.));
+    assert!((divider.left() - (bar.left() + bar.size.width / 2.)).abs() <= px(1.));
+    let line = visual.debug_bounds("notch-music-title").unwrap();
+    assert_eq!(line.left(), busy.0.right() + px(8.));
+    assert_eq!(line.right() + px(8.), busy.1.left());
+    visual.update(|_, cx| cx.set_reduce_motion(false));
+    finish_music_agent(&opened, visual);
+    assert_eq!(music_frame(&opened, visual, Duration::ZERO), busy);
+
+    let mut previous = busy.0.left();
+    for _ in 0..12 {
+        let (cover, wave) = music_frame(&opened, visual, Duration::from_millis(16));
+        assert!(cover.left() < previous, "the cover glides, never teleports");
+        assert_eq!(wave, busy.1, "the waveform never jumps or duplicates");
+        assert_eq!(size(opened.window, visual), island);
+        assert!(cover.size.width > px(16.) && cover.size.width <= px(20.));
+        opened
+            .window
+            .update(visual, |notch, _, _| {
+                assert!(std::sync::Arc::ptr_eq(&art, &notch.art.as_ref().unwrap().1));
+            })
+            .unwrap();
+        previous = cover.left();
+    }
+    let (cover, wave) = music_frame(&opened, visual, Duration::from_millis(8));
+    let bar = visual.debug_bounds("notch-media").unwrap();
+    assert_eq!(cover.left(), bar.left() + px(6.));
+    assert_eq!(cover.size.width, px(20.));
+    assert_eq!(wave, busy.1);
+    assert!(visual.debug_bounds("notch-music-agents").is_none());
+    assert!(visual.debug_bounds("notch-music-divider").is_none());
+    let title = visual.debug_bounds("notch-music-title").unwrap();
+    assert_eq!(title.left(), cover.right() + px(8.));
+    assert_eq!(title.right() + px(8.), wave.left());
+    assert_eq!(
+        music_frame(&opened, visual, crate::motion::QUICK),
+        (cover, wave),
+        "the transition ends instead of continuing to drift"
+    );
+}
+
+#[gpui::test]
+fn another_agent_reverses_the_music_from_its_current_position(cx: &mut TestAppContext) {
+    let opened = open_music_bar(cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    let busy = music_frame(&opened, visual, Duration::ZERO);
+    visual.update(|_, cx| cx.set_reduce_motion(false));
+    finish_music_agent(&opened, visual);
+    let midway = music_frame(&opened, visual, Duration::from_millis(64));
+    assert!(midway.0.left() < busy.0.left());
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    activities: vec![working(2), working(3)],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            let mut playing = notch.media.clone().unwrap();
+            playing.track.title = "A different track".into();
+            notch.set_media(Some(playing), cx);
+        })
+        .unwrap();
+    assert_eq!(music_frame(&opened, visual, Duration::ZERO), midway);
+    let returning = music_frame(&opened, visual, Duration::from_millis(32));
+    assert!(returning.0.left() > midway.0.left());
+    assert!(returning.0.left() < busy.0.left());
+    // One agent finishes, but the other still needs the left side.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    activities: vec![working(3)],
+                    ..Feed::default()
+                },
+                cx,
+            )
+        })
+        .unwrap();
+    assert_eq!(music_frame(&opened, visual, Duration::ZERO), returning);
+    assert_eq!(music_frame(&opened, visual, crate::motion::QUICK), busy);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(Feed::default(), cx)
+        })
+        .unwrap();
+    music_frame(&opened, visual, Duration::ZERO);
+    let (cover, _) = music_frame(&opened, visual, crate::motion::QUICK);
+    assert_eq!(cover.size.width, px(20.));
+}
+
+#[gpui::test]
+fn reduced_motion_finishes_the_music_move_immediately(cx: &mut TestAppContext) {
+    let opened = open_music_bar(cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    visual.update(|_, cx| cx.set_reduce_motion(false));
+    finish_music_agent(&opened, visual);
+    music_frame(&opened, visual, Duration::from_millis(48));
+    visual.update(|_, cx| cx.set_reduce_motion(true));
+    let resting = music_frame(&opened, visual, Duration::ZERO);
+    assert_eq!(resting.0.size.width, px(20.));
+    assert!(visual.debug_bounds("notch-music-agents").is_none());
+    // Turning motion back on must not replay an unfinished move.
+    visual.update(|_, cx| cx.set_reduce_motion(false));
+    assert_eq!(music_frame(&opened, visual, Duration::ZERO), resting);
+}
+
+#[gpui::test]
+fn interrupted_music_moves_leave_no_stale_cover(cx: &mut TestAppContext) {
+    for interrupt in 0..4 {
+        let opened = open_music_bar(cx);
+        let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+        leave(visual);
+        visual.update(|_, cx| cx.set_reduce_motion(false));
+        finish_music_agent(&opened, visual);
+        music_frame(&opened, visual, Duration::from_millis(48));
+        opened
+            .window
+            .update(visual, |notch, _, cx| match interrupt {
+                0 => notch.set_open(true, cx),
+                1 => {
+                    notch.level = Some(monocode_core::notch::system::Level::Volume(0.5, false));
+                    cx.notify();
+                }
+                2 => notch.set_media(None, cx),
+                _ => notch.update_feed(
+                    Feed {
+                        asks: vec![approval()],
+                        ..Feed::default()
+                    },
+                    cx,
+                ),
+            })
+            .unwrap();
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("notch-music-cover").is_none());
+        opened
+            .window
+            .update(visual, |notch, _, _| {
+                assert!(notch.music_motion.is_none());
+            })
+            .unwrap();
+    }
+}
+
 #[gpui::test]
 fn agents_lists_the_users_own_agents_and_chat_the_coding_chats(cx: &mut TestAppContext) {
     use monocode_core::notch::{Face, Personal, Recent};

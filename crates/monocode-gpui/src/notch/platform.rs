@@ -1001,6 +1001,67 @@ mod win {
         }
     }
 
+    /// Makes the notch the foreground window, from a click on it. Windows
+    /// lets only the foreground process bring a window forward, and the
+    /// notch never activates by a click, so without this a click on Open
+    /// only flashed the app's taskbar button.
+    pub(super) fn claim_foreground() {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+        let notch = ON_TOP.load(Ordering::Relaxed);
+        if notch != 0 {
+            // SAFETY: a stale handle just fails.
+            let _ = unsafe { SetForegroundWindow(HWND(notch as _)) };
+        }
+    }
+
+    /// Brings forward the first of `pids` (nearest first) that has a window
+    /// of its own on screen: the terminal, Claude or the editor an agent
+    /// runs in. Whether one was found.
+    pub(super) fn bring_forward(pids: &[u32]) -> bool {
+        use windows::Win32::Foundation::LPARAM;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            EnumWindows, GW_OWNER, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId,
+            IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow,
+        };
+        let mut windows: Vec<(u32, HWND)> = Vec::new();
+        unsafe extern "system" fn each(window: HWND, list: LPARAM) -> windows::core::BOOL {
+            // SAFETY: `list` is the Vec below, alive for the whole walk.
+            let list = unsafe { &mut *(list.0 as *mut Vec<(u32, HWND)>) };
+            // SAFETY: plain queries on a window the system just handed over.
+            unsafe {
+                let main = IsWindowVisible(window).as_bool()
+                    && GetWindow(window, GW_OWNER).is_err()
+                    && GetWindowTextLengthW(window) > 0;
+                if main {
+                    let mut pid = 0u32;
+                    GetWindowThreadProcessId(window, Some(&mut pid));
+                    list.push((pid, window));
+                }
+            }
+            true.into()
+        }
+        // SAFETY: the callback only reads windows and pushes to the list.
+        let _ = unsafe { EnumWindows(Some(each), LPARAM(&mut windows as *mut _ as isize)) };
+        let Some(window) = pids.iter().find_map(|pid| {
+            windows
+                .iter()
+                .find(|(owner, _)| owner == pid)
+                .map(|(_, window)| *window)
+        }) else {
+            return false;
+        };
+        claim_foreground();
+        // SAFETY: plain calls on a live window; a refusal changes nothing.
+        unsafe {
+            if IsIconic(window).as_bool() {
+                let _ = ShowWindow(window, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(window);
+        }
+        true
+    }
+
     /// The notch the foreground watch keeps on top.
     static ON_TOP: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
@@ -1682,6 +1743,25 @@ pub(crate) fn take_keys(window: &Window) {
     win::take_keys(window);
     #[cfg(not(all(target_os = "windows", not(test))))]
     let _ = window;
+}
+
+/// Lets the app bring its own window forward after a click on the notch
+/// (Windows: only the foreground process may). Elsewhere nothing to do.
+pub(crate) fn claim_foreground() {
+    #[cfg(all(target_os = "windows", not(test)))]
+    win::claim_foreground();
+}
+
+/// Brings forward the app one of `pids` shows (nearest first). Windows only:
+/// macOS names the app by its bundle id instead.
+pub(crate) fn bring_forward(pids: &[u32]) -> bool {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::bring_forward(pids);
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    {
+        let _ = pids;
+        false
+    }
 }
 
 /// Gives the keyboard back to the window `take_keys` took it from, when the

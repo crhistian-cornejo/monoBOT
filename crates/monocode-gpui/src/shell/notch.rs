@@ -515,22 +515,34 @@ impl Shell {
         match event {
             // A terminal's or another app's session: bring that app forward.
             NotchEvent::OpenSession(id) if id < 0 => {
-                if let Some(app) = self.notch_externals.app_for(id) {
-                    cx.background_executor()
-                        .spawn(async move {
-                            #[cfg(target_os = "macos")]
-                            let _ = std::process::Command::new("/usr/bin/open")
-                                .args(["-b", &app])
-                                .status();
-                            #[cfg(not(target_os = "macos"))]
-                            let _ = app;
-                        })
-                        .detach();
+                let Some(app) = self.notch_externals.app_for(id) else {
+                    return;
+                };
+                // Windows: the programs the hook came from; the first with a
+                // window of its own (the terminal, Claude, an editor) comes
+                // forward, now, while the click still lets it.
+                let pids = monocode_core::notch::hooks::app_pids(&app);
+                if !pids.is_empty() {
+                    crate::notch::bring_forward(&pids);
+                    return;
                 }
+                cx.background_executor()
+                    .spawn(async move {
+                        #[cfg(target_os = "macos")]
+                        let _ = std::process::Command::new("/usr/bin/open")
+                            .args(["-b", &app])
+                            .status();
+                        #[cfg(not(target_os = "macos"))]
+                        let _ = app;
+                    })
+                    .detach();
             }
             NotchEvent::OpenSession(id) => {
                 // The notch is another app's neighbor: bring monoBOT forward
-                // with the chat, as a notification's click does.
+                // with the chat, as a notification's click does. On Windows
+                // the notch first takes the foreground the click gives it, or
+                // the window could only flash on the taskbar.
+                crate::notch::claim_foreground();
                 cx.activate(true);
                 // An agent's finished turn is read once its chat is open.
                 if self.notch_agents_done.remove(&id).is_some() {

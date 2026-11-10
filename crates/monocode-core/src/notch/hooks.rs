@@ -75,10 +75,18 @@ pub fn loopback_port(data: &str) -> u16 {
 pub fn command(source: &str, socket: &Path) -> String {
     if let Some(url) = loopback_url(socket) {
         // Over loopback the source is the address's last part and the JSON
-        // is the body; `curl` ships with Windows.
-        return format!(
-            "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || curl -s -m 2 --data-binary @- '{url}/{source}' >/dev/null 2>&1; true # {MARK}"
-        );
+        // is the body; `curl` ships with Windows. Claude Code runs a hook in
+        // Git Bash; Codex runs it as a plain command line (the other apps'
+        // hooks there are a quoted program and its words), so its form has
+        // no shell in it. The address carries MARK. monoBOT's own sessions
+        // are told apart by the notch, which sees itself among the senders.
+        return if source == "codex" {
+            format!("curl.exe -s -m 2 --data-binary @- {url}/{source}")
+        } else {
+            format!(
+                "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || curl -s -m 2 --data-binary @- '{url}/{source}' >/dev/null 2>&1; true # {MARK}"
+            )
+        };
     }
     let socket = socket.to_string_lossy().replace('\'', r"'\''");
     // Sessions monoBOT runs itself carry MONOCODE_HARNESS_PARENT and are
@@ -94,7 +102,7 @@ pub fn command(source: &str, socket: &Path) -> String {
 /// for it.
 fn quoted(socket: &Path) -> String {
     if let Some(url) = loopback_url(socket) {
-        return format!("'{url}/");
+        return format!("{url}/");
     }
     format!("'{}'", socket.to_string_lossy().replace('\'', r"'\''"))
 }
@@ -270,13 +278,9 @@ pub fn install(home: &Path, socket: &Path) -> Vec<(std::path::PathBuf, Result<bo
         ),
         (codex_home, "hooks.json", "codex", CODEX_EVENTS),
     ];
-    // Over loopback (Windows) only Claude Code's: its hooks run in Git Bash,
-    // Codex's in a shell this command is not written for.
-    let loopback = loopback_url(socket).is_some();
     targets
         .into_iter()
         .filter(|(dir, ..)| dir.is_dir())
-        .filter(|(_, _, source, _)| !loopback || *source == "claude")
         .map(|(dir, name, source, events)| {
             let path = dir.join(name);
             let result = install_file(&path, source, events, socket);
@@ -360,6 +364,15 @@ pub fn serve_loopback(
     port: u16,
     on_event: impl Fn(HookEvent) + Send + 'static,
 ) -> std::io::Result<()> {
+    serve_loopback_for(port, Some(std::process::id()), on_event)
+}
+
+/// [`serve_loopback`], leaving out what comes from below the program `own`.
+fn serve_loopback_for(
+    port: u16,
+    own: Option<u32>,
+    on_event: impl Fn(HookEvent) + Send + 'static,
+) -> std::io::Result<()> {
     let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
     std::thread::Builder::new()
         .name("notch-hooks".into())
@@ -367,19 +380,150 @@ pub fn serve_loopback(
             for stream in listener.incoming().flatten() {
                 let mut stream = stream;
                 let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
-                let event = read_request(&mut stream);
+                // Who sent it, while the sender still waits for the answer:
+                // the programs above it, so a click can bring forward the
+                // app the agent runs in (a terminal, Claude, an editor).
+                let senders = stream
+                    .peer_addr()
+                    .ok()
+                    .map(|peer| senders(peer.port()))
+                    .unwrap_or_default();
+                let event = read_request(&mut stream).map(|mut event| {
+                    if event.app.is_none() && !senders.is_empty() {
+                        event.app = Some(pids_app(&senders));
+                    }
+                    event
+                });
+                // A session monoBOT runs itself is already in the notch: its
+                // hooks come from below this very program.
+                let own = own.is_some_and(|own| senders.contains(&own));
                 let answer: &[u8] = if event.is_some() {
                     b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
                 } else {
                     b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
                 };
                 let _ = std::io::Write::write_all(&mut stream, answer);
-                if let Some(event) = event {
+                if let Some(event) = event.filter(|_| !own) {
                     on_event(event);
                 }
             }
         })?;
     Ok(())
+}
+
+/// How many programs up from the hook's sender are kept: `curl`, its shell,
+/// the agent, the shell or app that started it, and a few more.
+const SENDERS: usize = 12;
+
+/// A hook's app as the programs it came from: `pids-<sender>-<parent>-…`,
+/// nearest first (the characters a hook's app may hold).
+fn pids_app(pids: &[u32]) -> String {
+    let list: Vec<String> = pids.iter().map(u32::to_string).collect();
+    format!("pids-{}", list.join("-"))
+}
+
+/// The programs a hook came from, by `pids_app`'s form; none for an app
+/// named otherwise (a macOS bundle id).
+pub fn app_pids(app: &str) -> Vec<u32> {
+    app.strip_prefix("pids-")
+        .map(|list| list.split('-').filter_map(|pid| pid.parse().ok()).collect())
+        .unwrap_or_default()
+}
+
+/// The program on this computer whose connection comes from `port` on the
+/// loopback, then its parents. Windows only; elsewhere the hook names its
+/// app itself.
+#[cfg(windows)]
+fn senders(port: u16) -> Vec<u32> {
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::NetworkManagement::IpHelper::{
+        GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, TCP_TABLE_OWNER_PID_ALL,
+    };
+    use windows_sys::Win32::Networking::WinSock::AF_INET;
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    // The connection's owner, from the system's table of TCP connections.
+    let owner = (|| {
+        let mut size = 0u32;
+        // SAFETY: a null table asks for the size it needs.
+        unsafe {
+            GetExtendedTcpTable(
+                std::ptr::null_mut(),
+                &mut size,
+                0,
+                u32::from(AF_INET),
+                TCP_TABLE_OWNER_PID_ALL,
+                0,
+            )
+        };
+        let mut buffer = vec![0u32; (size as usize).div_ceil(4) + 64];
+        size = (buffer.len() * 4) as u32;
+        // SAFETY: the buffer holds `size` bytes, aligned for the table.
+        let status = unsafe {
+            GetExtendedTcpTable(
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+                0,
+                u32::from(AF_INET),
+                TCP_TABLE_OWNER_PID_ALL,
+                0,
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let count = buffer[0] as usize;
+        // SAFETY: the table is its count and then `count` rows.
+        let rows = unsafe {
+            std::slice::from_raw_parts(
+                buffer.as_ptr().add(1).cast::<MIB_TCPROW_OWNER_PID>(),
+                count.min((buffer.len() - 1) / 6),
+            )
+        };
+        // Ports are in network order, in the low 16 bits.
+        rows.iter()
+            .find(|row| u16::from_be(row.dwLocalPort as u16) == port)
+            .map(|row| row.dwOwningPid)
+    })();
+    let Some(owner) = owner.filter(|pid| *pid != 0) else {
+        return Vec::new();
+    };
+    let mut parents = HashMap::new();
+    // SAFETY: a snapshot of the process list, walked and closed here.
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return vec![owner];
+        }
+        let mut entry = PROCESSENTRY32W {
+            dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+            ..Default::default()
+        };
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        CloseHandle(snapshot);
+    }
+    let mut chain = vec![owner];
+    while chain.len() < SENDERS {
+        match parents.get(chain.last().unwrap_or(&0)) {
+            Some(&parent) if parent != 0 && !chain.contains(&parent) => chain.push(parent),
+            _ => break,
+        }
+    }
+    chain
+}
+
+#[cfg(not(windows))]
+fn senders(_: u16) -> Vec<u32> {
+    Vec::new()
 }
 
 /// One hook's request, read off a loopback connection.
@@ -844,10 +988,24 @@ mod tests {
         let data = r"C:\Users\me\AppData\Local\MonoBOT Development";
         assert_eq!(loopback_port(data), loopback_port(data));
         assert!((47_000..48_000).contains(&loopback_port(data)));
-        // Only Claude Code's hooks are added over loopback.
+        // Codex runs its hook as a plain command line: no shell in it, and
+        // the address still carries the mark that finds monoBOT's entries.
+        let codex = super::command("codex", &endpoint);
+        assert_eq!(
+            codex,
+            "curl.exe -s -m 2 --data-binary @- http://127.0.0.1:47123/monobot-notch/codex"
+        );
+        assert!(ours(&json!({ "command": codex })));
+        let merged = merge("", "codex", CODEX_EVENTS, &endpoint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            merge(&merged, "codex", CODEX_EVENTS, &endpoint).unwrap(),
+            None
+        );
+        assert!(remove(&merged).is_ok_and(|file| !file.contains("curl")));
         let home = std::env::temp_dir().join(format!("monobot-loop-{}", std::process::id()));
         std::fs::create_dir_all(home.join(".claude")).unwrap();
-        std::fs::create_dir_all(home.join(".codex")).unwrap();
         let done: Vec<_> = install(&home, &endpoint)
             .into_iter()
             .map(|(path, result)| (path.file_name().unwrap().to_owned(), result))
@@ -863,7 +1021,8 @@ mod tests {
         let port = listener.local_addr().unwrap().port();
         drop(listener);
         let (sent, received) = std::sync::mpsc::channel();
-        serve_loopback(port, move |event| {
+        // This test is the sender: nothing of its own is left out here.
+        serve_loopback_for(port, None, move |event| {
             let _ = sent.send(event);
         })
         .unwrap();
@@ -892,12 +1051,51 @@ mod tests {
             ),
             ("claude", "s1", "Stop")
         );
+        // On Windows the sender is found: this test, then its parents.
+        #[cfg(windows)]
+        assert_eq!(
+            event
+                .app
+                .as_deref()
+                .map(app_pids)
+                .and_then(|pids| pids.first().copied()),
+            Some(std::process::id())
+        );
+        assert_eq!(app_pids("pids-12-7-1"), [12, 7, 1]);
+        assert!(app_pids("com.apple.Terminal").is_empty());
         // A web page, another address, an unknown source: refused.
         let page = format!("POST /{MARK}/claude HTTP/1.1\r\nOrigin: https://a.b");
         assert!(post(&page).starts_with("HTTP/1.1 400"));
         assert!(post("POST /other/claude HTTP/1.1").starts_with("HTTP/1.1 400"));
         assert!(post(&format!("POST /{MARK}/vim HTTP/1.1")).starts_with("HTTP/1.1 400"));
         assert!(received.try_recv().is_err());
+        // What comes from below monoBOT itself (its own sessions' hooks) is
+        // answered and left out.
+        #[cfg(windows)]
+        {
+            let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            drop(listener);
+            let (sent, received) = std::sync::mpsc::channel();
+            serve_loopback(port, move |event| {
+                let _ = sent.send(event);
+            })
+            .unwrap();
+            let body = r#"{"session_id":"s2","hook_event_name":"Stop"}"#;
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(
+                stream,
+                "POST /{MARK}/codex HTTP/1.1\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            let mut answer = String::new();
+            let _ = stream.read_to_string(&mut answer);
+            assert!(answer.starts_with("HTTP/1.1 204"));
+            assert!(received
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .is_err());
+        }
     }
 
     #[test]

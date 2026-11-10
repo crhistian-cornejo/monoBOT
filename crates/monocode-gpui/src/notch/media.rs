@@ -29,6 +29,24 @@ const GLIDE_GAP: f32 = 36.;
 /// Keeps the scrubber's drag (0 to 1) between frames.
 pub(super) type Scrub = Rc<Cell<Option<f32>>>;
 
+/// 0 is the agent's compact badge, 1 the full music line. Retarget from the
+/// drawn position, including when another agent starts before the cover lands.
+pub(super) struct BarMotion {
+    from: f32,
+    target: f32,
+    at: Instant,
+    rest: Rest,
+    pub(super) moving: bool,
+}
+
+impl BarMotion {
+    fn value(&self, now: Instant) -> f32 {
+        let t = now.saturating_duration_since(self.at).as_secs_f32()
+            / crate::motion::QUICK.as_secs_f32();
+        self.from + (self.target - self.from) * crate::motion::cubic_out(t)
+    }
+}
+
 /// The clock every glide and equalizer runs on, so they keep their phase
 /// between frames.
 fn since_start() -> f32 {
@@ -396,6 +414,119 @@ impl Notch {
                 .child(equalizer(true))
                 .into_any_element()
         })
+    }
+
+    /// No camera divides this bar: the same cover slides left and grows as
+    /// the agent fades out. The waveform stays put and no image is decoded.
+    pub(super) fn music_bar(
+        &mut self,
+        size: Frame,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let now = cx.background_executor().now();
+        let target = if self.rest.busy() { 0. } else { 1. };
+        let mut motion = self.music_motion.take().unwrap_or_else(|| BarMotion {
+            from: target,
+            target,
+            at: now,
+            rest: self.rest.clone(),
+            moving: false,
+        });
+        let mut along = motion.value(now);
+        if motion.target != target {
+            motion.from = along;
+            motion.target = target;
+            motion.at = now;
+        }
+        if cx.reduce_motion() {
+            motion.from = target;
+            along = target;
+        }
+        if self.rest.busy() && motion.rest != self.rest {
+            motion.rest = self.rest.clone();
+        }
+        motion.moving = along != target;
+        if motion.moving {
+            window.request_animation_frame();
+        }
+        // As the Mac's notch does around its camera: while an agent works,
+        // the agent takes the left half and the music the right one (cover,
+        // the lyric being sung or the title, the waveform), a hairline
+        // between them. With no agent the music takes the whole bar. The
+        // bar keeps one width either way, so only what is in it moves.
+        let middle = (size.width / 2.).round();
+        let wave_left = size.width - 12. - WAVE_WIDTH;
+        let busy_cover = middle + 8.;
+        let cover_left = busy_cover + (6. - busy_cover) * along;
+        let side = 16. + 4. * along;
+        let title_left = cover_left + side + 8.;
+        let agents = (along < 1.).then(|| {
+            div()
+                .debug_selector(|| "notch-music-agents".into())
+                .absolute()
+                .left(px(-8. * along))
+                .top_0()
+                .w(px(middle - 2.))
+                .h_full()
+                .overflow_hidden()
+                .opacity((1. - 3. * along).clamp(0., 1.))
+                .child(self.ears_for(&motion.rest, None, (0., 0.), false, cx))
+        });
+        let divider = (along < 1.).then(|| {
+            div()
+                .debug_selector(|| "notch-music-divider".into())
+                .absolute()
+                .left(px(middle))
+                .top(px(size.height * 0.3))
+                .w(px(1.))
+                .h(px(size.height * 0.4))
+                .bg(ink(0.14))
+                .opacity(1. - along)
+        });
+        self.music_motion = Some(motion);
+        self.keep_responsive();
+        div()
+            .debug_selector(|| "notch-media".into())
+            .size_full()
+            .relative()
+            .overflow_hidden()
+            .children(agents)
+            .children(divider)
+            .child(
+                div()
+                    .debug_selector(|| "notch-music-cover".into())
+                    .absolute()
+                    .left(px(cover_left))
+                    .top(px((size.height - side) / 2.))
+                    .size(px(side))
+                    .child(self.cover(side, false)),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "notch-music-title".into())
+                    .absolute()
+                    .left(px(title_left))
+                    .top_0()
+                    .w(px((wave_left - 8. - title_left).max(0.)))
+                    .h_full()
+                    .overflow_hidden()
+                    .flex()
+                    .items_center()
+                    .child(self.media_line()),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "notch-music-wave".into())
+                    .absolute()
+                    .left(px(wave_left))
+                    .top_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .child(equalizer(true)),
+            )
+            .into_any_element()
     }
 
     fn cover(&self, side: f32, badge: bool) -> AnyElement {

@@ -24,6 +24,8 @@ mod talk;
 pub(crate) mod tests;
 mod tray;
 
+pub(crate) use platform::{bring_forward, claim_foreground};
+
 use crate::input::{self, Input};
 use crate::theme::*;
 use gpui::{
@@ -289,6 +291,8 @@ pub(crate) struct Notch {
     media_task: Option<Task<()>>,
     /// Repaints the line and the progress while something plays.
     media_tick: Option<Task<()>>,
+    /// The closed bar carries one cover between the agent and music layouts.
+    music_motion: Option<media::BarMotion>,
     /// The track whose lyrics were asked for, and what came back.
     lyrics_for: Option<monocode_core::notch::media::Track>,
     lyrics: Option<(
@@ -486,6 +490,7 @@ impl Notch {
             media_commands: None,
             media_task: None,
             media_tick: None,
+            music_motion: None,
             lyrics_for: None,
             lyrics: None,
             lyrics_task: None,
@@ -1048,6 +1053,7 @@ impl Notch {
             ));
         }
         if cx.reduce_motion() {
+            self.appeared = Some((shape, self.tab, now - Duration::from_secs(1)));
             return 1.;
         }
         let since = self
@@ -1385,7 +1391,17 @@ impl Notch {
     /// left the work mark and a face per session at work (and "+N"), on the
     /// right who leads, what it does and how far along its list it is.
     fn ears(&self, camera: Option<model::Camera>, wings: (f32, f32), cx: &App) -> AnyElement {
-        let rest = &self.rest;
+        self.ears_for(&self.rest, camera, wings, true, cx)
+    }
+
+    fn ears_for(
+        &self,
+        rest: &Rest,
+        camera: Option<model::Camera>,
+        wings: (f32, f32),
+        music: bool,
+        cx: &App,
+    ) -> AnyElement {
         let mut faces = div().flex().items_center();
         for (at, mark) in rest.marks.iter().enumerate() {
             faces = faces.child(
@@ -1546,7 +1562,7 @@ impl Notch {
                 .when(rest.busy(), |bar| {
                     bar.child(div().flex_shrink_0().child(left))
                         .child(div().flex_1().min_w_0().flex().child(right))
-                        .children(self.music_badge())
+                        .children(music.then(|| self.music_badge()).flatten())
                 })
                 .into_any_element(),
         }
@@ -1725,6 +1741,13 @@ impl Notch {
     ) -> AnyElement {
         let camera = self.camera(cx);
         let top = camera.map_or(0., |camera| camera.height);
+        if !matches!(shape, Shape::Busy { .. })
+            || camera.is_some()
+            || self.level.is_some()
+            || !self.media_showing()
+        {
+            self.music_motion = None;
+        }
         match shape {
             Shape::Quiet => div().into_any_element(),
             Shape::Busy { left, right } => {
@@ -1735,6 +1758,9 @@ impl Notch {
                 let wings = (left as f32 + swell, right as f32 + swell);
                 match self.level {
                     Some(level) => self.level_view(level, camera, wings),
+                    None if camera.is_none() && self.media_showing() => {
+                        self.music_bar(size, window, cx)
+                    }
                     None if !self.rest.busy() && self.media_showing() => {
                         self.media_wings(camera, wings)
                     }
@@ -1802,6 +1828,10 @@ impl Notch {
         let in_use = self.hovered
             || self.open
             || self.motion.is_some()
+            || self
+                .music_motion
+                .as_ref()
+                .is_some_and(|motion| motion.moving)
             || self.level.is_some()
             || self.notices.current().is_some();
         if in_use && self.responsive.is_none() {
