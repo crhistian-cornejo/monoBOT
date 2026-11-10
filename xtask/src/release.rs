@@ -135,11 +135,31 @@ const URI_COMPONENT: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'(')
     .remove(b')');
 
-/// Whether a release must carry an updater target or a download key. A
-/// release made without the Apple signing credentials
-/// (`MONOBOT_RELEASE_WITHOUT_MACOS=1`) leaves the macOS ones out.
-fn required(name: &str, without_macos: bool) -> bool {
-    !(without_macos && (name.starts_with("darwin-") || name.starts_with("macos-")))
+/// Platforms a release leaves out: macOS without the Apple signing
+/// credentials (`MONOBOT_RELEASE_WITHOUT_MACOS=1`), Linux while it is not
+/// published (`MONOBOT_RELEASE_WITHOUT_LINUX=1`). Every other package stays
+/// required.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Without {
+    pub macos: bool,
+    pub linux: bool,
+}
+
+impl Without {
+    fn from_env(env: &HashMap<String, String>) -> Self {
+        let set = |key: &str| env.get(key).is_some_and(|v| v == "1");
+        Without {
+            macos: set("MONOBOT_RELEASE_WITHOUT_MACOS"),
+            linux: set("MONOBOT_RELEASE_WITHOUT_LINUX"),
+        }
+    }
+}
+
+/// Whether a release must carry an updater target or a download key.
+fn required(name: &str, without: Without) -> bool {
+    let macos = name.starts_with("darwin-") || name.starts_with("macos-");
+    let linux = name.starts_with("linux-");
+    !(without.macos && macos || without.linux && linux)
 }
 
 pub fn native_manifest(
@@ -147,7 +167,7 @@ pub fn native_manifest(
     base_url: &str,
     artifacts: &[Artifact],
     notes: &str,
-    without_macos: bool,
+    without: Without,
 ) -> Result<Value> {
     release_version(version)?;
     let insecure =
@@ -191,7 +211,7 @@ pub fn native_manifest(
         );
     }
     for target in NATIVE_TARGETS {
-        if required(target, without_macos) && !platforms.contains_key(target) {
+        if required(target, without) && !platforms.contains_key(target) {
             return Err(format!("Missing native package: {target}"));
         }
     }
@@ -304,7 +324,7 @@ impl Signer {
 pub fn downloads_manifest(
     version: &str,
     artifacts: &[Artifact],
-    without_macos: bool,
+    without: Without,
 ) -> Result<Value> {
     release_version(version)?;
     let mut files = serde_json::Map::new();
@@ -321,7 +341,7 @@ pub fn downloads_manifest(
         files.insert(key.clone(), artifact.filename.clone().into());
     }
     for key in DOWNLOAD_KEYS {
-        if required(key, without_macos) && !files.contains_key(key) {
+        if required(key, without) && !files.contains_key(key) {
             return Err(format!("Missing download: {key}"));
         }
     }
@@ -389,11 +409,9 @@ pub fn prepare_release(
         .get("MONOBOT_UPDATES_URL")
         .map(String::as_str)
         .unwrap_or_default();
-    let without_macos = env
-        .get("MONOBOT_RELEASE_WITHOUT_MACOS")
-        .is_some_and(|v| v == "1");
-    let manifest = native_manifest(version, base_url, &records, &notes, without_macos)?;
-    let downloads = downloads_manifest(version, &records, without_macos)?;
+    let without = Without::from_env(env);
+    let manifest = native_manifest(version, base_url, &records, &notes, without)?;
+    let downloads = downloads_manifest(version, &records, without)?;
     let payload = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
     let payload_path = directory.join("native-manifest.payload");
     fs::write(&payload_path, &payload).map_err(|e| e.to_string())?;
@@ -448,7 +466,7 @@ mod tests {
             base.unwrap_or("https://dl.example.test/"),
             &artifacts.unwrap_or_else(self::artifacts),
             "",
-            false,
+            Without::default(),
         )
     }
 
@@ -508,7 +526,7 @@ mod tests {
 
     #[test]
     fn every_manual_download_is_listed_once() {
-        let listed = downloads_manifest("0.0.1", &downloads(), false).unwrap();
+        let listed = downloads_manifest("0.0.1", &downloads(), Without::default()).unwrap();
         assert_eq!(listed["version"], "0.0.1");
         assert_eq!(listed["files"]["windows"], "windows.installer");
         assert_eq!(
@@ -517,14 +535,51 @@ mod tests {
         );
         let mut missing = downloads();
         missing.pop();
-        assert!(downloads_manifest("0.0.1", &missing, false)
+        assert!(downloads_manifest("0.0.1", &missing, Without::default())
             .unwrap_err()
             .contains("Missing download"));
         let mut duplicate = downloads();
         duplicate.push(duplicate[0].clone());
-        assert!(downloads_manifest("0.0.1", &duplicate, false)
+        assert!(downloads_manifest("0.0.1", &duplicate, Without::default())
             .unwrap_err()
             .contains("Duplicate"));
+    }
+
+    const MAC: Without = Without {
+        macos: true,
+        linux: false,
+    };
+
+    #[test]
+    fn a_windows_only_release_still_requires_windows() {
+        let without = Without {
+            macos: true,
+            linux: true,
+        };
+        let windows: Vec<Artifact> = artifacts()
+            .into_iter()
+            .filter(|a| a.target.as_deref() == Some("windows-x86_64-nsis"))
+            .collect();
+        let feed =
+            native_manifest("0.0.1", "https://dl.example.test", &windows, "", without).unwrap();
+        assert_eq!(feed["platforms"].as_object().unwrap().len(), 1);
+        assert!(
+            native_manifest("0.0.1", "https://dl.example.test", &[], "", without)
+                .unwrap_err()
+                .contains("windows")
+        );
+        let downloads: Vec<Artifact> = self::downloads()
+            .into_iter()
+            .filter(|a| a.download.as_deref() == Some("windows"))
+            .collect();
+        let listed = downloads_manifest("0.0.1", &downloads, without).unwrap();
+        assert_eq!(listed["files"].as_object().unwrap().len(), 1);
+        let env = HashMap::from([
+            ("MONOBOT_RELEASE_WITHOUT_LINUX".to_owned(), "1".to_owned()),
+            ("MONOBOT_RELEASE_WITHOUT_MACOS".to_owned(), "0".to_owned()),
+        ]);
+        let parsed = Without::from_env(&env);
+        assert!(parsed.linux && !parsed.macos);
     }
 
     #[test]
@@ -533,18 +588,22 @@ mod tests {
             .into_iter()
             .filter(|a| !a.target.as_deref().unwrap().starts_with("darwin-"))
             .collect();
-        assert!(
-            native_manifest("0.0.1", "https://dl.example.test", &without_mac, "", false)
-                .unwrap_err()
-                .contains("Missing native package")
-        );
+        assert!(native_manifest(
+            "0.0.1",
+            "https://dl.example.test",
+            &without_mac,
+            "",
+            Without::default()
+        )
+        .unwrap_err()
+        .contains("Missing native package"));
         let feed =
-            native_manifest("0.0.1", "https://dl.example.test", &without_mac, "", true).unwrap();
+            native_manifest("0.0.1", "https://dl.example.test", &without_mac, "", MAC).unwrap();
         assert_eq!(feed["platforms"].as_object().unwrap().len(), 4);
         let mut no_windows = without_mac.clone();
         no_windows.retain(|a| a.target.as_deref() != Some("windows-x86_64-nsis"));
         assert!(
-            native_manifest("0.0.1", "https://dl.example.test", &no_windows, "", true)
+            native_manifest("0.0.1", "https://dl.example.test", &no_windows, "", MAC)
                 .unwrap_err()
                 .contains("windows")
         );
@@ -552,8 +611,8 @@ mod tests {
             .into_iter()
             .filter(|a| !a.download.as_deref().unwrap().starts_with("macos-"))
             .collect();
-        assert!(downloads_manifest("0.0.1", &downloads, false).is_err());
-        let listed = downloads_manifest("0.0.1", &downloads, true).unwrap();
+        assert!(downloads_manifest("0.0.1", &downloads, Without::default()).is_err());
+        let listed = downloads_manifest("0.0.1", &downloads, MAC).unwrap();
         assert_eq!(listed["files"].as_object().unwrap().len(), 4);
     }
 

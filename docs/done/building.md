@@ -65,6 +65,10 @@ native-dist`) and uploads everything to the `monobot-releases` R2 bucket:
 the files under `releases/<version>/`, then `downloads.json` and
 `latest.json` at the top. A version already in the bucket is refused.
 
+For now a release ships Windows, and macOS once the Apple signing secrets
+exist; Linux is left out (`MONOBOT_RELEASE_WITHOUT_LINUX=1`, and its builds
+are commented out in the workflow).
+
 The [update Worker](../../deploy/cloudflare-updates/README.md) serves the
 bucket. The app checks `<MONOBOT_UPDATES_URL>/latest.json` when it opens and
 every four hours. A newer version downloads by itself and is verified, and the

@@ -35,12 +35,15 @@ jobs:
           # for the SDK the app links against, and only the newest Apple
           # silicon images ship a current one, so Intel cross-compiles there.
           MAC='{"os":"macos-latest","target":"aarch64-apple-darwin","arch":"aarch64","kind":"macos"},{"os":"macos-latest","target":"x86_64-apple-darwin","arch":"x86_64","kind":"macos"},'
-          REST='{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","arch":"x86_64","kind":"linux"},{"os":"windows-latest","target":"x86_64-pc-windows-msvc","arch":"x86_64","kind":"windows"}'
+          # Linux is not published for now (MONOBOT_RELEASE_WITHOUT_LINUX below).
+          # To bring it back, add this entry and re-enable the rpm job:
+          # {"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu","arch":"x86_64","kind":"linux"},
+          REST='{"os":"windows-latest","target":"x86_64-pc-windows-msvc","arch":"x86_64","kind":"windows"}'
           if [ "$HAS_APPLE" = true ]; then
             echo "matrix={\"include\":[${MAC}${REST}]}" >> "$GITHUB_OUTPUT"
             echo "without_macos=0" >> "$GITHUB_OUTPUT"
           else
-            echo "::warning::No Apple signing credentials: this release ships Windows and Linux only."
+            echo "::warning::No Apple signing credentials: this release ships Windows only."
             echo "matrix={\"include\":[${REST}]}" >> "$GITHUB_OUTPUT"
             echo "without_macos=1" >> "$GITHUB_OUTPUT"
           fi
@@ -188,6 +191,8 @@ jobs:
 
   rpm:
     name: Build (Enterprise Linux rpm)
+    # Linux is not published for now; see the plan job.
+    if: false
     runs-on: ubuntu-latest
     container: almalinux:10
     env:
@@ -267,10 +272,11 @@ jobs:
 
   publish:
     name: Publish to R2 behind the update Worker
-    needs: [plan, build, rpm, host]
+    needs: [plan, build, host]
     runs-on: ubuntu-latest
     env:
       MONOBOT_RELEASE_WITHOUT_MACOS: ${{ needs.plan.outputs.without_macos }}
+      MONOBOT_RELEASE_WITHOUT_LINUX: "1"
       MONOBOT_UPDATER_PRIVATE_KEY: ${{ secrets.MONOBOT_UPDATER_PRIVATE_KEY }}
       MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD: ${{ secrets.MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD }}
       MONOBOT_UPDATER_PUBKEY: ${{ secrets.MONOBOT_UPDATER_PUBKEY }}

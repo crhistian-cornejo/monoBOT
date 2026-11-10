@@ -51,8 +51,8 @@ fn verify() -> Result<(), String> {
             verified += 1;
         }
     }
-    // Six, or four for a release made without the Apple credentials.
-    if verified < 4 {
+    // Every package listed; a release may leave whole platforms out.
+    if verified == 0 {
         return Err(format!(
             "Expected the signed native update packages, verified {verified}"
         ));
