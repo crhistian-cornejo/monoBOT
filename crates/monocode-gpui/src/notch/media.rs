@@ -115,14 +115,7 @@ impl Notch {
                     .as_ref()
                     .is_some_and(|(kept, _)| Arc::ptr_eq(kept, &bytes)) =>
             {
-                let format = if bytes.starts_with(&[0xff, 0xd8]) {
-                    gpui::ImageFormat::Jpeg
-                } else if bytes.starts_with(b"RIFF") {
-                    gpui::ImageFormat::Webp
-                } else {
-                    gpui::ImageFormat::Png
-                };
-                let image = Arc::new(gpui::Image::from_bytes(format, bytes.to_vec()));
+                let image = picture(&bytes);
                 let before = self.art.replace((bytes, image));
                 Self::forget_cover(before, cx);
             }
@@ -925,6 +918,20 @@ impl Notch {
         .h(px(14.))
         .into_any_element()
     }
+}
+
+/// A cover's bytes as one picture to draw: JPEG, WebP or PNG, told apart by
+/// how the file starts. GPUI keys its texture by the picture, so the same
+/// `Arc` draws every frame for free.
+pub(super) fn picture(bytes: &[u8]) -> Arc<gpui::Image> {
+    let format = if bytes.starts_with(&[0xff, 0xd8]) {
+        gpui::ImageFormat::Jpeg
+    } else if bytes.starts_with(b"RIFF") {
+        gpui::ImageFormat::Webp
+    } else {
+        gpui::ImageFormat::Png
+    };
+    Arc::new(gpui::Image::from_bytes(format, bytes.to_vec()))
 }
 
 fn redraw(notch: &WeakEntity<Notch>, cx: &mut App) {

@@ -1,5 +1,6 @@
 //! What the notch's player takes from Spotify's own Web API
-//! (`monocode_core::notch::spotify`): "Playing next" under the player, where
+//! (`monocode_core::notch::spotify`): "Playing next" under the player (each
+//! track with its cover, a click away from playing), where
 //! the title and each artist lead in Spotify, whether the track is among the
 //! Liked Songs, and how shuffle stands. The system's media session tells
 //! what plays, never any of that. The user signs in once from Notch
@@ -11,10 +12,12 @@ use monocode_core::notch::media::Track;
 use monocode_core::notch::spotify::{self, Next};
 use std::sync::{Arc, Mutex};
 
-/// One waiting track's row.
-const NEXT_ROW: f32 = 22.;
+/// One waiting track's row: its cover, and its title over its artist.
+const NEXT_ROW: f32 = 40.;
+/// The cover's side in a row.
+const NEXT_ART: f32 = 30.;
 /// The line that says where "Playing next" comes from, before the sign-in.
-const HINT: f32 = NEXT_ROW + 6.;
+const HINT: f32 = 28.;
 /// How long a shuffle just asked for is shown before the player's own word
 /// on it is: the system's controls take a moment to follow.
 const WISH: Duration = Duration::from_secs(2);
@@ -51,6 +54,12 @@ pub(super) struct Queue {
     /// The shuffle just asked for, shown until the player confirms it.
     wish: Option<bool>,
     wish_over: Option<Task<()>>,
+    /// The listed tracks' covers by their address, each decoded once and
+    /// kept while its track is listed.
+    art: std::collections::HashMap<String, Arc<gpui::Image>>,
+    art_fetch: Option<Task<()>>,
+    /// The listed track chosen to play, on its way.
+    skip: Option<Task<()>>,
 }
 
 /// What the player's heart can do now.
@@ -134,6 +143,8 @@ impl Notch {
     }
 
     fn disconnect_spotify(&mut self, cx: &mut Context<Self>) {
+        self.queue.next.clear();
+        self.want_art(cx);
         self.queue = Queue::default();
         cx.background_executor()
             .spawn(async { spotify::disconnect() })
@@ -154,6 +165,7 @@ impl Notch {
                 self.queue.next.clear();
                 self.queue.now = None;
                 self.queue.liked = None;
+                self.want_art(cx);
                 cx.notify();
             }
             return;
@@ -223,7 +235,106 @@ impl Notch {
         self.queue.now = snapshot.now;
         self.queue.liked = snapshot.liked;
         self.queue.next = snapshot.next;
+        self.want_art(cx);
         cx.notify();
+    }
+
+    /// Lets go of the covers of what is no longer listed (the picture and
+    /// its texture) and asks for the ones still missing, one after another
+    /// off the interface thread; each shows as it arrives.
+    fn want_art(&mut self, cx: &mut Context<Self>) {
+        let mut listed: Vec<String> = Vec::new();
+        for address in self.queue.next.iter().filter_map(|next| next.art.clone()) {
+            if !listed.contains(&address) {
+                listed.push(address);
+            }
+        }
+        let gone: Vec<String> = self
+            .queue
+            .art
+            .keys()
+            .filter(|address| !listed.contains(address))
+            .cloned()
+            .collect();
+        for address in gone {
+            if let Some(image) = self.queue.art.remove(&address) {
+                gpui::ImageSource::Image(image).evict(cx);
+            }
+        }
+        listed.retain(|address| !self.queue.art.contains_key(address));
+        // Tests never touch the network.
+        if listed.is_empty() || cfg!(test) {
+            return;
+        }
+        self.queue.art_fetch = Some(cx.spawn(async move |this, cx| {
+            for address in listed {
+                let asked = address.clone();
+                let bytes = cx
+                    .background_executor()
+                    .spawn(async move { spotify::fetch_art(&asked) })
+                    .await;
+                // Offline or refused: the row keeps its placeholder.
+                let Ok(bytes) = bytes else {
+                    continue;
+                };
+                let kept = this.update(cx, |this, cx| {
+                    let listed = this
+                        .queue
+                        .next
+                        .iter()
+                        .any(|next| next.art.as_deref() == Some(address.as_str()));
+                    if listed {
+                        this.queue.art.insert(address, media::picture(&bytes));
+                        cx.notify();
+                    }
+                });
+                if kept.is_err() {
+                    break;
+                }
+            }
+        }));
+    }
+
+    /// Plays the listed track in place `index`. The ones before it are
+    /// skipped, as choosing a song in Spotify's own queue does, and the list
+    /// shows that at once. Spotify is asked where the track is now, since
+    /// its queue may have changed since it was listed, and the player is
+    /// told "next" that many times: the system's own command, so it works
+    /// wherever previous and next do.
+    pub(super) fn play_from_queue(&mut self, index: usize, cx: &mut Context<Self>) {
+        if index >= self.queue.next.len() {
+            return;
+        }
+        let Some(chosen) = self.queue.next.drain(..=index).last() else {
+            return;
+        };
+        self.want_art(cx);
+        cx.notify();
+        // Tests never touch the keychain or the network.
+        let session = (!cfg!(test)).then(|| self.spotify_session());
+        self.queue.skip = Some(cx.spawn(async move |this, cx| {
+            let now = match session {
+                Some(session) => {
+                    cx.background_executor()
+                        .spawn(async move {
+                            session
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .queue()
+                                // Offline or refused: its place as it was shown.
+                                .unwrap_or_default()
+                        })
+                        .await
+                }
+                None => Vec::new(),
+            };
+            let presses = spotify::skips_to(&now, &chosen.uri, index);
+            let _ = this.update(cx, |this, cx| {
+                for _ in 0..presses {
+                    this.send_media(platform::MediaCommand::Next, cx);
+                }
+            });
+        }));
     }
 
     /// The track that plays, when Spotify plays it.
@@ -446,38 +557,83 @@ impl Notch {
             .flex_col()
             .child(pages::caption("Playing next").pt(px(6.)));
         for (index, next) in self.queue.next.iter().enumerate() {
+            let group = gpui::SharedString::from(format!("notch-next-{index}"));
+            let cover = next
+                .art
+                .as_ref()
+                .and_then(|address| self.queue.art.get(address))
+                .cloned();
+            // A row is a button: a click plays its track. Under the pointer
+            // it lights up and shows the play mark at its end.
             list = list.child(
                 div()
+                    .id(("notch-next", index))
+                    .group(group.clone())
+                    .debug_selector(move || format!("notch-next-{index}"))
+                    .role(Role::Button)
+                    .aria_label(format!("Play {}", next.title))
                     .h(px(NEXT_ROW))
-                    .px(px(2.))
+                    .px(px(4.))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(10.))
+                    .rounded(px(2.))
+                    .cursor_pointer()
+                    .hover(|style| style.bg(ink(0.07)))
+                    .active(|style| style.bg(ink(0.12)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.play_from_queue(index, cx)))
                     .child(
                         div()
-                            .w(px(12.))
+                            .size(px(NEXT_ART))
                             .flex_shrink_0()
-                            .text_size(px(10.5))
-                            .text_color(ink(0.35))
-                            .child(format!("{}", index + 1)),
+                            .overflow_hidden()
+                            .rounded(px(2.))
+                            .bg(ink(0.1))
+                            .child(match cover {
+                                Some(image) => gpui::img(image)
+                                    .size(px(NEXT_ART))
+                                    .object_fit(gpui::ObjectFit::Cover)
+                                    .into_any_element(),
+                                None => div()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(icon("media-note", 11.).text_color(ink(0.45)))
+                                    .into_any_element(),
+                            }),
                     )
                     .child(
                         div()
                             .min_w_0()
                             .flex_1()
-                            .truncate()
-                            .text_size(px(12.))
-                            .text_color(ink(0.88))
-                            .child(next.title.clone()),
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(12.))
+                                    .line_height(px(16.))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(ink(0.94))
+                                    .child(next.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(10.5))
+                                    .line_height(px(14.))
+                                    .text_color(ink(0.5))
+                                    .child(next.artist.clone()),
+                            ),
                     )
                     .child(
                         div()
                             .flex_shrink_0()
-                            .max_w(px(170.))
-                            .truncate()
-                            .text_size(px(11.))
-                            .text_color(ink(0.45))
-                            .child(next.artist.clone()),
+                            .pr(px(4.))
+                            .opacity(0.)
+                            .group_hover(group, |style| style.opacity(1.))
+                            .child(icon("media-play", 11.).text_color(ink(0.85))),
                     ),
             );
         }

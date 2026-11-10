@@ -1362,6 +1362,8 @@ fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
     let next = |title: &str| Next {
         title: title.into(),
         artist: "Someone".into(),
+        uri: format!("spotify:track:{title}"),
+        art: Some(format!("https://i.scdn.co/image/{title}")),
     };
     let heights = opened
         .window
@@ -1399,6 +1401,42 @@ fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
     assert!(visual.debug_bounds("notch-player").is_some());
     assert!(visual.debug_bounds("notch-queue").is_some());
     assert!(heights.1 > heights.0, "the panel grows by the queue");
+    // A row is a button: choosing the second song skips the first, shows
+    // that at once and tells the player "next" twice.
+    let (commands, sent) = std::sync::mpsc::channel();
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.media_commands = Some(commands);
+            notch.set_snapshot(
+                monocode_core::notch::spotify::Snapshot {
+                    next: vec![next("One"), next("Two"), next("Three")],
+                    ..Default::default()
+                },
+                cx,
+            );
+        })
+        .unwrap();
+    click(visual, "notch-next-1");
+    let listed = opened
+        .window
+        .update(visual, |notch, _, _| {
+            notch.media_commands = None;
+            notch
+                .queue
+                .next
+                .iter()
+                .map(|next| next.title.clone())
+                .collect::<Vec<_>>()
+        })
+        .unwrap();
+    assert_eq!(listed, ["Three"]);
+    assert_eq!(
+        sent.try_iter().collect::<Vec<_>>(),
+        [platform::MediaCommand::Next, platform::MediaCommand::Next]
+    );
+    assert!(visual.debug_bounds("notch-next-0").is_some());
+    assert!(visual.debug_bounds("notch-next-1").is_none());
     // Settings › Music holds the sign-in.
     click(visual, "notch-tab-settings");
     click(visual, "notch-page-music");

@@ -33,6 +33,80 @@ const NOT_THE_ANSWER: &str = "Not the sign-in's answer.";
 pub struct Next {
     pub title: String,
     pub artist: String,
+    /// `spotify:track:…` or an episode's; empty when Spotify gave none.
+    pub uri: String,
+    /// Its cover's address on Spotify's image servers, the smallest that
+    /// still fills a row's thumbnail.
+    pub art: Option<String>,
+}
+
+/// The largest cover a row asks for: a thumbnail is a few kilobytes.
+const ART_LIMIT: u64 = 512 << 10;
+/// The side, in pixels, a row's thumbnail needs at twice its size.
+const ART_SIDE: u64 = 60;
+
+/// Whether `address` is a picture on Spotify's own image servers, the only
+/// place a cover is fetched from.
+pub fn is_art(address: &str) -> bool {
+    url::Url::parse(address).is_ok_and(|url| {
+        url.scheme() == "https"
+            && url.host_str().is_some_and(|host| {
+                host == "i.scdn.co"
+                    || host.ends_with(".scdn.co")
+                    || host.ends_with(".spotifycdn.com")
+            })
+    })
+}
+
+/// The cover to show beside a queued item out of its `images`: the
+/// smallest one that still fills the thumbnail, else the largest there is.
+fn art_of(images: &serde_json::Value) -> Option<String> {
+    let mut sized: Vec<(u64, &str)> = images
+        .as_array()?
+        .iter()
+        .filter_map(|image| {
+            let address = image["url"].as_str().filter(|address| is_art(address))?;
+            Some((image["width"].as_u64().unwrap_or(0), address))
+        })
+        .collect();
+    sized.sort_by_key(|(width, _)| *width);
+    sized
+        .iter()
+        .find(|(width, _)| *width >= ART_SIDE)
+        .or(sized.last())
+        .map(|(_, address)| (*address).to_owned())
+}
+
+/// A cover's bytes (JPEG, PNG or WebP) from Spotify's image servers.
+pub fn fetch_art(address: &str) -> Result<Vec<u8>, String> {
+    if !is_art(address) {
+        return Err("Not one of Spotify's pictures.".into());
+    }
+    let response = agent()
+        .get(address)
+        .call()
+        .map_err(|error| error.to_string())?;
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(ART_LIMIT + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.is_empty() || bytes.len() as u64 > ART_LIMIT {
+        return Err("Not a thumbnail.".into());
+    }
+    Ok(bytes)
+}
+
+/// How many times "next" reaches the queued item `uri`, which the notch
+/// showed in place `shown` (0 for the first): its place in `queue` as
+/// Spotify has it now, since the queue may have changed since it was shown;
+/// its shown place when it is no longer there or has no address.
+pub fn skips_to(queue: &[Next], uri: &str, shown: usize) -> usize {
+    let place = (!uri.is_empty())
+        .then(|| queue.iter().position(|next| next.uri == uri))
+        .flatten();
+    place.unwrap_or(shown) + 1
 }
 
 /// One of the playing track's artists, with Spotify's own address for them.
@@ -391,9 +465,20 @@ pub fn parse_queue(body: &str) -> Vec<Next> {
             } else {
                 artists.join(", ")
             };
+            // A track's cover is its album's; an episode has its own, or
+            // its show's.
+            let art = art_of(&item["album"]["images"])
+                .or_else(|| art_of(&item["images"]))
+                .or_else(|| art_of(&item["show"]["images"]));
             Some(Next {
                 title: title.to_owned(),
                 artist,
+                uri: item["uri"]
+                    .as_str()
+                    .filter(|uri| is_uri(uri))
+                    .unwrap_or_default()
+                    .to_owned(),
+                art,
             })
         })
         .take(SHOWN)
@@ -593,10 +678,18 @@ mod tests {
     #[test]
     fn the_queue_lists_tracks_and_episodes_in_order() {
         let body = r#"{"currently_playing":{"name":"Now"},"queue":[
-            {"name":"One","artists":[{"name":"A"},{"name":"B"}]},
+            {"name":"One","uri":"spotify:track:t1","artists":[{"name":"A"},{"name":"B"}],
+                "album":{"images":[
+                    {"url":"https://i.scdn.co/image/big","width":640},
+                    {"url":"https://i.scdn.co/image/mid","width":300},
+                    {"url":"https://i.scdn.co/image/small","width":64}]}},
             {"name":"  ","artists":[]},
-            {"name":"Talk","show":{"name":"The Show"}},
-            {"name":"3","artists":[{"name":"C"}]},{"name":"4","artists":[]},
+            {"name":"Talk","uri":"spotify:episode:e1","show":{"name":"The Show",
+                "images":[{"url":"https://i.scdn.co/image/show","width":640}]}},
+            {"name":"3","uri":"javascript:alert(1)","artists":[{"name":"C"}],
+                "album":{"images":[{"url":"https://evil.example/x.jpg","width":64},
+                    {"url":"http://i.scdn.co/image/plain","width":64}]}},
+            {"name":"4","artists":[]},
             {"name":"5","artists":[]},{"name":"6","artists":[]}]}"#;
         let queue = parse_queue(body);
         assert_eq!(queue.len(), SHOWN);
@@ -604,12 +697,44 @@ mod tests {
             queue[0],
             Next {
                 title: "One".into(),
-                artist: "A, B".into()
+                artist: "A, B".into(),
+                uri: "spotify:track:t1".into(),
+                // The smallest that fills a thumbnail, not the largest.
+                art: Some("https://i.scdn.co/image/small".into()),
             }
         );
         assert_eq!(queue[1].artist, "The Show");
+        assert_eq!(
+            queue[1].art.as_deref(),
+            Some("https://i.scdn.co/image/show")
+        );
+        // Neither an address that is not Spotify's nor a picture from
+        // anywhere but its image servers is kept.
+        assert_eq!((queue[2].uri.as_str(), &queue[2].art), ("", &None));
+        assert!(is_art("https://image-cdn-ak.spotifycdn.com/image/x"));
+        assert!(!is_art("https://i.scdn.co.evil.example/image/x"));
+        assert!(fetch_art("https://evil.example/x.jpg").is_err());
         assert!(parse_queue("not json").is_empty());
         assert!(parse_queue("{}").is_empty());
+    }
+
+    #[test]
+    fn a_chosen_song_is_reached_by_its_place_in_the_queue_as_it_is_now() {
+        let next = |uri: &str| Next {
+            title: uri.into(),
+            artist: String::new(),
+            uri: uri.into(),
+            art: None,
+        };
+        let queue = [next("spotify:track:a"), next("spotify:track:b"), next("")];
+        // Shown second and still second: two presses of next.
+        assert_eq!(skips_to(&queue, "spotify:track:b", 1), 2);
+        // The song before it has started since: it is now first.
+        assert_eq!(skips_to(&queue[1..], "spotify:track:b", 1), 1);
+        // No longer there, or no address to find it by: where it was shown.
+        assert_eq!(skips_to(&queue, "spotify:track:z", 2), 3);
+        assert_eq!(skips_to(&queue, "", 2), 3);
+        assert_eq!(skips_to(&[], "spotify:track:a", 0), 1);
     }
 
     const PLAYER: &str = r#"{"shuffle_state":true,
