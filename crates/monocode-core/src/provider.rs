@@ -1544,6 +1544,11 @@ fn run_operation(
                 "--include-partial-messages",
                 "--permission-prompt-tool",
                 "stdio",
+                // The folder, git status and memory paths go in the first
+                // message instead of the system prompt, so every new chat
+                // reads the cached tools and system prompt instead of
+                // writing them again (Claude Code 2.1.98+).
+                "--exclude-dynamic-system-prompt-sections",
             ]);
             let settings = &request.settings;
             // botLaunchForSession: a bot's Claude gets only its tools and

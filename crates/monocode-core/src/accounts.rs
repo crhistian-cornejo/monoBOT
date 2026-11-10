@@ -23,9 +23,12 @@ use std::{
 
 pub const DEFAULT: &str = "default";
 static CLAUDE_ENTRYPOINT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The client name Claude Code reports when the opt-in below is on. Our own
+/// name, not `cli` or `claude-vscode`, so requests still say who sent them.
+pub const CLAUDE_ENTRYPOINT_LABEL: &str = "monobot";
 /// Opt-in: label spawned Claude processes as monoBOT instead of the default
 /// `sdk-cli`, which is metered at a higher subscription rate
-/// (anthropics/claude-code#97074).
+/// (anthropics/claude-code#97074, still open as of Claude Code 2.1.322).
 pub fn set_claude_entrypoint(on: bool) {
     CLAUDE_ENTRYPOINT.store(on, std::sync::atomic::Ordering::Relaxed);
 }
@@ -114,7 +117,7 @@ impl Profile {
     }
     pub fn apply(&self, kind: Kind, command: &mut Command) -> Result<(), String> {
         if kind == Kind::Claude && claude_entrypoint() {
-            command.env("CLAUDE_CODE_ENTRYPOINT", "monocode");
+            command.env("CLAUDE_CODE_ENTRYPOINT", CLAUDE_ENTRYPOINT_LABEL);
         }
         let Some(dir) = self.directory(kind)? else {
             return Ok(());

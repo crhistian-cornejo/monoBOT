@@ -261,7 +261,7 @@ fn claude_entrypoint_label_is_opt_in_for_every_profile() {
         env[std::ffi::OsStr::new("CLAUDE_CODE_ENTRYPOINT")].map(|v| v.to_owned())
     };
     for profile in [Profile::default(), Profile::new("work-1", root.path())] {
-        assert_eq!(label(true, &profile), Some("monocode".into()));
+        assert_eq!(label(true, &profile), Some("monobot".into()));
         assert_eq!(label(false, &profile), Some("sdk-cli".into()));
     }
 }
