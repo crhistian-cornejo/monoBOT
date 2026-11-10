@@ -1,4 +1,4 @@
-//! A quiet rail button asking people to star MonoBOT on GitHub. It only
+//! A quiet rail button asking people to star monoBOT on GitHub. It only
 //! appears once `gh` confirms the active account hasn't starred it yet, and
 //! goes away for good when they star it or dismiss it.
 use super::*;
@@ -106,7 +106,7 @@ impl Shell {
             .id("github-star")
             .debug_selector(|| "github-star".into())
             .role(Role::Button)
-            .aria_label("Star MonoBOT on GitHub")
+            .aria_label("Star monoBOT on GitHub")
             .size_full()
             .pl_2()
             .pr(px(32.))

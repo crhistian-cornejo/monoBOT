@@ -1,4 +1,4 @@
-//! MonoBOT's built-in MCP connectors, ported from
+//! monoBOT's built-in MCP connectors, ported from
 //! src/features/settings/model/connectors.ts. Public servers need no account;
 //! the private remote mail server connector uses the system credential store and a
 //! local allowlisting proxy. Others use Streamable HTTP, `npx` or `node`.
@@ -735,7 +735,7 @@ pub fn refresh_session_defaults(store: &Store) {
     );
 }
 
-/// What a Claude session gets from the app's connectors and MonoBOT's skill
+/// What a Claude session gets from the app's connectors and monoBOT's skill
 /// packs (launchOptions + bundledPluginDirs in claude.ts). `bot` narrows the
 /// connectors to its list and brings its own packs.
 #[derive(Clone, Debug, Default)]

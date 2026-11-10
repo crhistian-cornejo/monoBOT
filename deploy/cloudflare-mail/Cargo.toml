@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 license = "MIT"
 publish = false
-description = "Optional Cloudflare Email Routing inbound Worker for MonoBOT (D1 index + R2 raw MIME, pull API)."
+description = "Optional Cloudflare Email Routing inbound Worker for monoBOT (D1 index + R2 raw MIME, pull API)."
 
 # Built on its own for wasm32 by worker-build, not as part of the desktop workspace.
 [workspace]

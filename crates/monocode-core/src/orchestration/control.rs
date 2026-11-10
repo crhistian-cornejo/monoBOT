@@ -22,7 +22,7 @@ pub const ACTIONS: [&str; 12] = [
     "review", "finish",
 ];
 
-pub const HELP: &str = r#"MonoBOT local control — supervise this orchestration run from the lead agent.
+pub const HELP: &str = r#"monoBOT local control — supervise this orchestration run from the lead agent.
 
 Usage: monocode-gpui control ACTION [--json JSON | --input FILE|-] [--request-id ID]
 
@@ -74,14 +74,14 @@ for corrections -> review each task -> finish.
 
 When paused, list, get and wait still return the reason and recovery steps.
 Do not keep polling or retry mutations. Explain the pause and ask the user to
-click Resume in MonoBOT. Resume continues interrupted workers in their
+click Resume in monoBOT. Resume continues interrupted workers in their
 retained checkouts.
 
 Output is one JSON line: {"ok":true,"result":...} or {"ok":false,"error":"..."}.
 The exit code is 0 only when "ok" is true. Input must be a JSON object; unknown
 fields are rejected rather than ignored. Every call carries a request ID and the
 run applies each ID at most once: retry an uncertain call with --request-id ID.
-Tasks run inside the MonoBOT app; exiting this CLI never cancels them.
+Tasks run inside the monoBOT app; exiting this CLI never cancels them.
 Credentials are already in your environment; never print them.
 "#;
 
@@ -396,7 +396,7 @@ pub fn worker_prompt(prompt: &str, files: &[String], isolated: bool) -> String {
         "Other workers may share this checkout; preserve their changes and never reset the repository."
     };
     format!(
-        "{prompt}\n\n<monocode_assignment>\nYou are a worker managed by a MonoBOT lead. {checkout} Your assigned write scope is: {}. Read other files as needed, but do not edit outside your scope. If another file or shared operation is needed, report the blocker and stop so the lead can expand or create a new assignment. Do not spawn agents, create worktrees, switch branches, stage, commit, push, install dependencies or run broad formatters/generators. Report focused checks, changed files, remaining issues and a concise final result.\n</monocode_assignment>",
+        "{prompt}\n\n<monocode_assignment>\nYou are a worker managed by a monoBOT lead. {checkout} Your assigned write scope is: {}. Read other files as needed, but do not edit outside your scope. If another file or shared operation is needed, report the blocker and stop so the lead can expand or create a new assignment. Do not spawn agents, create worktrees, switch branches, stage, commit, push, install dependencies or run broad formatters/generators. Report focused checks, changed files, remaining issues and a concise final result.\n</monocode_assignment>",
         files.join(", ")
     )
 }
@@ -412,7 +412,7 @@ pub fn recovery_turn(reason: &str) -> String {
 pub fn lead_instructions(cli: &str) -> String {
     let cli = shell_path(cli);
     format!(
-        "<monocode_orchestration>\nYou are the lead of a local MonoBOT run. Coordinate the user's task using `{cli} control`. Run `{cli} control --help` before your first command; it documents every action, its exact JSON fields and the retry rule. Credentials are already in your environment; never print them.\nEach call prints one JSON line and exits non-zero unless \"ok\" is true; read the \"error\" text, it says what to do next. Unknown JSON fields are rejected. If a call fails before reaching MonoBOT, retry it with the same --request-id so the work is never queued twice.\nUse list to discover allowed harness/model IDs. Delegate bounded tasks with project-relative files (directories reserve their descendants), self-contained prompts and dependsOn task IDs. You may read and plan; leave project file edits to workers. Never start workers outside this CLI. Workers with overlapping files are queued.\nAgents never prompt the user. When one needs an approval or answers a question, list, get and wait report it as needsInput on that task, and you decide with respond or answer; it stays stopped until you do. Put it to the user in this conversation only when the call is genuinely theirs.\nSteer a running agent with steer; use message once it has stopped. completed means a turn finished, not that the work passed review. Review the actual changes (each worker has its own worktree, reported as workspace in get), message a worker for fixes, and use review to accept each completed task: that applies its changes to your checkout. Call finish only when required work and combined validation are complete. You receive worker results automatically when idle; use bounded wait calls while supervising. If the run is paused, stop polling, report the reason and ask the user to click Resume.\n</monocode_orchestration>"
+        "<monocode_orchestration>\nYou are the lead of a local monoBOT run. Coordinate the user's task using `{cli} control`. Run `{cli} control --help` before your first command; it documents every action, its exact JSON fields and the retry rule. Credentials are already in your environment; never print them.\nEach call prints one JSON line and exits non-zero unless \"ok\" is true; read the \"error\" text, it says what to do next. Unknown JSON fields are rejected. If a call fails before reaching monoBOT, retry it with the same --request-id so the work is never queued twice.\nUse list to discover allowed harness/model IDs. Delegate bounded tasks with project-relative files (directories reserve their descendants), self-contained prompts and dependsOn task IDs. You may read and plan; leave project file edits to workers. Never start workers outside this CLI. Workers with overlapping files are queued.\nAgents never prompt the user. When one needs an approval or answers a question, list, get and wait report it as needsInput on that task, and you decide with respond or answer; it stays stopped until you do. Put it to the user in this conversation only when the call is genuinely theirs.\nSteer a running agent with steer; use message once it has stopped. completed means a turn finished, not that the work passed review. Review the actual changes (each worker has its own worktree, reported as workspace in get), message a worker for fixes, and use review to accept each completed task: that applies its changes to your checkout. Call finish only when required work and combined validation are complete. You receive worker results automatically when idle; use bounded wait calls while supervising. If the run is paused, stop polling, report the reason and ask the user to click Resume.\n</monocode_orchestration>"
     )
 }
 
@@ -536,7 +536,7 @@ impl Run {
     pub fn inactive_reason(&self) -> String {
         if self.status == RunStatus::Paused {
             format!(
-                "This run is paused. {} list, get and wait remain available for inspection. Do not retry mutations or keep polling: explain the pause and ask the user to click Resume in MonoBOT. Resume continues interrupted tasks from their retained worker checkouts.",
+                "This run is paused. {} list, get and wait remain available for inspection. Do not retry mutations or keep polling: explain the pause and ask the user to click Resume in monoBOT. Resume continues interrupted tasks from their retained worker checkouts.",
                 self.error.as_deref().unwrap_or("Work was interrupted.")
             )
         } else {

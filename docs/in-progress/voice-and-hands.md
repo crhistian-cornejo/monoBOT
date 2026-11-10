@@ -2,16 +2,16 @@
 
 A review on Nov 8, 2026 of what IVY (`~/Developer/IVY`) does for voice, calls
 in the JOSIE-Voice style, realtime speech and acting on the computer, against
-what MonoBOT does today. It extends [ivy-review.md](ivy-review.md), which
+what monoBOT does today. It extends [ivy-review.md](ivy-review.md), which
 already covers the harness, Decider and the Gemini Live design for group
 calls. Paths that start with `IVY/` are in that repository.
 
-## Where MonoBOT stands
+## Where monoBOT stands
 
 Group calls and dictation work end to end and their tests pass (see
 ivy-review.md), but the scope is narrow:
 
-| Area | MonoBOT today | IVY |
+| Area | monoBOT today | IVY |
 | --- | --- | --- |
 | Ear (STT) | Parakeet v3 int8 + Silero, one phrase at a time, no partials | Parakeet, Whisper turbo, Qwen3-ASR (hotwords), CoreML Parakeet; ElevenLabs Scribe in the cloud; partial every 320 ms |
 | Voice (TTS) | Supertonic 3, en/es, one synth at a time | Phonon (local `ptts`), ElevenLabs, Gradium, Phonic, Gemini TTS, system voice fallback; synth ahead |

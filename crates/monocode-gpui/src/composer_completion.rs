@@ -412,7 +412,7 @@ impl Completion {
         cx.notify();
     }
     /// A skill or provider command already named `/{name}`, which wins over
-    /// MonoBOT's own command of the same name.
+    /// monoBOT's own command of the same name.
     pub(crate) fn has_user_command(&self, name: &str) -> bool {
         self.skills
             .iter()
@@ -855,7 +855,7 @@ impl Completion {
                     "Orchestrator",
                     "Plan and coordinate agent work",
                 ),
-                ("operator", "Operator", "Give this thread access to MonoBOT"),
+                ("operator", "Operator", "Give this thread access to monoBOT"),
                 ("plan", "Plan mode", "Review a plan before building"),
                 (
                     "btw",

@@ -1,4 +1,4 @@
-//! Live voice for MonoBOT's calls, as IVY runs it
+//! Live voice for monoBOT's calls, as IVY runs it
 //! (`IVY/crates/voice/src/{gemini,gemini_live,phonic,phonic_live}.rs`): a
 //! model that hears the user and answers out loud in real time, and asks the
 //! user's agents through a tool when it needs them.

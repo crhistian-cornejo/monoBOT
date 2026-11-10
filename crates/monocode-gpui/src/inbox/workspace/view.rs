@@ -809,7 +809,7 @@ impl Workspace {
 
         let mailflare = section(
             "Remote mail server",
-            "A mail server you host that speaks MCP can let bots read that mailbox and its schedule. MonoBOT connects to the address below with the token you save here.",
+            "A mail server you host that speaks MCP can let bots read that mailbox and its schedule. monoBOT connects to the address below with the token you save here.",
         )
         .child(labelled("Server URL", &self.mailflare_url, window, cx))
         .child(self.secret_field(
@@ -855,7 +855,7 @@ impl Workspace {
 
         let sending = section(
             "Sending",
-            "How a reply leaves MonoBOT when you send it from the Email tab.",
+            "How a reply leaves monoBOT when you send it from the Email tab.",
         )
         .child(
             div()
@@ -919,7 +919,7 @@ impl Workspace {
 
         let inbound = section(
             "Inbound mail",
-            "Mail for your own domain arrives at a Worker you host. MonoBOT fetches it from there with the secret below; nothing is pushed into the app.",
+            "Mail for your own domain arrives at a Worker you host. monoBOT fetches it from there with the secret below; nothing is pushed into the app.",
         )
         .child(labelled("Worker URL", &self.inbound_url, window, cx))
         .child(self.secret_field(

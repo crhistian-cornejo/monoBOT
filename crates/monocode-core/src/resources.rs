@@ -1,4 +1,4 @@
-//! System pressure and the processes MonoBOT owns, extracted from
+//! System pressure and the processes monoBOT owns, extracted from
 //! src-tauri/src/resources.rs and resourcePressure.ts.
 use crate::process::{self, Agent};
 use std::collections::{HashMap, HashSet};
@@ -276,7 +276,7 @@ fn validate_tool<'a>(
     processes: &HashMap<u32, Process>,
     roots: &'a [Agent],
 ) -> Result<&'a Agent, String> {
-    let root = owner(pid, processes, roots).ok_or("This process is no longer owned by MonoBOT")?;
+    let root = owner(pid, processes, roots).ok_or("This process is no longer owned by monoBOT")?;
     if identity(root.pid) != root.identity {
         return Err("The owning agent has exited or changed".into());
     }
@@ -287,7 +287,7 @@ fn validate_tool<'a>(
         return Err("This process has exited or changed; refresh the list".into());
     }
     if !live_descendant(pid, root.pid, root.identity.as_deref().unwrap_or_default()) {
-        return Err("This process is no longer owned by MonoBOT".into());
+        return Err("This process is no longer owned by monoBOT".into());
     }
     Ok(root)
 }

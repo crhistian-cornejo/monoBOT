@@ -6396,9 +6396,9 @@ mod mono_status_tests {
         assert_eq!(
             label(vec![
                 prompt.clone(),
-                row("reasoning", "**Finding the MonoBOT repo**\n\nLooking…")
+                row("reasoning", "**Finding the monoBOT repo**\n\nLooking…")
             ]),
-            "Finding the MonoBOT repo…"
+            "Finding the monoBOT repo…"
         );
         // Raw thinking prose has no heading, so it stays generic.
         assert_eq!(

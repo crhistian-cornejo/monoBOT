@@ -1,4 +1,4 @@
-# MonoBOT remote host (`monocode-host`)
+# monoBOT remote host (`monocode-host`)
 
 A small Node service that runs on a remote machine (installed by the desktop
 app over SSH, or started by hand). It runs the provider CLIs there and serves

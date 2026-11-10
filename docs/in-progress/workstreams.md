@@ -23,7 +23,7 @@ flowchart TD
 - **El orquestador** es un Mono más: tiene su chat, su memoria y sus hábitos. No escribe código; planifica, reparte y coordina. Sus instrucciones salen de `workstreamBrief` en `src/features/workstreams/model/workstreams.ts` (Tauri).
 - **Cada agente** es una sesión normal, abierta en un **worktree propio** del repositorio. Así nunca pisa los archivos de otro. Trabaja en la rama `ws/<nombre>/<parte>` y termina abriendo un **pull request en borrador**.
 - **La carpeta compartida** guarda lo que no es código: el plan (`plan.md`), notas, hallazgos y entregables. En Windows está en `%APPDATA%\com.monocode.desktop\workstreams\<id>`.
-- **Todo corre en tu ordenador.** Si cierras MonoBOT, el orquestador y los agentes se detienen.
+- **Todo corre en tu ordenador.** Si cierras monoBOT, el orquestador y los agentes se detienen.
 
 ## Antes de empezar
 
@@ -35,7 +35,7 @@ flowchart TD
    gh repo set-default crhistian-cornejo/monoBOT
    ```
 
-   El Inbox de MonoBOT ya usa `origin` por su cuenta. Este comando también sirve para `gh` en la terminal y para los agentes.
+   El Inbox de monoBOT ya usa `origin` por su cuenta. Este comando también sirve para `gh` en la terminal y para los agentes.
 
 ## Crear un workstream
 

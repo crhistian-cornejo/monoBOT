@@ -4,7 +4,7 @@ version = "0.0.0"
 edition.workspace = true
 license.workspace = true
 publish = false
-description = "MonoBOT's build, packaging and release tooling (`cargo xtask`)."
+description = "monoBOT's build, packaging and release tooling (`cargo xtask`)."
 
 [features]
 # The icon generators evaluate npm packages with QuickJS. It is optional so the

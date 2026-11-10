@@ -1,6 +1,6 @@
 //! The connected mail accounts (the desktop app's MailAccounts): who can read each one,
 //! removing one, and the form that connects another (`connect.rs`). The password goes
-//! straight to the system's store; MonoBOT only reads mail and sends the replies the user
+//! straight to the system's store; monoBOT only reads mail and sends the replies the user
 //! sends.
 use super::*;
 
@@ -156,7 +156,7 @@ impl Mailbox {
                                         .text_size(px(12.))
                                         .line_height(px(19.))
                                         .text_color(content(0.55))
-                                        .child("MonoBOT fetches them for the message, with no cookies. A sender can still tell you opened it. Mail held back as suspicious never loads them on its own."),
+                                        .child("monoBOT fetches them for the message, with no cookies. A sender can still tell you opened it. Mail held back as suspicious never loads them on its own."),
                                 ),
                         )
                         .child(

@@ -1,10 +1,10 @@
-# MonoBOT inbound mail Worker (optional)
+# monoBOT inbound mail Worker (optional)
 
 A small Cloudflare Worker, written in Rust and compiled to WebAssembly with
 [workers-rs](https://github.com/cloudflare/workers-rs), that receives mail
 through Cloudflare Email Routing, stores it durably, and lets the desktop app
 pull it later over HTTPS. Nothing
-here runs unless you deploy it; MonoBOT works without it.
+here runs unless you deploy it; monoBOT works without it.
 
 ```
 sender -> Cloudflare Email Routing -> Worker email() -> R2 (raw MIME) + D1 (index)
@@ -153,7 +153,7 @@ npx wrangler r2 bucket lifecycle add monobot-inbound-mail-raw expire-raw-mail ma
 #    (flags differ between wrangler versions; check `npx wrangler r2 bucket lifecycle add --help`)
 
 # 4. Generate a random token (at least 32 characters) in your password manager.
-#    Paste the same token into this interactive secret prompt and MonoBOT's
+#    Paste the same token into this interactive secret prompt and monoBOT's
 #    protected inbound-token field. Never paste it into chat or a config file.
 npx wrangler secret put INBOUND_TOKEN
 
@@ -223,7 +223,7 @@ reuse, retention, and log hygiene.
 
 ## Source references
 
-- Integration guide and all remaining account/deployment work: [MonoBOT mail workspace](../../docs/in-progress/mail-workspace.md).
+- Integration guide and all remaining account/deployment work: [monoBOT mail workspace](../../docs/in-progress/mail-workspace.md).
 - Reference project (used through its public MCP interface, not copied): https://github.com/hieunc229/mailflare
 
 - Email Workers runtime API (`email()` handler, `from`, `to`, `raw`, `rawSize`, `setReject`): https://developers.cloudflare.com/email-routing/email-workers/runtime-api/

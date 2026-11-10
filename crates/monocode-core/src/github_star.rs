@@ -1,4 +1,4 @@
-//! Whether the active GitHub CLI account has starred MonoBOT, and starring it.
+//! Whether the active GitHub CLI account has starred monoBOT, and starring it.
 use std::path::PathBuf;
 
 pub const REPOSITORY_URL: &str = "https://github.com/crhistian-cornejo/monoBOT";

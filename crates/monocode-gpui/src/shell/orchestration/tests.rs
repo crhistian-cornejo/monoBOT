@@ -410,7 +410,7 @@ fn an_interrupted_run_comes_back_paused_and_resumes_its_worker_in_place(cx: &mut
                 view.orchestration_progress
                     .as_deref()
                     .unwrap()
-                    .contains("MonoBOT closed")
+                    .contains("monoBOT closed")
             );
             let paused = call(
                 shell,

@@ -3,7 +3,7 @@ name = "monobot-live"
 version.workspace = true
 edition = "2024"
 license.workspace = true
-description = "Live voice for MonoBOT's calls: Gemini Live and Phonic speech-to-speech over a WebSocket, with the tools that reach the user's agents. No interface; the app paints and connects."
+description = "Live voice for monoBOT's calls: Gemini Live and Phonic speech-to-speech over a WebSocket, with the tools that reach the user's agents. No interface; the app paints and connects."
 
 [dependencies]
 serde_json.workspace = true

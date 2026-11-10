@@ -1,4 +1,4 @@
-//! Local dictation for MonoBOT's composer: the microphone feeds
+//! Local dictation for monoBOT's composer: the microphone feeds
 //! a Silero voice detector, and each phrase it closes is transcribed by
 //! Parakeet v3 while the user keeps talking, so the text is ready the moment
 //! they stop. On Apple silicon Parakeet runs on the Neural Engine

@@ -74,7 +74,7 @@ pub struct Plan {
     pub summary: String,
     pub tasks: Vec<Task>,
 }
-pub const INSTRUCTIONS: &str = r#"Prepare an orchestration plan for the user's request. Inspect the project with read-only tools. Do not edit or launch workers yet. The user will review and start the plan in MonoBOT.
+pub const INSTRUCTIONS: &str = r#"Prepare an orchestration plan for the user's request. Inspect the project with read-only tools. Do not edit or launch workers yet. The user will review and start the plan in monoBOT.
 Return a short explanation followed by exactly one JSON block between <monocode_orchestration> and </monocode_orchestration>.
 Schema: {"title":"short title","summary":"approach","tasks":[{"id":"task-1","title":"assignment title","prompt":"complete self-contained instructions, validation and expected report","files":["src/path"],"depends_on":[]}]}
 Use 1 to 12 assignments, unique ASCII IDs, exact project-relative file or directory scopes ('.' for the whole project), and dependency IDs. Independent assignments may run concurrently (up to four), each in its own worktree; overlapping scopes run serially. Workers use this session's provider and model unless the user changes them on the card. After the user starts the plan you supervise the workers and review their changes. Include verification in the assignments. Never claim that workers have already started."#;

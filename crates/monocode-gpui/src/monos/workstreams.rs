@@ -152,7 +152,7 @@ pub(super) const STEPS: [Step; 4] = [
     },
     Step {
         title: "Review what comes back",
-        body: "Follow each agent in Agents, read plans and notes in Files, and review the work in Pull requests. Agents run on this computer and stop when you quit MonoBOT. A workstream uses far more tokens than one session, so keep it for large work.",
+        body: "Follow each agent in Agents, read plans and notes in Files, and review the work in Pull requests. Agents run on this computer and stop when you quit monoBOT. A workstream uses far more tokens than one session, so keep it for large work.",
         diagram: || fan("Workstream", ["Agents", "Files", "Pull requests"]),
     },
 ];
@@ -716,7 +716,7 @@ impl Render for NewWorkstreamDialog {
                     .py_3()
                     .child(beta_badge())
                     .child(
-                        hint("Runs on this computer and stops when you quit MonoBOT.")
+                        hint("Runs on this computer and stops when you quit monoBOT.")
                             .flex_1()
                             .min_w_0(),
                     )

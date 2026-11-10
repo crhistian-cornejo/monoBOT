@@ -1,4 +1,4 @@
-//! What Echo's `echo-base` gave this crate, made from MonoBOT's own pieces: the
+//! What Echo's `echo-base` gave this crate, made from monoBOT's own pieces: the
 //! system's store of secrets, a log line, and the TLS settings of a connection
 //! opened by hand (IMAP and SMTP).
 

@@ -55,7 +55,7 @@ enum Line {
 const GET: &[Line] = &[
     Line::Out("Downloading Poki's published release (about 11 MB)…", false),
     Line::Out("SHA-256 matches the one GitHub lists", true),
-    Line::Out("Unpacked inside MonoBOT's data folder", true),
+    Line::Out("Unpacked inside monoBOT's data folder", true),
     Line::Out("No install scripts run", true),
 ];
 const START: &[Line] = &[
@@ -92,7 +92,7 @@ impl Scene {
             Scene::Developer => developer(secs),
             Scene::Start => terminal(
                 START,
-                "MonoBOT runs this for you while the connector is on",
+                "monoBOT runs this for you while the connector is on",
                 secs,
             ),
             Scene::Folder => folder(secs),
@@ -507,7 +507,7 @@ fn toggle(on: f32) -> Div {
         )
 }
 
-/// MonoBOT's own setting being filled in, its status turning to Ready. The
+/// monoBOT's own setting being filled in, its status turning to Ready. The
 /// path and the status are examples; the step prints the real status itself.
 fn folder(secs: f32) -> Div {
     const PATH: &str = "/Users/you/poki";

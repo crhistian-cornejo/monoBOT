@@ -168,7 +168,7 @@ pub fn show(notification: Notification, _: &gpui::App) -> Receiver<Result<(), St
             return;
         }
         let content = UNMutableNotificationContent::new();
-        content.setTitle(&NSString::from_str("MonoBOT"));
+        content.setTitle(&NSString::from_str("monoBOT"));
         content.setSubtitle(&NSString::from_str(&notification.subtitle));
         content.setBody(&NSString::from_str(&notification.body));
         content.setCategoryIdentifier(&NSString::from_str(CATEGORY));

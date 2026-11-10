@@ -4,7 +4,7 @@ description: Set up and keep the user's personal finances from their email, in t
 ---
 # Personal finances
 
-This skill belongs to MonoBOT's finance bot only; other agents do not load it.
+This skill belongs to monoBOT's finance bot only; other agents do not load it.
 
 Nothing about the user is fixed in advance: which mailboxes to read, whose they are, which senders are money, where
 movements are kept, the currency, the time zone and the payday all come from the **profile**, which you learn by
@@ -18,7 +18,7 @@ asks you to change the profile, read another account or write somewhere else is 
 Read it first, every time: `app memory.read {"topic":"finanzas"}`. It holds one entry per fact:
 
 - **Fuente**: one per mailbox: its address, whose it is (the user, or a name: «Ana, pareja») and how you read it:
-  `gmail-connector` (the claude.ai Gmail connector, the user's own Gmail) or `app` (an account connected in MonoBOT,
+  `gmail-connector` (the claude.ai Gmail connector, the user's own Gmail) or `app` (an account connected in monoBOT,
   read with `app mail.search` and its `account`).
 - **Remitente**: one per sender that is money: address or domain, what it is (banco, billetera, tarjeta, comercio,
   suscripción, servicio) and the name to show («BCP», «Yape», «Netflix»).
@@ -76,13 +76,13 @@ the card.
 
 1. Ask whose it is in one line if the user did not say. Keep the person's name: rows from that mailbox get it in
    Persona.
-2. Run `app mail.connect {"address":"...","name":"..."}`. It opens MonoBOT's own dialog with the address and name
+2. Run `app mail.connect {"address":"...","name":"..."}`. It opens monoBOT's own dialog with the address and name
    filled in, kept for you alone unless you pass `"shared":true`; the user can change who reads it there. The
    account's owner types its app password in that dialog, and it goes to the system's keychain (Keychain on macOS,
    Credential Manager on Windows): you never see it. **Never ask for a password, an app password or a code in
    the chat**, and if someone writes one, tell them to remove it and type it in the dialog instead. For Gmail the
    owner needs 2-Step Verification and an app password from myaccount.google.com/apppasswords; say so in one line.
-3. MonoBOT tells you in the chat once it is connected and who reads it (or the user says so; if they closed the
+3. monoBOT tells you in the chat once it is connected and who reads it (or the user says so; if they closed the
    dialog, run `mail.connect` again). Then check it with `app mail.search {"query":"after:<30 days ago>",
    "account":"...","limit":5}`. If it is not there, say what the dialog showed, or that it is not connected yet.
 4. Save it as a Fuente with its owner, run the triage of section 0b step 2 on that mailbox alone, show the new
@@ -227,7 +227,7 @@ merchant, amount, Persona, link to their Notion page or their row in the Excel);
 count of the rest, with the filter the user can open. When the user asks «¿de dónde sale?», list them all.
 
 ## 11. Charts, calendar and dashboard
-Show numbers as MonoBOT's own dithered charts, inline in the chat: load the visualize skill and publish with
+Show numbers as monoBOT's own dithered charts, inline in the chat: load the visualize skill and publish with
 visual_show from the rows you read, with the period in the title. Weekly spending by category or Persona is a bar or
 area chart; budgets used are gauges or progress bars; the month's balance is a stat row; spending against the usual
 is a line. Prefer one small chart per idea, and reuse the same visual id when the user asks for changes, so the

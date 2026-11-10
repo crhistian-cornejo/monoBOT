@@ -9,7 +9,7 @@ use crate::{
 use gpui::{AnyElement, Context, FontWeight, Role, SharedString, div, prelude::*, px};
 use monocode_core::connectors::{self, Platform, Server};
 impl SettingsView {
-    /// BuiltInConnectors: MonoBOT's own remote MCP servers, one switch each.
+    /// BuiltInConnectors: monoBOT's own remote MCP servers, one switch each.
     /// Poki's folder, status and tutorial sit under its switch.
     fn connectors_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let settings = self.ctx.connectors.clone();
@@ -133,7 +133,7 @@ impl SettingsView {
                             .mt_1()
                             .text_size(px(12.))
                             .text_color(content(0.55))
-                            .child("Remote MCP servers MonoBOT adds to each Claude turn. Nothing is installed and your Claude Code configuration stays untouched. Their read-only tools run without asking."),
+                            .child("Remote MCP servers monoBOT adds to each Claude turn. Nothing is installed and your Claude Code configuration stays untouched. Their read-only tools run without asking."),
                     ),
             )
             .child(

@@ -1,9 +1,9 @@
 //! Claude Code's and Codex's own sessions in the notch, through their hooks.
 //!
-//! Each hook is a one-line shell command, so MonoBOT ships no helper: it
+//! Each hook is a one-line shell command, so monoBOT ships no helper: it
 //! writes the source and the hook's JSON to the notch's Unix socket with
-//! `nc`, and always succeeds. When MonoBOT is closed `nc` fails at once, and
-//! the agent never waits on the notch. MonoBOT's entries carry [`MARK`]; the
+//! `nc`, and always succeeds. When monoBOT is closed `nc` fails at once, and
+//! the agent never waits on the notch. monoBOT's entries carry [`MARK`]; the
 //! merge adds them beside everybody else's hooks and touches nothing else.
 //! Claude Code reads `~/.claude/settings.json`; Codex reads
 //! `~/.codex/hooks.json`, and runs a new hook only once the user trusts it
@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::path::Path;
 
-/// In every command MonoBOT writes, so it can find its own entries.
+/// In every command monoBOT writes, so it can find its own entries.
 pub const MARK: &str = "monobot-notch";
 
 /// The Claude Code events the notch follows, with each hook's timeout.
@@ -46,7 +46,7 @@ pub const CODEX_EVENTS: &[(&str, u64)] = &[
 /// hook's JSON, to the socket; always a success.
 pub fn command(source: &str, socket: &Path) -> String {
     let socket = socket.to_string_lossy().replace('\'', r"'\''");
-    // Sessions MonoBOT runs itself carry MONOCODE_HARNESS_PARENT and are
+    // Sessions monoBOT runs itself carry MONOCODE_HARNESS_PARENT and are
     // already in the notch: their hooks stay quiet. The first line also
     // names the app the agent runs in (macOS passes its bundle id down), so
     // the notch can bring that app forward.
@@ -55,7 +55,7 @@ pub fn command(source: &str, socket: &Path) -> String {
     )
 }
 
-/// The socket as the command quotes it, to find MonoBOT's older commands
+/// The socket as the command quotes it, to find monoBOT's older commands
 /// for it.
 fn quoted(socket: &Path) -> String {
     format!("'{}'", socket.to_string_lossy().replace('\'', r"'\''"))
@@ -67,7 +67,7 @@ fn ours(handler: &Value) -> bool {
         .is_some_and(|command| command.contains(MARK))
 }
 
-/// The hook file with MonoBOT's entry for `socket` on every event, beside
+/// The hook file with monoBOT's entry for `socket` on every event, beside
 /// whatever else it holds. `None` when it already has them all. A file that
 /// is not a JSON object is refused rather than overwritten.
 pub fn merge(
@@ -96,7 +96,7 @@ pub fn merge(
         let Some(groups) = groups.as_array_mut() else {
             return Err(format!("\"hooks.{event}\" is not a list"));
         };
-        // An older MonoBOT command for this same socket gives way to this one.
+        // An older monoBOT command for this same socket gives way to this one.
         let before: usize = groups
             .iter()
             .map(|group| group["hooks"].as_array().map_or(0, Vec::len))
@@ -141,7 +141,7 @@ pub fn merge(
         .map_err(|error| error.to_string())
 }
 
-/// The hook file without any of MonoBOT's entries; everything else stays.
+/// The hook file without any of monoBOT's entries; everything else stays.
 pub fn remove(file: &str) -> Result<String, String> {
     let mut root: Value = serde_json::from_str(file).map_err(|error| error.to_string())?;
     if let Some(hooks) = root["hooks"].as_object_mut() {
@@ -163,7 +163,7 @@ pub fn remove(file: &str) -> Result<String, String> {
     serde_json::to_string_pretty(&root).map_err(|error| error.to_string())
 }
 
-/// Adds MonoBOT's hooks for `socket` to Claude Code's and Codex's files
+/// Adds monoBOT's hooks for `socket` to Claude Code's and Codex's files
 /// under `home`, where each agent is installed (its folder exists). The
 /// first change of a file keeps a copy beside it (`.monobot-backup`), and
 /// every write goes through a temporary file. Returns what was done, by
@@ -302,7 +302,7 @@ struct External {
     seen_at: u64,
 }
 
-/// The sessions outside MonoBOT, by their agent's session id.
+/// The sessions outside monoBOT, by their agent's session id.
 #[derive(Debug, Default)]
 pub struct Externals {
     sessions: HashMap<String, External>,
@@ -410,7 +410,7 @@ impl Externals {
     }
 
     /// The sessions at work, waiting or just finished, for the notch. Each
-    /// gets a negative id of its own, so it never meets one of MonoBOT's.
+    /// gets a negative id of its own, so it never meets one of monoBOT's.
     pub fn activities(&self) -> Vec<Activity> {
         let mut activities: Vec<Activity> = self
             .sessions

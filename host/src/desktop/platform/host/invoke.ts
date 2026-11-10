@@ -11,7 +11,7 @@ export function invoke<T>(
   _args?: Record<string, unknown>,
 ): Promise<T> {
   return Promise.reject(
-    new Error(`${command} is not available on MonoBOT Host`),
+    new Error(`${command} is not available on monoBOT Host`),
   );
 }
 
@@ -20,6 +20,6 @@ export function listen<T>(
   _handler: (event: { payload: T }) => void,
 ): Promise<UnlistenFn> {
   return Promise.reject(
-    new Error(`${event} events are not available on MonoBOT Host`),
+    new Error(`${event} events are not available on monoBOT Host`),
   );
 }

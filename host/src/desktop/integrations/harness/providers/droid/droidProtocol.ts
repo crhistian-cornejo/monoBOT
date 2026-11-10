@@ -19,7 +19,7 @@ export type DroidModeId =
   | "auto-high";
 
 /**
- * MonoBOT's permission mode as a Droid autonomy level. Supervised lets Droid
+ * monoBOT's permission mode as a Droid autonomy level. Supervised lets Droid
  * read on its own and asks for everything else; full access lets it run all.
  * Planning uses Droid's own Spec mode, which is read-only.
  */

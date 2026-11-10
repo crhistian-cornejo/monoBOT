@@ -69,7 +69,7 @@ fn plugin_names_and_uses_match_the_desktop() {
     fixed.extend(ids(PluginUse::Bot));
     assert_eq!(union(PLUGINS, "BundledPlugin"), fixed);
     assert_eq!(ids(PluginUse::Always), [ALWAYS_ON]);
-    // Every Claude session takes MonoBOT's own plugin, then a bot's packs or
+    // Every Claude session takes monoBOT's own plugin, then a bot's packs or
     // the ones turned on in Settings.
     let launch = CLAUDE
         .find("pluginDirs: await bundledPluginDirs([")
@@ -102,7 +102,7 @@ fn packs_stay_off_until_the_user_turns_one_on() {
             ("monocode.skillPack.monobot-openai.enabled", "1"),
             ("monocode.skillPack.monobot-design.enabled", "true"),
             ("monocode.skillPack.monobot-dev.enabled", "0"),
-            // Not a pack: MonoBOT's own plugin has no switch.
+            // Not a pack: monoBOT's own plugin has no switch.
             ("monocode.skillPack.monobot.enabled", "1"),
         ]),
         ["monobot-design", "monobot-openai"]

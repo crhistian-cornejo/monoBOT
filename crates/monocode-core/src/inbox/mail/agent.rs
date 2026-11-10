@@ -489,7 +489,7 @@ fn connect(
         "opened": true,
         "account": address,
         "readers": if shared { "every agent" } else { "you alone, unless the user chooses otherwise in the dialog" },
-        "note": "MonoBOT opened its own dialog with the address filled in. The mailbox's owner types the app password there (Gmail: 2-Step Verification on, then an app password from myaccount.google.com/apppasswords); it goes to the system's keychain and you never see it. Never ask for it in the chat. The user can also choose there which agents read it. When the user says it is connected, check it with mail.search and its account; if they closed the dialog, call mail.connect again.",
+        "note": "monoBOT opened its own dialog with the address filled in. The mailbox's owner types the app password there (Gmail: 2-Step Verification on, then an app password from myaccount.google.com/apppasswords); it goes to the system's keychain and you never see it. Never ask for it in the chat. The user can also choose there which agents read it. When the user says it is connected, check it with mail.search and its account; if they closed the dialog, call mail.connect again.",
         DIALOG: {"address": address, "provider": provider, "name": name, "shared": shared},
     }))
 }

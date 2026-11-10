@@ -8,7 +8,7 @@ siguen funcionando sin Cloudflare ni Mailflare.
 ### Desplegado en la cuenta de Cloudflare (8 de noviembre de 2026)
 
 La cuenta se limpió: se borraron los Workers y buckets de Buddy y Echo. Solo
-quedan recursos de MonoBOT:
+quedan recursos de monoBOT:
 
 | Recurso | Nombre | Uso |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ quedan recursos de MonoBOT:
 | R2 | `monobot-releases` | Feed del actualizador y paquetes, público en `https://pub-5244a0b3b0814931924338438f119f34.r2.dev` |
 
 `INBOUND_TOKEN` es un valor aleatorio de 64 caracteres. Está guardado como
-secreto del Worker y en el llavero de macOS con el nombre «MonoBOT inbound mail
+secreto del Worker y en el llavero de macOS con el nombre «monoBOT inbound mail
 token». Cópialo de Acceso a Llaveros al campo protegido *Inbound token* de
 **Inbox → Agenda**, junto con la URL del Worker.
 
@@ -37,7 +37,7 @@ y el modo automático de esta sesión lo bloqueó. Ver los pasos abajo.
 Repositorio de referencia: **https://github.com/hieunc229/mailflare**
 
 Se usa el protocolo MCP público de Mailflare. No se ha copiado su código AGPL
-a los crates MIT de MonoBOT.
+a los crates MIT de monoBOT.
 
 | Bloque | Implementación |
 | --- | --- |
@@ -99,7 +99,7 @@ Esto funciona igual en macOS y Windows, sin Cloudflare.
 Todo esto funciona con un Gmail normal (IMAP + contraseña de aplicación), sin
 Cloudflare ni dominio, en macOS y Windows:
 
-| Función | En MonoBOT |
+| Función | En monoBOT |
 | --- | --- |
 | Redactar y responder | **New message (C)** y **Forward (F)** en la pestaña Email (`inbox/mail/compose.rs`). Sale por SMTP con la misma contraseña de aplicación; Gmail guarda su copia en Enviados. *Save as draft* lo deja en Borradores del servidor. Un reenvío lleva el texto, no los adjuntos. |
 | El agente redacta respuestas | `mail.propose`: el agente propone una respuesta o un correo nuevo y aparece como tarjeta en su chat, con remitente, destinatarios y asunto. Solo el usuario pulsa *Send*, *Save as draft* o *Discard* (`monos/mail_card.rs`). |
@@ -110,7 +110,7 @@ Cloudflare ni dominio, en macOS y Windows:
 | Darse de baja | Botón **Unsubscribe** cuando el correo trae `List-Unsubscribe`: una petición si admite `One-Click` (RFC 8058), si no abre la página o prepara el correo al `mailto`. Nunca en correo retenido, y nunca hacia `localhost` ni la red local. |
 | Posponer | **Snooze** (3 horas, mañana 8:00, lunes 8:00). Es local: el correo sale de las vistas hasta su hora y espera en la vista **Snoozed**. |
 
-## Configuración en MonoBOT (solo con dominio propio)
+## Configuración en monoBOT (solo con dominio propio)
 
 Con Gmail o iCloud no hace falta nada de esto: la pestaña Email envía por SMTP
 con la contraseña de aplicación, y **Email › Cuentas** lo dice
@@ -148,7 +148,7 @@ En tu instancia: **Settings → API keys → Allow MCP access**.
   correspondiente. `request_send` devuelve un enlace: **no envía**.
 - No hace falta dar permisos de administración o gestión del calendario.
 
-MonoBOT lanza su propio proxy stdio (`--mailflare-mcp <data-dir>`).
+monoBOT lanza su propio proxy stdio (`--mailflare-mcp <data-dir>`).
 El token no aparece en argumentos de proceso, archivos MCP ni variables de
 entorno del agente. El proxy usa Streamable HTTP hacia `/mcp` y bloquea llamadas
 no revisadas aunque el cliente ignore la lista de herramientas.
@@ -170,7 +170,7 @@ son **locales**, no invitaciones externas.
 
 - Activa Email Sending para la cuenta y verifica el dominio remitente.
 - Crea un token con `Email Sending: Edit`, limitado a la cuenta necesaria.
-- Guarda su account ID (32 caracteres hexadecimales) y el token en MonoBOT.
+- Guarda su account ID (32 caracteres hexadecimales) y el token en monoBOT.
 - Endpoint:
   `POST https://api.cloudflare.com/client/v4/accounts/{account_id}/email/sending/send`.
 
@@ -191,7 +191,7 @@ Ese README contiene los comandos de creación, migración, secretos y despliegue
 El escritorio consulta una página de hasta 20 mensajes cada 30 segundos,
 aproximadamente, mientras está abierto. Una actualización manual de Email
 también sincroniza. El Worker recibe y almacena correo aunque el escritorio
-esté suspendido; el procesamiento de bots espera a que MonoBOT vuelva a estar
+esté suspendido; el procesamiento de bots espera a que monoBOT vuelva a estar
 abierto y tenga conexión.
 
 El cursor solo avanza después de guardar toda la página y su cola de entregas.
@@ -226,13 +226,13 @@ pueden borrar). **New event** propone el día elegido.
 format» (Google Calendar › Configuración › tu calendario › Integrar
 calendario). La dirección funciona como una contraseña: va al llavero
 (`mail-workspace-calendar-…`), el campo se vacía al guardar y nunca se
-escribe en disco. MonoBOT la descarga por HTTPS (8 MiB máx., sin red local),
+escribe en disco. monoBOT la descarga por HTTPS (8 MiB máx., sin red local),
 expande las recurrencias (`DAILY`, `WEEKLY` con `BYDAY`, `MONTHLY` con
 `BYDAY`/`BYMONTHDAY`, `YEARLY`, `INTERVAL`, `COUNT`, `UNTIL`, `EXDATE`,
 `RECURRENCE-ID` y eventos cancelados) de 62 días atrás a 400 adelante, y la
 guarda en `mail/calendar-feed.json`. Se actualiza al abrir la Agenda si tiene
 más de 15 minutos. Una regla que no sabe expandir (`BYSETPOS`…) se muestra
-solo en su primera fecha y la Agenda lo dice. Es de solo lectura: MonoBOT no
+solo en su primera fecha y la Agenda lo dice. Es de solo lectura: monoBOT no
 crea ni cambia eventos en Google, y los agentes no leen este calendario
 (`agenda_for_user` es solo para la vista del usuario).
 
@@ -277,7 +277,7 @@ Nada de esta sección se ha ejecutado contra una cuenta real.
 - [x] Aplicar la migración del Worker y desplegarlo con Wrangler autenticado (en workers.dev).
 - [ ] Con dominio: volver a `workers_dev = false`, descomentar `routes` y poner los destinatarios reales en `ALLOWED_RECIPIENTS`.
 - [x] Crear `INBOUND_TOKEN` (64 caracteres) y guardarlo como secreto del Worker
-  y en el llavero de macOS. Falta pegarlo en MonoBOT (Inbox → Agenda).
+  y en el llavero de macOS. Falta pegarlo en monoBOT (Inbox → Agenda).
 - [ ] Activar Email Routing y revisar los registros MX/SPF existentes antes de
   cambiarlos. No sustituir sin revisión el correo de un dominio en producción.
 - [ ] Crear reglas de alias hacia el Worker. Mantener catch-all desactivado

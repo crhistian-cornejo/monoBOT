@@ -185,7 +185,7 @@ impl Service {
             *old = rule.clone();
         } else {
             if saved.rules.len() >= MAX_RULES {
-                return Err(format!("MonoBOT keeps up to {MAX_RULES} rules."));
+                return Err(format!("monoBOT keeps up to {MAX_RULES} rules."));
             }
             rule.id = crate::mono::new_id();
             rule.created_at = now_ms();

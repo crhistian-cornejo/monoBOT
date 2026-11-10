@@ -1,4 +1,4 @@
-From kylezantos/design-motion-principles (https://github.com/kylezantos/design-motion-principles), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From kylezantos/design-motion-principles (https://github.com/kylezantos/design-motion-principles), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 MIT License
 

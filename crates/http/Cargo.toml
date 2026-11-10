@@ -3,7 +3,7 @@ name = "monobot-http"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "MonoBOT's HTTPS client settings: one place that decides which certificate authorities the app trusts."
+description = "monoBOT's HTTPS client settings: one place that decides which certificate authorities the app trusts."
 
 [dependencies]
 ureq = { version = "2.12.1", default-features = false, features = ["tls"] }

@@ -241,7 +241,7 @@ export function requireHostDescriptor(value: HostDescriptor): HostDescriptor {
     !Array.isArray(value.providers) ||
     !value.providers.every(isRemoteProvider)
   ) {
-    throw new Error("This machine is running an incompatible MonoBOT Host");
+    throw new Error("This machine is running an incompatible monoBOT Host");
   }
   return value;
 }

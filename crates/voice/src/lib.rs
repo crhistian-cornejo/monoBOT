@@ -1,4 +1,4 @@
-//! Local voices for MonoBOT's group calls: each member's reply is spoken by
+//! Local voices for monoBOT's group calls: each member's reply is spoken by
 //! Supertonic 3 through sherpa-onnx, in the language it was written in and in
 //! a voice of its own. Like dictation, everything runs on this machine.
 #[cfg(feature = "playback")]

@@ -4,7 +4,7 @@ version.workspace = true
 # Ported from Echo's echo-email, written for the 2024 edition.
 edition = "2024"
 license.workspace = true
-description = "The user's mail in MonoBOT: IMAP accounts with an app password (Gmail, iCloud or any server), reading, sorting and actions, and the reply the user sends with their own press. Ported from Echo (MIT)."
+description = "The user's mail in monoBOT: IMAP accounts with an app password (Gmail, iCloud or any server), reading, sorting and actions, and the reply the user sends with their own press. Ported from Echo (MIT)."
 
 [dependencies]
 monobot-http = { path = "../http" }

@@ -85,7 +85,7 @@ export function ConnectScreen() {
             tintColor={colors.content}
             accessibilityIgnoresInvertColors
           />
-          <Text style={styles.wordmark}>MonoBOT</Text>
+          <Text style={styles.wordmark}>monoBOT</Text>
         </Animated.View>
         <Animated.View
           style={styles.intro}
@@ -104,7 +104,7 @@ export function ConnectScreen() {
             onLayout={colliders.layout("subtitle")}
             onTextLayout={colliders.lines("subtitle")}
           >
-            Pair this phone with MonoBOT on your desktop to pick up your
+            Pair this phone with monoBOT on your desktop to pick up your
             sessions on the go.
           </Text>
         </Animated.View>

@@ -41,7 +41,7 @@ In this order, leaving out a section only when it has nothing:
 
 ## 3. Clean the text
 
-MonoBOT already cleans documents saved with `artifacts.write` and text the user copies from the chat. A file you write
+monoBOT already cleans documents saved with `artifacts.write` and text the user copies from the chat. A file you write
 yourself (Markdown, text, Word, Excel, PowerPoint) is yours to clean, every time, before you say it is ready:
 
 ```bash

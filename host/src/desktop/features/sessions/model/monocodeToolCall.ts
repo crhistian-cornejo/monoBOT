@@ -120,7 +120,7 @@ export function monoCodeToolCall(block: Block): MonoCodeToolCall | undefined {
   return { action, label: ACTION_LABELS[action], command };
 }
 
-/** A group of only MonoBOT calls can be named for the app, not the shell. */
+/** A group of only monoBOT calls can be named for the app, not the shell. */
 export function monoCodeWorkSummary(
   steps: Block[],
   live: boolean,
@@ -134,5 +134,5 @@ export function monoCodeWorkSummary(
   if (calls.length === 0 || calls.some((block) => !monoCodeToolCall(block))) {
     return undefined;
   }
-  return live ? "Using MonoBOT" : "Used MonoBOT";
+  return live ? "Using monoBOT" : "Used monoBOT";
 }

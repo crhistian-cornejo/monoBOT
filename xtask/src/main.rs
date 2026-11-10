@@ -1,4 +1,4 @@
-//! MonoBOT's desktop tooling: `cargo xtask <command>`.
+//! monoBOT's desktop tooling: `cargo xtask <command>`.
 //!
 //! Builds, runs, packages and releases the GPUI app without Node, Bun or
 //! Python. External tools that only exist as programs (codesign, notarytool,

@@ -26,14 +26,14 @@ const PROVIDERS: [(&str, &str); 3] = [
 fn steps(provider: &str) -> (&'static str, Option<(&'static str, &'static str)>) {
     match provider {
         "gmail" => (
-            "Gmail needs 2-Step Verification on, then an app password: create one named MonoBOT and paste its 16 letters here.",
+            "Gmail needs 2-Step Verification on, then an app password: create one named monoBOT and paste its 16 letters here.",
             Some((
                 "Create a Gmail app password",
                 "https://myaccount.google.com/apppasswords",
             )),
         ),
         "icloud" => (
-            "Sign in to your Apple Account, open Sign-In and Security, then App-Specific Passwords, and create one for MonoBOT.",
+            "Sign in to your Apple Account, open Sign-In and Security, then App-Specific Passwords, and create one for monoBOT.",
             Some((
                 "Open your Apple Account",
                 "https://account.apple.com/account/manage",
@@ -507,7 +507,7 @@ impl ConnectForm {
                     .line_height(px(17.))
                     .text_color(content(0.45))
                     .child(format!(
-                        "The password goes to {} and nowhere else: not to a file, the chat or any model. MonoBOT reads the mail and sends only the replies you send yourself; it never deletes mail.",
+                        "The password goes to {} and nowhere else: not to a file, the chat or any model. monoBOT reads the mail and sends only the replies you send yourself; it never deletes mail.",
                         keychain_name()
                     )),
             )

@@ -1,4 +1,4 @@
-//! `cargo xtask logo`: redraws every MonoBOT icon from `assets/logo/monobot.svg`.
+//! `cargo xtask logo`: redraws every monoBOT icon from `assets/logo/monobot.svg`.
 //!
 //! The mark is one path. Each icon places it on a square: alone in white or
 //! black for the app to tint, on black, cut out of black, or on the rounded

@@ -20,7 +20,7 @@ Fedora needs no extra repository step:
 sudo dnf install ./monobot-*.x86_64.rpm
 ```
 
-Enterprise Linux 10 needs EPEL first, because `webkit2gtk4.1` is an EPEL package there. CRB is not needed to run MonoBOT.
+Enterprise Linux 10 needs EPEL first, because `webkit2gtk4.1` is an EPEL package there. CRB is not needed to run monoBOT.
 
 On Rocky, Alma, or CentOS Stream 10:
 

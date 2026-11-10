@@ -65,7 +65,7 @@ pub(super) struct Control {
 pub(super) fn restore(runs: HashMap<i64, Run>) -> HashMap<i64, Live> {
     runs.into_iter()
         .map(|(lead, mut run)| {
-            run.pause("MonoBOT closed while this run was working. Its agents were stopped.");
+            run.pause("monoBOT closed while this run was working. Its agents were stopped.");
             (lead, Live::new(run))
         })
         .collect()
@@ -197,7 +197,7 @@ impl Shell {
         if self.app_bridge.is_none() && !cx.is_test() {
             return fail(
                 self,
-                "MonoBOT app access is unavailable, so the lead cannot supervise workers.".into(),
+                "monoBOT app access is unavailable, so the lead cannot supervise workers.".into(),
                 cx,
             );
         }

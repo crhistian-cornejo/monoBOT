@@ -1,7 +1,7 @@
-# MonoBOT 0.16.0 preview
+# monoBOT 0.16.0 preview
 
-First MonoBOT release built only with Rust + GPUI. The earlier React/Tauri
-desktop app is no longer part of MonoBOT.
+First monoBOT release built only with Rust + GPUI. The earlier React/Tauri
+desktop app is no longer part of monoBOT.
 
 ## What's in it
 
@@ -18,7 +18,7 @@ desktop app is no longer part of MonoBOT.
 
 - macOS is the main verified platform. Linux and Windows packages still need
   wider runtime testing; see [preview limitations](../in-progress/limitations.md).
-- Updates are signed with MonoBOT's own update key. Builds signed with the old
+- Updates are signed with monoBOT's own update key. Builds signed with the old
   Tauri key cannot update to this release; install it fresh.
 - On macOS the app is now `monoBOT.app`. Previews 1–14, installed as
   `MonoBOT Native.app`, cannot update themselves to this release: install it

@@ -1,12 +1,12 @@
 name: Feature request
-description: Suggest an idea or improvement for MonoBOT
+description: Suggest an idea or improvement for monoBOT
 title: "[Feature]: "
 labels: [enhancement]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks for helping improve MonoBOT.
+        Thanks for helping improve monoBOT.
 
   - type: textarea
     id: problem
@@ -21,7 +21,7 @@ body:
     id: solution
     attributes:
       label: Proposed solution
-      description: What would you like MonoBOT to do?
+      description: What would you like monoBOT to do?
     validations:
       required: true
 

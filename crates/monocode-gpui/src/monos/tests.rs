@@ -4253,7 +4253,7 @@ fn a_group_asks_its_members_in_their_seats_and_posts_their_answers(cx: &mut Test
     }));
     assert!(lead_outbox(cx).iter().any(|m| {
         m.internal
-            && m.text.starts_with("MonoBOT completion notification")
+            && m.text.starts_with("monoBOT completion notification")
             && m.text.contains("Find the October invoices")
     }));
     let refused = call(

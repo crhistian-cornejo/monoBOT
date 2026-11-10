@@ -1,6 +1,6 @@
 The guides in `references/` come from Threejs-Awesome-Graphics-Agent-Skills
 (https://github.com/scottstts/Threejs-Awesome-Graphics-Agent-Skills), adapted
-for MonoBOT: cross-references now point at the local files.
+for monoBOT: cross-references now point at the local files.
 
 MIT License
 

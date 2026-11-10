@@ -18,7 +18,7 @@ import { allModels } from "./models";
 import { monoCodeWorkSummary } from "./monocodeToolCall";
 
 /** The system notice older desktops wrote for a turn cut short by quitting. */
-const INTERRUPT_MESSAGE = "Turn interrupted when MonoBOT quit.";
+const INTERRUPT_MESSAGE = "Turn interrupted when monoBOT quit.";
 
 export type ToolCallState = "pending" | "accepted" | "rejected";
 

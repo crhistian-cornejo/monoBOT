@@ -24,9 +24,9 @@ use std::{
 
 pub const FORMAT: &str = "monobot.bots";
 pub const VERSION: u32 = 1;
-pub const NOT_AN_EXPORT: &str = "That file is not a MonoBOT bots export.";
+pub const NOT_AN_EXPORT: &str = "That file is not a monoBOT bots export.";
 pub const NEWER_EXPORT: &str =
-    "That export comes from a newer MonoBOT. Update this one, then import it.";
+    "That export comes from a newer monoBOT. Update this one, then import it.";
 pub const NO_BOTS: &str = "There are no bots to export yet.";
 /// The providers a bot's model may name (HARNESSES in sessions/model/session.ts).
 pub const HARNESSES: [&str; 12] = [
@@ -409,7 +409,7 @@ pub struct BotModel {
 }
 
 impl BotModel {
-    /// The model when it is one MonoBOT knows, its settings bounded
+    /// The model when it is one monoBOT knows, its settings bounded
     /// (parseBotModel); none for anything else.
     fn parse(value: &Json) -> Option<Self> {
         let harness = value.get("harness")?.as_str()?;
@@ -774,7 +774,7 @@ pub struct Comparison {
 /// The tools compared, with their labels (TOOL_LABELS).
 const TOOL_LABELS: [(&str, &str); 5] = [
     ("services", "Accounts"),
-    ("plugins", "MonoBOT skills"),
+    ("plugins", "monoBOT skills"),
     ("access", "Access"),
     ("connectors", "Connectors"),
     ("skills", "Skills"),

@@ -5,7 +5,7 @@
 //! `saveSoundsVolume`) and the "Sound volume" slider of the settings. The cues
 //! themselves (and the on/off switch) live in the app crate's `sound.rs`.
 //!
-//! The user sets a percentage (0 to 100) of the loudest MonoBOT plays; the
+//! The user sets a percentage (0 to 100) of the loudest monoBOT plays; the
 //! system volume still scales it, as it does any app's sound. The cues were
 //! quiet on laptop speakers and headphones, since the engine's limiter keeps
 //! peaks near -8 dBFS, so the output is lifted by [`BOOST`] after the limiter:
@@ -23,7 +23,7 @@ use crate::store::Store;
 /// Store setting (and Tauri `localStorage` key) of the volume.
 pub const SETTING_KEY: &str = "monocode.soundsVolume";
 
-/// The volume when nobody chose: the loudest MonoBOT plays.
+/// The volume when nobody chose: the loudest monoBOT plays.
 pub const VOLUME_DEFAULT: u8 = 100;
 
 /// Gain applied after the engine's limiter (about +5 dB).

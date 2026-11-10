@@ -447,7 +447,7 @@ fn skill_list(value: &Value) -> Result<Vec<String>, String> {
 }
 
 /// The services and skills a bot keeps, from a complete list (requiredTools).
-/// A list left out keeps what it has; a name MonoBOT does not know is an error.
+/// A list left out keeps what it has; a name monoBOT does not know is an error.
 pub fn required_tools(
     input: &Value,
     current: &bot_tools::Tools,
@@ -457,7 +457,7 @@ pub fn required_tools(
     let skills = input.get("skills").map(skill_list).transpose()?;
     Ok(BotTools {
         services: list(input, "services", &bot_tools::SERVICES, &current.services)?,
-        // "skills" names MonoBOT's own packs and installed skills alike.
+        // "skills" names monoBOT's own packs and installed skills alike.
         plugins: match &skills {
             None => current.plugins.clone(),
             Some(names) => bot_tools::PLUGINS

@@ -273,7 +273,7 @@ impl Store {
         ] {
             if !columns.contains(required) {
                 return Err(format!(
-                    "Unsupported MonoBOT database: missing sessions.{required}. No schema changes were made."
+                    "Unsupported monoBOT database: missing sessions.{required}. No schema changes were made."
                 ));
             }
         }
@@ -412,7 +412,7 @@ impl Store {
     }
     pub(super) fn shared_writable(&self) -> Result<(), String> {
         if self.shared.as_ref().unwrap().read_only {
-            Err("This MonoBOT store is read-only".into())
+            Err("This monoBOT store is read-only".into())
         } else {
             Ok(())
         }

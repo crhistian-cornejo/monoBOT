@@ -17,7 +17,7 @@ pub(super) fn microphone() -> Result<(), String> {
     // AVAuthorizationStatus.
     const NOT_DETERMINED: isize = 0;
     const AUTHORIZED: isize = 3;
-    const DENIED: &str = "Microphone access is off for MonoBOT. Turn it on in System Settings → Privacy & Security → Microphone.";
+    const DENIED: &str = "Microphone access is off for monoBOT. Turn it on in System Settings → Privacy & Security → Microphone.";
 
     let Some(device) = AnyClass::get(c"AVCaptureDevice") else {
         return Err("Microphone: AVFoundation is not available".into());

@@ -58,7 +58,7 @@ impl Status {
             } else {
                 button.setTitle(&NSString::from_str("Mono"));
             }
-            button.setToolTip(Some(&NSString::from_str("MonoBOT")));
+            button.setToolTip(Some(&NSString::from_str("monoBOT")));
         }
         Some(Self {
             item,
@@ -94,7 +94,7 @@ impl Status {
             run.clone(),
         ));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
-        menu.addItem(&Item::new(mtm, "Quit MonoBOT", "quit".into(), run));
+        menu.addItem(&Item::new(mtm, "Quit monoBOT", "quit".into(), run));
         self.item.setMenu(Some(&menu));
     }
 }

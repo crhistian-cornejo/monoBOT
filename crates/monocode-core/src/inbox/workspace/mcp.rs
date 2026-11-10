@@ -199,7 +199,7 @@ fn proxy(service: &Service, mut input: impl BufRead, mut output: impl Write) -> 
                 }
             }
         } else {
-            json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32601,"message":"Tool or method not permitted by MonoBOT."}})
+            json!({"jsonrpc":"2.0","id":request["id"],"error":{"code":-32601,"message":"Tool or method not permitted by monoBOT."}})
         };
         if request.get("id").is_some() {
             serde_json::to_writer(&mut output, &response).map_err(|_| "MCP output failed.")?;

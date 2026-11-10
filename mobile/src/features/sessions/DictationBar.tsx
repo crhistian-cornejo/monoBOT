@@ -113,7 +113,7 @@ export function DictationBar({ onClose }: { onClose: (words: string | null) => v
         stage.current = "done";
         Alert.alert(
           "Microphone access",
-          "MonoBOT needs the microphone to take dictation.",
+          "monoBOT needs the microphone to take dictation.",
           permission.canAskAgain
             ? [{ text: "OK" }]
             : [

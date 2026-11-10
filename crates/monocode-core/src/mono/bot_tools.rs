@@ -177,7 +177,7 @@ pub fn folder_problem(path: &str, edit: bool) -> Option<&'static str> {
     None
 }
 
-/// Keeps only what MonoBOT knows; anything else is dropped (parseBotTools).
+/// Keeps only what monoBOT knows; anything else is dropped (parseBotTools).
 pub fn parse(value: &Value) -> Option<BotTools> {
     let entry = value.as_object()?;
     let pick = |list: Option<&Value>, known: &[&str]| -> Vec<String> {
@@ -336,7 +336,7 @@ fn access_tools(kind: &str) -> &'static [&'static str] {
     }
 }
 
-/// What MonoBOT adds to a bot's Claude session (botLaunch).
+/// What monoBOT adds to a bot's Claude session (botLaunch).
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Launch {
     pub plugins: Vec<String>,

@@ -237,7 +237,7 @@ export async function forgetCursorSession(sessionId: string): Promise<void> {
   await stopCursorTitleGeneration(sessionId);
 }
 
-/** Seed ACP resume state for a restored MonoBOT session. */
+/** Seed ACP resume state for a restored monoBOT session. */
 export function bindCursorSession(
   threadId: string,
   acpSessionId: string,

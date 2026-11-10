@@ -1,4 +1,4 @@
-# MonoBOT mobile
+# monoBOT mobile
 
 The Expo app lives in this directory and has its own pnpm dependencies and lockfile. The app pairs with the desktop over QUIC and shows its real workspace. Use a Node.js LTS release for development.
 

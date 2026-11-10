@@ -11199,7 +11199,7 @@ mod tests {
     }
 
     #[gpui::test]
-    #[ignore = "covers the rounded workspace card, which MonoBOT removed"]
+    #[ignore = "covers the rounded workspace card, which monoBOT removed"]
     fn panel_tab_switches_and_animated_reversals_keep_shortcuts_live(cx: &mut TestAppContext) {
         let (window, _, _) = window(cx);
         cx.update(|cx| {
@@ -11520,7 +11520,7 @@ mod tests {
         );
     }
     #[gpui::test]
-    #[ignore = "covers the rounded workspace card, which MonoBOT removed"]
+    #[ignore = "covers the rounded workspace card, which monoBOT removed"]
     fn collapsed_sidebar_peeks_from_the_edge_and_the_toggle(cx: &mut TestAppContext) {
         let (window, _, _) = window(cx);
         cx.update(|cx| cx.set_reduce_motion(true));
@@ -11849,7 +11849,7 @@ mod tests {
                 visual.debug_bounds("title-tab-strip").unwrap(),
             )
         };
-        // MonoBOT's only workspace frame is boxy, as Tauri's.
+        // monoBOT's only workspace frame is boxy, as Tauri's.
         let (sidebar, main, tabs) = frames(cx);
         let sidebar = sidebar.unwrap();
         assert_eq!(sidebar.top(), px(0.));
@@ -12018,7 +12018,7 @@ mod tests {
         draw(cx);
     }
     #[gpui::test]
-    #[ignore = "covers the rounded workspace card, which MonoBOT removed"]
+    #[ignore = "covers the rounded workspace card, which monoBOT removed"]
     fn main_pane_covers_a_fixed_sidebar_with_a_clipped_fade(cx: &mut TestAppContext) {
         use std::time::Duration;
         let (window, _, active) = window(cx);
@@ -12349,7 +12349,7 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         // Pin → Rename → Copy session ID, open it, then skip the harness ID
-        // (this session has none) for the MonoBOT one.
+        // (this session has none) for the monoBOT one.
         cx.simulate_keystrokes(window.into(), "down down right down enter");
         cx.run_until_parked();
         window
@@ -12482,7 +12482,7 @@ mod tests {
                 let id = shell.workspace.active.unwrap();
                 let anchor = Anchor::Point(gpui::point(px(400.), px(30.)));
                 shell.open_menu(MenuTarget::Tab(id), anchor, w, cx);
-                // Closing every tab preserves one fresh blank tab, as in MonoBOT.
+                // Closing every tab preserves one fresh blank tab, as in monoBOT.
                 for id in shell.workspace.tabs.clone() {
                     shell.close(id, w, cx);
                 }

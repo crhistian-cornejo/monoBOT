@@ -96,7 +96,7 @@ fn connected_note(address: &str, readers: &Readers, bot: &str) -> String {
         Readers::Only(_) => "other agents the user chose, not you".to_owned(),
     };
     format!(
-        "The user connected {address} in MonoBOT's own dialog; its app password is in the system's keychain. It is read by {who}. If you may read it, check it with mail.search and its account, then carry on with what you were doing."
+        "The user connected {address} in monoBOT's own dialog; its app password is in the system's keychain. It is read by {who}. If you may read it, check it with mail.search and its account, then carry on with what you were doing."
     )
 }
 

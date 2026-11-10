@@ -1,14 +1,14 @@
-<h1 align="center">MonoBOT</h1>
+<h1 align="center">monoBOT</h1>
 
 <p align="center">
   <strong>A fast, native GUI for your coding agents — Desktop (Rust + GPUI) & Mobile (Expo).</strong>
 </p>
 
 <p align="center">
-  <img width="1680" height="1050" alt="MonoBOT with agent sessions open side by side" src="https://github.com/user-attachments/assets/89e04066-69de-473d-9aab-88b9ca3e3b7b" />
+  <img width="1680" height="1050" alt="monoBOT with agent sessions open side by side" src="https://github.com/user-attachments/assets/89e04066-69de-473d-9aab-88b9ca3e3b7b" />
 </p>
 
-MonoBOT provides a unified native desktop and mobile interface for your existing coding agent CLI subscriptions: **Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin**.
+monoBOT provides a unified native desktop and mobile interface for your existing coding agent CLI subscriptions: **Claude Code, Codex, Cursor, Grok Build, OpenCode, Antigravity, Pi, omp, fx, Hermes Agent, and Devin**.
 
 No extra API token fees or middleman servers — it talks directly to your locally installed agent CLIs and communicates securely between desktop and mobile over peer-to-peer encrypted QUIC (TLS 1.3).
 
@@ -97,6 +97,6 @@ Optional mail infrastructure, Mailflare MCP, agent inboxes and agenda:
 
 ## License
 
-MonoBOT is developed by Crhistian Cornejo. It started as a fork of Monocode by Nick, also MIT-licensed, whose copyright notice is kept in [LICENSE](LICENSE) as the license requires.
+monoBOT is developed by Crhistian Cornejo. It started as a fork of Monocode by Nick, also MIT-licensed, whose copyright notice is kept in [LICENSE](LICENSE) as the license requires.
 
 [MIT](LICENSE). Provider names and logos are trademarks of their respective owners. See [NOTICE](NOTICE).

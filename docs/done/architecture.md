@@ -1,6 +1,6 @@
 # Native architecture
 
-The GPUI app is MonoBOT's only desktop app. The React/Tauri app it replaced was
+The GPUI app is monoBOT's only desktop app. The React/Tauri app it replaced was
 removed from the repository; [tauri-gap-audit.md](../in-progress/tauri-gap-audit.md) lists the
 behavior it had that the native app still lacks. CI, releases and the updater
 feed build the native app.

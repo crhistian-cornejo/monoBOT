@@ -80,7 +80,7 @@ pub fn info_plist(version: &str, data_mode: DataMode) -> String {
 <key>CFBundleIconName</key><string>AppIcon</string>
 <key>NSPrincipalClass</key><string>NSApplication</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSMicrophoneUsageDescription</key><string>MonoBOT turns what you say into text while dictation is listening. The audio never leaves this Mac.</string>
+<key>NSMicrophoneUsageDescription</key><string>monoBOT turns what you say into text while dictation is listening. The audio never leaves this Mac.</string>
 </dict></plist>
 "#
     )
@@ -293,7 +293,7 @@ mod tests {
             // macOS rejects menu bar items from a process that exec'd after launch.
             assert!(plist.contains("<key>CFBundleExecutable</key><string>monocode-gpui</string>"));
             // Without it macOS ends the app the moment dictation opens the microphone.
-            assert!(plist.contains("<key>NSMicrophoneUsageDescription</key><string>MonoBOT "));
+            assert!(plist.contains("<key>NSMicrophoneUsageDescription</key><string>monoBOT "));
             assert!(!bundle.join("MacOS/monocode-launcher").exists());
             // The .icns is the icon when actool compiled no catalog, and a
             // catalog left by an earlier build is gone.

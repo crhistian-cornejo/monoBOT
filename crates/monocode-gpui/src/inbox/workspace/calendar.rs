@@ -286,7 +286,7 @@ impl Workspace {
                     .child("Follow your Google Calendar"),
             )
             .child(hint(
-                "In Google Calendar on the web: Settings › your calendar › Integrate calendar › «Secret address in iCal format». Copy it and paste it here. It works like a password, so MonoBOT keeps it in your system's keychain. Its events show here read only and refresh every 15 minutes; MonoBOT never changes that calendar.",
+                "In Google Calendar on the web: Settings › your calendar › Integrate calendar › «Secret address in iCal format». Copy it and paste it here. It works like a password, so monoBOT keeps it in your system's keychain. Its events show here read only and refresh every 15 minutes; monoBOT never changes that calendar.",
             ))
             .when_some(status, |d, status| {
                 d.child(

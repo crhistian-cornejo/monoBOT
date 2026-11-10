@@ -1,5 +1,5 @@
 //! `/goal`: one objective the agent keeps working toward over several turns.
-//! When a turn ends cleanly and the objective is not met, MonoBOT sends the
+//! When a turn ends cleanly and the objective is not met, monoBOT sends the
 //! next turn itself, as DeepSeek Harness's goal round driver does, so a long
 //! task runs on without the user typing "continue". It is bounded: at most
 //! [`DEFAULT_ROUNDS`] automatic turns, never after a turn that failed or that
@@ -193,7 +193,7 @@ impl Goal {
 /// The rules every goal turn carries, after its own text.
 fn rules(limit: u32) -> String {
     format!(
-        "This is a goal. MonoBOT sends you up to {limit} more turns on its own until it is done, so work toward it end to end and check your work (build, tests) as you go. End your final message with one of these lines:\n- `{MARKER} complete` when the goal is fully done and checked.\n- `{MARKER} blocked: <what you need>` when you cannot go on without the user (a decision, access, missing information).\nWith neither line, the next turn continues where you stopped."
+        "This is a goal. monoBOT sends you up to {limit} more turns on its own until it is done, so work toward it end to end and check your work (build, tests) as you go. End your final message with one of these lines:\n- `{MARKER} complete` when the goal is fully done and checked.\n- `{MARKER} blocked: <what you need>` when you cannot go on without the user (a decision, access, missing information).\nWith neither line, the next turn continues where you stopped."
     )
 }
 

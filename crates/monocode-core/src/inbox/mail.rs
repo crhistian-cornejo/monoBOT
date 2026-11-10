@@ -1,6 +1,6 @@
 //! The user's mail in the Inbox, as the desktop app keeps it (`src-tauri/src/mail.rs` over
 //! the `monobot-email` crate). The account list (no secrets) is `mail/accounts.json` in the
-//! app's data folder, the passwords live in the system's store under MonoBOT's own name, and
+//! app's data folder, the passwords live in the system's store under monoBOT's own name, and
 //! the last reading is `mail/snapshot.json`: a mailbox connected in either app shows in both.
 //!
 //! Nothing here sends by itself: `send` runs only when the user presses Send. The pure half
@@ -220,7 +220,7 @@ impl Service {
             return Err("That account is already connected.".into());
         }
         if saved.accounts.len() >= MAX_ACCOUNTS {
-            return Err(format!("MonoBOT keeps up to {MAX_ACCOUNTS} mail accounts."));
+            return Err(format!("monoBOT keeps up to {MAX_ACCOUNTS} mail accounts."));
         }
         mail().add_account(&account, password)?;
         saved.accounts.push(account.clone());

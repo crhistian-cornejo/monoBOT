@@ -10,7 +10,7 @@ agent, no network, the same text at the same pace every run.
   `provider::process_tests::perf_replay_streams_a_whole_claude_turn` keeps it in
   step with the parser.
 - `cargo xtask perf stream-profile [binary] [seconds]` opens a separate
-  MonoBOT window on throwaway data with the replay as Claude, waits for you to
+  monoBOT window on throwaway data with the replay as Claude, waits for you to
   send a message, then profiles that window with Monocode Performance's
   `--profile` (`MONOCODE_PROFILER` points at another profiler).
 

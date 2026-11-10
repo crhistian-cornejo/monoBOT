@@ -1,4 +1,4 @@
-From upstash/context7 (https://github.com/upstash/context7), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From upstash/context7 (https://github.com/upstash/context7), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 The MIT License (MIT)
 

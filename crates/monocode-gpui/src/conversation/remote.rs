@@ -256,17 +256,17 @@ impl Conversation {
                 .capabilities
                 .contains("attachments.upload")
         {
-            self.status = "Update MonoBOT Host in Connections settings to send attachments.".into();
+            self.status = "Update monoBOT Host in Connections settings to send attachments.".into();
             cx.notify();
             return true;
         }
         if self.settings.plan && !self.remote_state.capabilities.contains("sessions.plan") {
-            self.status = "Update MonoBOT Host in Connections settings to use Plan mode.".into();
+            self.status = "Update monoBOT Host in Connections settings to use Plan mode.".into();
             cx.notify();
             return true;
         }
         if self.draft_active(cx) && !self.remote_state.capabilities.contains("sessions.draft") {
-            self.status = "Update MonoBOT Host in Connections settings to save drafts.".into();
+            self.status = "Update monoBOT Host in Connections settings to save drafts.".into();
             cx.notify();
             return true;
         }

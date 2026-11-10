@@ -100,7 +100,7 @@ impl Guard {
 /// What the agent reads when it repeats itself.
 fn reminder(tool: &str, times: usize) -> String {
     format!(
-        "MonoBOT: you made the same {tool} call with the same input {times} times in a row. Read its last result before you call it again. If it did not help, change your approach; if the work is done, finish and report."
+        "monoBOT: you made the same {tool} call with the same input {times} times in a row. Read its last result before you call it again. If it did not help, change your approach; if the work is done, finish and report."
     )
 }
 

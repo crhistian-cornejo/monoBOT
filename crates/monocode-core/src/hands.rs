@@ -334,7 +334,7 @@ pub fn run(action: &str, input: &Value, shots: &std::path::Path) -> Result<Value
     let output = execute(&plan)?;
     if let Some(path) = shot {
         if !path.exists() {
-            return Err("No picture was taken. Allow MonoBOT under System Settings › Privacy & Security › Screen Recording.".into());
+            return Err("No picture was taken. Allow monoBOT under System Settings › Privacy & Security › Screen Recording.".into());
         }
         return Ok(json!({"path": path, "note": "Open this image to see the screen."}));
     }
@@ -370,7 +370,7 @@ fn execute(plan: &Plan) -> Result<String, String> {
     let why = String::from_utf8_lossy(&output.stderr);
     Err(
         if why.contains("not allowed assistive access") || why.contains("1002") {
-            "Allow MonoBOT under System Settings › Privacy & Security › Accessibility to type."
+            "Allow monoBOT under System Settings › Privacy & Security › Accessibility to type."
                 .into()
         } else if why.contains("Unable to find application")
             || why.contains("Can’t get application")

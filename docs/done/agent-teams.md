@@ -2,7 +2,7 @@
 
 Plan del 2026-11-04. Toma las ideas del equipo de agentes de Echo
 (`~/Developer/Echo/docs/on board/10-26-2026-equipos-de-agentes.md`) y las
-construye sobre lo que MonoBOT ya tiene: bots con rol, SOUL.md, MEMORY.md,
+construye sobre lo que monoBOT ya tiene: bots con rol, SOUL.md, MEMORY.md,
 hábitos, `agents.message` y herramientas por bot.
 
 ## Por qué
@@ -53,9 +53,9 @@ hábitos, `agents.message` y herramientas por bot.
 
 - Cada bot tiene una lista de skills instaladas que puede usar; si no la tiene,
   usa las sugeridas por su rol que estén instaladas.
-- Al lanzar su sesión de Claude Code, MonoBOT niega con `Skill(<nombre>)` cada
+- Al lanzar su sesión de Claude Code, monoBOT niega con `Skill(<nombre>)` cada
   skill instalada (usuario, proyecto y plugins) que no esté en su lista. Las
-  skills propias de MonoBOT (`monobot`) siempre quedan.
+  skills propias de monoBOT (`monobot`) siempre quedan.
 - `tools.read` y los ajustes del bot muestran las skills instaladas, marcadas.
 
 ### 4. Memoria del equipo

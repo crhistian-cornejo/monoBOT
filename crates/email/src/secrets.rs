@@ -5,7 +5,7 @@
 use crate::account::id_of;
 
 #[cfg(not(test))]
-// MonoBOT's internal identifier, like its other stored secrets.
+// monoBOT's internal identifier, like its other stored secrets.
 const SERVICE: &str = "com.monocode.desktop";
 
 fn name(address: &str) -> String {

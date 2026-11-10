@@ -22,7 +22,7 @@ export async function generateClaudeSessionTitle(input: {
     });
     return parseGeneratedSessionTitle(output, input.message);
   } catch (error) {
-    console.debug("[MonoBOT] session title", error);
+    console.debug("[monoBOT] session title", error);
     return null;
   }
 }

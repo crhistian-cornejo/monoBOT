@@ -1,6 +1,6 @@
 # What to take from IVY
 
-A review on Nov 8, 2026 of `~/Developer/IVY` against MonoBOT. It covers the
+A review on Nov 8, 2026 of `~/Developer/IVY` against monoBOT. It covers the
 code harness, agents, Perplexity Decider, live calls, group calls and
 dictation. The notch has its own plan in [notch.md](notch.md). Paths that start
 with `IVY/` are in that repository; everything else is in this one.
@@ -9,7 +9,7 @@ with `IVY/` are in that repository; everything else is in this one.
 
 Every gap below was checked by searching `monocode-core` and `monocode-gpui`.
 
-| # | Change | IVY source | MonoBOT today | Effort |
+| # | Change | IVY source | monoBOT today | Effort |
 | --- | --- | --- | --- | --- |
 | 1 | **Harden every Git call** against a hostile repo: no fsmonitor, hooks, external diff, pager or `protocol.ext`; strip `GIT_DIR`/`GIT_CONFIG`; neutralize dangerous `.git/config` keys | `IVY/crates/core/src/code/git.rs` (`hardened`, `base`, `ALWAYS`, `ENV_REMOVED`, `guard`) | `git.rs:35` and `scm.rs:1152` set only `GIT_TERMINAL_PROMPT=0`; only `checkpoint.rs:899` disables fsmonitor; ten separate `Command::new("git")` | S–M |
 | 2 | **Cap the access of agent-started sessions** at the access of the session that started them | `IVY/crates/core/src/agents/subagents.rs`, `spawn.rs` | `app_access.rs:240` copies `runtimeMode` with no ceiling, so a Supervised agent can start a full-access session | S |
@@ -32,7 +32,7 @@ Seatbelt sandbox for providers without one.
 
 IVY has nothing to add on memory, agent messages, groups with rounds and
 mentions, commit messages, checkpoints, provider switching or worktrees. Its
-memory was copied from MonoBOT's.
+memory was copied from monoBOT's.
 
 **Done Nov 8 (1–4):**
 
@@ -74,7 +74,7 @@ The reference schema is `IVY/crates/decider/src/protocol.rs`.
 When Decider is down, destructive actions fail closed (ask the user) and the
 rest fail open. Only verdicts, sources and timings are logged, never the text.
 
-**How MonoBOT should integrate it:**
+**How monoBOT should integrate it:**
 
 - **Placement.** Put the client in `monocode-core/src/decider/` (`client.rs`, `gate.rs`, `questions.rs`). Question texts and thresholds go in plain functions that are tested without a network. Use `monobot_http` with no redirects. It never runs on the GPUI thread.
 - **Discovery.** macOS only at first. Read the port from the user's setting, then `DECIDER_PORT`, then `config.toml`, then 8080. The host is always `127.0.0.1`.

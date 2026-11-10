@@ -23,7 +23,7 @@ use std::{
 
 pub const DEFAULT: &str = "default";
 static CLAUDE_ENTRYPOINT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-/// Opt-in: label spawned Claude processes as MonoBOT instead of the default
+/// Opt-in: label spawned Claude processes as monoBOT instead of the default
 /// `sdk-cli`, which is metered at a higher subscription rate
 /// (anthropics/claude-code#97074).
 pub fn set_claude_entrypoint(on: bool) {

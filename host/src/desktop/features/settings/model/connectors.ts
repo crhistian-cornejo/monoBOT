@@ -2,7 +2,7 @@ import { IS_MAC, IS_WIN } from "../../../platform/tauri/platform";
 import { readFlag, writeFlag } from "./storageFlags";
 
 /** Built-in MCP servers that need no account: remote ones (Streamable HTTP)
- * and a few that run locally through `npx`. MonoBOT passes the enabled ones
+ * and a few that run locally through `npx`. monoBOT passes the enabled ones
  * to each Claude turn with `--mcp-config` and to Codex as `-c` overrides, so
  * neither CLI's own configuration is touched. What they return is data,
  * never instructions. */

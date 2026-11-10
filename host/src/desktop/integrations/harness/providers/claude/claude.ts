@@ -152,7 +152,7 @@ type Live = {
   /**
    * Every task Claude still runs for this session, by id: subagents, shells it
    * backgrounded, monitors. Each one ends in a notification that wakes Claude
-   * for another turn, so the MonoBOT turn stays open until they are done.
+   * for another turn, so the monoBOT turn stays open until they are done.
    */
   backgroundTasks: Map<string, BackgroundTask>;
   /** Rows shown for tasks still running when Claude yielded, by task id. */
@@ -1575,7 +1575,7 @@ function completeAgentTask(
 
 /**
  * A task is done. If Claude had already yielded, the notification about it
- * starts a follow-up turn, so hold the MonoBOT turn open for that too rather
+ * starts a follow-up turn, so hold the monoBOT turn open for that too rather
  * than settling in the gap between the two.
  */
 function finishBackgroundTask(live: Live, taskId: string): void {
@@ -1592,9 +1592,9 @@ function finishBackgroundTask(live: Live, taskId: string): void {
 }
 
 /**
- * Claude began another turn inside this MonoBOT turn: woken by a finished
+ * Claude began another turn inside this monoBOT turn: woken by a finished
  * task, or by a follow-up written in while it waited. Its own result, not the
- * earlier one, decides when the MonoBOT turn ends.
+ * earlier one, decides when the monoBOT turn ends.
  */
 function noteClaudeTurnStarted(live: Live): void {
   if (!live.activeTurn || !live.turnResultSeen) return;

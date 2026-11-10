@@ -1,4 +1,4 @@
-From Leonxlnx/imagegen-skills (https://github.com/Leonxlnx/imagegen-skills), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From Leonxlnx/imagegen-skills (https://github.com/Leonxlnx/imagegen-skills), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 MIT License
 

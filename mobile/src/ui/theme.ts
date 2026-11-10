@@ -32,7 +32,7 @@ const dark = {
   fill: "rgba(255, 255, 255, 0.08)",
   /** A segmented switch's thumb, inside the glass. */
   thumb: "rgba(255, 255, 255, 0.14)",
-  /** Laid over the MonoBOT mark, which is drawn white. */
+  /** Laid over the monoBOT mark, which is drawn white. */
   mark: "#ffffff",
   /** A transcript's fold rails and connectors. */
   rail: "#323232",

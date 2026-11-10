@@ -54,7 +54,7 @@ fn fetch_within(url: &str, types: &[&str], limit: u64, seconds: u64) -> Result<S
         .trim()
         .to_ascii_lowercase();
     if !types.contains(&kind.as_str()) {
-        return Err("That address is not an image MonoBOT shows.".into());
+        return Err("That address is not an image monoBOT shows.".into());
     }
     let mut bytes = Vec::new();
     response

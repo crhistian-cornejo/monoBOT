@@ -69,7 +69,7 @@ pub(crate) struct SettingsContext {
     pub mobile_invite: Option<monocode_core::mobile::Invite>,
     /// The connector switches and the skill packs turned on.
     pub connectors: monocode_core::connectors::ConnectorSettings,
-    /// MonoBOT's data folder, where Poki is installed.
+    /// monoBOT's data folder, where Poki is installed.
     pub data_dir: Option<std::path::PathBuf>,
     pub packs: Vec<String>,
     /// The folder the bots sync through, and how the last sync went.

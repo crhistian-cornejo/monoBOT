@@ -30,7 +30,7 @@ const ACCESSORY_GAP = 10;
 /** The photo is drawn a moment after the screen opens, so it eases in slower. */
 const BACKGROUND_ENTER = FadeIn.duration(520).easing(Easing.out(Easing.quad));
 
-// Empty conversation: a dimmed MonoBOT logo above the prompt, and the
+// Empty conversation: a dimmed monoBOT logo above the prompt, and the
 // project's name under it, over the background set for it on this phone, or
 // a still frame of the connect screen's ASCII field where no photo is set.
 // A Mono's chat greets with its own mascot instead, on a plain background.

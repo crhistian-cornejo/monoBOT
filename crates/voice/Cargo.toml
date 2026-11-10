@@ -3,7 +3,7 @@ name = "monobot-voice"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Local voices for MonoBOT's group calls: Supertonic 3 through sherpa-onnx, speaking Spanish and English on this machine."
+description = "Local voices for monoBOT's group calls: Supertonic 3 through sherpa-onnx, speaking Spanish and English on this machine."
 
 [features]
 playback = ["dep:cpal"]

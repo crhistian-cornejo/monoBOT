@@ -1,4 +1,4 @@
-//! Keep the computer from going to sleep while MonoBOT has work under way.
+//! Keep the computer from going to sleep while monoBOT has work under way.
 //!
 //! Port of `src-tauri/src/keep_awake.rs` (the platform holds, as they are),
 //! `src/features/sessions/model/keepAwake.ts` (when to hold) and the
@@ -187,7 +187,7 @@ mod platform {
                 })
             } else {
                 let _ = thread.join();
-                Err("Windows didn't let MonoBOT keep the computer awake".into())
+                Err("Windows didn't let monoBOT keep the computer awake".into())
             }
         }
     }
@@ -260,7 +260,7 @@ mod platform {
     impl Hold {
         pub fn acquire() -> Result<Self, String> {
             let kind = cf_string("PreventUserIdleSystemSleep");
-            let name = cf_string("MonoBOT has agents working");
+            let name = cf_string("monoBOT has agents working");
             if kind.is_null() || name.is_null() {
                 for value in [kind, name] {
                     if !value.is_null() {
@@ -282,7 +282,7 @@ mod platform {
             if status == 0 {
                 Ok(Self(id))
             } else {
-                Err(format!("macOS didn't let MonoBOT stay awake ({status})"))
+                Err(format!("macOS didn't let monoBOT stay awake ({status})"))
             }
         }
     }

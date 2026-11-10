@@ -1,6 +1,6 @@
-# MonoBOT desktop (GPUI)
+# monoBOT desktop (GPUI)
 
-MonoBOT's desktop app is written in Rust with GPUI. It is the only desktop app:
+monoBOT's desktop app is written in Rust with GPUI. It is the only desktop app:
 the earlier React/Tauri app has been removed. It builds from the Cargo workspace at
 the repository root (`Cargo.toml`, `Cargo.lock`, output in `target/`).
 
@@ -164,7 +164,7 @@ cargo xtask build
 ```
 
 This creates an optimized build without launching it. **The release app uses the
-installed MonoBOT database, and changes save there.** No extra flags are needed.
+installed monoBOT database, and changes save there.** No extra flags are needed.
 
 On macOS, open:
 

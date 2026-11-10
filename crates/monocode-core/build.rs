@@ -1,4 +1,4 @@
-//! Embeds MonoBOT's bundled Claude Code plugins (src/features/skills/bundled)
+//! Embeds monoBOT's bundled Claude Code plugins (src/features/skills/bundled)
 //! so the native app ships them like the desktop app's frontend bundle does.
 use std::{
     env,

@@ -162,11 +162,11 @@ impl SignIn {
                     let result =
                         code_from_request(request.lines().next().unwrap_or(""), &self.state);
                     let said = match &result {
-                        Ok(_) => "MonoBOT is connected to Spotify. You can close this tab.",
-                        Err(_) => "MonoBOT could not connect to Spotify. Try again from the notch.",
+                        Ok(_) => "monoBOT is connected to Spotify. You can close this tab.",
+                        Err(_) => "monoBOT could not connect to Spotify. Try again from the notch.",
                     };
                     let body = format!(
-                        "<!doctype html><meta charset=\"utf-8\"><title>MonoBOT</title><body style=\"font:16px system-ui;margin:3em\">{said}</body>"
+                        "<!doctype html><meta charset=\"utf-8\"><title>monoBOT</title><body style=\"font:16px system-ui;margin:3em\">{said}</body>"
                     );
                     let _ = write!(
                         stream,

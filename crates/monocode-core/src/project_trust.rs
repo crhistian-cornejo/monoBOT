@@ -1,9 +1,9 @@
 //! Which projects may run their own Claude Code configuration. A cloned
 //! repository can bring `.claude/settings.json` (hooks, a status line, key
 //! helpers) and `.mcp.json` (servers), and a turn in print mode would run
-//! them without asking. Until the user trusts the project, MonoBOT starts
+//! them without asking. Until the user trusts the project, monoBOT starts
 //! Claude Code with the user's own settings only (`--setting-sources user`).
-//! Trust is kept per repository root, in a file of MonoBOT's own data.
+//! Trust is kept per repository root, in a file of monoBOT's own data.
 use std::path::{Path, PathBuf};
 
 /// The project files that can make Claude Code run something.

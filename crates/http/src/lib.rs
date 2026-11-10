@@ -1,4 +1,4 @@
-//! Who MonoBOT trusts when it opens an HTTPS connection of its own (model
+//! Who monoBOT trusts when it opens an HTTPS connection of its own (model
 //! downloads, Azure DevOps, GitLab, Jira, Linear, link previews…).
 //!
 //! On the Mac, the web's public authorities bundled with the app, as always.

@@ -1,4 +1,4 @@
-From vercel/ai (https://github.com/vercel/ai), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From vercel/ai (https://github.com/vercel/ai), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 Copyright 2023 Vercel, Inc.
 

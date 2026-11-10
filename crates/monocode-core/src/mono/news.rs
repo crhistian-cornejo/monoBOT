@@ -439,7 +439,7 @@ pub struct Block {
     pub text: String,
     /// Written by the app, not the user.
     pub internal: bool,
-    /// Sent by MonoBOT itself (Block.monocode).
+    /// Sent by monoBOT itself (Block.monocode).
     pub monocode: bool,
     /// The title of the final report the turn's request carries, if any.
     pub final_report: Option<String>,

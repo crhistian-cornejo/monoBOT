@@ -1,8 +1,8 @@
-//! Claude Code plugins MonoBOT ships (src/features/skills/bundled), ported
+//! Claude Code plugins monoBOT ships (src/features/skills/bundled), ported
 //! from skillPacks.ts, bundledPlugins.ts and src-tauri/src/plugins.rs. They
 //! are embedded at build time, written under the data folder once per
 //! bundle and passed to Claude with `--plugin-dir`, so their skills load in
-//! MonoBOT's sessions only and nothing is installed into `~/.claude`.
+//! monoBOT's sessions only and nothing is installed into `~/.claude`.
 use crate::desktop_preferences::{read_flag, DesktopPreferences};
 use std::{
     path::{Component, Path, PathBuf},
@@ -153,7 +153,7 @@ pub fn save_skill_pack(store: &crate::store::Store, id: &str, enabled: bool) -> 
     Ok(())
 }
 
-/// The plugins a Claude session loads: MonoBOT's own, then a bot's packs,
+/// The plugins a Claude session loads: monoBOT's own, then a bot's packs,
 /// or for any other session the ones turned on in Settings.
 pub fn session_plugins(bot_plugins: Option<&[String]>, enabled_packs: &[String]) -> Vec<String> {
     let mut out = vec![ALWAYS_ON.to_owned()];
@@ -243,7 +243,7 @@ pub fn install(data_dir: &Path, plugin: &str) -> Result<PathBuf, String> {
     let staging = version.join(format!(".{plugin}-{}-{stamp}", std::process::id()));
     let written = write_plugin(&staging, plugin).and_then(|()| {
         std::fs::rename(&staging, &target).or_else(|error| {
-            // Another MonoBOT wrote the same bundle first.
+            // Another monoBOT wrote the same bundle first.
             if target.is_dir() {
                 Ok(())
             } else {

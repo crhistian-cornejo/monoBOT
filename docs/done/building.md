@@ -1,6 +1,6 @@
 # Build from source
 
-MonoBOT's desktop app is Rust + GPUI (`crates/monocode-gpui`). You need a current
+monoBOT's desktop app is Rust + GPUI (`crates/monocode-gpui`). You need a current
 stable Rust toolchain and at least one signed-in agent CLI ([provider setup](providers.md)).
 The build, packaging and release tooling is Rust as well: the `xtask` crate,
 run as `cargo xtask <command>` (`cargo xtask help` lists them). No Node.js or

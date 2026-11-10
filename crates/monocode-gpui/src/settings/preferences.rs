@@ -87,7 +87,7 @@ pub(crate) struct Preferences {
     /// How long a call waits before it answers: "patient", "normal" or "quick".
     pub voice_pace: String,
     pub claude_hooks: bool,
-    /// Experimental: report MonoBOT instead of `sdk-cli` as Claude's entrypoint.
+    /// Experimental: report monoBOT instead of `sdk-cli` as Claude's entrypoint.
     pub claude_entrypoint: bool,
     pub binary_paths: HashMap<String, String>,
     pub disabled_skill_paths: Vec<String>,

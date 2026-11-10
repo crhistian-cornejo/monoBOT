@@ -1,5 +1,5 @@
 //! FloatingMonoChat.tsx: the menu bar's chat panel. It floats over other
-//! apps without activating MonoBOT, and its rail moves between Monos without
+//! apps without activating monoBOT, and its rail moves between Monos without
 //! touching the workspace window's selection.
 //! Like Tauri's, it opens only from the macOS menu bar; tests drive it anywhere.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -295,7 +295,7 @@ impl Floating {
                 )
             })
             .child(
-                header_button("floating-reveal", "Open in MonoBOT", "external-link").on_click(
+                header_button("floating-reveal", "Open in monoBOT", "external-link").on_click(
                     cx.listener(|this, _, window, cx| {
                         let id = this.selected.clone();
                         let owner = this.owner.clone();

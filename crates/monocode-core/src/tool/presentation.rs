@@ -338,7 +338,7 @@ pub(super) fn present(call: &ToolCall, fallback_cwd: Option<&str>) -> ToolPresen
     shown.target = shown.target.lines().next().unwrap_or("").into();
     shown
 }
-/// A step of MonoBOT's own visual tools.
+/// A step of monoBOT's own visual tools.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VisualStep {
     Docs,
@@ -346,7 +346,7 @@ pub enum VisualStep {
     Show,
 }
 
-/// Recognizes MonoBOT's visual tools however a provider names an MCP tool:
+/// Recognizes monoBOT's visual tools however a provider names an MCP tool:
 /// `visual_show`, `monocode_visual:visual_show`,
 /// `mcp__monocode_visual__visual_show` or `monocode_visual.visual_show`.
 pub fn visual_tool(name: &str) -> Option<VisualStep> {

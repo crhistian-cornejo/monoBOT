@@ -1,7 +1,7 @@
-# What MonoBOT adds around a coding agent
+# What monoBOT adds around a coding agent
 
-MonoBOT runs each provider's own agent CLI (see [providers.md](providers.md)).
-The CLI owns the model, its tools and its own compaction. MonoBOT owns what it
+monoBOT runs each provider's own agent CLI (see [providers.md](providers.md)).
+The CLI owns the model, its tools and its own compaction. monoBOT owns what it
 puts in the agent's messages and when it steps in during a turn. These rules
 keep that part small, because every message stays in the conversation and
 every later request pays for it again. Several come from DeepSeek Harness,
@@ -23,7 +23,7 @@ MCP tools, and a Mono's rules, soul and memory.
   A new provider conversation, a provider switch or a change to the context
   sends it again.
 - **After a compaction**, the provider may have summarized that context away.
-  When a turn reports a completed `contextCompaction`, MonoBOT clears the
+  When a turn reports a completed `contextCompaction`, monoBOT clears the
   receipts, and the next turn sends the context again.
 
 ## Large text attachments
@@ -59,7 +59,7 @@ turns, so a long task runs on without you typing "continue". The logic lives in
 `monocode_core::goal`, and `conversation/goal.rs` runs it.
 
 - **The first turn** sends the objective, and its rules come after it. When a
-  turn ends cleanly without finishing, MonoBOT sends the next turn itself. The
+  turn ends cleanly without finishing, monoBOT sends the next turn itself. The
   chat shows that turn as "Continue the goal (2 of 8)". The agent reads the
   objective, the turn's number and the rules.
 - **The agent ends its final message** with `GOAL: complete` when the goal is
@@ -80,7 +80,7 @@ turns, so a long task runs on without you typing "continue". The logic lives in
 
 T3 Code hands `/goal` to the provider: Claude Code's version keeps one turn
 open with a Stop hook, and Codex's (`thread/goal/set`) starts turns of its own.
-MonoBOT runs its own loop instead. It works the same with every provider, and
+monoBOT runs its own loop instead. It works the same with every provider, and
 it fits its one-turn-per-message runtime, which Codex's self-started turns do
 not.
 

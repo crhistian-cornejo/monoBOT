@@ -1,5 +1,5 @@
 {
   "name": "monobot-finance",
   "version": "1.0.0",
-  "description": "Personal finance skill for MonoBOT's finance bot: expenses, income and budgets in Notion, read from Gmail."
+  "description": "Personal finance skill for monoBOT's finance bot: expenses, income and budgets in Notion, read from Gmail."
 }

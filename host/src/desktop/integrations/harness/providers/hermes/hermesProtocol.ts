@@ -44,7 +44,7 @@ export function hermesPromptBlocks(
   return promptBlocks(text, attachments);
 }
 
-/** Map MonoBOT access levels to Hermes' edit-approval modes. */
+/** Map monoBOT access levels to Hermes' edit-approval modes. */
 export function hermesModeId(
   runtimeMode: RuntimeMode,
   planning = false,

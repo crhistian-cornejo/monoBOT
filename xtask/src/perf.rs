@@ -64,7 +64,7 @@ struct Run {
 /// A throwaway folder for one run; kept afterwards for its logs.
 fn new_work(binary: &Path) -> Result<PathBuf> {
     if !executable(binary) {
-        return Err(format!("No MonoBOT binary at {}", binary.display()));
+        return Err(format!("No monoBOT binary at {}", binary.display()));
     }
     Ok(tempfile::Builder::new()
         .prefix("monocode-perf-")
@@ -103,7 +103,7 @@ fn wait_for_stream(run: &mut Run, limit: Option<u64>) -> Result<()> {
     while !run.work.join("streaming").exists() {
         if !run.app.alive() {
             return Err(format!(
-                "MonoBOT exited; see {}",
+                "monoBOT exited; see {}",
                 run.work.join("app.log").display()
             ));
         }
@@ -261,7 +261,7 @@ fn stream_profile(binary: &Path, seconds: u64) -> Result<()> {
     let env = [("REPLAY_SECONDS", (seconds + 15).to_string())];
     let mut run = start(binary, new_work(binary)?, &env)?;
     println!(
-        "Started MonoBOT (PID {}) on {}.",
+        "Started monoBOT (PID {}) on {}.",
         run.app.0.id(),
         run.work.join("data").display()
     );

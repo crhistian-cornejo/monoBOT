@@ -1,5 +1,5 @@
 //! Git that a repository cannot turn against the user. An agent works in the
-//! repository and can write its `.git/config` and `.git/hooks`; MonoBOT then
+//! repository and can write its `.git/config` and `.git/hooks`; monoBOT then
 //! runs Git there in the background (status, diffs, checkpoints), with no
 //! sandbox. Every call goes through here: settings that run nothing, no
 //! hooks unless the user asked for a commit or a push, none of the app's
@@ -65,7 +65,7 @@ const PLAIN: [&str; 10] = [
 /// Whether the repository's hooks may run.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Hooks {
-    /// Never: everything MonoBOT runs on its own.
+    /// Never: everything monoBOT runs on its own.
     Off,
     /// A commit or a push the user asked for, as in their terminal.
     Repo,
@@ -130,7 +130,7 @@ pub fn command_with(
     hooks: Hooks,
 ) -> Result<Command, String> {
     // A commit or a push the user asked for runs as in their terminal; what
-    // MonoBOT runs on its own never runs the repository's programs.
+    // monoBOT runs on its own never runs the repository's programs.
     let guard = match subcommand {
         _ if hooks == Hooks::Repo => Guard::default(),
         Some(sub) if PLAIN.contains(&sub) => Guard::default(),
@@ -270,7 +270,7 @@ fn guard_from(listing: &[u8], dir: &Path) -> Result<Guard, String> {
         // `-c` takes the name up to the first `=`: such a name cannot be said.
         if key.contains('=') || key.contains('\n') {
             return Err(
-                "This repository's Git settings name a program MonoBOT cannot set aside, so Git was not run."
+                "This repository's Git settings name a program monoBOT cannot set aside, so Git was not run."
                     .into(),
             );
         }
@@ -316,13 +316,13 @@ fn guard_from(listing: &[u8], dir: &Path) -> Result<Guard, String> {
                 Some(own) => set(&mut guard.config, key, own)?,
                 None => {
                     return Err(format!(
-                        "This repository's Git settings run a program ({key}), so MonoBOT did not run Git here."
+                        "This repository's Git settings run a program ({key}), so monoBOT did not run Git here."
                     ));
                 }
             },
             Program::WorkTree => {
                 guard.work_tree = Some(own_top(dir).ok_or(
-                    "This repository moves its working tree elsewhere (core.worktree) and MonoBOT cannot find its own, so Git was not run.",
+                    "This repository moves its working tree elsewhere (core.worktree) and monoBOT cannot find its own, so Git was not run.",
                 )?)
             }
         }

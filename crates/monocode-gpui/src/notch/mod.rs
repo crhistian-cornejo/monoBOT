@@ -1848,7 +1848,7 @@ impl Notch {
                     .occlude()
                     .debug_selector(|| "notch".into())
                     .role(Role::Group)
-                    .aria_label("MonoBOT notch")
+                    .aria_label("monoBOT notch")
                     .absolute()
                     .left(px(left))
                     .top(px(top))

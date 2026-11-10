@@ -1,16 +1,16 @@
 name: Bug report
-description: Report a problem in MonoBOT
+description: Report a problem in monoBOT
 labels: [bug]
 body:
   - type: markdown
     attributes:
       value: |
-        MonoBOT supports macOS, Linux, and Windows.
+        monoBOT supports macOS, Linux, and Windows.
 
   - type: input
     id: version
     attributes:
-      label: MonoBOT version
+      label: monoBOT version
       placeholder: "0.1.0"
     validations:
       required: true

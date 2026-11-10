@@ -404,7 +404,7 @@ async function startLive(input: HarnessSessionInput, startup: Startup): Promise<
       emit({ type: "session.ended", code });
     },
     (line) => {
-      console.debug("[MonoBOT] devin stderr", line);
+      console.debug("[monoBOT] devin stderr", line);
     },
   );
 

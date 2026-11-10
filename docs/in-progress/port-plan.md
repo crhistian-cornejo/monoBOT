@@ -1,4 +1,4 @@
-# Plan: llevar MonoBOT a la app nativa (GPUI)
+# Plan: llevar monoBOT a la app nativa (GPUI)
 
 Inventario: los 97 commits de Crhistian Cornejo del 4 y 5 de noviembre de 2026, de
 `d4c53c31` a `7ecab6e2`, más este plan. Referencia de comportamiento: la app Tauri
@@ -44,7 +44,7 @@ para la lógica y `crates/monocode-gpui` para la interfaz.
    datos, nunca en `localStorage`, para que Tauri y la nativa vean lo mismo
    durante la transición.
 7. Cada función se comprueba en Windows y en macOS, y en los dos diseños (Clásico y Enfocado).
-8. Los nombres visibles dicen MonoBOT. Los identificadores internos se quedan:
+8. Los nombres visibles dicen monoBOT. Los identificadores internos se quedan:
    `com.monocode.desktop`, `dev.usemono.gpui`, `monocode.*` y los nombres de los crates.
 9. `cargo xtask check` en verde antes de cada commit, sin avisos.
 
@@ -62,7 +62,7 @@ para la lógica y `crates/monocode-gpui` para la interfaz.
 | Reintentos, enviar más tarde, mantener despierto | `provider/lifecycle.rs`, `follow_up.rs`, `process.rs` | `conversation/` (`composer_features.rs`, `follow_up.rs`) |
 | Chips de cita en el compositor | `composer.rs` | `conversation/composer_shelf.rs` |
 | Conectores MCP, OpenAlex, web y papers | `mcp.rs`, `tool/`, `resources.rs` | `settings/pages/mcp.rs`, `connections.rs` |
-| Skills de MonoBOT | `skills.rs` (raíz «bundled») | `settings/pages/skills.rs` |
+| Skills de monoBOT | `skills.rs` (raíz «bundled») | `settings/pages/skills.rs` |
 | Gráficos tramados y explicaciones | `visual/`, `visual_bridge.rs`, `crates/visual` | `visuals/` (`charts.rs`, `visuals.rs`) |
 | Hojas de cálculo, PDF, Word, PowerPoint | `files/` | `file_editor/`, `monos/files.rs`, `image_lightbox.rs` |
 | Papers y citas en el PDF | `files/`, `resources.rs` | `monos/files.rs` |
@@ -165,7 +165,7 @@ paralelas desde que acaba la 4, porque tocan módulos distintos.
 
 | Commit | Qué |
 | --- | --- |
-| `eeca5c76` `fb5d7854` `d6e2bca4` `40a85edd` | MonoBOT en todo lo visible: título de ventana (antes «Monocode Native», ya «monoBOT»), `.app`, menús, ajustes, notificaciones y la CLI que ejecutan los agentes |
+| `eeca5c76` `fb5d7854` `d6e2bca4` `40a85edd` | monoBOT en todo lo visible: título de ventana (antes «Monocode Native», ya «monoBOT»), `.app`, menús, ajustes, notificaciones y la CLI que ejecutan los agentes |
 | `5b15a18e` | **Esquinas rectas en toda la app.** Hoy hay 606 llamadas `rounded_*` en `monocode-gpui`. Se reemplazan por un único radio del tema, que vale 0. Solo `rounded_full` se queda en avatares, puntos e interruptores, como el `9999px` de Tauri. También lo pintado a mano (barras de scroll del editor, sombras, recortes de imagen). Fuentes Geist y Geist Mono incluidas en la app. Acento naranja por defecto. Modo claro: espacio de trabajo blanco, barra lateral gris tenue, texto casi negro, controles del compositor en caja con contorno, burbuja del usuario con línea fina en vez de píldora |
 | `87224ca2` `747f9c87` | Superficies sólidas en lo que se abre encima de la ventana enfocada |
 | `63d9da70` `4fa65e6d` | Zonas Code y Agentes con su icono; el Principal marcado como orquestador |

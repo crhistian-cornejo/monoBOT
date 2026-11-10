@@ -1,6 +1,6 @@
 # Native preview limitations
 
-The native app is MonoBOT's only desktop app, still in preview. A feature being
+The native app is monoBOT's only desktop app, still in preview. A feature being
 present in source does not establish that it was checked at runtime on every
 platform. See [verification](../old/verification.md) for recorded checks and
 [tauri-gap-audit.md](tauri-gap-audit.md) for behavior of the removed Tauri app

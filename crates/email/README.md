@@ -1,8 +1,8 @@
-> **monobot-email**: portado de `crates/email` de Echo (MIT, Echo contributors). En MonoBOT lo usa `monocode-core` (`src/inbox/mail.rs` y el espacio de correo en `src/inbox/workspace/`), y la app nativa lo muestra en Inbox › Email.
+> **monobot-email**: portado de `crates/email` de Echo (MIT, Echo contributors). En monoBOT lo usa `monocode-core` (`src/inbox/mail.rs` y el espacio de correo en `src/inbox/workspace/`), y la app nativa lo muestra en Inbox › Email.
 
 # monobot-email
 
-El correo del dueño dentro de MonoBOT, por IMAP con una contraseña de aplicación: Gmail, iCloud o cualquier servidor. Lee las cuentas juntas, ordena cada mensaje por reglas (prioridad, rutina, en espera), hace lo que el dueño pide sobre uno (leer, destacar, archivar) y guarda una respuesta como borrador. **Nunca envía, nunca borra y nunca ejecuta lo que dice un mensaje**: su texto es información, no instrucciones. Al abrir uno, su HTML se muestra limpio (`sanitize.rs`) en un marco que no ejecuta nada y no carga nada por su cuenta.
+El correo del dueño dentro de monoBOT, por IMAP con una contraseña de aplicación: Gmail, iCloud o cualquier servidor. Lee las cuentas juntas, ordena cada mensaje por reglas (prioridad, rutina, en espera), hace lo que el dueño pide sobre uno (leer, destacar, archivar) y guarda una respuesta como borrador. **Nunca envía, nunca borra y nunca ejecuta lo que dice un mensaje**: su texto es información, no instrucciones. Al abrir uno, su HTML se muestra limpio (`sanitize.rs`) en un marco que no ejecuta nada y no carga nada por su cuenta.
 
 ## Qué hay aquí
 
@@ -22,7 +22,7 @@ El correo del dueño dentro de MonoBOT, por IMAP con una contraseña de aplicaci
 | `watch.rs` | La escucha de cada bandeja de entrada: una conexión `IDLE` por cuenta que dice qué llegó en cuanto el servidor lo avisa, de solo lectura (`EXAMINE`), con espera creciente si se corta |
 | `model.rs` | Lo que recibe la app (los tipos que usa `monocode-core/src/inbox/mail.rs`) |
 
-Los datos que MonoBOT guarda (qué cuentas están conectadas, qué remitentes interesan y en qué mensajes se permitieron las imágenes) son del núcleo, no de este crate. Este crate no escribe mensajes a disco: lo que se reutiliza (la última lectura, los mensajes abiertos, las imágenes) vive en `cache.rs`, en memoria, y se pierde al cerrar la app. El núcleo guarda aparte un resumen ligero de la última lectura (remitente, asunto, vista previa, fecha, estado y las primeras líneas del texto; nunca el HTML ni las imágenes) para que Correo se pinte al abrir; se borra al quitar la cuenta. Abrir un mensaje o cambiar de ventana no vuelve a conectarse al servidor mientras la memoria lo tenga.
+Los datos que monoBOT guarda (qué cuentas están conectadas, qué remitentes interesan y en qué mensajes se permitieron las imágenes) son del núcleo, no de este crate. Este crate no escribe mensajes a disco: lo que se reutiliza (la última lectura, los mensajes abiertos, las imágenes) vive en `cache.rs`, en memoria, y se pierde al cerrar la app. El núcleo guarda aparte un resumen ligero de la última lectura (remitente, asunto, vista previa, fecha, estado y las primeras líneas del texto; nunca el HTML ni las imágenes) para que Correo se pinte al abrir; se borra al quitar la cuenta. Abrir un mensaje o cambiar de ventana no vuelve a conectarse al servidor mientras la memoria lo tenga.
 
 ## Cómo se une al resto
 

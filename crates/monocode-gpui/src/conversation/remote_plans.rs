@@ -122,7 +122,7 @@ impl Conversation {
             return;
         }
         if !self.remote_state.capabilities.contains("sessions.plan") {
-            self.status = "Update MonoBOT Host in Connections settings to build plans.".into();
+            self.status = "Update monoBOT Host in Connections settings to build plans.".into();
             cx.notify();
             return;
         }

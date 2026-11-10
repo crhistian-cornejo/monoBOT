@@ -351,7 +351,7 @@ impl Mail {
         // What the look at its bytes blocked is never handed over to be opened, whatever the page asks.
         if info.risk.level == crate::inspect::Level::Danger {
             return Err(format!(
-                "MonoBOT won't open this file. {}",
+                "monoBOT won't open this file. {}",
                 info.risk.reasons.join(" ")
             ));
         }

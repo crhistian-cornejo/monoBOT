@@ -654,7 +654,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
   await spawnChild(
     input.sessionId,
     path,
-    // MonoBOT's connectors join the user's own Codex MCP servers for this
+    // monoBOT's connectors join the user's own Codex MCP servers for this
     // process only; ~/.codex/config.toml is never written. Codex sessions
     // are never bots, so a connector the user grants per bot (the iPhone)
     // stays out.
@@ -672,7 +672,7 @@ async function ensureLive(input: HarnessSessionInput): Promise<Live> {
     await rpc.request("initialize", {
       clientInfo: {
         name: "monocode",
-        title: "MonoBOT",
+        title: "monoBOT",
         version: "0.1.0",
       },
       capabilities: {
@@ -947,7 +947,7 @@ function handleNotification(
   const mapped = mapCodexNotification(method, params);
   if (mapped.diagnostic) {
     console.debug(
-      `[MonoBOT] codex ${live.threadId} ${method}`,
+      `[monoBOT] codex ${live.threadId} ${method}`,
       mapped.diagnostic,
     );
   }
@@ -1460,7 +1460,7 @@ async function handleServerRequest(
       if (!live.cancelled && !live.muteUpdates)
         live.onEvent({
           type: "status",
-          text: "This MCP server requested a form or browser sign-in that MonoBOT does not support yet. Complete it in the server's own interface.",
+          text: "This MCP server requested a form or browser sign-in that monoBOT does not support yet. Complete it in the server's own interface.",
         });
       await live.rpc.respond(id, {
         action: "cancel",

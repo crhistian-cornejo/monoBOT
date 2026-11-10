@@ -222,7 +222,7 @@ pub fn looks_like_html(bytes: &[u8]) -> bool {
 }
 
 /// What a site says when it will not hand a file to a program: a refusal, or
-/// a page that asks for a human check. MonoBOT does not try to pass these; it
+/// a page that asks for a human check. monoBOT does not try to pass these; it
 /// says so, and the user can fetch the file from the page themselves.
 fn is_refusal(message: &str) -> bool {
     ["(401)", "(403)", "(429)", "(451)", "(503)"]

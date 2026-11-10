@@ -1,4 +1,4 @@
-From wshobson/agents (https://github.com/wshobson/agents), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From wshobson/agents (https://github.com/wshobson/agents), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 MIT License
 

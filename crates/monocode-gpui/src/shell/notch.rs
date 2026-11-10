@@ -415,7 +415,7 @@ impl Shell {
                 }
             }
             NotchEvent::OpenSession(id) => {
-                // The notch is another app's neighbor: bring MonoBOT forward
+                // The notch is another app's neighbor: bring monoBOT forward
                 // with the chat, as a notification's click does.
                 cx.activate(true);
                 self.open_notice_target(Target::Session(id), cx)

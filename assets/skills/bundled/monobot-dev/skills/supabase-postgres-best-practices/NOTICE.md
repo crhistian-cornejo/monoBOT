@@ -1,4 +1,4 @@
-From supabase/agent-skills (https://github.com/supabase/agent-skills), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From supabase/agent-skills (https://github.com/supabase/agent-skills), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 MIT License
 

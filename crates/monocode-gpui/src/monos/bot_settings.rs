@@ -1,6 +1,6 @@
 //! A bot's part of its settings (MonoSettingsDialog.tsx): the Orchestrator
 //! badge, its specialty, the Principal's daily brief, and its tools — Claude's
-//! own, the user's accounts, MonoBOT's skills, the skills installed for Claude
+//! own, the user's accounts, monoBOT's skills, the skills installed for Claude
 //! Code, the folders the user opened to it and the app's connectors. Sending,
 //! sharing and deleting stay blocked whatever is on.
 use super::panels::{card, heading, setting, switch_setting};

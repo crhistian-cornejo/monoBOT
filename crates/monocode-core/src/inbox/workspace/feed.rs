@@ -167,7 +167,7 @@ fn fetch(url: &str) -> Result<String, String> {
     Ok(text)
 }
 
-/// A recurrence rule, the parts MonoBOT lays out.
+/// A recurrence rule, the parts monoBOT lays out.
 #[derive(Debug, Default, PartialEq, Eq)]
 struct Rule {
     freq: String,

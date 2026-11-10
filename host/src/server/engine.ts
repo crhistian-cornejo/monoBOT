@@ -740,7 +740,7 @@ export class HostEngine {
           if (live) live.value = saved;
         })
         .catch((error) =>
-          console.debug("[MonoBOT] remote session title", error),
+          console.debug("[monoBOT] remote session title", error),
         );
     }
     const temporary = value.autoWorktreeBranch;
@@ -770,7 +770,7 @@ export class HostEngine {
           if (live) live.value = saved;
         })
         .catch((error) =>
-          console.debug("[MonoBOT] remote worktree branch", error),
+          console.debug("[monoBOT] remote worktree branch", error),
         );
     }
   }

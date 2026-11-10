@@ -34,7 +34,7 @@ struct Step {
 const STEPS: [Step; 7] = [
     Step {
         title: "What you need",
-        body: "Poki is a separate open-source project (AGPL-3.0) that runs on your Mac and drives the iPhone through Xcode's developer services, over MCP. MonoBOT can install it for you and starts it while its connector is on.",
+        body: "Poki is a separate open-source project (AGPL-3.0) that runs on your Mac and drives the iPhone through Xcode's developer services, over MCP. monoBOT can install it for you and starts it while its connector is on.",
         commands: &[],
         points: &[
             "A Mac with Apple Silicon and macOS 15 or later",
@@ -45,7 +45,7 @@ const STEPS: [Step; 7] = [
     },
     Step {
         title: "Get Poki",
-        body: "Turn on Settings › Connectors › iPhone (Poki). MonoBOT asks, then downloads Poki's published release (about 11 MB), refuses it unless its SHA-256 matches the one GitHub lists, and unpacks it inside MonoBOT's own data folder. No admin rights, no install scripts, nothing else on your Mac changes.",
+        body: "Turn on Settings › Connectors › iPhone (Poki). monoBOT asks, then downloads Poki's published release (about 11 MB), refuses it unless its SHA-256 matches the one GitHub lists, and unpacks it inside monoBOT's own data folder. No admin rights, no install scripts, nothing else on your Mac changes.",
         commands: &[
             "git clone https://github.com/JosssphZhou/poki.git ~/poki",
             "cd ~/poki",
@@ -76,11 +76,11 @@ const STEPS: [Step; 7] = [
     },
     Step {
         title: "Poki runs while the connector is on",
-        body: "MonoBOT starts Poki's service (its npm start) when you turn the connector on or a Phone bot needs it, and stops it when you turn it off or quit. Its address and token stay on this Mac.",
+        body: "monoBOT starts Poki's service (its npm start) when you turn the connector on or a Phone bot needs it, and stops it when you turn it off or quit. Its address and token stay on this Mac.",
         commands: &[],
         points: &[
-            "MonoBOT never starts it with POKI_MCP_APPROVAL_MODE=allow, which would approve sensitive actions without asking anyone.",
-            "Running your own copy in a terminal with npm start works too; MonoBOT uses it and leaves it alone.",
+            "monoBOT never starts it with POKI_MCP_APPROVAL_MODE=allow, which would approve sensitive actions without asking anyone.",
+            "Running your own copy in a terminal with npm start works too; monoBOT uses it and leaves it alone.",
         ],
     },
     Step {
@@ -166,7 +166,7 @@ impl SettingsView {
         let field = cx.new(|cx| {
             let mut field = Input::field(
                 "Poki folder",
-                "Installed by MonoBOT, or ~/poki",
+                "Installed by monoBOT, or ~/poki",
                 content(0.35),
                 cx,
             );
@@ -300,7 +300,7 @@ impl SettingsView {
         cx.notify();
     }
 
-    /// The switch went off: stop the daemon MonoBOT started.
+    /// The switch went off: stop the daemon monoBOT started.
     pub(in crate::settings) fn poki_turn_off(&mut self, cx: &mut Context<Self>) {
         self.poki = PokiState::default();
         cx.background_executor()
@@ -582,7 +582,7 @@ impl SettingsView {
                     .text_size(px(12.))
                     .line_height(px(16.))
                     .text_color(content(0.55))
-                    .child("It acts on your real phone. Only a bot you give it to can use it; every tap, swipe and keystroke asks you first. It never reads or enters codes, never unlocks the phone and never accepts a purchase. Screens are sent to the model you use. MonoBOT installs only the published Poki release, checked against its SHA-256, and never starts it with POKI_MCP_APPROVAL_MODE=allow."),
+                    .child("It acts on your real phone. Only a bot you give it to can use it; every tap, swipe and keystroke asks you first. It never reads or enters codes, never unlocks the phone and never accepts a purchase. Screens are sent to the model you use. monoBOT installs only the published Poki release, checked against its SHA-256, and never starts it with POKI_MCP_APPROVAL_MODE=allow."),
             )
             .when_some(self.poki.tutorial, |d, step| {
                 d.child(self.poki_tutorial(step, status, cx))

@@ -1,4 +1,4 @@
-//! Native provider transports, ported from MonoBOT's TS adapters.
+//! Native provider transports, ported from monoBOT's TS adapters.
 //! Blocking work belongs to a worker; never call `run` from a render/input handler.
 use crate::agent::{AccessMode, Approval, Control, Decision, Settings, TurnMetrics};
 use crate::tool::{ToolCall, ToolState};
@@ -529,7 +529,7 @@ impl Protocol {
                         }
                         let (policy, sandbox, sandbox_policy, reviewer) = self.codex_access();
                         let mut params = json!({"cwd":self.request.cwd,"approvalPolicy":policy,"sandbox":sandbox,"sandboxPolicy":sandbox_policy,"approvalsReviewer":reviewer,
-                            "developerInstructions":format!("You are the coding agent in MonoBOT. Use the available tools to inspect and work in the supplied cwd. Do not ask the user to paste files or git output you can inspect yourself. Respect the selected access policy and request approval when required. {}", if self.request.settings.plan { "This is a planning turn: inspect and propose a plan without changing files." } else { "" })});
+                            "developerInstructions":format!("You are the coding agent in monoBOT. Use the available tools to inspect and work in the supplied cwd. Do not ask the user to paste files or git output you can inspect yourself. Respect the selected access policy and request approval when required. {}", if self.request.settings.plan { "This is a planning turn: inspect and propose a plan without changing files." } else { "" })});
                         if let Some(instructions) = crate::visual_bridge::instructions(
                             &self.request.settings.environment,
                             false,
@@ -1571,7 +1571,7 @@ fn run_operation(
                 .and_then(|mono| {
                     crate::mono::groups::native::group_launch(&mono.mono, &mono.groups.places)
                 });
-            // The app's connectors and MonoBOT's skill packs, for every chat.
+            // The app's connectors and monoBOT's skill packs, for every chat.
             let extras = (!settings.text_only).then(|| {
                 crate::connectors::claude_launch(
                     bot.as_ref().and_then(|b| b.connectors.as_deref()),
@@ -2109,7 +2109,7 @@ mod tests {
             .find(|message| message["method"] == "thread/start")
             .unwrap();
         let instructions = started["params"]["developerInstructions"].as_str().unwrap();
-        assert!(instructions.starts_with("You are the coding agent in MonoBOT."));
+        assert!(instructions.starts_with("You are the coding agent in monoBOT."));
         assert!(instructions.contains("## Be quick"));
         assert!(instructions.contains("- /repo"));
     }

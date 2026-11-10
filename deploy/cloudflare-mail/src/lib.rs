@@ -1,4 +1,4 @@
-//! MonoBOT inbound mail Worker.
+//! monoBOT inbound mail Worker.
 //!
 //! Cloudflare Email Routing hands each message to `email`, which stores the
 //! raw MIME in R2 and indexes it in D1. The desktop app pulls new messages over

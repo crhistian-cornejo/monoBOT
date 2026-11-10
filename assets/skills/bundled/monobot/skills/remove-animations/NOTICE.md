@@ -1,5 +1,5 @@
 From Emil Kowalski's skills (https://github.com/emilkowalski/skills, commit c8a7962),
-bundled with MonoBOT unchanged.
+bundled with monoBOT unchanged.
 
 MIT License
 

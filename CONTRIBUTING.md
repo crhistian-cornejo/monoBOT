@@ -1,6 +1,6 @@
 # Contributing
 
-MonoBOT is early and I’m the only maintainer, so small and focused lands much faster than large and ambitious. Past that, the door is open - bug reports and fixes are genuinely welcome.
+monoBOT is early and I’m the only maintainer, so small and focused lands much faster than large and ambitious. Past that, the door is open - bug reports and fixes are genuinely welcome.
 
 Please don’t open PRs that add a new provider right now. The existing harnesses still need to agree on a few patterns, and a new adapter would copy whatever is there today. See [New providers](#new-providers).
 
@@ -25,7 +25,7 @@ cargo xtask dev
 - `xtask/` - the desktop tooling behind `cargo xtask`: dev runner, builds, macOS bundles, installers, update signing.
 - `scripts/generators/` - JavaScript sources of the bundles the app runs in QuickJS; `scripts/perf/` - the profiling replay.
 
-`crates/monocode-core/src/provider/` is the most useful place to start if you want to fix something real. Each provider transport translates its CLI's protocol into MonoBOT's own events, and the parsers have unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed. That's for the providers we already ship - please don't add a new one yet.
+`crates/monocode-core/src/provider/` is the most useful place to start if you want to fix something real. Each provider transport translates its CLI's protocol into monoBOT's own events, and the parsers have unit tests beside them, so you can fix a Codex parsing bug with only Claude Code installed. That's for the providers we already ship - please don't add a new one yet.
 
 ## Before you push
 

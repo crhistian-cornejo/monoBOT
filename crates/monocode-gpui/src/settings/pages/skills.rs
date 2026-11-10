@@ -11,7 +11,7 @@ use gpui::{
 };
 use monocode_core::skills::bundled::SKILL_PACKS;
 impl SettingsView {
-    /// SkillPacksCard: the skill packs MonoBOT ships, each off until turned on.
+    /// SkillPacksCard: the skill packs monoBOT ships, each off until turned on.
     fn skill_packs_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let rows = SKILL_PACKS
             .iter()
@@ -98,7 +98,7 @@ impl SettingsView {
                             .text_size(px(12.))
                             .line_height(px(16.))
                             .text_color(content(0.55))
-                            .child("Skills from Claude Code and Codex that MonoBOT carries with it. Claude loads a pack you turn on in every new session; other agents follow a skill when you call it with /name. Give a bot a pack in its tools."),
+                            .child("Skills from Claude Code and Codex that monoBOT carries with it. Claude loads a pack you turn on in every new session; other agents follow a skill when you call it with /name. Give a bot a pack in its tools."),
                     ),
             )
             .child(
@@ -523,7 +523,7 @@ impl SettingsView {
                                 )
                                 .child(self.toggle(
                                     "include-skill",
-                                    format!("Include {} in MonoBOT catalog", skill.name),
+                                    format!("Include {} in monoBOT catalog", skill.name),
                                     enabled,
                                     false,
                                     cx,
@@ -626,7 +626,7 @@ impl SettingsView {
             );
         }
         list = list.child(div().pt_3().text_size(px(12.)).line_height(px(16.)).text_color(content(0.4))
-            .child("Hidden skills stay on disk but leave MonoBOT's picker. Provider-managed skills and commands are unchanged."));
+            .child("Hidden skills stay on disk but leave monoBOT's picker. Provider-managed skills and commands are unchanged."));
         let surface = self.skill_surface.clone();
         let view = cx.weak_entity();
         let mut layout = div()

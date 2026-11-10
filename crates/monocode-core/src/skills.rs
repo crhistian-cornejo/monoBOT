@@ -94,7 +94,7 @@ pub fn list_skills(
     list_skills_with_packs(cwd, disabled_paths, &[])
 }
 
-/// [`list_skills`] plus MonoBOT's own skill packs, as installed under its
+/// [`list_skills`] plus monoBOT's own skill packs, as installed under its
 /// data folder ([`bundled::bundled_plugin_dirs`]): source `monocode`, after
 /// every root the user controls so a skill they installed keeps its name.
 /// Only absolute folders count; their skills sit in `<pack>/skills`.
@@ -801,7 +801,7 @@ mod tests {
         write_skill(
             &project.0.join(".agents/skills"),
             "ship",
-            "---\nname: ship\ndescription: MonoBOT ship\n---\n",
+            "---\nname: ship\ndescription: monoBOT ship\n---\n",
         );
         write_skill(
             &project.0.join(".claude/skills"),
@@ -821,7 +821,7 @@ mod tests {
 
         let skills = list_skills_from(&project.0, Some(&home.0), None);
         let ship = skills.iter().find(|s| s.name == "ship").unwrap();
-        assert_eq!(ship.description, "MonoBOT ship");
+        assert_eq!(ship.description, "monoBOT ship");
         assert_eq!(ship.source, "agents");
         assert_eq!(ship.scope, "project");
 

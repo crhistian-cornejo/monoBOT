@@ -407,7 +407,7 @@ pub fn catalog_rules() -> String {
         .collect::<Vec<_>>()
         .join("; ");
     format!(
-        "<image_styles>\nMonoBOT's preset looks and formats. When the user's message has one of these slash words, or names one of these looks or uses, pass it to images.generate: a style as \"style\":\"<id>\" (MonoBOT adds its art direction to your brief, so don't repeat it in the prompt; describe the subject, composition and light), a format as its \"aspect\". With a style but no format, pick the aspect the use needs. Without a style, write the look into the prompt yourself.\nStyles: {styles}.\nFormats: {formats}.\n</image_styles>"
+        "<image_styles>\nmonoBOT's preset looks and formats. When the user's message has one of these slash words, or names one of these looks or uses, pass it to images.generate: a style as \"style\":\"<id>\" (monoBOT adds its art direction to your brief, so don't repeat it in the prompt; describe the subject, composition and light), a format as its \"aspect\". With a style but no format, pick the aspect the use needs. Without a style, write the look into the prompt yourself.\nStyles: {styles}.\nFormats: {formats}.\n</image_styles>"
     )
 }
 

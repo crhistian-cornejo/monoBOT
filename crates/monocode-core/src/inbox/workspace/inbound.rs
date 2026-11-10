@@ -234,7 +234,7 @@ impl Service {
                 Ok(raw) => raw,
                 Err(error) if error == EXPIRED => {
                     remote.auth_failed = true;
-                    b"Subject: Cloud email expired\r\n\r\nThe raw message expired under the cloud retention policy before MonoBOT downloaded it. Its sender and arrival metadata are preserved, but its content is unavailable.".to_vec()
+                    b"Subject: Cloud email expired\r\n\r\nThe raw message expired under the cloud retention policy before monoBOT downloaded it. Its sender and arrival metadata are preserved, but its content is unavailable.".to_vec()
                 }
                 Err(error) => return Err(error),
             };

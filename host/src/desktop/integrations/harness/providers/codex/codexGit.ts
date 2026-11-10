@@ -63,7 +63,7 @@ export async function generateCodexPrContent(
     });
     parsed = parsePrContent(output);
   } catch (error) {
-    console.debug("[MonoBOT] pr content", error);
+    console.debug("[monoBOT] pr content", error);
   }
   const title =
     parsed?.title ||
@@ -89,7 +89,7 @@ export async function generateCodexBranchName(
     });
     return parseBranchName(output);
   } catch (error) {
-    console.debug("[MonoBOT] branch name", error);
+    console.debug("[monoBOT] branch name", error);
     return null;
   }
 }

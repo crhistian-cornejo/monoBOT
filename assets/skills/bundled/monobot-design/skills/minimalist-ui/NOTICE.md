@@ -1,4 +1,4 @@
-From Leonxlnx/taste-skill-classics (https://github.com/Leonxlnx/taste-skill-classics), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From Leonxlnx/taste-skill-classics (https://github.com/Leonxlnx/taste-skill-classics), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 MIT License
 

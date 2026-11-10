@@ -1,4 +1,4 @@
-# MonoBOT
+# monoBOT
 
 App de escritorio nativa en Rust con GPUI, más una app móvil Expo. Ya no hay React ni Tauri.
 
@@ -43,8 +43,9 @@ El escritorio no necesita Node ni Bun. Antes de hacer commit: `cargo fmt --all` 
 
 ## Nombres y datos
 
-- Lo que ve el usuario dice MonoBOT.
+- Lo que ve el usuario dice monoBOT.
 - Los identificadores internos se quedan como están, porque cambiarlos borraría los datos del usuario: crates `monocode-*`, `com.monocode.desktop` (bundle y llavero), `MONOCODE_*` en variables de entorno y `~/.monocode-host`.
+- Por lo mismo siguen escritos `MonoBOT` los nombres que ya están en disco o que leen otros programas: la carpeta `Documentos/MonoBOT`, los datos de desarrollo `MonoBOT Development`, los instaladores `MonoBOT_<versión>_…`, el `User-Agent`, el autor y el mensaje de los commits de checkpoint, la tarea de Windows `MonoBOT Host-<SID>` y el nombre de la app móvil en `mobile/app.json` (cambiarlo cambia la versión de runtime de las actualizaciones).
 - Los secretos (tokens de correo, Mailflare, Cloudflare) van al llavero del sistema, nunca a archivos, argumentos de proceso ni al chat.
 
 ## Documentación

@@ -5,7 +5,7 @@
 
 use serde::Serialize;
 
-/// How a file looks: nothing found, something to be careful with, or something MonoBOT won't open.
+/// How a file looks: nothing found, something to be careful with, or something monoBOT won't open.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Level {

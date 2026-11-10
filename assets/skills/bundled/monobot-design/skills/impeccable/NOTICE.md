@@ -1,4 +1,4 @@
-From pbakaus/impeccable (https://github.com/pbakaus/impeccable), bundled with MonoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
+From pbakaus/impeccable (https://github.com/pbakaus/impeccable), bundled with monoBOT as an optional pack. Platform binaries and images were left out; scripts that need a binary download it on first run.
 
 Apache License
                            Version 2.0, January 2004

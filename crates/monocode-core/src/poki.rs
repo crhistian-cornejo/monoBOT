@@ -1,7 +1,7 @@
 //! Poki (AGPL-3.0, github.com/JosssphZhou/poki) drives an iPhone from this
-//! Mac over MCP. MonoBOT ships none of its code. When the user turns its
+//! Mac over MCP. monoBOT ships none of its code. When the user turns its
 //! connector on, this downloads one pinned release, refuses it unless it is
-//! byte for byte the one GitHub published, unpacks it into MonoBOT's own data
+//! byte for byte the one GitHub published, unpacks it into monoBOT's own data
 //! folder and runs its daemon while the connector is on. Nothing is installed
 //! system-wide, nothing asks for admin rights, and no install script runs.
 //!
@@ -13,7 +13,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 
-/// The one release MonoBOT installs, as its GitHub release page lists it.
+/// The one release monoBOT installs, as its GitHub release page lists it.
 pub const VERSION: &str = "v0.1.0";
 const URL: &str =
     "https://github.com/JosssphZhou/poki/releases/download/v0.1.0/poki-v0.1.0-macos-arm64.tar.gz";
@@ -31,13 +31,13 @@ pub const BRIDGE: &str = "src/stdio.mjs";
 const SCRUBBED_ENV: [&str; 3] = [
     // Pre-approves Poki's sensitive operations.
     "POKI_MCP_APPROVAL_MODE",
-    // Moves the endpoint file away from where MonoBOT and the bridge look.
+    // Moves the endpoint file away from where monoBOT and the bridge look.
     "POKI_MCP_STATE_DIR",
     // Exposes every tool instead of Poki's default list.
     "POKI_MCP_TOOLS",
 ];
 
-/// What this Mac has for Poki, and whether MonoBOT installed or runs it.
+/// What this Mac has for Poki, and whether monoBOT installed or runs it.
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Machine {
@@ -45,9 +45,9 @@ pub struct Machine {
     pub supported: bool,
     /// What it lacks to install or run Poki, as the user would install it.
     pub missing: Vec<String>,
-    /// The folder MonoBOT installed, if it did.
+    /// The folder monoBOT installed, if it did.
     pub installed: Option<String>,
-    /// Whether MonoBOT started the daemon and it still runs.
+    /// Whether monoBOT started the daemon and it still runs.
     pub running: bool,
     pub version: &'static str,
     pub size: u64,
@@ -67,7 +67,7 @@ impl Stage {
         match self {
             Stage::Download => "Downloading Poki…",
             Stage::Verify => "Checking it is the published release…",
-            Stage::Unpack => "Unpacking into MonoBOT's folder…",
+            Stage::Unpack => "Unpacking into monoBOT's folder…",
             Stage::Dependencies => "Installing its packages (no install scripts)…",
             Stage::Done => "Installed",
         }
@@ -100,7 +100,7 @@ impl Status {
         match self {
             Status::NoFolder => "Install it from here, or choose a folder where you cloned it.",
             Status::NoBridge => "There is no src/stdio.mjs in it. Pick the folder you cloned.",
-            Status::Stopped => "Start it here; MonoBOT stops it when you turn this off or quit.",
+            Status::Stopped => "Start it here; monoBOT stops it when you turn this off or quit.",
             Status::Ready => "Give the connector to a Phone bot in its settings.",
         }
     }
@@ -111,11 +111,11 @@ impl Status {
 pub enum Next {
     /// Not an Apple Silicon Mac: only the manual tutorial.
     Unsupported,
-    /// Install these first; MonoBOT never installs them.
+    /// Install these first; monoBOT never installs them.
     Missing(Vec<String>),
     /// Ask, then download and verify the pinned release.
     Install,
-    /// Use the copy MonoBOT already installed.
+    /// Use the copy monoBOT already installed.
     Use(String),
     /// Start the daemon from the saved folder.
     Start(String),
@@ -154,7 +154,7 @@ pub fn install_question(machine: &Machine) -> String {
             "Download Poki {} ({megabytes} MB, AGPL-3.0) from its GitHub release?",
             machine.version
         ),
-        "MonoBOT checks it against the SHA-256 GitHub published and refuses anything else, unpacks it only inside its own data folder, and runs no install scripts. It needs no admin rights and changes nothing else on your Mac.".into(),
+        "monoBOT checks it against the SHA-256 GitHub published and refuses anything else, unpacks it only inside its own data folder, and runs no install scripts. It needs no admin rights and changes nothing else on your Mac.".into(),
         "Poki's daemon runs while this connector is on and stops when you turn it off or quit.".into(),
     ]
     .join("\n\n")
@@ -306,7 +306,7 @@ mod mac {
     use std::sync::Mutex;
     use std::time::{Duration, Instant};
 
-    /// The daemon MonoBOT started, so it stops it and nothing else.
+    /// The daemon monoBOT started, so it stops it and nothing else.
     static DAEMON: Mutex<Option<Child>> = Mutex::new(None);
     static INSTALL: Mutex<()> = Mutex::new(());
 
@@ -562,7 +562,7 @@ mod mac {
         Ok(())
     }
 
-    /// Stops the daemon MonoBOT started, letting it remove its endpoint file.
+    /// Stops the daemon monoBOT started, letting it remove its endpoint file.
     pub(super) fn stop() {
         let Some(mut child) = DAEMON.lock().unwrap_or_else(|e| e.into_inner()).take() else {
             return;
@@ -627,7 +627,7 @@ pub fn start(dir: &str) -> Result<(), String> {
     }
 }
 
-/// Stops the daemon MonoBOT started; one the user started is left alone.
+/// Stops the daemon monoBOT started; one the user started is left alone.
 pub fn stop() {
     #[cfg(target_os = "macos")]
     mac::stop();

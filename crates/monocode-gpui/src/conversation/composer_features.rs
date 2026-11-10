@@ -151,7 +151,7 @@ impl Conversation {
                 }
                 self.save_settings(cx);
                 text = if rest.is_empty() && mode == "operator" {
-                    "Explain what you can do in MonoBOT with the app CLI.".into()
+                    "Explain what you can do in monoBOT with the app CLI.".into()
                 } else {
                     rest
                 };

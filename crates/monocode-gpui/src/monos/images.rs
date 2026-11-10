@@ -168,7 +168,7 @@ pub(super) fn render(
         .collect::<Vec<_>>();
     let failed = interrupted || job.status == JobStatus::Failed;
     let note = if interrupted {
-        "Stopped when MonoBOT closed. Ask again to retry.".to_owned()
+        "Stopped when monoBOT closed. Ask again to retry.".to_owned()
     } else if failed {
         job.error
             .clone()

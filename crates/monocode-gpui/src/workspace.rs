@@ -591,7 +591,7 @@ impl Workspace {
             dock.active = dock.active.min(dock.terminals.len() - 1);
             dock.size = dock.side.clamp(dock.size, (4000., 4000.));
         }
-        // MonoBOT has one square workspace frame, as Tauri; a saved rounded
+        // monoBOT has one square workspace frame, as Tauri; a saved rounded
         // card from an earlier preview opens boxy.
         state.new_layout_boxy = true;
         state.add_project(cwd);

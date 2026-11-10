@@ -41,7 +41,7 @@ const state: UsageLimitState = {
   canAutoResume: true,
   resumeAtReset: false,
   resetLabel: "Resets tomorrow at 9 AM",
-  limitation: "Keep MonoBOT running on desktop",
+  limitation: "Keep monoBOT running on desktop",
 };
 const render = (patch: Partial<UsageLimitState> = {}) =>
   act(() =>
