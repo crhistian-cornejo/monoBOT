@@ -732,6 +732,9 @@ pub struct Rest {
 
 /// How many sessions the left wing shows before "+N".
 pub const MARKS: usize = 3;
+/// Each wing while agents work: three marks and "+N" on one side, the
+/// longest state word ("Delegating") and its steps on the other.
+pub const AGENT_WING: u32 = 124;
 
 impl Rest {
     pub fn busy(&self) -> bool {
@@ -743,26 +746,12 @@ impl Rest {
         self.working.saturating_sub(self.marks.len())
     }
 
-    /// The wings' widths: a mark per session (and "+N") on the left, the
-    /// lead's words and steps on the right.
-    pub fn wings(&self, show_count: bool) -> (u32, u32) {
-        let marks = self
-            .marks
-            .len()
-            .max(usize::from(self.asking > 0 || self.call));
-        let left = 14 + 18 * marks as u32 + if show_count && self.more() > 0 { 22 } else { 0 };
-        // The lead's state word at about 6.2 points a letter and its steps.
-        let right = match &self.lead_text {
-            Some(word) => {
-                let steps = if self.lead_steps.is_some() { 30. } else { 0. };
-                (6.2 * word.chars().count() as f32 + steps + 24.) as u32
-            }
-            None => 36,
-        };
-        // Both wings as wide as the wider, so the notch stays centered on
-        // the camera.
-        let side = left.max(right).max(36);
-        (side, side)
+    /// The wings' widths while agents work: the marks (and "+N") on the
+    /// left, the lead's state and steps on the right. One size whatever the
+    /// state says, so the notch holds still as a session goes from reading
+    /// to editing, and even about the camera.
+    pub fn wings(&self) -> (u32, u32) {
+        (AGENT_WING, AGENT_WING)
     }
 }
 

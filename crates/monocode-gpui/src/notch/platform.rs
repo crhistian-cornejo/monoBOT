@@ -132,6 +132,30 @@ mod mac {
                     | NSWindowStyleMask::Resizable),
         );
         ns_window.setHasShadow(false);
+        // Nothing to bring back on relaunch: without this AppKit rewrites
+        // its saved window state off the main thread each time the notch
+        // moves or resizes.
+        // SAFETY: `setRestorable:` takes a BOOL, as sent.
+        let _: () = unsafe { objc2::msg_send![&*ns_window, setRestorable: false] };
+        // Every change of the notch's shape resizes its window, and AppKit
+        // draws a resized layer inside its own transaction. With GPUI's two
+        // drawables both still held there, that draw waited up to a second
+        // for one to come back, and the whole app with it: the hover's
+        // panel opened that much late. A third drawable is always free. It
+        // costs one more frame of the window's size, small while closed.
+        let handle = HasWindowHandle::window_handle(window).ok();
+        if let Some(RawWindowHandle::AppKit(appkit)) = handle.map(|handle| handle.as_raw()) {
+            // SAFETY: GPUI's AppKit handle points at its live content view,
+            // whose backing layer is the renderer's CAMetalLayer;
+            // `setMaximumDrawableCount:` takes an NSUInteger.
+            unsafe {
+                let view = &*appkit.ns_view.as_ptr().cast::<objc2::runtime::AnyObject>();
+                let layer: *mut objc2::runtime::AnyObject = objc2::msg_send![view, layer];
+                if let Some(layer) = layer.as_ref() {
+                    let _: () = objc2::msg_send![layer, setMaximumDrawableCount: 3usize];
+                }
+            }
+        }
         ns_window.setLevel(LEVEL);
         ns_window.setCollectionBehavior(
             NSWindowCollectionBehavior::CanJoinAllSpaces

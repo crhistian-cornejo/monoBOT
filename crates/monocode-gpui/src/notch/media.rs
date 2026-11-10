@@ -13,12 +13,11 @@ use monocode_core::notch::media::{self as media_model, Lyrics, Playing, Track};
 use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
 
-/// Each wing's room while something plays.
-pub(super) const MEDIA_WING: u32 = 150;
+/// Each wing's room while something plays, with or without agents at work:
+/// one width, so an agent starting under the music does not move it.
+pub(super) const MEDIA_WING: u32 = 160;
 /// The player at the top of Home.
 pub(super) const PLAYER_HEIGHT: f32 = 112.;
-/// The right wing's extra room for the music badge while an agent works.
-pub(super) const MUSIC_BADGE: u32 = 62;
 /// How often the open player's line and progress catch up.
 const TICK: Duration = Duration::from_millis(250);
 /// The title's glide: points a second, the pause at its start, the gap
@@ -442,17 +441,13 @@ impl Notch {
             .into_any_element()
     }
 
-    /// The closed notch while something plays: the cover, the title gliding
-    /// past and the equalizer.
-    pub(super) fn media_wings(
-        &self,
-        camera: Option<model::Camera>,
-        wings: (f32, f32),
-    ) -> AnyElement {
+    /// What plays in one line: the lyric being sung, or the title gliding
+    /// past.
+    fn media_line(&self) -> AnyElement {
         let Some(media) = self.media.as_ref() else {
             return div().into_any_element();
         };
-        let title: AnyElement = match self.lyric_moment() {
+        match self.lyric_moment() {
             Some((previous, current, since)) => {
                 let sung = self.lyric_sung();
                 lyric_flow(previous, current, since, sung, media.playing).into_any_element()
@@ -465,7 +460,39 @@ impl Notch {
                 ink(0.9),
             )
             .into_any_element(),
-        };
+        }
+    }
+
+    /// The right wing while agents work under the music: the cover, the
+    /// lyric or the title, and the equalizer.
+    pub(super) fn music_wing(&self, width: f32) -> AnyElement {
+        div()
+            .debug_selector(|| "notch-music-wing".into())
+            .w(px(width))
+            .flex_shrink_0()
+            .min_w_0()
+            .pl(px(10.))
+            .pr(px(14.))
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(self.cover(16., false))
+            .child(self.media_line())
+            .child(equalizer(true))
+            .into_any_element()
+    }
+
+    /// The closed notch while something plays: the cover, the title gliding
+    /// past and the equalizer.
+    pub(super) fn media_wings(
+        &self,
+        camera: Option<model::Camera>,
+        wings: (f32, f32),
+    ) -> AnyElement {
+        if self.media.is_none() {
+            return div().into_any_element();
+        }
+        let title = self.media_line();
         match camera {
             Some(camera) => div()
                 .debug_selector(|| "notch-media".into())

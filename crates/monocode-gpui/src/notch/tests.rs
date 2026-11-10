@@ -82,7 +82,7 @@ fn busy_wings() -> f32 {
         activities: vec![working(1), working(2)],
         ..Feed::default()
     })
-    .wings(true);
+    .wings();
     (left + right) as f32
 }
 
@@ -427,7 +427,7 @@ fn several_agents_spread_the_wings_with_the_leads_progress(cx: &mut TestAppConte
     leave(visual);
     // Four Claude Code sessions: one Claude mark and "+3" on the left; the
     // lead's state and 2/6 on the right, the wings even about the camera.
-    let (left, right) = rest.wings(true);
+    let (left, right) = rest.wings();
     assert_eq!(rest.marks.len(), 1);
     assert_eq!(rest.more(), 3);
     assert_eq!(
@@ -529,6 +529,72 @@ fn what_plays_glides_past_at_rest_and_leads_home_with_its_player(cx: &mut TestAp
     visual.run_until_parked();
     assert!(visual.debug_bounds("notch-media").is_none());
     assert_eq!(size(opened.window, visual), (186. + 2. * SHOULDER, 37.));
+}
+
+#[gpui::test]
+fn agents_under_the_music_take_the_left_wing_and_keep_the_width(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Playing, Track};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    let playing = Playing {
+        track: Track {
+            app: "Spotify.exe".into(),
+            title: "Song".into(),
+            artist: "Artist".into(),
+            album: "Album".into(),
+            duration: Some(Duration::from_secs(200)),
+        },
+        playing: true,
+        position: Duration::from_secs(12),
+        at: Instant::now(),
+        art: None,
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.lyrics_for = Some(playing.track.clone());
+            notch.set_media(Some(playing), cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let music_only = size(opened.window, visual);
+    assert_eq!(
+        music_only,
+        (186. + 2. * (media::MEDIA_WING as f32 + SHOULDER), 37.)
+    );
+    // An agent starts: the notch keeps its width, the state on the left of
+    // the camera and the music on its right, the two wings alike.
+    let feed = |step: &str| Feed {
+        activities: vec![Activity {
+            step: step.into(),
+            ..working(1)
+        }],
+        ..Feed::default()
+    };
+    for step in ["Reading files", "Delegating to an agent", "Editing main.rs"] {
+        opened
+            .window
+            .update(visual, |notch, _, cx| notch.update_feed(feed(step), cx))
+            .unwrap();
+        visual.run_until_parked();
+        assert_eq!(size(opened.window, visual), music_only, "{step}");
+        let state = visual.debug_bounds("notch-state-wing").unwrap();
+        let music = visual.debug_bounds("notch-music-wing").unwrap();
+        assert_eq!(state.size.width, music.size.width);
+        assert!(state.right() < music.left());
+    }
+    // The music stops: the agents' own width, the same for every state.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_media(None, cx))
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-music-wing").is_none());
+    assert_eq!(
+        size(opened.window, visual),
+        (186. + 2. * (model::AGENT_WING as f32 + SHOULDER), 37.)
+    );
 }
 
 #[gpui::test]

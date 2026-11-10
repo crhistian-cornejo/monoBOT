@@ -384,15 +384,18 @@ fn the_wings_show_who_works_and_what_the_lead_does() {
     assert_eq!(at_rest.marks[1].face.as_ref().unwrap().mascot, "robot");
     assert_eq!(at_rest.lead_text.as_deref(), Some("Reading"));
     assert_eq!(at_rest.lead_steps, Some((2, 6)));
-    let (left, right) = at_rest.wings(true);
-    // Even wings, so the notch stays on the camera's center.
-    assert_eq!(left, right);
-    // The wider of three faces with "+1" and "Reading 2/6".
-    assert_eq!(
-        left,
-        (14 + 3 * 18 + 22).max((6.2_f32 * 7. + 30. + 24.) as u32)
-    );
-    assert_eq!(Rest::default().wings(true), (36, 36));
+    // Even wings, so the notch stays on the camera's center, and one size
+    // whatever the state word, so it never changes width as the work does.
+    assert_eq!(at_rest.wings(), (AGENT_WING, AGENT_WING));
+    let editing = rest(&Feed {
+        activities: vec![Activity {
+            step: "Delegating to an agent".into(),
+            ..feed.activities[0].clone()
+        }],
+        ..feed.clone()
+    });
+    assert_ne!(editing.lead_text, at_rest.lead_text);
+    assert_eq!(editing.wings(), at_rest.wings());
     // An ask leads, and says so.
     let asked = Feed {
         asks: vec![ask(2, "r1")],

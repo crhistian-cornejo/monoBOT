@@ -35,7 +35,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 /// How long the pointer stays over the closed notch before it opens.
-const OPEN_DELAY: Duration = Duration::from_millis(90);
+pub(crate) const OPEN_DELAY: Duration = Duration::from_millis(90);
 /// How long after the pointer leaves the panel closes.
 const CLOSE_DELAY: Duration = Duration::from_millis(260);
 /// The outward flare where the notch meets the top edge.
@@ -57,12 +57,12 @@ pub(crate) const ROW: f32 = 26.;
 pub(crate) const CAPTION: f32 = 22.;
 const CATALOG_HEIGHT: f32 = 26.;
 /// The content fades in after the shape starts to move.
-const FADE_DELAY: f32 = 0.04;
+const FADE_DELAY: f32 = 0.02;
 const FADE: f32 = 0.12;
 /// A page's fade inside the open panel.
 const PAGE_FADE: f32 = 0.08;
 /// The beat between widgets coming in.
-const STAGGER: f32 = 0.03;
+const STAGGER: f32 = 0.02;
 /// How far a new page rises as it fades in.
 const RISE: f32 = 6.;
 
@@ -74,7 +74,7 @@ struct Spring {
     damping: f32,
 }
 const OPENING: Spring = Spring {
-    response: 0.34,
+    response: 0.3,
     damping: 0.8,
 };
 const BETWEEN: Spring = Spring {
@@ -773,6 +773,14 @@ impl Notch {
         }
     }
 
+    /// The trace's tour stands in for the pointer: the notch swells as
+    /// under it, and the tour opens it `OPEN_DELAY` later.
+    pub(crate) fn rehearse_hover(&mut self, hovered: bool, cx: &mut Context<Self>) {
+        self.hovered = hovered;
+        self.keep_responsive();
+        cx.notify();
+    }
+
     /// Whether the pointer is over the notch now: asked of the system where
     /// it is watched, so a stray event never opens or closes the panel.
     fn pointer_over(&self) -> bool {
@@ -833,17 +841,12 @@ impl Notch {
                 left: levels::LEVEL_WING,
                 right: levels::LEVEL_WING,
             }
-        } else if self.rest.busy() {
-            let (left, right) = self.rest.wings(self.look.show_count);
-            // Music playing keeps a corner of the right wing.
-            let right = right
-                + if self.media_showing() {
-                    media::MUSIC_BADGE
-                } else {
-                    0
-                };
+        } else if self.rest.busy() && !self.media_showing() {
+            let (left, right) = self.rest.wings();
             Shape::Busy { left, right }
         } else if self.media_showing() {
+            // What plays keeps its width when agents start: their state
+            // takes the left wing, the music the right.
             Shape::Busy {
                 left: media::MEDIA_WING,
                 right: media::MEDIA_WING,
@@ -951,7 +954,17 @@ impl Notch {
             _ => wanted,
         };
         if self.placed != Some(placed) {
+            let started = Instant::now();
             platform::place(window, cx, display, placed);
+            if tracing() {
+                eprintln!(
+                    "NOTCHTRACE {} place {:.0}x{:.0} {:?}",
+                    monocode_core::time::now_ms() % 100_000,
+                    placed.width,
+                    placed.height,
+                    started.elapsed()
+                );
+            }
             self.placed = Some(placed);
             // Draw the new size at once rather than when the next frame is
             // asked for.
@@ -1464,6 +1477,32 @@ impl Notch {
             },
         };
         match camera {
+            // Something plays too: who works and what they do on the left,
+            // the music on the right, each wing as wide as the other.
+            Some(camera) if self.media_showing() => {
+                let (left_wing, right_wing) = wings;
+                div()
+                    .size_full()
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .debug_selector(|| "notch-state-wing".into())
+                            .w(px(left_wing))
+                            .flex_shrink_0()
+                            .min_w_0()
+                            .pl(px(12.))
+                            .pr(px(8.))
+                            .flex()
+                            .items_center()
+                            .gap(px(8.))
+                            .child(div().flex_shrink_0().child(left))
+                            .child(div().flex_1().min_w_0().flex().child(right)),
+                    )
+                    .child(div().w(px(camera.width)).flex_shrink_0())
+                    .child(self.music_wing(right_wing))
+                    .into_any_element()
+            }
             Some(camera) => {
                 let (left_wing, right_wing) = wings;
                 div()
@@ -1487,9 +1526,7 @@ impl Notch {
                             .pr(px(12.))
                             .flex()
                             .items_center()
-                            .gap(px(8.))
-                            .child(div().flex_1().min_w_0().flex().child(right))
-                            .children(self.music_badge()),
+                            .child(div().flex_1().min_w_0().flex().child(right)),
                     )
                     .into_any_element()
             }
@@ -1774,11 +1811,15 @@ impl Render for Notch {
         let element = self.render_notch(window, cx);
         if tracing() {
             eprintln!(
-                "NOTCHTRACE {} render {:?} tab {:?} shape {:?}",
+                "NOTCHTRACE {} render {:?} tab {:?} shape {:?} height {:.0}",
                 monocode_core::time::now_ms() % 100_000,
                 started.elapsed(),
                 self.tab,
-                self.shape()
+                self.shape(),
+                self.motion
+                    .map_or(self.shown.map_or(0., |shown| shown.height), |motion| {
+                        motion.frame().height
+                    })
             );
         }
         element
@@ -1968,7 +2009,8 @@ pub(crate) fn tracing() -> bool {
     *TRACE.get_or_init(|| std::env::var_os("MONOBOT_NOTCH_TRACE").is_some())
 }
 
-/// `MONOBOT_NOTCH_TRACE=tour`: also walks the pages.
+/// `MONOBOT_NOTCH_TRACE=tour`: also opens and folds the panel as a hover
+/// does, then walks the pages.
 pub(crate) fn touring() -> bool {
     std::env::var("MONOBOT_NOTCH_TRACE").is_ok_and(|value| value == "tour")
 }

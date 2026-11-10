@@ -122,11 +122,38 @@ impl Shell {
                 this.notch_event(event.clone(), cx)
             }),
         );
-        // MONOBOT_NOTCH_TRACE=1: opens the panel and walks its pages, so
-        // their timing can be read without touching the pointer.
+        // MONOBOT_NOTCH_TRACE=tour: once the app has settled, opens and folds
+        // the panel a few times, then walks its pages, so their timing can
+        // be read without touching the pointer.
         if crate::notch::touring() {
             let entity = handle.entity.clone();
             cx.spawn(async move |_, cx| {
+                let executor = cx.background_executor().clone();
+                let wait = |ms| executor.timer(std::time::Duration::from_millis(ms));
+                wait(5000).await;
+                for open in (0..10).map(|cycle| cycle % 2 == 0) {
+                    let now = || monocode_core::time::now_ms() % 100_000;
+                    if open {
+                        // As the pointer does: it rests, then the panel opens.
+                        entity.update(cx, |notch, cx| {
+                            eprintln!("NOTCHTRACE {} hovers", now());
+                            notch.rehearse_hover(true, cx);
+                        });
+                        wait(crate::notch::OPEN_DELAY.as_millis() as u64).await;
+                    }
+                    entity.update(cx, |notch, cx| {
+                        eprintln!(
+                            "NOTCHTRACE {} {}",
+                            now(),
+                            if open { "opens" } else { "folds" }
+                        );
+                        notch.set_open(open, cx);
+                        if !open {
+                            notch.rehearse_hover(false, cx);
+                        }
+                    });
+                    wait(1400).await;
+                }
                 let tabs = crate::notch::Tab::ALL;
                 for step in 0..12usize {
                     cx.background_executor()

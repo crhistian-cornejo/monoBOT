@@ -60,6 +60,25 @@ A second pass the same day, on what the list below first held:
 After both passes: `cargo xtask check` clean; `cargo xtask test` 1317 (core) and
 1098 (GPUI) passed; `monobot-email` 101, `monobot-live` 27, `monobot-voice` 6.
 
+A third pass the same night, on the notch opening late under the pointer.
+Measured with `MONOBOT_NOTCH_TRACE=tour` (the tour now rests the pointer,
+waits `OPEN_DELAY` and opens, five times, after the app settles) on the
+`native-dev` build `cargo xtask dev` runs, in a temporary `HOME`.
+
+| What | Where | Checked by |
+| --- | --- | --- |
+| **The panel opened up to a second late, and the whole app froze meanwhile.** Each resize of the notch's window (opening, and before this pass every change of the state word's width) made AppKit draw the layer inside its own transaction; GPUI keeps 2 drawables and both were still held, so `nextDrawable` blocked the main thread 100 ms to 1 s. A 10 s `sample` of the running app had the main thread waiting there about half of its busy time. The notch's layer now keeps 3. Hover to open went from 90 ms + 100–1000 ms to 91 ms every time, the first frame within 18 ms, 60 frames/s throughout | `notch/platform.rs` (`style`) | The tour's trace; not covered by a test (tests draw no Metal) |
+| **The wings changed width with every state word** ("Running", "Delegating"…), each change a resize and a possible stall above. One width per state now; see [notch.md](notch.md) | `core/notch.rs` (`AGENT_WING`), `notch/media.rs` (`MEDIA_WING`, `music_wing`) | `agents_under_the_music_take_the_left_wing_and_keep_the_width`, `the_wings_show_who_works_and_what_the_lead_does` |
+| **AppKit rewrote its saved window state off the main thread, about 23 % of a core** in the running app while agents worked. The notch's window is no longer restorable; with the fixed widths it also resizes far less. Read in the `sample`; the share after the fix was not measured | `notch/platform.rs` (`style`) | Not covered by a test |
+| The content came in a little sooner: fade delay 40 → 20 ms, the widgets' stagger 30 → 20 ms, the opening spring's response 0.34 → 0.30 s | `notch/mod.rs` | Taste; tests run under reduced motion |
+
+Tried and left: keeping the notch's window at the panel's size for good also
+removed the stall, but doubled the app's CPU at rest and grew its footprint.
+
+The `native-dev` build (opt-level 1) is what `cargo xtask dev` runs; draws in
+it cost about twice the optimized build's (0.6–1.5 ms against 0.6–0.9 ms for
+the notch), still far inside a frame.
+
 ## Left to do, by value
 
 ### Yours to decide
