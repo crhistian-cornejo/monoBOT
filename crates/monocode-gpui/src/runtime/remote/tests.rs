@@ -470,9 +470,9 @@ fn built_node_host_round_trip_preserves_native_wire_commands() {
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("../../build/host/monocode-host.mjs")
+                .join("../../host/build/host/monocode-host.mjs")
         });
-    assert!(cli.is_file(), "Run npm run host:build first");
+    assert!(cli.is_file(), "Run pnpm --dir host build first");
     let node = std::env::var("MONOCODE_TEST_NODE").unwrap_or_else(|_| "node".into());
     let bin = directory.0.join("bin");
     std::fs::create_dir_all(&bin).unwrap();

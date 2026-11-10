@@ -1706,6 +1706,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
     fn a_login_shell_runs_and_its_output_reaches_the_grid() {
         let dir = std::env::temp_dir().to_string_lossy().into_owned();
         let size = GridSize {

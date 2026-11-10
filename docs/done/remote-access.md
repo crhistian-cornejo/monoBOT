@@ -71,11 +71,11 @@ HTTPS endpoints can also be entered if you operate a reverse proxy to the loopba
 ## Manage the host
 
 ```sh
-node build/host/monocode-host.mjs status
-node build/host/monocode-host.mjs devices
-node build/host/monocode-host.mjs revoke DEVICE_ID
-node build/host/monocode-host.mjs stop
-node build/host/monocode-host.mjs service uninstall
+node host/build/host/monocode-host.mjs status
+node host/build/host/monocode-host.mjs devices
+node host/build/host/monocode-host.mjs revoke DEVICE_ID
+node host/build/host/monocode-host.mjs stop
+node host/build/host/monocode-host.mjs service uninstall
 ```
 
 SSH setup names each device credential after the desktop's computer name. Removing a saved connection from the desktop does not stop the host. It revokes the device credential only when you choose **Revoke access and remove**. Otherwise, use `devices` and `revoke` on the host to remove access. Stopping the host interrupts active turns; restarting retains their transcripts and marks them interrupted. No uncertain provider operation is automatically replayed after a host crash.
