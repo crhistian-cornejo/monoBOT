@@ -621,11 +621,156 @@ pub struct Personal {
 }
 
 /// One thing said in an agent's chat, as the notch's own chat shows it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Said {
     /// The user said it; otherwise the agent did.
     pub mine: bool,
     pub text: String,
+    /// What came with it: the pictures and files the user attached, the
+    /// pictures the agent made or points at, and the documents it wrote.
+    pub files: Vec<Attached>,
+}
+
+/// A picture, a file or a document that came with something said.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Attached {
+    pub name: String,
+    /// Shown as a thumbnail; anything else is a named chip.
+    pub image: bool,
+    /// Where it is on this computer. None for what lives in the app only (an
+    /// agent's document, a picture kept inside the transcript): a click
+    /// opens the chat there instead.
+    pub path: Option<std::path::PathBuf>,
+}
+
+/// A row of attachments larger than this is not read for the notch: it
+/// carries its pictures inside it, megabytes that would be parsed on every
+/// look at the chat.
+const ATTACHED_ROW: usize = 64 << 10;
+
+/// What a transcript row other than plain text brings to the notch's chat:
+/// the user's attachments, a picture the agent made, a document it wrote.
+fn attached(role: &str, text: &str) -> Vec<Attached> {
+    let named = |value: &serde_json::Value, path: Option<&std::path::PathBuf>| {
+        value["name"]
+            .as_str()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+            .or_else(|| Some(path?.file_name()?.to_string_lossy().into_owned()))
+    };
+    let parsed = || {
+        (text.len() <= ATTACHED_ROW)
+            .then(|| serde_json::from_str::<serde_json::Value>(text).ok())
+            .flatten()
+    };
+    match role {
+        crate::transcript::attachments::ROLE => match parsed() {
+            Some(files) => files
+                .as_array()
+                .into_iter()
+                .flatten()
+                .map(|file| {
+                    let path = file["path"]
+                        .as_str()
+                        .filter(|path| !path.is_empty())
+                        .map(std::path::PathBuf::from)
+                        .filter(|path| path.is_absolute());
+                    let image = file["kind"] == "image"
+                        || file["mimeType"]
+                            .as_str()
+                            .is_some_and(|mime| mime.starts_with("image/"));
+                    Attached {
+                        name: named(file, path.as_ref()).unwrap_or_else(|| "Attachment".into()),
+                        image,
+                        path,
+                    }
+                })
+                .collect(),
+            None => vec![Attached {
+                name: "Attachments".into(),
+                image: false,
+                path: None,
+            }],
+        },
+        crate::images::REPLY_ROLE => parsed()
+            .and_then(|image| {
+                let path = std::path::PathBuf::from(image["path"].as_str()?);
+                Some(Attached {
+                    name: named(&image, Some(&path)).unwrap_or_else(|| "Image".into()),
+                    image: true,
+                    path: path.is_absolute().then_some(path),
+                })
+            })
+            .into_iter()
+            .collect(),
+        "mono-document" => parsed()
+            .and_then(|document| {
+                let title = document["title"].as_str()?.trim();
+                (!title.is_empty()).then(|| Attached {
+                    name: title.to_owned(),
+                    image: false,
+                    path: None,
+                })
+            })
+            .into_iter()
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The local pictures and videos an answer points at (`![alt](path)`), taken
+/// out of its text: the notch shows plain text, where the link would read
+/// as noise. A picture on the web stays as written; it is never fetched.
+fn pointed_at(text: &str) -> (String, Vec<Attached>) {
+    use crate::transcript::media::{self, Kind};
+    let mut out = String::with_capacity(text.len());
+    let mut files = Vec::new();
+    let mut rest = text;
+    while let Some(start) = rest.find("![") {
+        let after = &rest[start + 2..];
+        let link = after.find("](").and_then(|alt_end| {
+            let source = &after[alt_end + 2..];
+            let end = source.find(')')?;
+            let alt = &after[..alt_end];
+            let address = source[..end]
+                .trim()
+                .trim_start_matches('<')
+                .trim_end_matches('>');
+            // A new line inside is not a link.
+            (!alt.contains('\n') && !address.contains('\n')).then_some((
+                alt,
+                address,
+                alt_end + 2 + end + 1,
+            ))
+        });
+        let found = link.and_then(|(alt, address, length)| {
+            let media = media::resolve(address, None, None)?;
+            Some((alt, media, length))
+        });
+        match found {
+            Some((alt, media, length)) => {
+                out.push_str(&rest[..start]);
+                let name = Some(alt.trim())
+                    .filter(|alt| !alt.is_empty())
+                    .map(str::to_owned)
+                    .or_else(|| Some(media.path.file_name()?.to_string_lossy().into_owned()))
+                    .unwrap_or_else(|| "Image".into());
+                files.push(Attached {
+                    name,
+                    image: media.kind == Kind::Image,
+                    path: Some(media.path),
+                });
+                rest = &after[length..];
+            }
+            None => {
+                out.push_str(&rest[..start + 2]);
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    (out, files)
 }
 
 /// The chat the notch has open with one agent.
@@ -644,35 +789,49 @@ const SAID_LENGTH: usize = 600;
 
 /// The latest things said out of a transcript's rows (`role`, `text`): what
 /// the user wrote and what the agent answered, without tools or thinking.
-/// An answer streamed over several rows is one thing said.
+/// An answer streamed over several rows is one thing said, and it carries
+/// what came with it: the user's attachments, the pictures the agent made
+/// or points at, the documents it wrote.
 pub fn said<'a>(rows: impl DoubleEndedIterator<Item = (&'a str, &'a str)>) -> Vec<Said> {
     let mut kept: Vec<Said> = Vec::new();
+    // The user's attachments are a row after their message: read newest
+    // first, they wait for it.
+    let mut waiting: Vec<Attached> = Vec::new();
     for (role, text) in rows.rev() {
-        let mine = match role {
-            "user" => true,
-            "assistant" => false,
-            _ => continue,
+        let (mine, text, mut files) = match role {
+            "user" => (true, text.trim().to_owned(), std::mem::take(&mut waiting)),
+            "assistant" => {
+                let (text, files) = pointed_at(text);
+                (false, text.trim().to_owned(), files)
+            }
+            crate::transcript::attachments::ROLE => {
+                let mut files = attached(role, text);
+                files.append(&mut waiting);
+                waiting = files;
+                continue;
+            }
+            _ => (false, String::new(), attached(role, text)),
         };
-        let text = text.trim();
-        if text.is_empty() {
+        if text.is_empty() && files.is_empty() {
             continue;
         }
         match kept.last_mut() {
             // Rows are read newest first: an earlier row of the same answer
             // goes before what is already kept.
             Some(last) if !mine && !last.mine => {
-                if last.text.len() < SAID_LENGTH {
+                if last.text.is_empty() {
+                    last.text = text;
+                } else if last.text.len() < SAID_LENGTH && !text.is_empty() {
                     last.text = format!("{text}\n{}", last.text);
                 }
+                files.append(&mut last.files);
+                last.files = files;
             }
             _ => {
                 if kept.len() == SAID_KEPT {
                     break;
                 }
-                kept.push(Said {
-                    mine,
-                    text: text.to_owned(),
-                });
+                kept.push(Said { mine, text, files });
             }
         }
     }

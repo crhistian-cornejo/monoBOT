@@ -323,6 +323,8 @@ fn main() {
         .unwrap_or(cwd)
         .to_string_lossy()
         .to_string();
+    // Windows answers with a verbatim path; providers are given the plain one.
+    let cwd = monocode_core::files::plain_path(&cwd).to_owned();
     let database = if use_monocode {
         monocode_db
     } else {

@@ -15,15 +15,7 @@ impl Attachment {
     /// An image file the transcript shows that nobody attached: a picture a
     /// provider made, or one a reply points at.
     pub(super) fn image_file(path: PathBuf, name: impl Into<SharedString>) -> Self {
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .map(str::to_ascii_lowercase);
-        let mime = match extension.as_deref() {
-            Some("svg") => "image/svg+xml",
-            Some("bmp") => "image/bmp",
-            _ => monocode_core::composer::image_mime(&path).unwrap_or("image/png"),
-        };
+        let mime = picture_mime(&path);
         Self {
             name: name.into(),
             path: Some(path),
@@ -82,6 +74,20 @@ impl Attachment {
             .cloned()
             .map(Self::from_value)
             .collect()
+    }
+}
+
+/// The kind of picture a file is, by its name: what a [`Photo`] is told so
+/// the formats GPUI decodes itself (SVG, BMP) go the right way.
+pub(crate) fn picture_mime(path: &std::path::Path) -> &'static str {
+    let extension = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
+        Some("svg") => "image/svg+xml",
+        Some("bmp") => "image/bmp",
+        _ => monocode_core::composer::image_mime(path).unwrap_or("image/png"),
     }
 }
 
@@ -157,6 +163,9 @@ pub(crate) struct Photo {
     whole: bool,
     /// The decoded sprite's pixel size, which gives a whole photo its shape.
     shape: Option<(u32, u32)>,
+    /// The square a whole photo fits in, and its corners.
+    side: f32,
+    radius: f32,
     /// The file could not be read or is not an image.
     failed: bool,
 }
@@ -168,6 +177,27 @@ impl Photo {
 
     pub(crate) fn whole(origin: Origin, mime: SharedString, cx: &mut Context<Self>) -> Self {
         Self::build(origin, mime, true, cx)
+    }
+
+    /// A whole photo for a smaller place than a chat's column, such as the
+    /// notch: it fits a square of `side` and wears corners of `radius`.
+    pub(crate) fn framed(
+        origin: Origin,
+        mime: SharedString,
+        side: f32,
+        radius: f32,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        Self {
+            side,
+            radius,
+            ..Self::build(origin, mime, true, cx)
+        }
+    }
+
+    /// The file could not be read or is not a picture.
+    pub(crate) fn failed(&self) -> bool {
+        self.failed
     }
 
     fn build(origin: Origin, mime: SharedString, whole: bool, cx: &mut Context<Self>) -> Self {
@@ -230,6 +260,8 @@ impl Photo {
             source: None,
             whole,
             shape: None,
+            side: PHOTO_SIDE,
+            radius: 16.,
             failed: false,
         }
     }
@@ -241,13 +273,13 @@ impl Photo {
 
 /// A whole photo's size: its own shape inside the photo square. Formats
 /// decoded by GPUI, such as SVG, fill the square.
-fn photo_size(shape: Option<(u32, u32)>) -> (f32, f32) {
+fn photo_size(shape: Option<(u32, u32)>, side: f32) -> (f32, f32) {
     match shape {
         Some((w, h)) if w > 0 && h > 0 => {
-            let scale = PHOTO_SIDE / w.max(h) as f32;
+            let scale = side / w.max(h) as f32;
             ((w as f32 * scale).round(), (h as f32 * scale).round())
         }
-        _ => (PHOTO_SIDE, PHOTO_SIDE),
+        _ => (side, side),
     }
 }
 
@@ -255,12 +287,12 @@ impl Render for Photo {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         if self.whole {
             // AttachmentChip's `photo`: max-h-60 max-w-60 rounded-2xl.
-            let (width, height) = photo_size(self.shape);
+            let (width, height) = photo_size(self.shape, self.side);
             let frame = div()
                 .w(px(width))
                 .h(px(height))
                 .flex_shrink_0()
-                .rounded(px(16.))
+                .rounded(px(self.radius))
                 .overflow_hidden();
             if self.failed {
                 // A missing picture leaves a short note, not an empty frame.
@@ -279,7 +311,7 @@ impl Render for Photo {
                     .child(
                         gpui::img(source.clone())
                             .size_full()
-                            .rounded(px(16.))
+                            .rounded(px(self.radius))
                             .object_fit(gpui::ObjectFit::Cover),
                     )
                     .into_any_element(),
@@ -592,9 +624,12 @@ pub(super) fn split_photos(files: &[Attachment]) -> (Vec<Attachment>, Vec<Attach
 mod tests {
     #[test]
     fn photos_keep_their_shape_inside_the_photo_square() {
-        assert_eq!(super::photo_size(Some((1920, 1080))), (240., 135.));
-        assert_eq!(super::photo_size(Some((300, 900))), (80., 240.));
-        assert_eq!(super::photo_size(None), (240., 240.));
+        let side = super::PHOTO_SIDE;
+        assert_eq!(super::photo_size(Some((1920, 1080)), side), (240., 135.));
+        assert_eq!(super::photo_size(Some((300, 900)), side), (80., 240.));
+        assert_eq!(super::photo_size(None, side), (240., 240.));
+        // A smaller place, such as the notch's chat, keeps the shape.
+        assert_eq!(super::photo_size(Some((1920, 1080)), 120.), (120., 68.));
     }
 
     #[test]

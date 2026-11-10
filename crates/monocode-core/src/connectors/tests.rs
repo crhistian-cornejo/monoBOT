@@ -291,9 +291,9 @@ fn formats_connectors_for_acp() {
     assert_eq!(
         servers,
         vec![
-            json!({"name": "context7", "type": "http", "url": "https://mcp.context7.com/mcp"}),
-            json!({"name": "xmd", "type": "http", "url": "https://mdfromx.com/mcp"}),
-            json!({"name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@0.0.84"]}),
+            json!({"name": "context7", "type": "http", "url": "https://mcp.context7.com/mcp", "headers": []}),
+            json!({"name": "xmd", "type": "http", "url": "https://mdfromx.com/mcp", "headers": []}),
+            json!({"name": "playwright", "command": "npx", "args": ["-y", "@playwright/mcp@0.0.84"], "env": []}),
         ]
     );
 }

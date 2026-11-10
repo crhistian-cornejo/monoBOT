@@ -606,15 +606,21 @@ impl ConnectorSettings {
         connectors
             .iter()
             .map(|connector| match connector.server {
+                // ACP's schema requires `headers` and `env` even when there
+                // are none. Without them Devin refuses the whole session
+                // ("data did not match any variant of untagged enum
+                // McpServer"), so neither its models nor a turn load.
                 Server::Http { url } => json!({
                     "name": connector.id,
                     "type": "http",
                     "url": url,
+                    "headers": [],
                 }),
                 Server::Stdio { command, .. } => json!({
                     "name": connector.id,
                     "command": self.command(connector, command),
                     "args": self.args(connector),
+                    "env": [],
                 }),
             })
             .collect()

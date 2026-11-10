@@ -94,6 +94,7 @@ fn a_streaming_answer_reaches_the_notchs_chat_before_the_turn_ends(cx: &mut Test
         Some(&Said {
             mine: false,
             text: "Reading".into(),
+            files: Vec::new(),
         })
     );
     // More of the same answer: the notch catches up while the turn runs.

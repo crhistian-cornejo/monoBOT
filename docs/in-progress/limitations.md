@@ -24,8 +24,8 @@ provider feature or the current revision.
 | fx | ACP | Catalog, streaming and two-turn resume (Oct 19) |
 | Hermes Agent | ACP | Catalog; prompt blocked by upstream account credit (Oct 19) |
 | Antigravity | ACP | Protocol fixtures only; no installed server for a live check |
-| Devin | ACP | Catalog, streaming, two-turn resume and supervised write approval (Oct 19) |
-| Droid | ACP | Catalog, streaming, autonomy mapping and fallback models |
+| Devin | ACP | Catalog, streaming, two-turn resume and supervised write approval (Oct 19). Nov 10: its model list and every non-bot turn failed with "Devin: Invalid params" because the connectors' `mcpServers` entries lacked the `headers` and `env` ACP requires (`connectors::acp_servers`); fixed, not yet seen working in the app |
+| Droid | ACP | Catalog, streaming, autonomy mapping and fallback models. Nov 10: on Windows a session opened in the launch folder failed with "Droid: Internal error" because it was told the folder in verbatim form (`\\?\D:\...`), which Droid cannot name a folder after; providers now get the plain path (`files::plain_path`); fixed, not yet seen working in the app |
 
 Changes to provider lifecycles on Oct 21 still need live checks, especially
 steering, compaction, rewind, warm resume, questions and MCP confirmations.

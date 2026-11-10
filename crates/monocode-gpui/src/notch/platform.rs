@@ -914,8 +914,8 @@ mod win {
     ///
     /// - `WS_EX_NOACTIVATE`: Windows never picks the notch when it passes
     ///   activation to another window of the app (minimizing the workspace,
-    ///   switching with the taskbar). A click still activates it, since GPUI
-    ///   answers `WM_MOUSEACTIVATE` itself, so its chat still takes text.
+    ///   switching with the taskbar). A click does not activate it either,
+    ///   so a field asks for the keyboard itself (`take_keys`).
     /// - No Windows 11 frame: the window is a transparent room larger than
     ///   the island, and DWM would otherwise round it and draw its border and
     ///   shadow around that room.
@@ -954,6 +954,51 @@ mod win {
             set(DWMWA_NCRENDERING_POLICY, &(DWMNCRP_DISABLED.0 as u32));
         }
         stay_on_top(hwnd);
+    }
+
+    /// The window that had the keyboard when the notch took it.
+    static KEYS_FROM: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
+
+    /// `WS_EX_NOACTIVATE` keeps a click from activating the notch, so a
+    /// field in it showed its caret while the keys still went to whatever
+    /// app was in front (they reached the field only when that app was
+    /// MonoBOT). A field asks for the keyboard outright: the notch becomes
+    /// the foreground window, which Windows allows since the click that
+    /// asks was its own, and remembers who had it before.
+    pub(super) fn take_keys(window: &Window) {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
+        let Some(hwnd) = hwnd(window) else {
+            return;
+        };
+        // SAFETY: plain calls on the live window; a refusal changes nothing.
+        unsafe {
+            let front = GetForegroundWindow();
+            if front != hwnd {
+                KEYS_FROM.store(front.0 as isize, Ordering::Relaxed);
+                let _ = SetForegroundWindow(hwnd);
+            }
+            let _ = SetFocus(Some(hwnd));
+        }
+    }
+
+    /// Hands the keyboard back to the window it was taken from, when the
+    /// notch still has it: the user may have clicked another one since.
+    pub(super) fn give_keys_back() {
+        use std::sync::atomic::Ordering;
+        use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
+        let before = KEYS_FROM.swap(0, Ordering::Relaxed);
+        let notch = ON_TOP.load(Ordering::Relaxed);
+        if before == 0 || notch == 0 {
+            return;
+        }
+        // SAFETY: a stale handle just fails.
+        unsafe {
+            if GetForegroundWindow().0 as isize == notch {
+                let _ = SetForegroundWindow(HWND(before as _));
+            }
+        }
     }
 
     /// The notch the foreground watch keeps on top.
@@ -1626,6 +1671,24 @@ pub(crate) fn style(window: &Window) {
     win::style(window);
     #[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
     let _ = window;
+}
+
+/// Gives the notch the keyboard, for a field in it that was clicked or a
+/// chat that was opened to write in. Only Windows needs asking: its notch
+/// never activates by a click. The Mac's panel takes the keys of a click by
+/// itself, without bringing the app forward.
+pub(crate) fn take_keys(window: &Window) {
+    #[cfg(all(target_os = "windows", not(test)))]
+    win::take_keys(window);
+    #[cfg(not(all(target_os = "windows", not(test))))]
+    let _ = window;
+}
+
+/// Gives the keyboard back to the window `take_keys` took it from, when the
+/// panel closes.
+pub(crate) fn give_keys_back() {
+    #[cfg(all(target_os = "windows", not(test)))]
+    win::give_keys_back();
 }
 
 pub(crate) fn place(window: &mut Window, cx: &mut App, display: &Display, frame: Frame) {

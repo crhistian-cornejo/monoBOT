@@ -502,6 +502,95 @@ fn the_notchs_chat_keeps_what_was_said_without_the_tools() {
 }
 
 #[test]
+fn the_notchs_chat_carries_what_came_with_each_thing_said() {
+    let folder = std::env::temp_dir();
+    let at = |name: &str| folder.join(name);
+    let manifest = serde_json::json!([
+        {"path": at("bug.png"), "name": "bug.png", "mimeType": "image/png", "kind": "image"},
+        {"path": at("notes.pdf"), "name": "", "mimeType": "application/pdf", "kind": "file"},
+    ])
+    .to_string();
+    let pointing = format!(
+        "Here it is:\n![the chart]({}) done",
+        at("chart.png").display()
+    );
+    let made = serde_json::json!({
+        "path": at("made.png"), "name": "made.png", "mimeType": "image/png", "size": 1
+    })
+    .to_string();
+    let rows = [
+        ("user", "look at this"),
+        (crate::transcript::attachments::ROLE, manifest.as_str()),
+        ("assistant", pointing.as_str()),
+        ("tool", "{}"),
+        (crate::images::REPLY_ROLE, made.as_str()),
+        (
+            "mono-document",
+            r#"{"id":"artifact:report","title":"Report","kind":"html"}"#,
+        ),
+        (
+            "assistant",
+            "And one on the web: ![x](https://example.com/a.png)",
+        ),
+    ];
+    let kept = said(rows.iter().copied());
+    let file = |name: &str, image: bool, path: Option<&str>| Attached {
+        name: name.into(),
+        image,
+        path: path.map(at),
+    };
+    assert_eq!(
+        kept,
+        [
+            // The user's attachments are their message's.
+            Said {
+                mine: true,
+                text: "look at this".into(),
+                files: vec![
+                    file("bug.png", true, Some("bug.png")),
+                    // Without a name of its own, the file's.
+                    file("notes.pdf", false, Some("notes.pdf")),
+                ],
+            },
+            // The answer's: the picture it points at (out of its text), the
+            // one it made and the document it wrote, in order. A picture on
+            // the web stays as it was written.
+            Said {
+                mine: false,
+                text: "Here it is:\n done\nAnd one on the web: ![x](https://example.com/a.png)"
+                    .into(),
+                files: vec![
+                    file("the chart", true, Some("chart.png")),
+                    file("made.png", true, Some("made.png")),
+                    file("Report", false, None),
+                ],
+            },
+        ]
+    );
+    // Pictures sent alone still show, and a row that carries its pictures
+    // inside it is named, not read.
+    let heavy = format!(r#"[{{"kind":"image","data":"{}"}}]"#, "A".repeat(70_000));
+    let rows = [
+        ("user", ""),
+        (crate::transcript::attachments::ROLE, heavy.as_str()),
+    ];
+    assert_eq!(
+        said(rows.iter().copied()),
+        [Said {
+            mine: true,
+            text: String::new(),
+            files: vec![file("Attachments", false, None)],
+        }]
+    );
+    // A relative picture has no folder to be found in here.
+    let (text, files) = pointed_at("![a](shot.png) and ![b](");
+    assert_eq!(
+        (text.as_str(), files.len()),
+        ("![a](shot.png) and ![b](", 0)
+    );
+}
+
+#[test]
 fn a_spotify_client_id_is_kept_only_when_it_looks_like_one() {
     let look = |id: &str| {
         Look {

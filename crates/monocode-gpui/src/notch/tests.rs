@@ -930,10 +930,12 @@ fn an_agents_row_opens_its_chat_in_the_notch_and_sends_without_the_app(cx: &mut 
                         Said {
                             mine: true,
                             text: "What changed today?".into(),
+                            files: Vec::new(),
                         },
                         Said {
                             mine: false,
                             text: "Two files in the shell.".into(),
+                            files: Vec::new(),
                         },
                     ],
                     busy: false,
@@ -1113,11 +1115,13 @@ fn the_chat_with_an_agent_scrolls_and_follows_the_answer_as_it_streams(cx: &mut 
             .map(|n| Said {
                 mine: n % 2 == 0,
                 text: format!("Message {n}: {}", "a line of what was said ".repeat(6)),
+                files: Vec::new(),
             })
             .collect();
         said.push(Said {
             mine: false,
             text: answer.to_owned(),
+            files: Vec::new(),
         });
         said
     };
@@ -1157,6 +1161,7 @@ fn the_chat_with_an_agent_scrolls_and_follows_the_answer_as_it_streams(cx: &mut 
                         said: vec![Said {
                             mine: true,
                             text: "Hi".into(),
+                            files: Vec::new(),
                         }],
                         busy: false,
                     }),
@@ -1246,6 +1251,7 @@ fn the_chat_with_an_agent_scrolls_and_follows_the_answer_as_it_streams(cx: &mut 
     sent.push(Said {
         mine: true,
         text: "Thanks".into(),
+        files: Vec::new(),
     });
     opened
         .window
@@ -1861,4 +1867,112 @@ fn the_agents_page_lists_the_personal_agents_apart_from_the_ones_that_code(
         .update(visual, |notch, _, _| notch.agents_height())
         .unwrap();
     assert_eq!(two, one + CAPTION + ROW, "the page grows by Code's section");
+}
+
+#[gpui::test]
+fn an_agents_chat_is_written_in_at_once_and_shows_what_came_with_what_was_said(
+    cx: &mut TestAppContext,
+) {
+    use monocode_core::notch::{Attached, Said, Talk};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    agents: vec![ivy()],
+                    ..Feed::default()
+                },
+                cx,
+            );
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-agents");
+    click(visual, "notch-agent-0");
+    // The caret is in the chat's field: what is typed next is the message.
+    visual.simulate_input("hola");
+    let typed = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.talk_field.read(cx).content.to_string()
+        })
+        .unwrap();
+    assert_eq!(typed, "hola");
+    // A picture that is on disk, one that is not, and a document that lives
+    // in the app only.
+    let picture =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/icons/icon.png");
+    let gone = std::env::temp_dir().join("monobot-notch-no-such-picture.png");
+    let file = |name: &str, image: bool, path: Option<&std::path::Path>| Attached {
+        name: name.into(),
+        image,
+        path: path.map(std::path::Path::to_path_buf),
+    };
+    let said = vec![
+        Said {
+            mine: true,
+            text: String::new(),
+            files: vec![file("icon.png", true, Some(&picture))],
+        },
+        Said {
+            mine: false,
+            text: "Here they are.".into(),
+            files: vec![
+                file("lost.png", true, Some(&gone)),
+                file("Report", false, None),
+            ],
+        },
+    ];
+    let feed = |said: Vec<Said>| Feed {
+        agents: vec![ivy()],
+        talk: Some(Talk {
+            session: 20,
+            said,
+            busy: false,
+        }),
+        ..Feed::default()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(said.clone()), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    // The picture shows itself, on the side of who sent it; the one that
+    // cannot be read is named like a file, beside the document.
+    let mine = visual.debug_bounds("notch-talk-photo-0-0").unwrap();
+    let theirs = visual.debug_bounds("notch-talk-file-1-0").unwrap();
+    assert!(mine.left() > theirs.left());
+    assert!(mine.size.height > px(22.), "a picture, not a chip");
+    assert!(visual.debug_bounds("notch-talk-photo-1-0").is_none());
+    let photos = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| {
+                notch.talk.as_ref().map_or(0, |talk| talk.photo_count())
+            })
+            .unwrap()
+    };
+    assert_eq!(photos(visual), 2);
+    // The document opens its chat in the app.
+    click(visual, "notch-talk-file-1-1");
+    assert!(
+        opened
+            .events
+            .borrow()
+            .iter()
+            .any(|event| matches!(event, NotchEvent::OpenSession(20)))
+    );
+    // What is no longer said lets go of its pictures.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(feed(said[1..].to_vec()), cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert_eq!(photos(visual), 1);
 }

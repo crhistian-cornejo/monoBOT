@@ -280,7 +280,10 @@ impl Notch {
                 let agent = agent.clone();
                 row = row
                     .debug_selector(move || format!("notch-agent-{index}"))
-                    .on_click(cx.listener(move |this, _, _, cx| this.open_talk(&agent, cx)));
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.open_talk(&agent, cx);
+                        this.write_to_agent(window, cx);
+                    }));
             }
             list = list.child(row);
         }
@@ -422,6 +425,9 @@ impl Notch {
                             .text_color(crate::theme::content(0.95))
                             .border_1()
                             .border_color(ink(0.16))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                                platform::take_keys(window)
+                            })
                             .child(field),
                     )
                     .child(

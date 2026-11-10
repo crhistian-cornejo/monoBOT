@@ -2,13 +2,16 @@
 //! agent in the Agents page slides this in instead of bringing the app
 //! forward: the latest things said, a field to answer, and a way back. What
 //! is typed goes straight to the agent's own chat in the app, which stays
-//! where it is. The app fills in what was said (`Feed::talk`).
+//! where it is. The app fills in what was said (`Feed::talk`), each thing
+//! with what came with it: pictures show themselves and files are chips, a
+//! click away from opening.
 //!
 //! What was said scrolls. The chat opens at its end and stays there while
 //! the answer streams in; scrolling up to read leaves it where it is until
 //! the reader comes back down or sends something. It follows the way the
 //! transcript's live phases do (`transcript::live_phase::LiveScroll`).
 use super::*;
+use crate::transcript::attachments::{Origin, Photo, picture_mime};
 use crate::transcript::live_phase::LiveScroll;
 
 /// The chat's header: back, who it is, and Open.
@@ -27,7 +30,24 @@ pub(super) struct Talking {
     error: Option<String>,
     /// What was said, and whether it follows the end.
     pub(super) scroll: LiveScroll,
+    /// The pictures that came with what was said, by their file: each
+    /// decoded once, off the interface thread, and let go when its message
+    /// leaves the chat.
+    photos: std::collections::HashMap<std::path::PathBuf, Entity<Photo>>,
 }
+
+#[cfg(test)]
+impl Talking {
+    /// How many pictures the chat holds decoded.
+    pub(super) fn photo_count(&self) -> usize {
+        self.photos.len()
+    }
+}
+
+/// The square a picture in the chat fits in, and how many attachments one
+/// message shows before the rest are counted.
+const TALK_PHOTO: f32 = 132.;
+const TALK_FILES: usize = 6;
 
 impl Notch {
     /// The agent whose chat is open in the notch.
@@ -47,6 +67,7 @@ impl Notch {
             since: Instant::now(),
             error: None,
             scroll: LiveScroll::default(),
+            photos: Default::default(),
         });
         self.talk_field.update(cx, |field, cx| {
             field.set_placeholder(format!("Message {}", agent.name), cx);
@@ -54,6 +75,14 @@ impl Notch {
         });
         cx.emit(NotchEvent::Watch(Some(session)));
         cx.notify();
+    }
+
+    /// Puts the caret in the chat's field and gives the notch the keyboard,
+    /// so a chat opened to write in is written in at once.
+    pub(super) fn write_to_agent(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let field = gpui::Focusable::focus_handle(&self.talk_field, cx);
+        window.focus(&field, cx);
+        platform::take_keys(window);
     }
 
     /// Back to the agents.
@@ -115,6 +144,10 @@ impl Notch {
         talk.scroll.enable(true);
         let wheel = talk.scroll.wheeler();
         let scroll = talk.scroll.handle.clone();
+        let feed = self.talk_feed();
+        let busy = feed.is_some_and(|talk| talk.busy);
+        let said = feed.map(|talk| talk.said.clone());
+        let photos = self.talk_photos(said.as_deref().unwrap_or_default(), cx);
         let Some(talk) = self.talk.as_ref() else {
             return div().into_any_element();
         };
@@ -130,9 +163,6 @@ impl Notch {
             1. - (1. - t) * (1. - t)
         };
         let session = talk.session;
-        let feed = self.talk_feed();
-        let busy = feed.is_some_and(|talk| talk.busy);
-        let said = feed.map(|talk| talk.said.clone());
         let header = div()
             .h(px(TALK_HEADER))
             .flex_shrink_0()
@@ -200,27 +230,34 @@ impl Notch {
                 lines = lines.child(note("Nothing said yet. Write below to start."));
             }
             Some(said) => {
-                for said in said {
+                for (at, said) in said.into_iter().enumerate() {
+                    // The words, then what came with them, on the side of
+                    // who said it.
+                    let words = (!said.text.is_empty()).then(|| {
+                        div()
+                            .max_w(gpui::relative(0.86))
+                            .px(px(8.))
+                            .py(px(4.))
+                            .text_size(px(12.))
+                            .line_height(px(16.))
+                            .when(said.mine, |bubble| {
+                                bubble.bg(ink(0.12)).text_color(ink(0.95))
+                            })
+                            .when(!said.mine, |bubble| bubble.px(px(2.)).text_color(ink(0.82)))
+                            .child(said.text)
+                    });
+                    let files = (!said.files.is_empty())
+                        .then(|| attached_row(at, said.mine, &said.files, &photos, session, cx));
                     lines = lines.child(
                         div()
                             .flex_shrink_0()
                             .flex()
-                            .when(said.mine, |row| row.justify_end())
-                            .child(
-                                div()
-                                    .max_w(gpui::relative(0.86))
-                                    .px(px(8.))
-                                    .py(px(4.))
-                                    .text_size(px(12.))
-                                    .line_height(px(16.))
-                                    .when(said.mine, |bubble| {
-                                        bubble.bg(ink(0.12)).text_color(ink(0.95))
-                                    })
-                                    .when(!said.mine, |bubble| {
-                                        bubble.px(px(2.)).text_color(ink(0.82))
-                                    })
-                                    .child(said.text),
-                            ),
+                            .flex_col()
+                            .gap(px(4.))
+                            .when(said.mine, |column| column.items_end())
+                            .when(!said.mine, |column| column.items_start())
+                            .children(words)
+                            .children(files),
                     );
                 }
             }
@@ -276,6 +313,9 @@ impl Notch {
                             .text_color(crate::theme::content(0.95))
                             .border_1()
                             .border_color(ink(0.16))
+                            .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                                platform::take_keys(window)
+                            })
                             .child(self.talk_field.clone()),
                     )
                     .child(
@@ -286,6 +326,124 @@ impl Notch {
             )
             .into_any_element()
     }
+}
+
+impl Notch {
+    /// The pictures of what was said, one decoded photo per file: the ones
+    /// no longer said are let go (and their textures with them), the new
+    /// ones start decoding off the interface thread.
+    fn talk_photos(
+        &mut self,
+        said: &[model::Said],
+        cx: &mut Context<Self>,
+    ) -> std::collections::HashMap<std::path::PathBuf, Entity<Photo>> {
+        let Some(talk) = self.talk.as_mut() else {
+            return Default::default();
+        };
+        let shown: Vec<&std::path::PathBuf> = said
+            .iter()
+            .flat_map(|said| said.files.iter().take(TALK_FILES))
+            .filter(|file| file.image)
+            .filter_map(|file| file.path.as_ref())
+            .collect();
+        talk.photos.retain(|path, _| shown.contains(&path));
+        for path in shown {
+            if !talk.photos.contains_key(path) {
+                let origin = Origin::Path(path.clone());
+                let mime = picture_mime(path).into();
+                let photo = cx.new(|cx| Photo::framed(origin, mime, TALK_PHOTO, 2., cx));
+                // Decoded, or not a picture after all: the chat draws again.
+                cx.observe(&photo, |_, _, cx| cx.notify()).detach();
+                talk.photos.insert(path.clone(), photo);
+            }
+        }
+        talk.photos.clone()
+    }
+}
+
+/// What came with something said: its pictures as they are, and anything
+/// else as a chip with its name. A click opens the file with its app; what
+/// lives only in the app (an agent's document) opens the chat there.
+fn attached_row(
+    at: usize,
+    mine: bool,
+    files: &[model::Attached],
+    photos: &std::collections::HashMap<std::path::PathBuf, Entity<Photo>>,
+    session: i64,
+    cx: &mut Context<Notch>,
+) -> gpui::Div {
+    let mut row = div()
+        .debug_selector(move || format!("notch-talk-files-{at}"))
+        .max_w_full()
+        .flex()
+        .flex_wrap()
+        .gap(px(4.))
+        .when(mine, |row| row.justify_end());
+    for (index, file) in files.iter().take(TALK_FILES).enumerate() {
+        let id = at * (TALK_FILES + 1) + index;
+        let open = file.path.clone();
+        let click = cx.listener(move |this, _: &gpui::ClickEvent, _, cx| match &open {
+            Some(path) => cx.open_with_system(path),
+            None => this.emit(NotchEvent::OpenSession(session), cx),
+        });
+        // A picture that can be read shows itself; one that cannot, or
+        // that is kept inside the transcript, is named like any file.
+        let photo = file
+            .path
+            .as_ref()
+            .filter(|_| file.image)
+            .and_then(|path| photos.get(path))
+            .filter(|photo| !photo.read(cx).failed());
+        row = row.child(match photo {
+            Some(photo) => div()
+                .id(("notch-talk-photo", id))
+                .debug_selector(move || format!("notch-talk-photo-{at}-{index}"))
+                .role(Role::Button)
+                .aria_label(format!("Open {}", file.name))
+                .flex_shrink_0()
+                .cursor_pointer()
+                .hover(|style| style.opacity(0.85))
+                .on_click(click)
+                .child(photo.clone()),
+            None => div()
+                .id(("notch-talk-file", id))
+                .debug_selector(move || format!("notch-talk-file-{at}-{index}"))
+                .role(Role::Button)
+                .aria_label(format!("Open {}", file.name))
+                .h(px(22.))
+                .flex_shrink_0()
+                .px(px(7.))
+                .flex()
+                .items_center()
+                .gap(px(5.))
+                .bg(ink(0.1))
+                .cursor_pointer()
+                .hover(|style| style.bg(ink(0.16)))
+                .on_click(click)
+                .child(icon("file", 11.).text_color(ink(0.6)))
+                .child(
+                    div()
+                        .max_w(px(150.))
+                        .truncate()
+                        .text_size(px(11.))
+                        .text_color(ink(0.85))
+                        .child(file.name.clone()),
+                ),
+        });
+    }
+    if files.len() > TALK_FILES {
+        row = row.child(
+            div()
+                .h(px(22.))
+                .px(px(7.))
+                .flex()
+                .items_center()
+                .text_size(px(11.))
+                .text_color(ink(0.5))
+                .child(format!("+{}", files.len() - TALK_FILES)),
+        );
+    }
+    row
 }
 
 fn note(text: &'static str) -> gpui::Div {

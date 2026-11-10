@@ -36,6 +36,23 @@ pub struct DirEntry {
 }
 
 /// Immediate children of `path` (project tree). Folders first, then natural name order.
+/// A folder as other programs take it. Windows' `canonicalize` answers with
+/// a verbatim path (`\\?\D:\dev\app`), which Rust's own calls accept but a
+/// provider's CLI may not: Droid names a folder after the session's, and
+/// `?` cannot be in a name. A drive path loses the prefix; anything else (a
+/// network share's `\\?\UNC\...`, a path on another system) stays as it is.
+pub fn plain_path(path: &str) -> &str {
+    match path.strip_prefix(r"\\?\") {
+        Some(rest)
+            if rest.as_bytes().get(1) == Some(&b':')
+                && rest.as_bytes()[0].is_ascii_alphabetic() =>
+        {
+            rest
+        }
+        _ => path,
+    }
+}
+
 pub fn list_dir(path: &Path) -> Result<Vec<DirEntry>, String> {
     if remote::is_remote(path) {
         return remote::command("list_dir", serde_json::json!({"path":path}));
@@ -599,6 +616,16 @@ fn dir_contains(dir: &Path, dest_parent: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_verbatim_drive_path_is_given_to_other_programs_plain() {
+        assert_eq!(plain_path(r"\\?\D:\dev\monoBOT"), r"D:\dev\monoBOT");
+        assert_eq!(plain_path(r"D:\dev\monoBOT"), r"D:\dev\monoBOT");
+        assert_eq!(plain_path("/Users/me/app"), "/Users/me/app");
+        // A share has no drive to fall back to: left as it came.
+        assert_eq!(plain_path(r"\\?\UNC\server\share"), r"\\?\UNC\server\share");
+        assert_eq!(plain_path(r"\\?\"), r"\\?\");
+    }
 
     fn tmp() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()

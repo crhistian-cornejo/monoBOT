@@ -277,8 +277,13 @@ impl Protocol {
         }
         self.acp_send(Stage::Initialize, "initialize", params, stdin)
     }
+    /// The session's folder as the provider is told it: a session kept with
+    /// Windows' verbatim form (`\\?\D:\...`) gives the plain one.
+    fn cwd(&self) -> String {
+        crate::files::plain_path(&self.request.cwd.to_string_lossy()).to_owned()
+    }
     fn acp_session(&mut self, stdin: &mut impl Write) -> Result<(), String> {
-        let mut params = json!({"cwd":self.request.cwd,"mcpServers":self.mcp_servers()});
+        let mut params = json!({"cwd":self.cwd(),"mcpServers":self.mcp_servers()});
         if let Some(id) = &self.request.provider_id {
             params["sessionId"] = id.clone().into();
             if matches!(self.request.kind, Kind::Grok | Kind::Fx | Kind::Antigravity) {
@@ -292,7 +297,7 @@ impl Protocol {
         self.acp_new(stdin)
     }
     fn acp_new(&mut self, stdin: &mut impl Write) -> Result<(), String> {
-        let mut params = json!({"cwd":self.request.cwd,"mcpServers":self.mcp_servers()});
+        let mut params = json!({"cwd":self.cwd(),"mcpServers":self.mcp_servers()});
         if self.request.kind == Kind::Grok {
             if self.request.settings.access == AccessMode::FullAccess {
                 params["_meta"] = json!({"yoloMode":true});
@@ -626,7 +631,7 @@ impl Protocol {
                 return self.acp_session(stdin);
             }
             Stage::Resume if !(kind == Kind::Antigravity && timed_out) => {
-                return self.acp_send(Stage::Load, "session/load", json!({"sessionId":self.request.provider_id,"cwd":self.request.cwd,"mcpServers":self.mcp_servers()}), stdin);
+                return self.acp_send(Stage::Load, "session/load", json!({"sessionId":self.request.provider_id,"cwd":self.cwd(),"mcpServers":self.mcp_servers()}), stdin);
             }
             Stage::Load => {
                 let lower = detail.to_lowercase();

@@ -711,6 +711,9 @@ impl Notch {
                         .bg(background_base())
                         .border_1()
                         .border_color(ink(0.16))
+                        .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                            platform::take_keys(window)
+                        })
                         .child(self.spotify_field.clone()),
                 )
                 .child(small(format!(

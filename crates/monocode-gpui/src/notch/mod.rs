@@ -679,6 +679,8 @@ impl Notch {
             self.editing = false;
             self.tab = Tab::Home;
             self.ticker = None;
+            // Whoever was typed over gets the keyboard back.
+            platform::give_keys_back();
         }
         // The chat with an agent is only followed while the panel shows:
         // closed, a streaming answer would redraw the notch for nobody.
