@@ -160,11 +160,7 @@ impl Shell {
         let Some(handle) = Handle::from_window(window, cx) else {
             return;
         };
-        self.observations.push(
-            cx.subscribe(&handle.entity, |this, _, event: &NotchEvent, cx| {
-                this.notch_event(event.clone(), cx)
-            }),
-        );
+        self.follow_notch(&handle, cx);
         // MONOBOT_NOTCH_TRACE=tour: once the app has settled, opens and folds
         // the panel a few times, then walks its pages, so their timing can
         // be read without touching the pointer.
@@ -216,6 +212,15 @@ impl Shell {
         }
         self.notch = Some(handle);
         self.sync_notch_now(cx);
+    }
+
+    /// Carries out what the notch asks (open a chat, answer, hang up).
+    pub(super) fn follow_notch(&mut self, handle: &Handle, cx: &mut Context<Self>) {
+        self.observations.push(
+            cx.subscribe(&handle.entity, |this, _, event: &NotchEvent, cx| {
+                this.notch_event(event.clone(), cx)
+            }),
+        );
     }
 
     /// Asks for the notch to catch up. Sessions change on every streamed
@@ -514,16 +519,20 @@ impl Shell {
         use crate::notifications::delivery::Target;
         match event {
             // A terminal's or another app's session: bring that app forward.
-            NotchEvent::OpenSession(id) if id < 0 => {
-                let Some(app) = self.notch_externals.app_for(id) else {
+            // Which of its chats shows is the app's own business (Claude's
+            // desktop app has no way in from outside); the window whose title
+            // names the session is preferred.
+            NotchEvent::OpenSession(id) if model::hooks::is_external(id) => {
+                let Some(target) = self.notch_externals.target(id) else {
                     return;
                 };
+                let app = target.app;
                 // Windows: the programs the hook came from; the first with a
                 // window of its own (the terminal, Claude, an editor) comes
                 // forward, now, while the click still lets it.
                 let pids = monocode_core::notch::hooks::app_pids(&app);
                 if !pids.is_empty() {
-                    crate::notch::bring_forward(&pids);
+                    crate::notch::bring_forward(&pids, &target.hints);
                     return;
                 }
                 cx.background_executor()

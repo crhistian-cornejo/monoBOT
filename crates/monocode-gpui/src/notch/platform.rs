@@ -1017,40 +1017,45 @@ mod win {
 
     /// Brings forward the first of `pids` (nearest first) that has a window
     /// of its own on screen: the terminal, Claude or the editor an agent
-    /// runs in. Whether one was found.
-    pub(super) fn bring_forward(pids: &[u32]) -> bool {
+    /// runs in; of its windows, the one whose title holds one of `hints`.
+    /// Whether one was found.
+    pub(super) fn bring_forward(pids: &[u32], hints: &[String]) -> bool {
         use windows::Win32::Foundation::LPARAM;
         use windows::Win32::UI::WindowsAndMessaging::{
-            EnumWindows, GW_OWNER, GetWindow, GetWindowTextLengthW, GetWindowThreadProcessId,
-            IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow, ShowWindow,
+            EnumWindows, GW_OWNER, GetWindow, GetWindowTextLengthW, GetWindowTextW,
+            GetWindowThreadProcessId, IsIconic, IsWindowVisible, SW_RESTORE, SetForegroundWindow,
+            ShowWindow,
         };
-        let mut windows: Vec<(u32, HWND)> = Vec::new();
+        let mut windows: Vec<(u32, HWND, String)> = Vec::new();
         unsafe extern "system" fn each(window: HWND, list: LPARAM) -> windows::core::BOOL {
             // SAFETY: `list` is the Vec below, alive for the whole walk.
-            let list = unsafe { &mut *(list.0 as *mut Vec<(u32, HWND)>) };
+            let list = unsafe { &mut *(list.0 as *mut Vec<(u32, HWND, String)>) };
             // SAFETY: plain queries on a window the system just handed over.
             unsafe {
+                let length = GetWindowTextLengthW(window);
                 let main = IsWindowVisible(window).as_bool()
                     && GetWindow(window, GW_OWNER).is_err()
-                    && GetWindowTextLengthW(window) > 0;
+                    && length > 0;
                 if main {
                     let mut pid = 0u32;
                     GetWindowThreadProcessId(window, Some(&mut pid));
-                    list.push((pid, window));
+                    let mut title = vec![0u16; length as usize + 1];
+                    let read = GetWindowTextW(window, &mut title).max(0) as usize;
+                    list.push((pid, window, String::from_utf16_lossy(&title[..read])));
                 }
             }
             true.into()
         }
         // SAFETY: the callback only reads windows and pushes to the list.
         let _ = unsafe { EnumWindows(Some(each), LPARAM(&mut windows as *mut _ as isize)) };
-        let Some(window) = pids.iter().find_map(|pid| {
-            windows
-                .iter()
-                .find(|(owner, _)| owner == pid)
-                .map(|(_, window)| *window)
-        }) else {
+        let titles: Vec<(u32, String)> = windows
+            .iter()
+            .map(|(pid, _, title)| (*pid, title.clone()))
+            .collect();
+        let Some(at) = monocode_core::notch::hooks::pick_window(&titles, pids, hints) else {
             return false;
         };
+        let window = windows[at].1;
         claim_foreground();
         // SAFETY: plain calls on a live window; a refusal changes nothing.
         unsafe {
@@ -1752,14 +1757,15 @@ pub(crate) fn claim_foreground() {
     win::claim_foreground();
 }
 
-/// Brings forward the app one of `pids` shows (nearest first). Windows only:
+/// Brings forward the app one of `pids` shows (nearest first), on its
+/// window that names the session by one of `hints`. Windows only:
 /// macOS names the app by its bundle id instead.
-pub(crate) fn bring_forward(pids: &[u32]) -> bool {
+pub(crate) fn bring_forward(pids: &[u32], hints: &[String]) -> bool {
     #[cfg(all(target_os = "windows", not(test)))]
-    return win::bring_forward(pids);
+    return win::bring_forward(pids, hints);
     #[cfg(not(all(target_os = "windows", not(test))))]
     {
-        let _ = pids;
+        let _ = (pids, hints);
         false
     }
 }

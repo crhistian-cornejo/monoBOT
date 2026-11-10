@@ -492,6 +492,7 @@ fn senders(port: u16) -> Vec<u32> {
         return Vec::new();
     };
     let mut parents = HashMap::new();
+    let mut names = HashMap::new();
     // SAFETY: a snapshot of the process list, walked and closed here.
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
@@ -505,6 +506,9 @@ fn senders(port: u16) -> Vec<u32> {
         if Process32FirstW(snapshot, &mut entry) != 0 {
             loop {
                 parents.insert(entry.th32ProcessID, entry.th32ParentProcessID);
+                let name = &entry.szExeFile;
+                let len = name.iter().position(|c| *c == 0).unwrap_or(name.len());
+                names.insert(entry.th32ProcessID, String::from_utf16_lossy(&name[..len]));
                 if Process32NextW(snapshot, &mut entry) == 0 {
                     break;
                 }
@@ -519,7 +523,55 @@ fn senders(port: u16) -> Vec<u32> {
             _ => break,
         }
     }
-    chain
+    let named: Vec<(u32, String)> = chain
+        .into_iter()
+        .map(|pid| (pid, names.get(&pid).cloned().unwrap_or_default()))
+        .collect();
+    lasting(&named)
+}
+
+/// The programs a hook runs through that end with it: `curl` and the shell
+/// that started it.
+const PASSING: &[&str] = &["curl.exe", "bash.exe", "sh.exe", "dash.exe", "cmd.exe"];
+
+/// A hook's senders, nearest first, without the programs that ended with it
+/// (`curl`, its shell). Windows soon hands their ids to other programs, so
+/// a click could bring forward whatever got them; the agent and what runs it
+/// stay.
+pub fn lasting(chain: &[(u32, String)]) -> Vec<u32> {
+    let first = chain
+        .iter()
+        .position(|(_, name)| {
+            !PASSING
+                .iter()
+                .any(|passing| name.eq_ignore_ascii_case(passing))
+        })
+        .unwrap_or(chain.len());
+    chain[first..].iter().map(|(pid, _)| *pid).collect()
+}
+
+/// Which window on screen to bring forward for a session: one of the
+/// nearest of `pids` that shows any, and among its windows the one whose
+/// title names the session (what it was asked, its folder); otherwise its
+/// first, the one in front. `windows` is each window's program and title,
+/// front first.
+pub fn pick_window(windows: &[(u32, String)], pids: &[u32], hints: &[String]) -> Option<usize> {
+    let pid = pids
+        .iter()
+        .find(|pid| windows.iter().any(|(owner, _)| owner == *pid))?;
+    let own: Vec<usize> = (0..windows.len())
+        .filter(|at| windows[*at].0 == *pid)
+        .collect();
+    let named = hints
+        .iter()
+        .map(|hint| hint.trim().trim_end_matches('…').to_lowercase())
+        .filter(|hint| hint.chars().count() >= 3)
+        .find_map(|hint| {
+            own.iter()
+                .copied()
+                .find(|at| windows[*at].1.to_lowercase().contains(&hint))
+        });
+    named.or(own.first().copied())
 }
 
 #[cfg(not(windows))]
@@ -588,6 +640,8 @@ pub struct HookEvent {
     pub event: String,
     pub tool: Option<String>,
     pub message: Option<String>,
+    /// What the user asked, on `UserPromptSubmit`.
+    pub prompt: Option<String>,
 }
 
 /// Reads what a hook sent: its source and app, a newline, then its JSON.
@@ -616,6 +670,7 @@ pub fn parse(payload: &str) -> Option<HookEvent> {
         event: text("hook_event_name")?,
         tool: text("tool_name"),
         message: text("message"),
+        prompt: text("prompt"),
     })
 }
 
@@ -625,6 +680,9 @@ struct External {
     source: String,
     app: Option<String>,
     cwd: String,
+    /// What it was last asked, in a few words: tells two sessions in the
+    /// same folder apart.
+    topic: Option<String>,
     step: String,
     working: bool,
     needs_you: bool,
@@ -657,6 +715,7 @@ impl Externals {
                 source: event.source.clone(),
                 app: None,
                 cwd: event.cwd.clone(),
+                topic: None,
                 step: "Thinking".into(),
                 working: false,
                 needs_you: false,
@@ -681,6 +740,9 @@ impl Externals {
         match event.event.as_str() {
             "UserPromptSubmit" => {
                 start(session);
+                if let Some(topic) = event.prompt.as_deref().and_then(topic) {
+                    session.topic = Some(topic);
+                }
                 session.needs_you = false;
                 session.step = "Thinking".into();
             }
@@ -734,10 +796,24 @@ impl Externals {
 
     /// The app a session runs in, by its notch id, to bring forward.
     pub fn app_for(&self, id: i64) -> Option<String> {
-        self.sessions
+        self.target(id).map(|target| target.app)
+    }
+
+    /// What a click on a session brings forward: its app, and the words in
+    /// the title of a window that shows this very session (what it was
+    /// asked, its folder).
+    pub fn target(&self, id: i64) -> Option<Target> {
+        let session = self
+            .sessions
             .iter()
             .find(|(session, _)| external_id(session) == id)
-            .and_then(|(_, session)| session.app.clone())
+            .map(|(_, session)| session)?;
+        let mut hints: Vec<String> = session.topic.iter().cloned().collect();
+        hints.extend(folder(&session.cwd));
+        Some(Target {
+            app: session.app.clone()?,
+            hints,
+        })
     }
 
     /// The sessions at work, waiting or just finished, for the notch. Each
@@ -748,22 +824,22 @@ impl Externals {
             .iter()
             .filter(|(_, session)| session.working || session.done || session.needs_you)
             .map(|(id, session)| {
-                let folder = Path::new(&session.cwd)
-                    .file_name()
-                    .map(|name| name.to_string_lossy().into_owned())
-                    .unwrap_or_else(|| session.cwd.clone());
+                let folder = folder(&session.cwd).unwrap_or_default();
                 let who = if session.source == "codex" {
                     "Codex"
                 } else {
                     "Claude Code"
                 };
+                // Two sessions in one folder read apart by what each was
+                // asked; until then, by their agent.
+                let what = session.topic.as_deref().unwrap_or(who);
                 Activity {
                     id: external_id(id),
                     provider: session.source.clone(),
                     title: if folder.is_empty() {
-                        who.into()
+                        what.into()
                     } else {
-                        format!("{folder} · {who}")
+                        format!("{folder} · {what}")
                     },
                     step: if session.done {
                         "Done".into()
@@ -775,7 +851,9 @@ impl Externals {
                     started_at: session.started_at,
                     needs_you: session.needs_you,
                     done: session.done && !session.working,
-                    agent: Some(who.into()),
+                    // A coding session, not one of the user's agents: the
+                    // notch lists it with the coding chats.
+                    agent: None,
                     steps: None,
                     face: None,
                 }
@@ -784,6 +862,48 @@ impl Externals {
         activities.sort_by_key(|activity| activity.id);
         activities
     }
+}
+
+/// What a click on an outside session brings forward.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Target {
+    /// The app it runs in: a macOS bundle id, or on Windows the programs
+    /// it came from (see [`app_pids`]).
+    pub app: String,
+    /// Words in the title of a window showing this session, best first.
+    pub hints: Vec<String>,
+}
+
+/// Whether a notch id is a session outside monoBOT (see [`external_id`]).
+pub fn is_external(id: i64) -> bool {
+    id < 0
+}
+
+/// A folder's last part, which names a session. Either separator: a
+/// Windows path reads the same on any system.
+fn folder(cwd: &str) -> Option<String> {
+    let trimmed = cwd.trim_end_matches(['/', '\\']);
+    let name = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
+/// A prompt's first line, in a few words, for a session's title.
+fn topic(prompt: &str) -> Option<String> {
+    const LETTERS: usize = 48;
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())?;
+    if line.chars().count() <= LETTERS {
+        return Some(line.to_owned());
+    }
+    // Cut at the last word that fits, or mid-word if one word is longer.
+    let cut: String = line.chars().take(LETTERS + 1).collect();
+    let cut = cut.rsplit_once(char::is_whitespace).map_or_else(
+        || cut.chars().take(LETTERS).collect(),
+        |(head, _)| head.to_owned(),
+    );
+    Some(format!("{}…", cut.trim_end()))
 }
 
 /// A stable negative id from the agent's session id.
@@ -940,6 +1060,93 @@ mod tests {
         externals.apply(parse(&event("UserPromptSubmit", None)).unwrap(), 1);
         externals.apply(parse(&event("SessionEnd", None)).unwrap(), 2);
         assert!(externals.activities().is_empty());
+    }
+
+    #[test]
+    fn two_sessions_in_one_folder_read_apart_and_open_their_own_window() {
+        let prompt = |session: &str, prompt: &str| {
+            parse(&format!(
+                "claude\n{}",
+                json!({
+                    "session_id": session,
+                    "cwd": r"D:\dev\monoBOT",
+                    "hook_event_name": "UserPromptSubmit",
+                    "prompt": prompt,
+                })
+            ))
+            .unwrap()
+        };
+        let mut externals = Externals::default();
+        let mut first = prompt("a", "\n  Fix the notch's chats on Windows\nmore");
+        first.app = Some("pids-30-20".into());
+        externals.apply(first, 1);
+        let long = "Make the tray menu open every Mono's floating chat at once";
+        let mut second = prompt("b", long);
+        second.app = Some("pids-31-20".into());
+        externals.apply(second, 2);
+        let titles: Vec<String> = externals
+            .activities()
+            .into_iter()
+            .map(|activity| {
+                // Coding sessions, listed with the coding chats.
+                assert_eq!(activity.agent, None);
+                assert_eq!(activity.who(), "Claude Code");
+                activity.title
+            })
+            .collect();
+        assert!(titles.contains(&"monoBOT · Fix the notch's chats on Windows".to_owned()));
+        assert!(
+            titles.contains(&"monoBOT · Make the tray menu open every Mono's floating…".to_owned())
+        );
+        // A turn without a prompt keeps the last words it was asked.
+        let mut tool = prompt("a", "");
+        tool.event = "PreToolUse".into();
+        tool.prompt = None;
+        externals.apply(tool, 3);
+        let target = externals.target(external_id("a")).unwrap();
+        assert_eq!(target.app, "pids-30-20");
+        assert_eq!(
+            target.hints,
+            [
+                "Fix the notch's chats on Windows".to_owned(),
+                "monoBOT".to_owned()
+            ]
+        );
+        // A window that names the session wins over the app's front one.
+        let windows = [
+            (9, "Other app".to_owned()),
+            (20, "✳ Tray menu · Windows Terminal".to_owned()),
+            (20, "✳ Fix the notch's chats on Windows".to_owned()),
+        ];
+        assert_eq!(
+            pick_window(&windows, &app_pids(&target.app), &target.hints),
+            Some(2)
+        );
+        assert_eq!(pick_window(&windows, &[30, 20], &[]), Some(1));
+        assert_eq!(pick_window(&windows, &[30], &target.hints), None);
+        assert!(is_external(external_id("a")) && !is_external(4));
+    }
+
+    #[test]
+    fn curl_and_its_shell_are_not_kept_as_the_hooks_app() {
+        let chain = |names: &[&str]| -> Vec<(u32, String)> {
+            names
+                .iter()
+                .enumerate()
+                .map(|(at, name)| (at as u32 + 1, (*name).to_owned()))
+                .collect()
+        };
+        assert_eq!(
+            lasting(&chain(&[
+                "curl.exe",
+                "BASH.EXE",
+                "claude.exe",
+                "WindowsTerminal.exe"
+            ])),
+            [3, 4]
+        );
+        assert_eq!(lasting(&chain(&["claude.exe", "bash.exe"])), [1, 2]);
+        assert!(lasting(&chain(&["curl.exe"])).is_empty());
     }
 
     #[cfg(unix)]

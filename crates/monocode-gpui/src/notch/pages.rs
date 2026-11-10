@@ -262,8 +262,15 @@ impl Notch {
                 (Some(doing), _) => (doing.clone(), ink(0.6)),
                 (None, _) => ("Resting".to_owned(), ink(0.35)),
             };
+            // The row's id follows the agent, not its place: the list sorts
+            // again as agents start and stop, and a press and its release
+            // must land on the same agent.
             let mut row = session_row(
-                ("notch-agent", index as u64),
+                gpui::SharedString::from(format!(
+                    "notch-agent-{}-{}",
+                    agent.session.unwrap_or_default(),
+                    agent.name
+                )),
                 face_or_provider(
                     Some(&agent.face),
                     "",
@@ -360,6 +367,7 @@ impl Notch {
                             detail,
                             ink(0.5),
                         )
+                        .debug_selector(move || format!("{prefix}-{id}"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.emit(NotchEvent::OpenSession(id), cx)
                         })),
@@ -393,6 +401,7 @@ impl Notch {
                     model::ago(recent.updated_at, now),
                     ink(0.4),
                 )
+                .debug_selector(move || format!("notch-chat-recent-{id}"))
                 .on_click(
                     cx.listener(move |this, _, _, cx| this.emit(NotchEvent::OpenSession(id), cx)),
                 ),

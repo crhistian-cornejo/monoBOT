@@ -110,9 +110,6 @@ impl Monos {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.prefs.monos {
-            return false;
-        }
         // A group member's seat opens its group, where the member answers.
         let seat_group = self
             .groups
@@ -129,6 +126,11 @@ impl Monos {
         else {
             return false;
         };
+        // The Monos switch hides the coding Monos only: a bot or a group
+        // still opens in Agents, never as a coding chat (as `open` decides).
+        if !self.prefs.monos && self.roster.get(&mono).is_none_or(|mono| mono.is_coding()) {
+            return false;
+        }
         self.settings = None;
         self.route = None;
         self.open(&mono, window, cx);
