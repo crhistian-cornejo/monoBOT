@@ -3,6 +3,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
 
+import { faceAs, monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { PIXEL_MASCOT_NAMES } from "@/features/mascots/pixelMascots";
 import { useMonoModel } from "@/features/models/useMonoModel";
@@ -41,6 +42,8 @@ export default function EditMonoScreen() {
   const tile = gridWidth > 0 ? Math.floor((gridWidth - TILE_GAP * 4) / 5) : 0;
   const saved = useRef(mono?.name ?? "");
   const mascot = mono?.mascot ?? "ghost";
+  // A bot's look picker shows its persona as each mascot, dressed for its role.
+  const face = mono ? monoFace(mono) : mascot;
   const color = mono?.color ?? SWATCHES[0];
 
   const save = (change: MonoChange) => {
@@ -78,7 +81,7 @@ export default function EditMonoScreen() {
   return (
     <SettingsPage>
       <View style={styles.preview}>
-        <PixelMascot name={mascot} color={color} size={88} centered />
+        <PixelMascot name={face} color={color} size={88} centered />
       </View>
 
       <Text style={styles.heading}>Name</Text>
@@ -160,7 +163,13 @@ export default function EditMonoScreen() {
             }}
             style={[styles.mascot, { width: tile, height: tile }, name === mascot && { borderColor: color }]}
           >
-            <PixelMascot name={name} color={color} size={Math.round(tile * 0.62)} centered />
+            <PixelMascot
+              name={faceAs(face, name)}
+              color={color}
+              size={Math.round(tile * 0.62)}
+              centered
+              still={name !== mascot}
+            />
           </Pressable>
         ))}
       </View>

@@ -10,6 +10,7 @@ import Animated, {
 import { AsciiField } from "@/features/background/AsciiField";
 import { FadingBackground } from "@/features/background/FadingBackground";
 import type { EmptyBackground } from "@/features/background/useEmptyBackground";
+import { monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import type { Project } from "@/features/workspace/types";
 import { MONOCODE_MARK } from "@/ui/brand";
@@ -99,7 +100,7 @@ export function EmptySession({
         <Animated.View style={[styles.intro, fade]}>
           {mono ? (
             <>
-              <PixelMascot name={mono.mascot} color={mono.color} size={MARK_SIZE} />
+              <PixelMascot name={monoFace(mono)} color={mono.color} size={MARK_SIZE} />
               <Text style={styles.headline}>Say hi to {mono.name}</Text>
             </>
           ) : (

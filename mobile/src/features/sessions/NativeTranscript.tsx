@@ -31,6 +31,8 @@ import {
   type NativeTranscriptStatus,
 } from "@/features/workspace/WorkspaceProvider";
 import type { TurnMetrics } from "@/features/workspace/types";
+import { isPersona, monoFace } from "@/features/mascots/faces";
+import { picturePath, usePersonaPictures, type PersonaPose } from "@/features/mascots/personaPictures";
 import { pixelLayers } from "@/features/mascots/pixelMascots";
 import { AccentOverride, mix, useAccent, useColors, useScheme, useTheme } from "@/ui/theme";
 import { usePushStarted } from "@/ui/usePushedIn";
@@ -81,6 +83,10 @@ type Props = ViewProps & {
   onAction: (event: NativeSyntheticEvent<Action>) => void;
   onScrollState: (event: NativeSyntheticEvent<{ away: boolean; log?: string }>) => void;
 };
+/** The working Mono's mascot beside its status, in points (`TranscriptPresentation`). */
+const STATUS_MASCOT = 26;
+const TALKING: readonly PersonaPose[] = ["rest", "talk"];
+const NONE: readonly PersonaPose[] = [];
 const NativeView = hasNativeTranscript
   ? requireNativeView<Props>("MonocodeLink")
   : null;
@@ -123,6 +129,12 @@ export function NativeTranscript({
   const [held, setHeld] = useState<HeldMessage | null>(null);
   const [reactions, react] = useReactions(conversationId);
   const messageActions = use(MonoMessageActions);
+  const face = agent ? monoFace(agent) : "";
+  const persona = isPersona(face);
+  const pictures = usePersonaPictures(face, agent?.color ?? "", STATUS_MASCOT, persona ? TALKING : NONE);
+  // Sent once both are drawn, so the transcript takes one new appearance, not two.
+  const agentPicture = persona && pictures.rest && pictures.talk !== undefined ? picturePath(pictures.rest) : "";
+  const agentTalkPicture = agentPicture && pictures.talk ? picturePath(pictures.talk) : "";
   const configuration = useMemo(
     () =>
       pairing
@@ -178,13 +190,16 @@ export function NativeTranscript({
               return [...layers.body, ...layers.open];
             })()
           : [],
+        // A bot's 3D persona, drawn instead of the pixels once its pictures are.
+        agentPicture,
+        agentTalkPicture,
         // A Mono's chat reads a size up: 17 for the body's 16, and the rest
         // in step, its line heights too.
         scale: agent ? (fontScale * 17) / 16 : fontScale,
         pixelRatio,
         collapsed,
       }),
-    [colors, scheme, ink, agent, reactions, openFile, fontScale, pixelRatio, collapsed],
+    [colors, scheme, ink, agent, agentPicture, agentTalkPicture, reactions, openFile, fontScale, pixelRatio, collapsed],
   );
   const showError = useCallback((value: SessionErrorNotice) => {
     Keyboard.dismiss();

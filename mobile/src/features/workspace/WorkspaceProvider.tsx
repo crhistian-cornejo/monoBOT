@@ -23,6 +23,7 @@ import {
   type Conversation,
 } from "@/features/connection/ConnectionProvider";
 import { selectedWorkspace } from "@/features/connection/selection";
+import { faceAs } from "@/features/mascots/faces";
 import type { ModelCatalog, ModelChoice } from "@/features/models/types";
 import { toWire, type Attachment } from "@/features/sessions/attachments";
 import type { DisplayedQuestionPrompt, Message, UsageLimitState, Mono, MonoSubsessions, Project, QuestionPrompt, QuestionReply, SessionSummary, Turn, TurnItem } from "./types";
@@ -729,6 +730,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         const shown = { ...mono };
         for (const [field, edit] of Object.entries(edits) as [MonoField, { value: unknown; from: unknown }][])
           if (sameValue(mono[field], edit.from)) Object.assign(shown, { [field]: edit.value });
+        if (shown.face && shown.mascot !== mono.mascot) shown.face = faceAs(shown.face, shown.mascot);
         return shown;
       }),
       sessions: [

@@ -14,6 +14,7 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useConnection, useMonoTools } from "@/features/connection/ConnectionProvider";
+import { monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { plainText } from "@/features/sessions/markdownParser";
@@ -384,7 +385,7 @@ const MonoRow = memo(function MonoRow({
       onPress={() => onPress(mono.id)}
       style={({ pressed }) => [styles.row, (active || pressed) && styles.rowActive]}
     >
-      <PixelMascot name={mono.mascot} color={mono.color} status={mono.status} size={AVATAR} centered />
+      <PixelMascot name={monoFace(mono)} color={mono.color} status={mono.status} size={AVATAR} centered still />
       <View style={styles.rowText}>
         <View style={styles.rowTop}>
           <Text style={styles.rowLabel} numberOfLines={1}>

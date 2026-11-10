@@ -2,6 +2,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { Fragment } from "react";
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 
+import { monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { useMonoModel } from "@/features/models/useMonoModel";
@@ -34,7 +35,7 @@ export default function MonoProfileScreen() {
   return (
     <SettingsPage onRefresh={refresh} refreshing={refreshing}>
       <View style={styles.identity}>
-        <PixelMascot name={mono.mascot} color={mono.color} status={mono.status} size={88} />
+        <PixelMascot name={monoFace(mono)} color={mono.color} status={mono.status} size={88} />
         <Text style={styles.name} numberOfLines={1}>{mono.name}</Text>
         {model ? (
           <View style={styles.model}>

@@ -23,6 +23,10 @@ struct TranscriptStyle: Equatable {
   var agentRects: [TranscriptPixel] = []
   /// Its talking frame, swapped with the rest while it works, as PixelMascot.
   var agentTalkRects: [TranscriptPixel] = []
+  /// A bot's 3D persona, at rest and talking: files drawn in place of the
+  /// pixels, which stay for while they're drawn or if they can't be.
+  var agentPicture = ""
+  var agentTalkPicture = ""
   /// Reactions the user put on a Mono's replies, by the reply's first row.
   var reactions: [String: String] = [:]
   /// CoreText rounds fixed line heights up to whole points, so a fractional

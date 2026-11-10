@@ -94,6 +94,9 @@ export type Mono = {
   id: string;
   name: string;
   mascot: string;
+  /** What its avatar draws (`monoFace`): a personal bot's 3D persona, or
+   *  the mascot. Missing on desktops from before personas. */
+  face?: string;
   color: string;
   projectIds: string[];
   unread: number;

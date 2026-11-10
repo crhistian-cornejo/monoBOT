@@ -12,6 +12,7 @@ import { Alert, Text } from "react-native";
 import { ConnectionNotice } from "@/features/connection/ConnectionNotice";
 import { hasNativeTranscript } from "@/features/connection/nativeLink";
 
+import { monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { useMonoModel } from "@/features/models/useMonoModel";
 import { useDrawerActions, useDrawerSwipe } from "@/ui/ScenePager";
@@ -110,8 +111,9 @@ function MonoScreen({ monoOnly }: { monoOnly: boolean }) {
   // Stable, so the memoized turns keep their rows across polls.
   const name = mono?.name ?? "";
   const mascot = mono?.mascot ?? "";
+  const face = mono ? monoFace(mono) : "";
   const color = mono?.color ?? "";
-  const agent = useMemo(() => ({ name, mascot, color }), [name, mascot, color]);
+  const agent = useMemo(() => ({ name, mascot, face, color }), [name, mascot, face, color]);
   const { model, harness, effort } = useMonoModel(mono);
   // The colour picked for this Mono's chat, over the app's accent.
   const monoAccent = useMonoAccent(mono?.id);
@@ -189,7 +191,7 @@ function MonoScreen({ monoOnly }: { monoOnly: boolean }) {
     <Timed id="mono screen">
     <SessionScreen
       pill={{
-        icon: <PixelMascot name={mono.mascot} color={mono.color} status={headerStatus(mono)} size={28} />,
+        icon: <PixelMascot name={face} color={mono.color} status={headerStatus(mono)} size={28} still />,
         label: mono.name,
         // Its profile: the desktop's details, and its look to edit.
         onPress: tools
@@ -310,7 +312,7 @@ function MonoTitle({ mono, onPress }: { mono: Mono; onPress?: () => void }) {
       accessibilityLabel={onPress ? mono.name : undefined}
       pressedScale={onPress ? 1.04 : undefined}
     >
-      <PixelMascot name={mono.mascot} color={mono.color} status={headerStatus(mono)} size={28} />
+      <PixelMascot name={monoFace(mono)} color={mono.color} status={headerStatus(mono)} size={28} still />
       <Text style={styles.label} numberOfLines={1}>
         {mono.name}
       </Text>

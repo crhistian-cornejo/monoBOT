@@ -12,6 +12,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useConnection, useMonoTools } from "@/features/connection/ConnectionProvider";
 import { hideScrollEdgeEffects } from "@/features/connection/nativeLink";
+import { monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { HeaderBlur } from "@/features/files/codeScreen";
 import { plainText } from "@/features/sessions/markdownParser";
@@ -395,7 +396,7 @@ const MonoRow = memo(function MonoRow({
           accessibilityLabel={`${mono.name}, ${detail}`}
           style={styles.row}
         >
-          <PixelMascot name={mono.mascot} color={mono.color} status={mono.status} size={MASCOT} centered />
+          <PixelMascot name={monoFace(mono)} color={mono.color} status={mono.status} size={MASCOT} centered still />
           <View style={styles.rowText}>
             <View style={styles.rowLine}>
               <Text style={styles.rowLabel} numberOfLines={1}>
@@ -471,7 +472,7 @@ function MonoPreview({ mono }: { mono: Mono }) {
   return (
     <View style={styles.previewCard}>
       <View style={styles.previewHeader}>
-        <PixelMascot name={mono.mascot} color={mono.color} status={mono.status} size={28} centered />
+        <PixelMascot name={monoFace(mono)} color={mono.color} status={mono.status} size={28} centered still />
         <Text style={styles.previewName} numberOfLines={1}>
           {mono.name}
         </Text>

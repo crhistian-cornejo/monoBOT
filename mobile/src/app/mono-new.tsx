@@ -124,7 +124,7 @@ export default function NewMonoScreen() {
                     selected && { borderColor: colors.muted },
                   ]}
                 >
-                  <PixelMascot name={option} color={color} size={Math.round(tile * 0.6)} centered />
+                  <PixelMascot name={option} color={color} size={Math.round(tile * 0.6)} centered still={!selected} />
                 </Pressable>
               );
             })}

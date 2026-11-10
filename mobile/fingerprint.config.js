@@ -21,6 +21,11 @@ module.exports = {
       reasons: ["monocodeRust"],
     },
     {
+      type: "dir",
+      filePath: "../crates/persona",
+      reasons: ["monocodeRust"],
+    },
+    {
       type: "file",
       filePath: "scripts/build-native-link.mjs",
       reasons: ["monocodeRust"],

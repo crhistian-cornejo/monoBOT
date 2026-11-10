@@ -265,7 +265,9 @@ final class TranscriptRowView: UIView, UIScrollViewDelegate {
   /// A working Mono's mascot beside its "Thinking…" line, flipping between
   /// its rest and talk frames as PixelMascot does.
   private let mascot = UIImageView()
-  private var mascotFrames: (rects: [TranscriptPixel], talk: [TranscriptPixel], size: CGSize)?
+  private var mascotFrames: (
+    rects: [TranscriptPixel], talk: [TranscriptPixel], pictures: [String], size: CGSize
+  )?
 
   /// Shows Liquid Glass inside a surface's view where the surface asks for it
   /// and the system has it, else hides any left from a reused row. True when
@@ -472,7 +474,9 @@ final class TranscriptRowView: UIView, UIScrollViewDelegate {
     configureAccessibility()
   }
   private func configureMascot(_ model: TranscriptRowModel) {
-    guard let rect = model.mascotRect, !model.style.agentRects.isEmpty else {
+    guard let rect = model.mascotRect,
+      !model.style.agentRects.isEmpty || !model.style.agentPicture.isEmpty
+    else {
       mascot.stopAnimating()
       mascot.isHidden = true
       return
@@ -480,8 +484,13 @@ final class TranscriptRowView: UIView, UIScrollViewDelegate {
     mascot.isHidden = false
     mascot.frame = rect
     let style = model.style
-    if mascotFrames.map({ $0.rects != style.agentRects || $0.talk != style.agentTalkRects || $0.size != rect.size }) ?? true {
-      mascotFrames = (style.agentRects, style.agentTalkRects, rect.size)
+    let pictures = [style.agentPicture, style.agentTalkPicture]
+    if mascotFrames.map({
+      $0.rects != style.agentRects || $0.talk != style.agentTalkRects || $0.pictures != pictures
+        || $0.size != rect.size
+    }) ?? true {
+      mascotFrames = (style.agentRects, style.agentTalkRects, pictures, rect.size)
+      let picture = { (path: String) -> UIImage? in path.isEmpty ? nil : UIImage(contentsOfFile: path) }
       let draw = { (pixels: [TranscriptPixel]) in
         UIGraphicsImageRenderer(size: rect.size).image { context in
           for pixel in pixels {
@@ -493,11 +502,20 @@ final class TranscriptRowView: UIView, UIScrollViewDelegate {
           }
         }
       }
-      let rest = draw(style.agentRects)
+      let rest: UIImage
+      let talk: UIImage?
+      if let file = picture(style.agentPicture) {
+        rest = file
+        talk = picture(style.agentTalkPicture)
+      } else {
+        rest = draw(style.agentRects)
+        talk = style.agentTalkRects.isEmpty ? nil : draw(style.agentTalkRects)
+      }
       mascot.stopAnimating()
+      mascot.contentMode = .scaleAspectFit
       mascot.image = rest
       // 300ms a frame, as the desktop's and the header's mascots.
-      mascot.animationImages = style.agentTalkRects.isEmpty ? nil : [rest, draw(style.agentTalkRects)]
+      mascot.animationImages = talk.map { [rest, $0] }
       mascot.animationDuration = 0.6
     }
     animateMascot()

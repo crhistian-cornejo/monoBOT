@@ -3,6 +3,7 @@ import * as Haptics from "expo-haptics";
 import { createContext, memo, use, useEffect, useRef, useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 
+import { monoFace } from "@/features/mascots/faces";
 import { PixelMascot } from "@/features/mascots/PixelMascot";
 import { useCollapsedToolCalls } from "@/features/settings/toolCalls";
 import type {
@@ -29,8 +30,9 @@ import {
 } from "./transcriptFormat";
 import { TurnMetricsSheet } from "./TurnMetricsSheet";
 
-/** Who a Mono's turns are by, in place of the model and provider mark. */
-export type TranscriptAgent = { name: string; mascot: string; color: string };
+/** Who a Mono's turns are by, in place of the model and provider mark;
+ *  `face` is what its avatar draws (`monoFace`). */
+export type TranscriptAgent = { name: string; mascot: string; face?: string; color: string };
 
 type HeaderItem = Extract<TurnItem, { type: "header" }>;
 
@@ -412,7 +414,7 @@ function MonoHeader({ item, agent }: { item: HeaderItem; agent: TranscriptAgent 
   const styles = useStyles();
   const signature = (name: string) => (
     <View style={styles.signature}>
-      <PixelMascot name={agent.mascot} color={agent.color} size={14} />
+      <PixelMascot name={monoFace(agent)} color={agent.color} size={14} still />
       <Text style={styles.signatureName} numberOfLines={1}>
         {name}
       </Text>

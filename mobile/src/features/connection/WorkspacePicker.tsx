@@ -16,6 +16,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { monoFace } from "@/features/mascots/faces";
 import { MonoMascot } from "@/features/mascots/PixelMascot";
 import { ProjectMascot } from "@/features/mascots/ProjectMascot";
 import { SettingsRow } from "@/features/settings/SettingsUI";
@@ -123,10 +124,11 @@ export function WorkspacePicker({
                 onPress={() => toggle("monoIds", mono.id)}
                 icon={
                   <MonoMascot
-                    name={mono.mascot}
+                    name={monoFace(mono)}
                     color={mono.color}
                     status={mono.status}
                     size={24}
+                    still
                   />
                 }
               />

@@ -254,6 +254,8 @@ final class NativeTranscriptView: ExpoView, UIScrollViewDelegate, UIGestureRecog
     {
       style.agentTalkRects = (try? JSONDecoder().decode([TranscriptPixel].self, from: data)) ?? []
     }
+    style.agentPicture = input["agentPicture"] as? String ?? ""
+    style.agentTalkPicture = input["agentTalkPicture"] as? String ?? ""
     for key in [
       "content", "muted", "accent", "bubble", "bubbleText", "surface", "error", "rail", "agent",
     ] {
