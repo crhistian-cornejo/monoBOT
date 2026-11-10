@@ -67,6 +67,8 @@ fn register_icon() -> Result<(), String> {
         };
         status.ok().map_err(|e| format!("{name}: {e}"))
     };
+    // Older builds registered "MonoBOT Native"; the toast's header shows it.
+    set("DisplayName", APP_NAME)?;
     set("IconUri", &icon.to_string_lossy())?;
     // The logo's own tile is black: keep the square behind it black too.
     set("IconBackgroundColor", "FF000000")
