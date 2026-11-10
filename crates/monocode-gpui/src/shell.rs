@@ -718,6 +718,9 @@ pub(crate) struct Shell {
     /// Claude Code's and Codex's own sessions, as their hooks report them.
     notch_externals: monocode_core::notch::hooks::Externals,
     notch_hooks: Option<gpui::Task<()>>,
+    /// The agents' chats (Monos) whose turn finished, and when: the notch
+    /// shows each as finished for a while, so its notice goes up.
+    notch_agents_done: std::collections::HashMap<i64, u64>,
     unseen_finished: HashSet<i64>,
     archiving: HashSet<i64>,
     archive_shortcut_held: bool,
@@ -1127,6 +1130,7 @@ impl Shell {
             notch_talk: None,
             notch_externals: Default::default(),
             notch_hooks: None,
+            notch_agents_done: Default::default(),
             unseen_finished: HashSet::new(),
             archiving: HashSet::new(),
             archive_shortcut_held: false,
@@ -1569,7 +1573,11 @@ impl Shell {
         };
         let session = view.read(cx);
         let busy = session.responding();
-        let focused = !self.app_view_open() && self.workspace.active == Some(id);
+        // A turn that ends in the chat in front while the user is in another
+        // app was not seen: it stays finished (the sidebar's mark, the
+        // notch's notice) until the window is back.
+        let focused =
+            self.window_active && !self.app_view_open() && self.workspace.active == Some(id);
         if busy {
             self.busy_sessions.insert(id);
             self.unseen_finished.remove(&id);
@@ -9044,6 +9052,12 @@ impl Render for Shell {
                 .push(cx.observe_window_activation(window, |this, window, cx| {
                     this.window_active = window.is_window_active();
                     this.refresh_notification_permission();
+                    // Back in the window: the chat in front was read.
+                    if this.window_active
+                        && let Some(id) = this.workspace.active
+                    {
+                        this.refresh_session_mark(id, cx);
+                    }
                     cx.notify();
                 }));
             self.start_native_notifications(cx);

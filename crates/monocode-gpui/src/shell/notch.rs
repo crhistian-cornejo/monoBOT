@@ -10,6 +10,9 @@ use monocode_core::notch::{
 };
 use std::path::Path;
 
+/// How long an agent's finished turn stays in the notch, unread.
+const AGENT_DONE_MS: u64 = 10 * 60 * 1000;
+
 impl Shell {
     /// Reads the saved look off the interface thread, then opens the notch.
     pub(super) fn start_notch(&mut self, cx: &mut Context<Self>) {
@@ -82,21 +85,61 @@ impl Shell {
                     }
                 })
                 .detach();
-            self.notch_hooks = Some(cx.spawn(async move |this, cx| {
-                while let Ok(event) = events.recv().await {
-                    let alive = this.update(cx, |this, cx| {
-                        this.notch_externals
-                            .apply(event, monocode_core::time::now_ms());
-                        this.sync_notch(cx);
-                    });
-                    if alive.is_err() {
-                        break;
-                    }
-                }
-            }));
+            self.follow_notch_hooks(events, cx);
         }
-        #[cfg(not(unix))]
+        // Windows: a loopback port of this copy's own, and `curl` in the
+        // hook (see `notch::hooks`).
+        #[cfg(windows)]
+        {
+            use monocode_core::notch::hooks;
+            let port = hooks::loopback_port(&data.to_string_lossy());
+            let endpoint = hooks::loopback(port);
+            let (sender, events) = async_channel::unbounded();
+            let home = std::env::var_os("USERPROFILE").map(std::path::PathBuf::from);
+            cx.background_executor()
+                .spawn(async move {
+                    if let Err(error) = hooks::serve_loopback(port, move |event| {
+                        let _ = sender.try_send(event);
+                    }) {
+                        eprintln!("notch hooks: could not listen on port {port}: {error}");
+                        return;
+                    }
+                    if let Some(home) = home {
+                        for (path, result) in hooks::install(&home, &endpoint) {
+                            match result {
+                                Ok(true) => eprintln!("notch hooks: added to {path:?}"),
+                                Ok(false) => {}
+                                Err(error) => eprintln!("notch hooks: {path:?}: {error}"),
+                            }
+                        }
+                    }
+                })
+                .detach();
+            self.follow_notch_hooks(events, cx);
+        }
+        #[cfg(not(any(unix, windows)))]
         let _ = (data, cx);
+    }
+
+    /// Each hook call as it comes: the terminal's sessions catch up.
+    #[cfg(any(unix, windows))]
+    fn follow_notch_hooks(
+        &mut self,
+        events: async_channel::Receiver<monocode_core::notch::hooks::HookEvent>,
+        cx: &mut Context<Self>,
+    ) {
+        self.notch_hooks = Some(cx.spawn(async move |this, cx| {
+            while let Ok(event) = events.recv().await {
+                let alive = this.update(cx, |this, cx| {
+                    this.notch_externals
+                        .apply(event, monocode_core::time::now_ms());
+                    this.sync_notch(cx);
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        }));
     }
 
     fn open_notch(&mut self, look: model::Look, cx: &mut Context<Self>) {
@@ -262,6 +305,44 @@ impl Shell {
                     steps: transcript.live_steps(),
                 });
             }
+        }
+        // An agent's finished turn: shown as finished for a while, so the
+        // notch raises its notice, until it works again or is opened.
+        let now = monocode_core::time::now_ms();
+        self.notch_agents_done
+            .retain(|_, at| now.saturating_sub(*at) < AGENT_DONE_MS);
+        if let Some(monos) = &self.monos {
+            let monos = monos.read(cx);
+            let mut finished = Vec::new();
+            for (&id, &at) in &self.notch_agents_done {
+                if activities.iter().any(|activity| activity.id == id) {
+                    continue;
+                }
+                let Some(view) = monos.notification_entity(id, cx) else {
+                    continue;
+                };
+                let chat = view.read(cx);
+                if chat.responding() {
+                    continue;
+                }
+                let mono = monos.notification_mono(id);
+                finished.push(Activity {
+                    id,
+                    provider: chat.summary.provider.clone(),
+                    title: chat.display_title().to_string(),
+                    step: "Done".into(),
+                    started_at: Some(at),
+                    needs_you: false,
+                    done: true,
+                    agent: mono.map(|mono| mono.label()),
+                    face: mono.map(|mono| Face {
+                        mascot: mono.face().into_owned(),
+                        color: mono.color,
+                    }),
+                    steps: None,
+                });
+            }
+            activities.extend(finished);
         }
         // Claude Code and Codex in a terminal, through their hooks.
         self.notch_externals.prune(monocode_core::time::now_ms());
@@ -451,6 +532,10 @@ impl Shell {
                 // The notch is another app's neighbor: bring monoBOT forward
                 // with the chat, as a notification's click does.
                 cx.activate(true);
+                // An agent's finished turn is read once its chat is open.
+                if self.notch_agents_done.remove(&id).is_some() {
+                    self.sync_notch(cx);
+                }
                 self.open_notice_target(Target::Session(id), cx)
             }
             NotchEvent::Decide {
@@ -491,6 +576,10 @@ impl Shell {
             }
             NotchEvent::Watch(session) => {
                 self.notch_talk = session;
+                // Its chat is open in the notch: its finished turn is read.
+                if let Some(session) = session {
+                    self.notch_agents_done.remove(&session);
+                }
                 // Its chat may never have been opened since the app started.
                 if let (Some(session), Some(monos)) = (session, self.monos.clone()) {
                     monos.update(cx, |monos, cx| monos.notch_load_chat(session, cx));

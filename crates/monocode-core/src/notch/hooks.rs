@@ -8,6 +8,12 @@
 //! Claude Code reads `~/.claude/settings.json`; Codex reads
 //! `~/.codex/hooks.json`, and runs a new hook only once the user trusts it
 //! in Codex's `/hooks`.
+//!
+//! Windows has no `nc -U`: there the notch listens on a loopback port
+//! ([`loopback`]) and the hook sends its JSON with `curl`, which Windows
+//! ships. Claude Code runs its hooks in Git Bash there, so the command keeps
+//! its shell form; Codex's shell on Windows is not known, so only Claude
+//! Code's hooks are added.
 use super::{state_word, Activity};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -42,9 +48,38 @@ pub const CODEX_EVENTS: &[(&str, u64)] = &[
     ("Interrupt", 3),
 ];
 
+/// Where the notch listens on Windows: a loopback port of its own, written
+/// where a socket's path goes elsewhere. The address carries [`MARK`].
+pub fn loopback(port: u16) -> std::path::PathBuf {
+    format!("http://127.0.0.1:{port}/{MARK}").into()
+}
+
+/// The loopback address `endpoint` names, if it is one.
+fn loopback_url(endpoint: &Path) -> Option<String> {
+    let text = endpoint.to_str()?;
+    text.strip_prefix("http://127.0.0.1:")
+        .and_then(|rest| rest.split_once('/'))
+        .filter(|(port, path)| port.parse::<u16>().is_ok() && *path == MARK)
+        .map(|_| text.to_owned())
+}
+
+/// The port a copy of monoBOT listens on, from its data folder: stable
+/// across runs, so its hook command stays the same, and apart from another
+/// copy's (a development build beside the installed app).
+pub fn loopback_port(data: &str) -> u16 {
+    47_000 + (external_id(data).unsigned_abs() % 1_000) as u16
+}
+
 /// The hook's shell command: the source on the first line, then the
 /// hook's JSON, to the socket; always a success.
 pub fn command(source: &str, socket: &Path) -> String {
+    if let Some(url) = loopback_url(socket) {
+        // Over loopback the source is the address's last part and the JSON
+        // is the body; `curl` ships with Windows.
+        return format!(
+            "[ -n \"$MONOCODE_HARNESS_PARENT\" ] || curl -s -m 2 --data-binary @- '{url}/{source}' >/dev/null 2>&1; true # {MARK}"
+        );
+    }
     let socket = socket.to_string_lossy().replace('\'', r"'\''");
     // Sessions monoBOT runs itself carry MONOCODE_HARNESS_PARENT and are
     // already in the notch: their hooks stay quiet. The first line also
@@ -58,6 +93,9 @@ pub fn command(source: &str, socket: &Path) -> String {
 /// The socket as the command quotes it, to find monoBOT's older commands
 /// for it.
 fn quoted(socket: &Path) -> String {
+    if let Some(url) = loopback_url(socket) {
+        return format!("'{url}/");
+    }
     format!("'{}'", socket.to_string_lossy().replace('\'', r"'\''"))
 }
 
@@ -232,9 +270,13 @@ pub fn install(home: &Path, socket: &Path) -> Vec<(std::path::PathBuf, Result<bo
         ),
         (codex_home, "hooks.json", "codex", CODEX_EVENTS),
     ];
+    // Over loopback (Windows) only Claude Code's: its hooks run in Git Bash,
+    // Codex's in a shell this command is not written for.
+    let loopback = loopback_url(socket).is_some();
     targets
         .into_iter()
         .filter(|(dir, ..)| dir.is_dir())
+        .filter(|(_, _, source, _)| !loopback || *source == "claude")
         .map(|(dir, name, source, events)| {
             let path = dir.join(name);
             let result = install_file(&path, source, events, socket);
@@ -308,6 +350,85 @@ pub fn serve(socket: &Path, on_event: impl Fn(HookEvent) + Send + 'static) -> st
             }
         })?;
     Ok(())
+}
+
+/// Listens on the loopback `port` (Windows' stand-in for the socket) on a
+/// thread of its own. Each hook is one `POST /monobot-notch/<source>` with
+/// its JSON as the body. A request from a web page (it carries `Origin`) or
+/// to any other address is refused.
+pub fn serve_loopback(
+    port: u16,
+    on_event: impl Fn(HookEvent) + Send + 'static,
+) -> std::io::Result<()> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", port))?;
+    std::thread::Builder::new()
+        .name("notch-hooks".into())
+        .spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut stream = stream;
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
+                let event = read_request(&mut stream);
+                let answer: &[u8] = if event.is_some() {
+                    b"HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n"
+                } else {
+                    b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                let _ = std::io::Write::write_all(&mut stream, answer);
+                if let Some(event) = event {
+                    on_event(event);
+                }
+            }
+        })?;
+    Ok(())
+}
+
+/// One hook's request, read off a loopback connection.
+fn read_request(stream: &mut impl std::io::Read) -> Option<HookEvent> {
+    use std::io::Read;
+    // Hooks are small; a runaway sender stops at 256 KB.
+    let mut reader = stream.take(256 * 1024);
+    let mut bytes = Vec::new();
+    let mut chunk = [0u8; 8192];
+    let head_end = loop {
+        if let Some(at) = bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+            break at;
+        }
+        let read = reader.read(&mut chunk).ok()?;
+        if read == 0 {
+            return None;
+        }
+        bytes.extend_from_slice(&chunk[..read]);
+    };
+    let head = std::str::from_utf8(&bytes[..head_end]).ok()?;
+    let mut lines = head.split("\r\n");
+    let mut request = lines.next()?.split_whitespace();
+    let (method, path) = (request.next()?, request.next()?);
+    let source = path.strip_prefix(&format!("/{MARK}/")).unwrap_or("");
+    let mut length = 0usize;
+    let mut from_a_page = false;
+    for line in lines {
+        let (name, value) = line.split_once(':')?;
+        match name.trim().to_ascii_lowercase().as_str() {
+            "origin" => from_a_page = true,
+            "content-length" => length = value.trim().parse().ok()?,
+            _ => {}
+        }
+    }
+    // The body is read even when refused: closing on unread bytes resets
+    // the connection and the sender never hears the answer.
+    let mut body = bytes[head_end + 4..].to_vec();
+    while body.len() < length {
+        let read = reader.read(&mut chunk).ok()?;
+        if read == 0 {
+            return None;
+        }
+        body.extend_from_slice(&chunk[..read]);
+    }
+    body.truncate(length);
+    if method != "POST" || from_a_page {
+        return None;
+    }
+    parse(&format!("{source}\n{}", String::from_utf8_lossy(&body)))
 }
 
 /// One hook call, as the socket received it.
@@ -698,6 +819,85 @@ mod tests {
             ("s1", "Stop")
         );
         let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn on_windows_a_hook_posts_to_the_notchs_own_port() {
+        let endpoint = loopback(47_123);
+        let command = command("claude", &endpoint);
+        assert!(command.contains(
+            "curl -s -m 2 --data-binary @- 'http://127.0.0.1:47123/monobot-notch/claude'"
+        ));
+        assert!(command.starts_with("[ -n \"$MONOCODE_HARNESS_PARENT\" ] ||"));
+        assert!(command.ends_with(&format!("; true # {MARK}")));
+        // An address is never read as a socket, nor a socket as an address.
+        assert_eq!(socket_of(&command), None);
+        assert!(loopback_url(Path::new("/tmp/notch.sock")).is_none());
+        let merged = merge("", "claude", CLAUDE_EVENTS, &endpoint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            merge(&merged, "claude", CLAUDE_EVENTS, &endpoint).unwrap(),
+            None
+        );
+        // The port follows the data folder and stays in its range.
+        let data = r"C:\Users\me\AppData\Local\MonoBOT Development";
+        assert_eq!(loopback_port(data), loopback_port(data));
+        assert!((47_000..48_000).contains(&loopback_port(data)));
+        // Only Claude Code's hooks are added over loopback.
+        let home = std::env::temp_dir().join(format!("monobot-loop-{}", std::process::id()));
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let done: Vec<_> = install(&home, &endpoint)
+            .into_iter()
+            .map(|(path, result)| (path.file_name().unwrap().to_owned(), result))
+            .collect();
+        assert_eq!(done, [("settings.json".into(), Ok(true))]);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
+    fn the_notchs_port_hands_over_a_hooks_post_and_nothing_else() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let (sent, received) = std::sync::mpsc::channel();
+        serve_loopback(port, move |event| {
+            let _ = sent.send(event);
+        })
+        .unwrap();
+        let post = |head: &str| {
+            let body = r#"{"session_id":"s1","hook_event_name":"Stop","cwd":"D:\\dev"}"#;
+            let mut stream = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+            write!(
+                stream,
+                "{head}\r\nHost: x\r\nContent-Length: {}\r\n\r\n{body}",
+                body.len()
+            )
+            .unwrap();
+            let mut answer = String::new();
+            let _ = stream.read_to_string(&mut answer);
+            answer
+        };
+        assert!(post(&format!("POST /{MARK}/claude HTTP/1.1")).starts_with("HTTP/1.1 204"));
+        let event = received
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        assert_eq!(
+            (
+                event.source.as_str(),
+                event.session.as_str(),
+                event.event.as_str()
+            ),
+            ("claude", "s1", "Stop")
+        );
+        // A web page, another address, an unknown source: refused.
+        let page = format!("POST /{MARK}/claude HTTP/1.1\r\nOrigin: https://a.b");
+        assert!(post(&page).starts_with("HTTP/1.1 400"));
+        assert!(post("POST /other/claude HTTP/1.1").starts_with("HTTP/1.1 400"));
+        assert!(post(&format!("POST /{MARK}/vim HTTP/1.1")).starts_with("HTTP/1.1 400"));
+        assert!(received.try_recv().is_err());
     }
 
     #[test]

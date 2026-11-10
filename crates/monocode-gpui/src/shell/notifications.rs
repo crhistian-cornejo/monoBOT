@@ -295,6 +295,10 @@ impl Shell {
                 &monos,
                 |this, _, event: &crate::monos::NotificationFinished, cx| {
                     if !event.was_cancelled && !event.habit && !event.summary.archived {
+                        // The notch says so too, as it does for a coding chat.
+                        this.notch_agents_done
+                            .insert(event.summary.id, monocode_core::time::now_ms());
+                        this.sync_notch(cx);
                         this.deliver_session_notice(
                             &event.summary,
                             "agentFinished",

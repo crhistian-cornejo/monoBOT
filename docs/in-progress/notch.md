@@ -58,6 +58,13 @@ occluded and its frames stopped for up to two seconds.
 - **Sessions MonoBOT runs itself** carry `MONOCODE_HARNESS_PARENT`, so their hooks stay quiet.
 - **Install.** MonoBOT adds its entries beside everybody else's in `~/.claude/settings.json` and `~/.codex/hooks.json`. It keeps a `.monobot-backup` of each file, writes through a temporary file, and replaces its own older command for the same socket.
 - **Codex runs a new hook only after the user trusts it** in Codex's `/hooks`.
+- **Windows** has no `nc -U`, and until Nov 10 the notch listened for no hook there at all. Now it listens on a loopback port of its own (`hooks::loopback_port`, 47000–47999, from the data folder, so the installed app and a development build each have theirs) and the hook posts its JSON with `curl` to `http://127.0.0.1:<port>/monobot-notch/<source>`. Claude Code runs hook commands in Git Bash on Windows, so the command keeps its shell form and the `MONOCODE_HARNESS_PARENT` check. A request with an `Origin` header (a web page) or to another address is refused. Only Claude Code's hooks are added there: Codex's shell on Windows is not known. Not yet seen end to end with a real Claude Code session.
+
+**Finished turns that went unnoticed** (fixed Nov 10).
+
+- An agent's chat (a Mono) left the notch's feed the moment it stopped working, so the notch never saw it finish and raised no notice. Its finish (`NotificationFinished`, the same event the native notification uses) now keeps it in the feed as finished for up to 10 minutes, until it works again or its chat is opened in the notch or the app (`Shell::notch_agents_done`).
+- A coding chat that finished while it was the one in front counted as read even when the user was in another app, so neither the sidebar's mark nor the notch's notice showed. It now counts as read only while the window is active, and becomes read when the window comes back.
+- The native notification already asked whether the window was active; Windows' settings show this app's toasts arriving (`dev.usemono.gpui`).
 - **In the notch.** Sessions show as "folder · Claude Code" with their state word. Clicking one brings forward the app it runs in (`open -b` with the hook's `__CFBundleIdentifier`).
 
 **System levels** (`notch/system.rs`, `notch/levels.rs`).
