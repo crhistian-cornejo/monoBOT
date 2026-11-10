@@ -88,7 +88,9 @@ pub fn resolve(src: &str, cwd: Option<&str>, home: Option<&Path>) -> Option<Medi
     let kind = kind_of(src)?;
     let path = if let Some(rest) = src.strip_prefix("~/") {
         home?.join(rest)
-    } else if Path::new(src).is_absolute() || drive_path(src) {
+    } else if Path::new(src).has_root() || drive_path(src) {
+        // `/tmp/clip.mp4` is absolute on Unix; Windows reads a rooted path
+        // without a drive as the current drive's.
         PathBuf::from(src)
     } else {
         Path::new(cwd?).join(src.strip_prefix("./").unwrap_or(src))

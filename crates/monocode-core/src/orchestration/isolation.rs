@@ -267,6 +267,8 @@ mod tests {
         git(&["init", "-b", "main"]);
         git(&["config", "user.email", "fixture@example.invalid"]);
         git(&["config", "user.name", "Fixture"]);
+        // A Windows runner's global autocrlf would check files out with CRLF.
+        git(&["config", "core.autocrlf", "false"]);
         std::fs::create_dir(path.join("src")).unwrap();
         std::fs::write(path.join("src/lib.rs"), "one\n").unwrap();
         std::fs::write(path.join("README"), "readme\n").unwrap();
