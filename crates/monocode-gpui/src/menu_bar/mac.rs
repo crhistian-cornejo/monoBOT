@@ -6,9 +6,9 @@
 use super::mark::{self, Pixels};
 use block2::RcBlock;
 use monocode_core::menu_bar::Item;
-use objc2::{AnyThread, Message};
 use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, Bool};
+use objc2::{AnyThread, Message};
 use objc2_app_kit::{
     NSBitmapImageRep, NSColor, NSFont, NSFontAttributeName, NSForegroundColorAttributeName,
     NSImage, NSStringDrawing,

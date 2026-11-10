@@ -281,8 +281,10 @@ mod tests {
 
     #[gpui::test]
     fn the_item_follows_the_choice(cx: &mut TestAppContext) {
-        let mut prefs = Preferences::default();
-        prefs.menu_bar_live = "system".into();
+        let mut prefs = Preferences {
+            menu_bar_live: "system".into(),
+            ..Preferences::default()
+        };
         let bar = cx.update(|cx| open(&prefs, None, cx));
         bar.update(cx, |bar, cx| {
             assert!(bar.shown.is_none(), "nothing to say yet");

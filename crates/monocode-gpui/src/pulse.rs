@@ -387,7 +387,7 @@ mod tests {
             renders: renders.clone(),
         });
         cx.run_until_parked();
-        let mut frames = |ticks: u32, cx: &mut gpui::VisualTestContext| {
+        let frames = |ticks: u32, cx: &mut gpui::VisualTestContext| {
             let before = renders.get();
             for _ in 0..ticks {
                 cx.executor().advance_clock(TICK);

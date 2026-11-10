@@ -526,16 +526,28 @@ impl History {
         true
     }
 
-    fn insert(&mut self, clip: Clip) {
+    fn insert(&mut self, mut clip: Clip) {
+        clip.at = self.stamp(clip.at);
         self.clips.insert(0, clip);
         self.clips.truncate(KEPT);
+    }
+
+    /// When a copy was made, later than every copy kept: `at` names a copy
+    /// (the card shows the one pointed at by it), so two made in the same
+    /// millisecond must not share it.
+    fn stamp(&self, now: u64) -> u64 {
+        self.clips
+            .iter()
+            .map(|clip| clip.at + 1)
+            .max()
+            .map_or(now, |after| now.max(after))
     }
 
     /// A kept copy was copied again: it becomes the newest.
     pub fn raise(&mut self, index: usize, now: u64) {
         if index < self.clips.len() {
             let mut clip = self.clips.remove(index);
-            clip.at = now;
+            clip.at = self.stamp(now);
             self.clips.insert(0, clip);
         }
     }
@@ -554,6 +566,19 @@ impl History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn copies_made_in_the_same_millisecond_keep_their_own_time() {
+        let mut history = History::default();
+        for text in ["one", "two", "three"] {
+            assert!(history.push(text, 5));
+        }
+        let mut times: Vec<u64> = history.clips().iter().map(|clip| clip.at).collect();
+        assert_eq!(times, [7, 6, 5], "newest first, each its own");
+        history.raise(2, 5);
+        times = history.clips().iter().map(|clip| clip.at).collect();
+        assert_eq!(times, [8, 7, 6]);
+    }
 
     fn clip(text: &str) -> Clip {
         Clip {

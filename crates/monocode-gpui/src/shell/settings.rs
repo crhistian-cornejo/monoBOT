@@ -413,7 +413,9 @@ impl Shell {
         .detach();
     }
     /// The menu bar icon's menu picked what sits beside it: saved like any
-    /// preference, and shown in Settings if it is open.
+    /// preference, and shown in Settings if it is open. Tests open no menu
+    /// bar item, so nothing calls it there.
+    #[cfg_attr(test, allow(dead_code))]
     pub(crate) fn set_menu_bar_live(&mut self, choice: String, cx: &mut Context<Self>) {
         if self.workspace.preferences.menu_bar_live == choice {
             return;

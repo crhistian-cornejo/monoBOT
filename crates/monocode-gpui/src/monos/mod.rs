@@ -391,7 +391,8 @@ impl Monos {
                     let live = crate::menu_bar::open(&prefs, self.parent_window, _cx);
                     #[cfg(target_os = "macos")]
                     {
-                        self.live_watch = Some(_cx.observe(&live, |this, _, cx| this.show_live(cx)));
+                        self.live_watch =
+                            Some(_cx.observe(&live, |this, _, cx| this.show_live(cx)));
                     }
                     self.live = Some(live);
                 }
@@ -403,7 +404,10 @@ impl Monos {
     /// Draws the live item into the menu bar icon.
     #[cfg(all(target_os = "macos", not(test)))]
     fn show_live(&mut self, cx: &mut Context<Self>) {
-        let item = self.live.as_ref().and_then(|live| live.read(cx).shown.clone());
+        let item = self
+            .live
+            .as_ref()
+            .and_then(|live| live.read(cx).shown.clone());
         if let Some(status) = &mut self.status {
             status.set_live(item.as_ref());
         }
