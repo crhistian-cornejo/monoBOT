@@ -304,6 +304,11 @@ jobs:
         with:
           workspaces: . -> target
           key: native-publication-verifier
+      # The verifier links monocode-core, which needs these system libraries.
+      - name: Install the verifier's build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clang cmake ninja-build pkg-config libfontconfig1-dev libfreetype6-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libxcb-randr0-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libasound2-dev libx11-xcb-dev libegl1-mesa-dev libvulkan-dev libdbus-1-dev
       - name: Sign all update packages, the feed and the download list
         run: |
           echo "MONOCODE_NATIVE_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
