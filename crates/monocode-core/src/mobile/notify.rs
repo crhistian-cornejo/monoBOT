@@ -23,7 +23,7 @@ pub struct Notice {
 /// Sends `notice` to each token. Returns the tokens Expo says no longer reach
 /// a phone, to forget.
 pub fn send(tokens: &[String], notice: &Notice) -> Result<Vec<String>, String> {
-    let agent = ureq::AgentBuilder::new()
+    let agent = monobot_http::agent()
         .timeout_connect(std::time::Duration::from_secs(5))
         .timeout(std::time::Duration::from_secs(15))
         .build();

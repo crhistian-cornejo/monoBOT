@@ -60,7 +60,7 @@ fn installed(kind: Kind) -> Result<String, String> {
 }
 pub fn latest_version(kind: Kind) -> Result<String, String> {
     let package = package(kind).ok_or("No update feed for harness")?;
-    let text = ureq::AgentBuilder::new()
+    let text = monobot_http::agent()
         .timeout(Duration::from_secs(10))
         .build()
         .get(&format!("https://registry.npmjs.org/{package}/latest"))

@@ -328,7 +328,7 @@ pub fn verify_feed(bytes: &[u8], config: &Config, target: &str) -> Result<Option
 
 fn request(url: &str) -> Result<ureq::Response, String> {
     https_url(url)?;
-    let response = ureq::AgentBuilder::new()
+    let response = monobot_http::agent()
         .timeout_connect(Duration::from_secs(15))
         .timeout_read(Duration::from_secs(60))
         .build()

@@ -797,7 +797,7 @@ fn gitlab_post_form(
 }
 
 fn gitlab_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+    monobot_http::agent()
         .timeout(HTTP_TIMEOUT)
         .redirects(0)
         .build()

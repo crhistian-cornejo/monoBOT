@@ -23,7 +23,7 @@ pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
     } else {
         None
     };
-    let agent = ureq::AgentBuilder::new()
+    let agent = monobot_http::agent()
         .timeout(HTTP_TIMEOUT)
         .redirects(0)
         .build();

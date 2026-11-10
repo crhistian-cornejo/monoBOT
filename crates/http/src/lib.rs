@@ -1,5 +1,6 @@
-//! Who monoBOT trusts when it opens an HTTPS connection of its own (model
-//! downloads, Azure DevOps, GitLab, Jira, Linear, link previews…).
+//! Who monoBOT trusts when it opens an HTTPS connection of its own (app
+//! updates, model downloads, Azure DevOps, GitLab, Jira, Linear, usage, link
+//! previews…). Every HTTPS client in the app starts from `agent()`.
 //!
 //! On the Mac, the web's public authorities bundled with the app, as always.
 //! On Windows, the system checks each certificate against its own store: a

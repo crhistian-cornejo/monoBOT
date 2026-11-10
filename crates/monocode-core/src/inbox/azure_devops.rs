@@ -1594,7 +1594,7 @@ fn azure_current_user_id(config: &AzureDevOpsConfig) -> Result<String, String> {
 }
 
 fn azure_agent() -> ureq::Agent {
-    ureq::AgentBuilder::new()
+    monobot_http::agent()
         .timeout(HTTP_TIMEOUT)
         .redirects(0)
         .build()

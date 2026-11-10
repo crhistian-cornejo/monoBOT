@@ -9,7 +9,7 @@ pub fn png(url: &str) -> Result<Vec<u8>, String> {
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("Invalid avatar URL".into());
     }
-    let response = ureq::AgentBuilder::new()
+    let response = monobot_http::agent()
         .timeout(Duration::from_secs(8))
         .build()
         .get(url)
