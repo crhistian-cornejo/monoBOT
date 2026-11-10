@@ -880,7 +880,7 @@ impl Shell {
                                         d.child(crate::pulse::looping(
                                             SharedString::from(format!("rail-spinner-{lead}-{ix}")),
                                             crate::session_mark::SPINNER_PERIOD,
-                                            crate::pulse::Rate::Smooth,
+                                            crate::session_mark::SPINNER_RATE,
                                             crate::session_mark::spinner_at,
                                         ))
                                     })

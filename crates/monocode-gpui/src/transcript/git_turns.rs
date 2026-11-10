@@ -587,11 +587,8 @@ impl TranscriptView {
                     .child(if still {
                         icon(action.icon(), 14.).into_any_element()
                     } else {
-                        crate::session_mark::spinner(
-                            ("git-live-loader", message_start),
-                            crate::pulse::Rate::Smooth,
-                        )
-                        .into_any_element()
+                        crate::session_mark::spinner(("git-live-loader", message_start))
+                            .into_any_element()
                     }),
             )
             .child(div().min_w_0().truncate().child(if still {

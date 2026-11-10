@@ -916,9 +916,10 @@ fn equalizer(playing: bool) -> impl IntoElement {
                 );
             }
             if moving {
-                // On the shared clock: 60 a second at most, and the frame keeps its
-                // measurements instead of laying the notch out again.
-                crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+                // On the shared clock, at the pace of what runs for a whole
+                // song, and the frame keeps its measurements instead of
+                // laying the notch out again.
+                crate::pulse::request(crate::pulse::Rate::Steady, window, cx);
             }
         },
     )
@@ -1052,7 +1053,10 @@ fn lyric_flow(
                     let shape = |text: &str, alpha: f32, window: &mut Window| {
                         colored(text, ink(0.92 * alpha), window)
                     };
-                    let mut moving = t < 1.;
+                    // A new line rises in at the clock's full pace; the fill
+                    // then runs on at half for as long as the line is sung.
+                    let rising = t < 1.;
+                    let mut moving = rising;
                     window.with_content_mask(Some(gpui::ContentMask { bounds }), |window| {
                         if let Some(previous) = previous.as_deref().filter(|_| t < 1.) {
                             // The line before leaves as it was: sung.
@@ -1134,9 +1138,14 @@ fn lyric_flow(
                         moving |= fills && playing && sung < 1.;
                     });
                     if moving {
-                        // On the shared clock: 60 a second at most, and the frame keeps its
+                        // On the shared clock, and the frame keeps its
                         // measurements instead of laying the notch out again.
-                        crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+                        let rate = if rising {
+                            crate::pulse::Rate::Smooth
+                        } else {
+                            crate::pulse::Rate::Steady
+                        };
+                        crate::pulse::request(rate, window, cx);
                     }
                 },
             )
@@ -1213,9 +1222,10 @@ fn glide(
                         }
                     });
                     if !still {
-                        // On the shared clock: 60 a second at most, and the frame keeps its
-                        // measurements instead of laying the notch out again.
-                        crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+                        // On the shared clock, at the pace of what runs for
+                        // a whole song, and the frame keeps its measurements
+                        // instead of laying the notch out again.
+                        crate::pulse::request(crate::pulse::Rate::Steady, window, cx);
                     }
                 },
             )

@@ -256,10 +256,9 @@ impl TranscriptView {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .child(crate::session_mark::spinner(
-                            gpui::SharedString::from(format!("compaction-loader:{identity}")),
-                            crate::pulse::Rate::Smooth,
-                        ))
+                        .child(crate::session_mark::spinner(gpui::SharedString::from(
+                            format!("compaction-loader:{identity}"),
+                        )))
                         .into_any_element()
                 } else {
                     let glyph = match tool.state {

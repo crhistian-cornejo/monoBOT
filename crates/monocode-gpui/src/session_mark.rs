@@ -11,9 +11,13 @@ pub(crate) const SPINNER_PERIOD: Duration = Duration::from_millis(1_200);
 /// Slate, peach and pink, top row to bottom.
 pub(crate) const SPINNER_ROWS: [u32; 3] = [0x6f84a3, 0xe8b583, 0xe47fa6];
 
-/// The working spinner turning on the shared clock at `rate`.
-pub(crate) fn spinner(id: impl Into<ElementId>, rate: Rate) -> pulse::Looping {
-    pulse::looping(id, SPINNER_PERIOD, rate, spinner_at)
+/// The spinner's pace: it turns for as long as a session works, in the
+/// sidebar, the tabs, the transcript and the notch at once.
+pub(crate) const SPINNER_RATE: Rate = Rate::Steady;
+
+/// The working spinner turning on the shared clock.
+pub(crate) fn spinner(id: impl Into<ElementId>) -> pulse::Looping {
+    pulse::looping(id, SPINNER_PERIOD, SPINNER_RATE, spinner_at)
 }
 
 /// TerminalSpinner's 12px 3×3 grid at `fraction` of its period: a soft wave
@@ -105,7 +109,7 @@ impl Render for SessionMark {
             // Its own small view, so the clock repaints only the mark.
             State::Working => div()
                 .id("session-working")
-                .child(spinner("session-working-spinner", Rate::Smooth))
+                .child(spinner("session-working-spinner"))
                 .role(Role::Image)
                 .aria_label("Working")
                 .into_any_element(),

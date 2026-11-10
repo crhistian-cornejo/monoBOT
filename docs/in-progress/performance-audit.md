@@ -98,11 +98,13 @@ the notch), still far inside a frame.
 
 ### Yours to decide
 
-- **The closed notch's loops at 60 or 30 frames/s.** The spinner and the
-  shimmer on the state word run at 60 while any agent works, which is the 4–6 %
-  measured above. 30 would halve it and is hard to tell apart at 14 points. The
-  app's loops were moved to 60 on purpose (commit `e603f23f`), so this was not
-  changed.
+- Decided on Nov 10: the working spinner everywhere, and the closed notch's
+  loops (the sweep on the state word, the equalizer, the gliding title, the
+  lyric's fill), run at 30 frames/s (`Rate::Steady`). Changes of a moment (a
+  word trading letters, a lyric rising in) keep 60, and a view now says its
+  pace on every frame: before, one frame at 60 kept it at 60 for as long as
+  it animated. The main window still draws about 53 frames/s while the chat
+  in view streams, since the composer's runner and the transcript ask for 60.
 
 ### Resources
 

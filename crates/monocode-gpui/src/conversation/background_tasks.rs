@@ -86,10 +86,7 @@ impl Conversation {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(crate::session_mark::spinner(
-                        "background-tasks-spinner",
-                        crate::pulse::Rate::Smooth,
-                    )),
+                    .child(crate::session_mark::spinner("background-tasks-spinner")),
             )
             .child(
                 div()

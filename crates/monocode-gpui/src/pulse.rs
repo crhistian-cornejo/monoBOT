@@ -3,7 +3,8 @@
 //!
 //! A view that paints a loop leases the clock for itself. Each tick notifies
 //! every leased view together, so all loops land in one frame instead of one
-//! frame per spinner, and at 60Hz or less instead of the display's 120Hz. A
+//! frame per spinner, and at 60Hz or less instead of the display's 120Hz
+//! (30Hz for the loops that run for a whole turn, see [`Rate::Steady`]). A
 //! lease ends when its view was notified but did not paint a loop again, so
 //! a closed, scrolled-away or hidden spinner stops costing anything, and the
 //! clock parks once no lease is left. While no window is visible the clock
@@ -28,6 +29,10 @@ const BACKGROUND_STRIDE: u64 = 16;
 pub(crate) enum Rate {
     /// 60fps: whatever moves, turns or fades, so it looks continuous.
     Smooth,
+    /// 30fps: small loops that turn in place for as long as an agent works
+    /// or something plays (the spinner, a sweep of light, the equalizer),
+    /// where half the frames are hard to tell apart and cost half.
+    Steady,
     /// 15fps: pictures that only trade one still pose for another.
     Low,
 }
@@ -35,6 +40,7 @@ impl Rate {
     fn stride(self) -> u64 {
         match self {
             Rate::Smooth => 1,
+            Rate::Steady => 2,
             Rate::Low => 4,
         }
     }
@@ -182,6 +188,9 @@ fn tick(cx: &mut App) -> bool {
             return false;
         }
         lease.painted = false;
+        // The next frame says its pace again: a view that moved at full
+        // pace for a moment (a word changing) falls back to its loop's.
+        lease.rate = Rate::Low;
         due.push((*view, lease.on_tick.take()));
         true
     });
@@ -353,6 +362,54 @@ mod tests {
             "an unpainted loop releases the clock"
         );
         cx.update(|_, cx| assert!(!cx.global::<Clock>().running));
+    }
+
+    #[gpui::test]
+    fn a_steady_loop_takes_every_other_tick_and_a_burst_does_not_stick(cx: &mut TestAppContext) {
+        struct Paced {
+            rate: Rate,
+            renders: Rc<Cell<usize>>,
+        }
+        impl Render for Paced {
+            fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+                self.renders.set(self.renders.get() + 1);
+                div()
+                    .size_4()
+                    .child(looping("spin", Duration::from_secs(1), self.rate, |_| {
+                        div()
+                    }))
+            }
+        }
+        cx.update(|cx| cx.set_reduce_motion(false));
+        let renders = Rc::new(Cell::new(0));
+        let (view, cx) = cx.add_window_view(|_, _| Paced {
+            rate: Rate::Steady,
+            renders: renders.clone(),
+        });
+        cx.run_until_parked();
+        let mut frames = |ticks: u32, cx: &mut gpui::VisualTestContext| {
+            let before = renders.get();
+            for _ in 0..ticks {
+                cx.executor().advance_clock(TICK);
+                cx.run_until_parked();
+            }
+            renders.get() - before
+        };
+        assert_eq!(frames(12, cx), 6, "30 a second");
+        // Something in the view moves at full pace for a moment.
+        view.update(cx, |view, cx| {
+            view.rate = Rate::Smooth;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(frames(12, cx) >= 11, "60 a second while it does");
+        view.update(cx, |view, cx| {
+            view.rate = Rate::Steady;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        frames(4, cx);
+        assert_eq!(frames(12, cx), 6, "and back to its loop's pace");
     }
 
     #[gpui::test]

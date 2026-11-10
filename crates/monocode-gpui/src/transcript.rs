@@ -5437,10 +5437,7 @@ impl TranscriptView {
                             crate::tab_tile::mark_tile(
                                 &tile,
                                 crate::tab_tile::Face::Neutral,
-                                crate::session_mark::spinner(
-                                    ("tool-loader", message_start),
-                                    crate::pulse::Rate::Smooth,
-                                ),
+                                crate::session_mark::spinner(("tool-loader", message_start)),
                             )
                         } else {
                             let glyph =

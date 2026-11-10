@@ -360,9 +360,13 @@ impl Element for TextMorph {
                 ((drawn, moving), state)
             },
         );
-        // The change, and the sweep of light, move on the shared clock.
-        if moving || (self.shimmer.is_some() && animate) {
+        // The change, and the sweep of light, move on the shared clock: the
+        // letters trading places at its full pace, the sweep alone at half,
+        // since it runs for as long as the work does.
+        if moving {
             crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+        } else if self.shimmer.is_some() && animate {
+            crate::pulse::request(crate::pulse::Rate::Steady, window, cx);
         }
         Frame {
             drawn,

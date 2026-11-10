@@ -133,10 +133,15 @@ the modal card, the notices that slide in from the window's edge, the image
 preview's fade and the tick that answers a copy all take them from there. A
 new transition picks from that file instead of adding its own numbers.
 Looping decoration keeps its clock in `pulse.rs`: one tick, 60 times a second,
-repaints every view that leased it, so spinners, loaders, mascots and bot
-faces move at 60fps and share their frames (`Rate::Low`, 15fps, is for
-pictures that only trade one still pose for another; a hidden app ticks a few
-times a second). Entrances and one-off transitions run on GPUI's own
+repaints every view that leased it, so loaders, mascots and bot faces move at
+60fps and share their frames. `Rate::Steady`, 30fps, is for the small loops
+that turn in place for a whole turn or a whole song: the 3×3 working spinner
+everywhere it shows, and on the closed notch the sweep of light on the state
+word, the equalizer, the gliding title and the lyric's fill. `Rate::Low`,
+15fps, is for pictures that only trade one still pose for another; a hidden
+app ticks a few times a second. A view says its pace again on every frame, so
+one that moves at 60 for a moment (a word changing, a lyric rising in) falls
+back to its loop's. Entrances and one-off transitions run on GPUI's own
 per-frame animations. Panes keep their spring in `pane_motion.rs` and tabs
 their widths in `tab_motion.rs`. Everything draws
 its final state under reduced motion.
