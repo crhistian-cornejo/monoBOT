@@ -120,7 +120,10 @@ for (const target of targets) {
   ).catch((error) => {
     if (error.code !== "ENOENT") throw error;
   });
-  await copyFile("provider-guard.mjs", join(folder, "provider-guard.mjs"));
+  await copyFile(
+    "build/host/provider-guard.mjs",
+    join(folder, "provider-guard.mjs"),
+  );
   await copyFile("../LICENSE", join(folder, "MONOBOT-LICENSE"));
   await writeFile(
     join(folder, "version.json"),
