@@ -218,16 +218,18 @@ fn list_skills_with(
             add_root(root, "user", "antigravity");
         }
         add_root(home.join(".config/devin/skills"), "user", "devin");
-        // Windows keeps Devin's user config under %APPDATA% instead.
+        // Windows keeps Devin's user config under %APPDATA% instead. Tests
+        // scan only the temporary home so a real install cannot leak in.
         #[cfg(windows)]
-        add_root(
-            std::env::var_os("APPDATA")
+        {
+            #[cfg(not(test))]
+            let roaming = std::env::var_os("APPDATA")
                 .map(PathBuf::from)
-                .unwrap_or_else(|| home.join("AppData/Roaming"))
-                .join("devin/skills"),
-            "user",
-            "devin",
-        );
+                .unwrap_or_else(|| home.join("AppData/Roaming"));
+            #[cfg(test)]
+            let roaming = home.join("AppData/Roaming");
+            add_root(roaming.join("devin/skills"), "user", "devin");
+        }
         add_root(project.join(".devin/skills"), "project", "devin");
         for pack in packs {
             add_root(pack.clone(), "user", "monocode");

@@ -118,10 +118,10 @@ fn log_predicates_take_only_executable_names() {
 #[test]
 fn builds_need_an_absolute_project_or_workspace() {
     assert!(container("App.xcodeproj").unwrap_err().contains("absolute"));
-    assert!(container("/tmp/App.swift")
+    let dir = tempfile::tempdir().unwrap();
+    assert!(container(&dir.path().join("App.swift").to_string_lossy())
         .unwrap_err()
         .contains("find_projects"));
-    let dir = tempfile::tempdir().unwrap();
     let project = dir.path().join("App.xcworkspace");
     std::fs::create_dir(&project).unwrap();
     let found = container(&project.to_string_lossy()).unwrap();
@@ -180,9 +180,13 @@ fn finds_projects_but_not_inside_bundles_or_dependencies() {
     }
     let root = dir.path().to_string_lossy().into_owned();
     let found = find_projects(&root).unwrap();
-    let names: Vec<&str> = found
+    let names: Vec<String> = found
         .iter()
-        .map(|p| p.strip_prefix(&root).unwrap())
+        .map(|p| {
+            p.strip_prefix(&root)
+                .unwrap()
+                .replace(std::path::MAIN_SEPARATOR, "/")
+        })
         .collect();
     assert_eq!(
         names,
@@ -191,6 +195,7 @@ fn finds_projects_but_not_inside_bundles_or_dependencies() {
             "/Tool.xcodeproj",
             "/ios/App.xcodeproj"
         ]
+        .map(str::to_owned)
     );
     assert!(find_projects("relative").is_err());
 }
@@ -215,12 +220,13 @@ fn finds_the_simulator_app_in_the_build_settings() {
         {"target":"AppTests","buildSettings":{"PRODUCT_TYPE":"com.apple.product-type.bundle.unit-test","TARGET_BUILD_DIR":"/d/Debug-iphonesimulator","FULL_PRODUCT_NAME":"AppTests.xctest"}},
         {"target":"App","buildSettings":{"PRODUCT_TYPE":"com.apple.product-type.application","PLATFORM_NAME":"iphonesimulator","TARGET_BUILD_DIR":"/d/Debug-iphonesimulator","FULL_PRODUCT_NAME":"App.app","PRODUCT_BUNDLE_IDENTIFIER":"com.example.app"}}
     ]);
+    let app = std::path::Path::new("/d/Debug-iphonesimulator")
+        .join("App.app")
+        .to_string_lossy()
+        .into_owned();
     assert_eq!(
         find_app(&settings.to_string()),
-        Some((
-            "/d/Debug-iphonesimulator/App.app".into(),
-            Some("com.example.app".into())
-        ))
+        Some((app, Some("com.example.app".into())))
     );
     assert_eq!(find_app("[]"), None);
     assert_eq!(find_app("not json"), None);
