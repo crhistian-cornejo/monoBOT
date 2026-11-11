@@ -80,19 +80,38 @@ impl Wire {
         let account = crate::accounts::track(child.id(), request.kind, &request.settings.account);
         let stdout = child.stdout.take().unwrap();
         let stderr = child.stderr.take().unwrap();
-        let mut stdin = child.stdin.take().unwrap();
+        // Shared so quitting can close it and let the provider exit by itself
+        // (`process::shutdown_all`). Whoever takes it closes the pipe.
+        let stdin = Arc::new(Mutex::new(Some(child.stdin.take().unwrap())));
+        let closer = stdin.clone();
+        process::on_shutdown(child.id(), move || {
+            // A write in progress keeps the pipe; quitting kills it later.
+            if let Ok(mut pipe) = closer.try_lock() {
+                pipe.take();
+            }
+        });
         // Tauri's JSON-RPC transport has a 15s write deadline. A wedged child
         // must not leave a worker stuck forever in a full stdin pipe.
         let (writes, requests) = mpsc::channel::<WriteRequest>();
         let writer = thread::spawn(move || {
             while let Ok((bytes, reply)) = requests.recv() {
-                let result = stdin.write_all(&bytes).and_then(|_| stdin.flush());
+                let mut pipe = stdin.lock().unwrap_or_else(|e| e.into_inner());
+                let result = match pipe.as_mut() {
+                    Some(pipe) => pipe.write_all(&bytes).and_then(|_| pipe.flush()),
+                    None => Err(std::io::Error::new(
+                        std::io::ErrorKind::BrokenPipe,
+                        "Provider input closed",
+                    )),
+                };
+                drop(pipe);
                 let failed = result.is_err();
                 let _ = reply.send(result);
                 if failed {
                     break;
                 }
             }
+            // The shutdown closer may still hold a reference; close it here.
+            stdin.lock().unwrap_or_else(|e| e.into_inner()).take();
         });
         let (tx, rx) = mpsc::sync_channel(16);
         let reader = thread::spawn(move || {
@@ -171,22 +190,29 @@ impl Drop for Wire {
             drop(held);
         });
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     fn drop(&mut self) {
-        process::terminate(&mut self.child);
         self.stdin.sender.take();
-        if let Some(writer) = self.writer.take() {
-            let _ = writer.join();
-        }
         // Disconnect before joining so a bounded stdout sender cannot deadlock.
         let (_, empty) = mpsc::channel();
         drop(std::mem::replace(&mut self.rx, empty));
-        if let Some(t) = self.reader.take() {
-            let _ = t.join();
-        }
-        if let Some(t) = self.stderr_reader.take() {
-            let _ = t.join();
-        }
+        // Opened while `self.child` still holds the process, so the pid
+        // cannot have been reused.
+        let watch = process::Watch::new(self.child.id());
+        let threads = [
+            self.writer.take(),
+            self.reader.take(),
+            self.stderr_reader.take(),
+        ];
+        let held = (self._registration.take(), self._account.take());
+        thread::spawn(move || {
+            process::retire_watch(watch, || {
+                for t in threads.into_iter().flatten() {
+                    let _ = t.join();
+                }
+            });
+            drop(held);
+        });
     }
 }
 pub(super) struct Parked {

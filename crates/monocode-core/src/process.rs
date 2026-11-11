@@ -146,20 +146,23 @@ pub fn terminate(child: &mut std::process::Child) {
 }
 
 /// How long a provider whose stdin was closed may take to exit by itself.
-#[cfg(unix)]
 const EXIT_GRACE: std::time::Duration = std::time::Duration::from_millis(1500);
-/// How long the group leader may take to shut down after SIGTERM.
-#[cfg(unix)]
+/// How long the group leader may take to shut down after SIGTERM. Windows has
+/// no SIGTERM for these children, so there it extends the stdin-EOF wait.
 const TERM_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+/// How long quitting waits for providers whose stdin it closed.
+const SHUTDOWN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// Stop a provider child without cutting off a credential write, on a
 /// background thread. Close its stdin before calling this.
 ///
-/// Claude Code rotates its OAuth refresh token on every refresh and saves the
-/// new one through a `security -i` child. Killing the whole group in that
-/// window loses the new token and leaves Keychain holding a spent one, which
-/// signs the account out. Close stdin first, then send SIGTERM to the leader
-/// only (Claude shuts down cleanly on it), and SIGKILL the group last.
+/// Claude Code and Codex rotate their OAuth refresh token on every refresh and
+/// save the new one (Claude through a `security -i` child on macOS, by
+/// truncating and rewriting `.credentials.json` elsewhere). Killing the
+/// process in that window loses the new token and leaves a spent one on disk,
+/// which signs the account out. Close stdin first, then send SIGTERM to the
+/// leader only (Claude shuts down cleanly on it), and SIGKILL the group last.
+/// Windows waits for the same total time before `taskkill /T /F`.
 pub fn retire(mut child: std::process::Child) {
     drop(child.stdin.take());
     #[cfg(unix)]
@@ -169,8 +172,72 @@ pub fn retire(mut child: std::process::Child) {
         drop(child);
         std::thread::spawn(move || retire_pid(pid, || {}));
     }
-    #[cfg(not(unix))]
-    std::thread::spawn(move || terminate(&mut child));
+    #[cfg(windows)]
+    {
+        let watch = Watch::new(child.id());
+        std::thread::spawn(move || {
+            retire_watch(watch, || {});
+            let _ = child.wait();
+        });
+    }
+}
+
+/// An open handle on a provider child. It outlives the `Child` value, so the
+/// wait and the kill never reach another process that reused the pid.
+#[cfg(windows)]
+pub(crate) struct Watch {
+    pid: u32,
+    handle: windows_sys::Win32::Foundation::HANDLE,
+}
+// A process handle may be waited on and closed from any thread.
+#[cfg(windows)]
+unsafe impl Send for Watch {}
+#[cfg(windows)]
+impl Watch {
+    /// `None` when the process is already gone.
+    pub(crate) fn new(pid: u32) -> Option<Self> {
+        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SYNCHRONIZE};
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, pid) };
+        (!handle.is_null()).then_some(Self { pid, handle })
+    }
+    fn exited(&self, within: std::time::Duration) -> bool {
+        use windows_sys::Win32::{
+            Foundation::WAIT_TIMEOUT, System::Threading::WaitForSingleObject,
+        };
+        let ms = within.as_millis().min(u32::MAX as u128 - 1) as u32;
+        unsafe { WaitForSingleObject(self.handle, ms) != WAIT_TIMEOUT }
+    }
+}
+#[cfg(windows)]
+impl Drop for Watch {
+    fn drop(&mut self) {
+        unsafe { windows_sys::Win32::Foundation::CloseHandle(self.handle) };
+    }
+}
+
+/// Windows form of [`retire_pid`]: wait for the child to exit on stdin EOF,
+/// and kill its tree only if it is still running. Open the [`Watch`] while
+/// the `Child` is still held. `after` runs once the process is gone.
+#[cfg(windows)]
+pub(crate) fn retire_watch(watch: Option<Watch>, after: impl FnOnce()) {
+    if let Some(watch) = watch {
+        if !watch.exited(EXIT_GRACE + TERM_GRACE) {
+            kill_tree(watch.pid);
+            watch.exited(std::time::Duration::from_secs(1));
+        }
+    }
+    after();
+}
+
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    let mut kill = Command::new("taskkill");
+    kill.args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW);
+    let _ = kill.status();
 }
 
 /// Blocking form of [`retire`] for a child whose `Child` value cannot be
@@ -280,13 +347,42 @@ impl Drop for Registration {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .remove(&self.0);
+        inputs()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
     }
 }
-/// Explicit native-app quit hook. Run off the UI thread and wait briefly for the
-/// workers to reap their children, rather than leaving isolated provider groups.
+type Close = Box<dyn FnOnce() + Send>;
+fn inputs() -> &'static Mutex<HashMap<u32, Close>> {
+    static INPUTS: OnceLock<Mutex<HashMap<u32, Close>>> = OnceLock::new();
+    INPUTS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+/// How quitting closes a registered child's stdin, so a long-lived provider
+/// can exit by itself before anything is killed. Forgotten with the
+/// child's [`Registration`].
+pub(crate) fn on_shutdown(pid: u32, close: impl FnOnce() + Send + 'static) {
+    inputs()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(pid, Box::new(close));
+}
+fn close_inputs(pids: &[u32]) {
+    let closes: Vec<Close> = {
+        let mut inputs = inputs().lock().unwrap_or_else(|e| e.into_inner());
+        pids.iter().filter_map(|pid| inputs.remove(pid)).collect()
+    };
+    for close in closes {
+        close();
+    }
+}
+/// Explicit native-app quit hook (also quitting to install an update). Run off
+/// the UI thread and wait briefly for the workers to reap their children,
+/// rather than leaving isolated provider groups.
 ///
-/// Leaders get SIGTERM first so a CLI that is saving a rotated OAuth token
-/// (Claude Code) can finish; only what is still running after that is killed.
+/// Every provider's stdin is closed first, and on Unix its leader gets
+/// SIGTERM, so a CLI that is saving a rotated OAuth token (Claude Code, Codex)
+/// can finish; only what is still running after [`SHUTDOWN_GRACE`] is killed.
 pub fn shutdown_all() {
     let registered = || -> Vec<u32> {
         active()
@@ -296,30 +392,39 @@ pub fn shutdown_all() {
             .copied()
             .collect()
     };
+    close_inputs(&registered());
     #[cfg(unix)]
     {
         for pid in registered() {
             unsafe { libc::kill(pid as i32, libc::SIGTERM) };
         }
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        let deadline = std::time::Instant::now() + SHUTDOWN_GRACE;
         while !registered().is_empty() && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
     }
-    let pids = registered();
-    for pid in pids {
-        #[cfg(unix)]
+    #[cfg(windows)]
+    let watches: Vec<Watch> = {
+        // A child that exits stays registered until its worker reaps it, so
+        // wait on the processes themselves.
+        let watches: Vec<Watch> = registered().into_iter().filter_map(Watch::new).collect();
+        let deadline = std::time::Instant::now() + SHUTDOWN_GRACE;
+        watches
+            .into_iter()
+            .filter(|watch| {
+                !watch.exited(deadline.saturating_duration_since(std::time::Instant::now()))
+            })
+            .collect()
+    };
+    #[cfg(unix)]
+    for pid in registered() {
         unsafe {
             libc::kill(-(pid as i32), libc::SIGKILL);
         }
-        #[cfg(windows)]
-        {
-            let mut c = Command::new("taskkill");
-            c.args(["/PID", &pid.to_string(), "/T", "/F"]);
-            use std::os::windows::process::CommandExt;
-            c.creation_flags(CREATE_NO_WINDOW);
-            let _ = c.status();
-        }
+    }
+    #[cfg(windows)]
+    for watch in &watches {
+        kill_tree(watch.pid);
     }
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
     while !active()
@@ -433,6 +538,98 @@ mod windows_tests {
         assert_eq!(output.status.code(), Some(7));
         assert!(String::from_utf8_lossy(&output.stdout).contains("stdout"));
         assert!(String::from_utf8_lossy(&output.stderr).contains("stderr"));
+    }
+
+    fn spawn(script: &str) -> std::process::Child {
+        use std::os::windows::process::CommandExt;
+        let mut command = Command::new("cmd.exe");
+        // cmd does not parse the backslash-escaped quotes `args` would write.
+        command
+            .args(["/D", "/C"])
+            .raw_arg(script)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        isolate(&mut command);
+        command.spawn().unwrap()
+    }
+
+    fn saved_file(name: &str) -> std::path::PathBuf {
+        let path = std::env::temp_dir().join(format!("monocode-{name}-{}.txt", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        path
+    }
+
+    #[test]
+    fn retire_lets_a_child_finish_on_stdin_eof_before_any_kill() {
+        let path = saved_file("retire");
+        // `sort` reads until EOF; a kill would skip the write after it.
+        let mut child = spawn(&format!("sort >NUL & echo saved>\"{}\"", path.display()));
+        let watch = Watch::new(child.id());
+        drop(child.stdin.take());
+        let started = std::time::Instant::now();
+        retire_watch(watch, || {});
+        assert!(started.elapsed() < EXIT_GRACE + TERM_GRACE);
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "saved");
+        let _ = child.wait();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn retire_kills_a_child_that_ignores_stdin_after_the_grace() {
+        let mut child = spawn("ping -n 30 127.0.0.1 >NUL");
+        let watch = Watch::new(child.id());
+        drop(child.stdin.take());
+        let started = std::time::Instant::now();
+        retire_watch(watch, || {});
+        assert!(
+            started.elapsed() >= EXIT_GRACE + TERM_GRACE - std::time::Duration::from_millis(100)
+        );
+        assert!(child.try_wait().unwrap().is_some());
+    }
+
+    #[test]
+    fn quitting_closes_a_registered_childs_stdin_so_it_exits_by_itself() {
+        let path = saved_file("shutdown");
+        let mut child = spawn(&format!("sort >NUL & echo saved>\"{}\"", path.display()));
+        let pid = child.id();
+        let _registration = register(pid);
+        let pipe = child.stdin.take();
+        on_shutdown(pid, move || drop(pipe));
+        close_inputs(&[pid]);
+        assert!(Watch::new(pid).unwrap().exited(SHUTDOWN_GRACE));
+        assert_eq!(std::fs::read_to_string(&path).unwrap().trim(), "saved");
+        let _ = child.wait();
+        let _ = std::fs::remove_file(&path);
+    }
+}
+
+#[cfg(test)]
+mod input_tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    #[test]
+    fn a_shutdown_closer_runs_once_and_is_forgotten_with_its_registration() {
+        // Pids no real child here can have.
+        let (kept, gone) = (u32::MAX - 7, u32::MAX - 8);
+        let ran = Arc::new(AtomicBool::new(false));
+        let _kept = register(kept);
+        let flag = ran.clone();
+        on_shutdown(kept, move || flag.store(true, Ordering::SeqCst));
+        let stale = Arc::new(AtomicBool::new(false));
+        let registration = register(gone);
+        let flag = stale.clone();
+        on_shutdown(gone, move || flag.store(true, Ordering::SeqCst));
+        drop(registration);
+
+        close_inputs(&[kept, gone]);
+        assert!(ran.load(Ordering::SeqCst));
+        assert!(!stale.load(Ordering::SeqCst));
+        assert!(!inputs().lock().unwrap().contains_key(&kept));
     }
 }
 
