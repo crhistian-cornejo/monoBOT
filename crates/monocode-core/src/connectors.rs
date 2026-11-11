@@ -94,7 +94,7 @@ const BASE: Connector = Connector {
     server: Server::Http { url: "" },
 };
 
-pub const CONNECTORS: [Connector; 11] = [
+pub const CONNECTORS: [Connector; 12] = [
     Connector {
         id: "mailflare",
         name: "Remote mail server",
@@ -316,7 +316,45 @@ pub const CONNECTORS: [Connector; 11] = [
             "build_and_run",
         ],
     },
+    Connector {
+        id: crate::simulator::mcp::SERVER,
+        name: "iOS Simulator",
+        description: "Build an Xcode project for the iOS Simulator, launch it, see and read its screen, tap, swipe and type, and read its log. Needs Xcode; it runs inside monoBOT and acts only on the simulator.",
+        server: Server::Stdio {
+            command: "monocode-gpui",
+            args: &["ios-simulator-mcp"],
+            checkout: None,
+        },
+        site: "https://developer.apple.com/documentation/xcode/running-your-app-in-simulator-or-on-a-device",
+        platforms: Some(&[Platform::Mac]),
+        experimental: true,
+        tools: &[
+            "status",
+            "boot",
+            "find_projects",
+            "schemes",
+            "build",
+            "build_status",
+            "launch",
+            "screenshot",
+            "logs",
+            "open_url",
+            "appearance",
+            "describe_ui",
+            "tap",
+            "swipe",
+            "type_text",
+            "press_key",
+            "press_button",
+            "rotate",
+        ],
+        ..BASE
+    },
 ];
+
+/// Connectors only the native app has, so the TypeScript registry the
+/// parity tests compare against never listed them.
+pub const NATIVE_ONLY: [&str; 2] = ["mailflare", crate::simulator::mcp::SERVER];
 
 /// The connector with this id.
 pub fn connector(id: &str) -> Option<&'static Connector> {
@@ -537,8 +575,9 @@ impl ConnectorSettings {
         out
     }
 
-    fn command(&self, connector: &Connector, command: &str) -> String {
-        if connector.id == "mailflare" {
+    /// monoBOT's own servers run this executable, wherever it is installed.
+    fn command(command: &str) -> String {
+        if command == "monocode-gpui" {
             std::env::current_exe()
                 .unwrap_or_else(|_| command.into())
                 .to_string_lossy()
@@ -556,7 +595,7 @@ impl ConnectorSettings {
                 let server = match connector.server {
                     Server::Http { url } => json!({"type": "http", "url": url}),
                     Server::Stdio { command, .. } => {
-                        json!({"type": "stdio", "command": self.command(connector, command), "args": self.args(connector)})
+                        json!({"type": "stdio", "command": Self::command(command), "args": self.args(connector)})
                     }
                 };
                 (connector.id.to_owned(), server)
@@ -587,7 +626,7 @@ impl ConnectorSettings {
                 }
                 Server::Stdio { command, .. } => out.extend([
                     "-c".to_owned(),
-                    format!("{key}.command={}", toml(&self.command(connector, command))),
+                    format!("{key}.command={}", toml(&Self::command(command))),
                     "-c".to_owned(),
                     format!("{key}.args={}", list(&self.args(connector))),
                 ]),
@@ -618,7 +657,7 @@ impl ConnectorSettings {
                 }),
                 Server::Stdio { command, .. } => json!({
                     "name": connector.id,
-                    "command": self.command(connector, command),
+                    "command": Self::command(command),
                     "args": self.args(connector),
                     "env": [],
                 }),

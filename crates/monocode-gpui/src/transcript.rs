@@ -1,5 +1,6 @@
 pub(crate) mod attachments;
 pub(crate) mod burst;
+mod calm;
 mod citations;
 pub(crate) mod dates;
 mod drafts;
@@ -180,7 +181,13 @@ enum Body {
         group: usize,
         icon: &'static str,
         active: bool,
+        /// Calm work in Focused: the newest thought under the live step.
+        thought: Option<SharedString>,
     },
+    /// "3 subagents · 2 working" over a turn's subagent cards.
+    Subagents(Arc<calm::Subagents>),
+    /// The files a settled turn changed, under its reply.
+    Changes(Arc<calm::TurnChanges>),
     WorkLine {
         turn: usize,
         expandable: bool,
@@ -779,6 +786,16 @@ pub(crate) struct TranscriptView {
     /// Settings › Chat › Calm work: a running phase stays folded under its
     /// current step.
     calm: bool,
+    /// The Focused layout (not Classic): Calm work shows a running turn
+    /// as its live step and newest thought alone.
+    focused: bool,
+    /// Settings › Chat › Tool visibility.
+    visibility: calm::Visibility,
+    /// Subagent groups opened or folded by a click, by their first run.
+    subagent_folds: HashMap<usize, bool>,
+    /// A settled turn's changed files, by turn, with the turn's end and
+    /// text length they were read from.
+    turn_changes: HashMap<usize, (usize, usize, Option<Arc<calm::TurnChanges>>)>,
     /// Finished replies fold their work under "worked for".
     fold_work: bool,
     search_match: Option<(usize, String)>,
@@ -2734,6 +2751,10 @@ impl TranscriptView {
             smooth_reveal: true,
             collapse_groups: false,
             calm: false,
+            focused: true,
+            visibility: calm::Visibility::All,
+            subagent_folds: HashMap::new(),
+            turn_changes: HashMap::new(),
             fold_work: true,
             search_match: None,
             edit_previews: HashMap::new(),
@@ -2824,11 +2845,13 @@ impl TranscriptView {
             && self.collapse_groups == p.collapse_tool_groups
             && self.calm == p.calm_work
             && self.fold_work == p.fold_finished_work
+            && self.visibility == calm::Visibility::parse(&p.tool_visibility)
         {
             return;
         }
         self.collapse_groups = p.collapse_tool_groups;
         self.calm = p.calm_work;
+        self.visibility = calm::Visibility::parse(&p.tool_visibility);
         self.fold_work = p.fold_finished_work;
         self.chat_layout = chat;
         self.anchor_prompts = anchor_prompts;
@@ -2844,6 +2867,14 @@ impl TranscriptView {
         }
         self.rebuild(0, cx);
         cx.notify();
+    }
+    /// The Focused layout or Classic, which keeps every running step in view.
+    pub(crate) fn set_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
+        if self.focused != focused {
+            self.focused = focused;
+            self.rebuild(0, cx);
+            cx.notify();
+        }
     }
     /// Stop visible work immediately, while the provider drains and saves.
     pub(crate) fn stop_streaming(&mut self, cx: &mut Context<Self>) {
@@ -3524,6 +3555,9 @@ impl TranscriptView {
         let mut git_card: Option<Arc<git_turns::GitCard>> = None;
         let mut git_live_shown = false;
         let mut promoted_answer = None;
+        let mut subagents: Option<Arc<calm::Subagents>> = None;
+        // Tool visibility: the last row each shown group still draws.
+        let mut visible_tails: HashMap<usize, usize> = HashMap::new();
         while at < self.source.len() {
             let mut end = at + 1;
             while end < self.source.len() && !self.source[end].first {
@@ -3597,6 +3631,21 @@ impl TranscriptView {
                 self.fold_targets
                     .insert(turn, final_answer.filter(|_| has_work && ready));
                 git_card = self.git_card(turn, turn_end, final_answer);
+                // Two or more subagents at once share one header.
+                let runs: Vec<_> = activity
+                    .agents
+                    .iter()
+                    .filter(|(at, ..)| (turn..turn_end).contains(at))
+                    .collect();
+                subagents = (runs.len() > 1).then(|| {
+                    Arc::new(calm::Subagents {
+                        first: runs[0].0,
+                        faces: runs
+                            .iter()
+                            .map(|(_, name, state)| (name.clone(), state.clone()))
+                            .collect(),
+                    })
+                });
                 git_live_shown = false;
                 // A plan promoted from the final answer stands in for it.
                 promoted_answer =
@@ -3674,6 +3723,20 @@ impl TranscriptView {
                         .copied()
                         .unwrap_or(self.phase_opens(active))
             });
+            // Calm work in Focused: a running turn shows only the phase at
+            // work; the ones behind it come back once the turn settles, in
+            // its fold. One the user opened stays.
+            let settled_away = !self.mono
+                && self.calm
+                && self.focused
+                && self.streaming
+                && turn_end == self.source.len()
+                && !active
+                && phase.is_some_and(|group| self.phases.get(&group.start) != Some(&true));
+            // Tool visibility hides a whole group when none of its steps
+            // shows.
+            let steps_hidden = settled_away
+                || phase.is_some_and(|group| grouped && !self.visibility.shows_group(&group.calls));
             // A running pill turn shows one status line in place of its work
             // and prose; a settled one's card leads its reply.
             let git_stand_in = git_card.clone().filter(|card| {
@@ -3703,6 +3766,7 @@ impl TranscriptView {
             if !self.mono
                 && !folded
                 && !git_hidden
+                && !steps_hidden
                 && grouped
                 && phase.is_some_and(|group| group.start == at)
             {
@@ -3724,6 +3788,11 @@ impl TranscriptView {
                         .filter(|label| !label.is_empty());
                     (current.unwrap_or(summary), icon)
                 };
+                // Under the live step, the newest thought, so a calm turn
+                // still says what it is weighing.
+                let thought = (active && self.calm && self.focused && !phase_open)
+                    .then(|| calm::last_thought(&self.source[group.start..group.end]))
+                    .flatten();
                 self.rows.push(UiRow {
                     key: (0, 0),
                     body: Body::Phase {
@@ -3731,6 +3800,7 @@ impl TranscriptView {
                         group: group.start,
                         icon,
                         active,
+                        thought,
                     },
                     message,
                     first: false,
@@ -3881,11 +3951,46 @@ impl TranscriptView {
                 if role == "tool" {
                     self.seen_steps.insert(at);
                 }
-            } else if folded || activity.hidden.contains(&at) || !phase_open {
+            } else if folded
+                || activity.hidden.contains(&at)
+                || !phase_open
+                || (steps_hidden && matches!(role.as_str(), "tool" | "reasoning"))
+                || (role == "reasoning" && !self.visibility.shows_thoughts())
+            {
                 if role == "tool" {
                     self.seen_steps.insert(at);
                 }
                 // WorkFoldLine puts earlier commentary and work behind its receipt.
+            } else if role == "tool"
+                && (self.visibility != calm::Visibility::All
+                    || subagents.as_ref().is_some_and(|group| {
+                        activity.pinned.contains(&at) && self.folded_subagents(group.first)
+                    }))
+                && serde_json::from_str::<ToolCall>(&text).is_ok_and(|tool| {
+                    !self.visibility.shows_step(&tool.state)
+                        || (activity.pinned.contains(&at)
+                            && subagents
+                                .as_ref()
+                                .is_some_and(|group| self.folded_subagents(group.first)))
+                })
+            {
+                // Tool visibility leaves it out, or its subagent group is
+                // folded under the header.
+                if subagents.as_ref().is_some_and(|group| group.first == at)
+                    && self.visibility.shows_step(&ToolState::Running)
+                {
+                    self.rows.push(UiRow {
+                        key: (0, 0),
+                        body: Body::Subagents(subagents.clone().unwrap()),
+                        message,
+                        first: false,
+                        last: false,
+                        work: false,
+                        work_tail: false,
+                        thought_phase: None,
+                    });
+                }
+                self.seen_steps.insert(at);
             } else if role == "tool"
                 && text.contains("lan")
                 && serde_json::from_str::<ToolCall>(&text)
@@ -3896,12 +4001,41 @@ impl TranscriptView {
             } else if role == "tool"
                 && let Ok(tool) = serde_json::from_str::<ToolCall>(&text)
             {
+                if let Some(group) = subagents.clone().filter(|group| group.first == at) {
+                    self.rows.push(UiRow {
+                        key: (0, 0),
+                        body: Body::Subagents(group),
+                        message,
+                        first: false,
+                        last: false,
+                        work: false,
+                        work_tail: false,
+                        thought_phase: None,
+                    });
+                }
+                // With steps left out, the group's rail ends at the last
+                // one still drawn.
+                let tail = phase.is_none_or(|group| {
+                    let last = if self.visibility == calm::Visibility::All {
+                        group.last
+                    } else {
+                        *visible_tails.entry(group.start).or_insert_with(|| {
+                            calm::visible_tail(
+                                &self.source,
+                                group.start,
+                                group.last,
+                                self.visibility,
+                            )
+                        })
+                    };
+                    last == at
+                });
                 self.rows.push(UiRow {
                     key: (0, 0),
                     body: Body::Tool {
                         call: Box::new(tool),
                         group: phase.filter(|_| grouped).map(|group| group.start),
-                        tail: phase.is_none_or(|group| group.last == at),
+                        tail,
                         live: active,
                     },
                     message,
@@ -4048,7 +4182,7 @@ impl TranscriptView {
                 }
                 let ordinal = match row.body {
                     Body::WorkLine { .. } => 0,
-                    Body::Phase { .. } => 1,
+                    Body::Phase { .. } | Body::Subagents(_) => 1,
                     Body::Tool { .. } => 2,
                     Body::Reasoning => 4,
                     _ => {
@@ -4160,6 +4294,28 @@ impl TranscriptView {
                         });
                     }
                 }
+            }
+            // t3code's changed-files card: under a settled reply, what its
+            // steps changed.
+            if !self.mono
+                && !self.document
+                && !is_prompt
+                && end == turn_end
+                && has_work
+                && ready
+                && !(self.streaming && turn_end == self.source.len())
+                && let Some(changes) = self.turn_changes(turn, turn_end)
+            {
+                self.rows.push(UiRow {
+                    key: (at, usize::MAX - 2),
+                    body: Body::Changes(changes),
+                    message,
+                    first: false,
+                    last: false,
+                    work: false,
+                    work_tail: false,
+                    thought_phase: None,
+                });
             }
             if !self.document
                 && !is_prompt
@@ -5347,11 +5503,14 @@ impl TranscriptView {
                     }))
                     .into_any_element()
             }
+            Body::Subagents(group) => self.subagents_header(&group, cx),
+            Body::Changes(changes) => self.changes_card(&changes, message_start, cx),
             Body::Phase {
                 title,
                 group,
                 icon: glyph,
                 active,
+                thought,
             } => {
                 let open = self
                     .phases
@@ -5425,7 +5584,30 @@ impl TranscriptView {
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.toggle_phase(group, !open, cx);
                     }))
-                    .into_any_element()
+                    .map(|header| match thought {
+                        // The thought sits under the step, in line with its
+                        // words, quieter than the step itself.
+                        Some(thought) => div()
+                            .flex()
+                            .flex_col()
+                            .child(header)
+                            .child(
+                                div()
+                                    .id(("phase-thought", group))
+                                    .role(Role::Status)
+                                    .aria_label(thought.clone())
+                                    .pl(px(crate::tab_tile::ACTIVITY_TILE.w + 8.))
+                                    .pb_1()
+                                    .truncate()
+                                    .text_size(px(12.5))
+                                    .line_height(px(18.))
+                                    .italic()
+                                    .text_color(content(0.38))
+                                    .child(thought),
+                            )
+                            .into_any_element(),
+                        None => header.into_any_element(),
+                    })
             }
             Body::Tool {
                 call,

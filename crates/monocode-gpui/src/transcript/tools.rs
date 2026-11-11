@@ -1042,7 +1042,7 @@ mod tests {
                         _ => None,
                     })
                     .collect();
-                assert_eq!(phases, [("Ran 2 commands · Explored the project", 2)]);
+                assert_eq!(phases, [("Ran 2 commands and explored the project", 2)]);
                 assert!(!view.rows.iter().any(|row| row.key.0 == 4));
                 let thought: Vec<_> = view.rows.iter().filter(|row| row.key.0 == 6).collect();
                 assert!(

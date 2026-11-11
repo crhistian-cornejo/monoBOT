@@ -91,6 +91,25 @@ impl SettingsView {
                 )],
             ),
             self.row(
+                Some("tool-visibility"),
+                false,
+                "Tool visibility",
+                Some("Which steps a reply shows: all of them, only the ones that failed, none, or Zen for prompts and answers alone.".into()),
+                vec![self.segmented(
+                    "tool-visibility",
+                    "Tool visibility",
+                    &p.tool_visibility,
+                    &[
+                        ("all", "All"),
+                        ("failures", "Failures"),
+                        ("none", "None"),
+                        ("zen", "Zen"),
+                    ],
+                    cx,
+                    |this, v, cx| this.update(cx, |p| p.tool_visibility = v.into()),
+                )],
+            ),
+            self.row(
                 Some("swarm-offer"),
                 false,
                 "Let agents start swarms",

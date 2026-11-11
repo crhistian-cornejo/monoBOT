@@ -3,8 +3,7 @@ use gpui::{
     AnyElement, App, Bounds, ContentMask, Element, ElementId, GlobalElementId, InspectorElementId,
     LayoutId, Pixels, StyledText, Window, point, prelude::*,
 };
-use monocode_core::tool::{ToolCall, ToolState};
-use std::collections::HashSet;
+use monocode_core::tool::ToolCall;
 
 /// Shade a fixed glyph layout. Animated StyledText highlights change font-run
 /// boundaries (and kerning/ligatures) as neighboring colors become equal.
@@ -140,178 +139,11 @@ pub(crate) fn file_icon(path: &str, side: f32) -> AnyElement {
     let name = path.rsplit(['/', '\\']).next().unwrap_or(path);
     crate::file_icons::file_type_icon(name, false, false, side)
 }
+/// A group's header: one sentence for what it did (`core::tool::summary`)
+/// and the icon of its busiest kind of step.
 pub(crate) fn summary(tools: &[ToolCall], live: bool) -> (String, &'static str) {
-    let mut order = Vec::new();
-    let mut reads = HashSet::new();
-    let mut edits = HashSet::new();
-    let mut searches = 0;
-    let mut read_calls = 0;
-    let mut edit_calls = 0;
-    let mut commands = 0;
-    let mut agents = 0;
-    let mut failed_agents = 0;
-    let mut others = 0;
-    let mut charts = 0;
-    let mut chart_steps = 0;
-    let mut current = "think";
-    for tool in tools {
-        let (action, target) = tool.summary();
-        let visual = tool.visual_step();
-        let kind = match action.as_str() {
-            _ if visual.is_some() => "visual",
-            "Read" | "List" | "Search" | "Find" => "research",
-            "Edit" | "Write" => "edit",
-            "Run" => "run",
-            "Agent" => "agent",
-            _ => "other",
-        };
-        if !order.contains(&kind) {
-            order.push(kind);
-        }
-        if live {
-            current = kind;
-        }
-        if let Some(step) = visual {
-            chart_steps += 1;
-            if step == monocode_core::tool::VisualStep::Show {
-                charts += 1;
-            }
-            continue;
-        }
-        match action.as_str() {
-            "Read" => {
-                read_calls += 1;
-                reads.insert(target);
-            }
-            "Edit" | "Write" => {
-                edit_calls += 1;
-                edits.insert(target);
-            }
-            "Search" | "Find" | "List" => searches += 1,
-            "Run" => commands += 1,
-            "Agent" => {
-                agents += 1;
-                if matches!(tool.state, ToolState::Failed | ToolState::Cancelled) {
-                    failed_agents += 1;
-                }
-            }
-            _ => others += 1,
-        }
-    }
-    if failed_agents > 0 {
-        return (
-            if failed_agents == 1 {
-                "Subagent failed".into()
-            } else {
-                format!("{failed_agents} subagents failed")
-            },
-            "bot",
-        );
-    }
-    let file_label = |paths: &HashSet<String>| {
-        if paths.len() == 1 {
-            paths
-                .iter()
-                .next()
-                .unwrap()
-                .rsplit('/')
-                .next()
-                .unwrap_or("")
-                .to_owned()
-        } else {
-            format!("{} files", paths.len())
-        }
-    };
-    let title = order
-        .iter()
-        .map(|kind| {
-            let live = *kind == current;
-            match *kind {
-                "research" if searches > 0 && !reads.is_empty() => if live {
-                    "Exploring the project"
-                } else {
-                    "Explored the project"
-                }
-                .into(),
-                "research" if !reads.is_empty() => format!(
-                    "{} {}",
-                    if live { "Reading" } else { "Read" },
-                    file_label(&reads)
-                ),
-                "research" => if live {
-                    "Searching the project"
-                } else {
-                    "Searched the project"
-                }
-                .into(),
-                "edit" => format!(
-                    "{} {}",
-                    if live { "Editing" } else { "Edited" },
-                    file_label(&edits)
-                ),
-                "run" => format!(
-                    "{} {}",
-                    if live { "Running" } else { "Ran" },
-                    if commands == 1 {
-                        "a command".into()
-                    } else {
-                        format!("{commands} commands")
-                    }
-                ),
-                "visual" if charts == 0 => if live {
-                    "Planning a chart"
-                } else {
-                    "Planned a chart"
-                }
-                .into(),
-                "visual" => format!(
-                    "{} {}",
-                    if live { "Drawing" } else { "Drew" },
-                    if charts == 1 {
-                        "a chart".into()
-                    } else {
-                        format!("{charts} charts")
-                    }
-                ),
-                "agent" => format!(
-                    "{} {}",
-                    if live { "Running" } else { "Ran" },
-                    if agents == 1 {
-                        "a subagent".into()
-                    } else {
-                        format!("{agents} subagents")
-                    }
-                ),
-                _ => format!(
-                    "{} {}",
-                    if live { "Running" } else { "Ran" },
-                    if others == 1 {
-                        "a tool".into()
-                    } else {
-                        format!("{others} tools")
-                    }
-                ),
-            }
-        })
-        .collect::<Vec<String>>()
-        .join(" · ");
-    // React breaks equal call counts towards edit, run, agent, then research.
-    let mut dominant = "terminal";
-    let mut most = 0;
-    for (count, icon) in [
-        (edit_calls, "pencil-line"),
-        (commands, "terminal"),
-        (agents, "bot"),
-        (read_calls + searches, "search"),
-        (others, "terminal"),
-        (chart_steps, "monocode"),
-    ] {
-        if count > most {
-            most = count;
-            dominant = icon;
-        }
-    }
-    (title, dominant)
+    let summary = monocode_core::tool::summary::summarize(tools, live);
+    (summary.text, summary.icon)
 }
 /// A step as it happens, for a running phase's one live line: "Reading
 /// main.rs", "Running cargo test". A step with no verb of its own keeps its

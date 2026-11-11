@@ -68,6 +68,10 @@ pub(crate) struct Preferences {
     /// While a reply works its steps stay folded under one line that says
     /// what it does now ("Editing main.rs"); a click opens them.
     pub calm_work: bool,
+    /// Which steps a reply shows: "all", "failures" (only steps that went
+    /// wrong), "none" (no steps, its thoughts and prose stay) or "zen"
+    /// (only prompts and answers).
+    pub tool_visibility: String,
     /// A finished reply folds its work under "worked for"; off keeps the
     /// text and tool groups inline.
     pub fold_finished_work: bool,
@@ -180,13 +184,14 @@ impl Default for Preferences {
             paced_reveal: true,
             collapse_tool_groups: false,
             calm_work: true,
+            tool_visibility: "all".into(),
             fold_finished_work: true,
+            swarm_offer: false,
             follow_up: "steer".into(),
             model_controls: "menu".into(),
             autocorrect: false,
             format_on_save: true,
             autosave: false,
-            swarm_offer: false,
             diff_view: "editor".into(),
             composer_mascot: true,
             empty_session: "ink".into(),

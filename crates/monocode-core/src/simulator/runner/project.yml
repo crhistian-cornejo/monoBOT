@@ -1,0 +1,42 @@
+# The XCUITest runner that taps, swipes, types and reads the interface of the
+# iOS Simulator for monoBOT's agents. Edit this file or the Swift sources, then
+# regenerate the project with `xcodegen generate` in this folder (Homebrew's
+# xcodegen); simulator/input.rs embeds what it writes.
+name: MonoRunner
+options:
+  bundleIdPrefix: com.monocode.desktop
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+targets:
+  MonoRunner:
+    type: application
+    platform: iOS
+    sources: [MonoRunner]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.monocode.desktop.simulator-runner
+        INFOPLIST_KEY_CFBundleDisplayName: monoBOT Runner
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        SWIFT_VERSION: "5.0"
+  MonoRunnerUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [MonoRunnerUITests]
+    dependencies:
+      - target: MonoRunner
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.monocode.desktop.simulator-runner.uitests
+        TEST_TARGET_NAME: MonoRunner
+        SWIFT_VERSION: "5.0"
+schemes:
+  MonoRunner:
+    build:
+      targets:
+        MonoRunner: all
+        MonoRunnerUITests: [test]
+    test:
+      targets: [MonoRunnerUITests]

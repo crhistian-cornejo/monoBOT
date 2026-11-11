@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 pub mod edit_preview;
 mod presentation;
+pub mod summary;
 pub mod tasks;
 pub use presentation::{
     app_activity, app_cli_action, app_tool, visual_tool, CommandStep, ToolPresentation, VisualStep,

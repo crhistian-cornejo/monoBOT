@@ -264,6 +264,8 @@ impl TranscriptView {
         map(&mut self.phases, f);
         map(&mut self.phase_scrolls, f);
         map(&mut self.work_folds, f);
+        map(&mut self.subagent_folds, f);
+        self.turn_changes.clear();
         map(&mut self.reveals, f);
         map(&mut self.step_queue, f);
         map(&mut self.turns, f);

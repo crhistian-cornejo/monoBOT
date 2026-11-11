@@ -104,14 +104,19 @@ flowchart TD
 - **Subagentes con cara de mono:** la mascota de píxeles pasa a ser una cara de `persona` de 16 px. La especie y el color salen del nombre del subagente, que trabajando salta y al terminar se atenúa (`transcript/mascot.rs`). Lo mismo en la pestaña Sub-agents de los bots.
 - **Diagramas Mermaid con zoom:** botón "Open full size" y clic en el dibujo. Se abren en el visor de imágenes con zoom (Ctrl+rueda, pellizco, doble clic, Ctrl +/−) y arrastre. El SVG se dibuja a 4 veces su tamaño (máx. 4096 px) sobre la superficie del tema (`markdown/mermaid.rs`, `image_lightbox.rs` `Source::Svg`).
 
-**Sigue pendiente de la propuesta:**
+**Hecho después (10 de noviembre, noche; sin commit y sin probar a mano en la app):**
 
-- Solo en Focused: cabecera "Trabajando · 1:23", una fila en vivo, la línea de pensamiento y el resto plegado. Classic se queda como está.
-- Los turnos terminados se pliegan siempre, también en los chats de Mono; su panel de actividad sigue igual.
-- Frase-resumen por grupo, en `core` y sin GPUI (nuevo `monocode-core/src/tool/summary.rs`).
-- Tarjeta de archivos cambiados bajo la respuesta final, reutilizando `conversation/changes_shelf.rs`.
-- Ajuste "Visibilidad de herramientas" en `settings/pages/chat.rs`.
-- **Subagentes como monos efímeros:** cada `Task`/`Agent` recibe una cara de `persona` (la especie y el color salen del tipo de subagente, con hash estable) en lugar de la mascota de píxeles. No entran en el roster ni se guardan. Grupo plegable con caras superpuestas y estado; clic abre su tráfico (ya guardado bajo el padre en `core/provider/tasks.rs`) en modo lectura.
+- **Focused más tranquilo** (solo Focused, con Calm work): mientras el turno trabaja solo se ve la fase en marcha, con su paso ("Editing src/lib.rs") y debajo la última línea del pensamiento más reciente. Las fases anteriores del turno se esconden hasta que termina, y entonces vuelven dentro del pliegue "Worked for…". Una fase que el usuario abrió sigue a la vista. Classic no cambia. La cabecera "Working for 1m 23s" ya existía (`transcript/calm.rs` `last_thought`, `transcript.rs` `settled_away`, `TranscriptView::set_focused`, que llama `Conversation::set_classic_layout`).
+- **Frase-resumen por grupo en core:** `monocode-core/src/tool/summary.rs` (`summarize`) escribe una frase ("Ran 2 commands and edited 2 files") en lugar de "Ran 2 commands · Edited 2 files". `activity::summary` solo la llama.
+- **Tarjeta de archivos cambiados** bajo la respuesta de un turno ya terminado: "N files changed +a −d", hasta 5 archivos con sus líneas y el botón "Open diff". Cada archivo y el botón abren los cambios guardados de la sesión (`ReviewTab::Session`, por `ResponseRequest::OpenChanges`). Las cifras salen de los propios pasos Edit/Write (`summary::changed_files` sobre `edit_preview`), no de git. Es una tarjeta del transcript con el estilo de la de commit: la píldora de `changes_shelf.rs` sigue igual.
+- **Ajuste "Tool visibility"** (Ajustes › Chat): All / Failures (solo los pasos que fallaron o siguen en marcha) / None (sin pasos; quedan los pensamientos y la prosa) / Zen (solo prompts y respuestas). `transcript/calm.rs` `Visibility`.
+- **Grupo de subagentes:** dos o más subagentes a la vez en un turno comparten una cabecera con sus caras superpuestas y "2 subagents · 1 working · 1 done". Con Calm work sus tarjetas empiezan plegadas; un clic las abre, y cada tarjeta muestra su tráfico como antes.
+- **Turnos de Mono:** no se añadió nada. Sus pasos ya viven en el panel de actividad y la prosa de mientras trabaja ya se esconde tras la cabecera (`mono_prose_hidden`), así que un turno terminado ya muestra solo la respuesta.
+- Tests: `transcript::calm` (banco de pruebas de GPUI, con clics reales en "Open diff" y en la cabecera de los subagentes) y `tool::summary` en core.
+
+**Sigue pendiente:**
+
+- Abrir un subagente como hilo hijo aparte en modo lectura. Hoy su tarjeta se abre en el sitio.
 - Opcional: herramientas MCP `delegate_task` / `task_status` sobre `core/orchestration.rs`, para que un chat de código lance trabajadores que se vean igual.
 
 ```mermaid

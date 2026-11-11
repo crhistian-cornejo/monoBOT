@@ -338,6 +338,8 @@ impl Conversation {
     pub(crate) fn set_classic_layout(&mut self, classic: bool, cx: &mut Context<Self>) {
         if self.classic_layout != classic {
             self.classic_layout = classic;
+            self.transcript
+                .update(cx, |view, cx| view.set_focused(!classic, cx));
             cx.notify();
         }
     }
@@ -1727,6 +1729,14 @@ impl Conversation {
             ResponseRequest::QuoteSelection { text } => self.mono_quote(text, window, cx),
             ResponseRequest::EditLastTurn { turn } => self.begin_edit_last_turn(*turn, window, cx),
             ResponseRequest::Draft { send } => self.draft_action(*send, cx),
+            ResponseRequest::OpenChanges { path } => {
+                let (session, cwd) = self.review.read(cx).session();
+                cx.emit(OpenSessionChanges(crate::review::ReviewTab::Session {
+                    cwd: cwd.to_owned(),
+                    session,
+                    path: path.clone(),
+                }));
+            }
             ResponseRequest::SaveNote {
                 turn,
                 text,

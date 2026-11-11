@@ -82,15 +82,15 @@ fn registry_matches_the_typescript_connectors() {
         source.iter().map(|c| c["id"].clone()).collect::<Vec<_>>(),
         CONNECTORS
             .iter()
-            .filter(|c| c.id != "mailflare")
+            .filter(|c| !NATIVE_ONLY.contains(&c.id))
             .map(|c| json!(c.id))
             .collect::<Vec<_>>()
     );
-    // The fixture captures the historical web desktop; native-only Mailflare
-    // is checked independently below, not added to an immutable source fixture.
+    // The fixture captures the historical web desktop; native-only connectors
+    // are checked independently, not added to an immutable source fixture.
     for (ts, rust) in source
         .iter()
-        .zip(CONNECTORS.iter().filter(|c| c.id != "mailflare"))
+        .zip(CONNECTORS.iter().filter(|c| !NATIVE_ONLY.contains(&c.id)))
     {
         assert_eq!(ts, &as_ts(rust), "{}", rust.id);
     }
@@ -523,4 +523,28 @@ fn a_saved_switch_survives_and_refreshes_the_session_defaults() {
     assert!(session_packs().is_empty());
     save_enabled(&store, off.id, false).unwrap();
     assert!(!ConnectorSettings::from_store(&store).is_enabled(off));
+}
+
+#[test]
+fn the_ios_simulator_is_off_mac_only_and_runs_monobot_itself() {
+    let simulator = connector("ios_simulator").unwrap();
+    assert!(!simulator.on_by_default);
+    assert!(simulator.experimental);
+    assert!(!simulator.user_granted);
+    assert!(simulator.ask.is_empty() && simulator.denied.is_empty());
+    assert!(connector_available(simulator, Platform::Mac));
+    assert!(!connector_available(simulator, Platform::Windows));
+    assert!(!connector_available(simulator, Platform::Linux));
+
+    let settings = saved(&[("monocode.connector.ios_simulator.enabled", "1")]);
+    assert!(settings.is_ready(simulator, Platform::Mac));
+    let servers = settings.servers(&[simulator]);
+    let exe = std::env::current_exe().unwrap();
+    assert_eq!(
+        servers["ios_simulator"],
+        json!({"type": "stdio", "command": exe.to_string_lossy(), "args": ["ios-simulator-mcp"]})
+    );
+    assert!(connector_allowed_tools(&[simulator]).contains(&"mcp__ios_simulator__build".to_owned()));
+    // Its tools never ask, so a session keeps its own permission mode.
+    assert_eq!(asking_permission_mode("auto", &[simulator]), "auto");
 }

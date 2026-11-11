@@ -13,6 +13,9 @@ pub(crate) struct Phases {
     /// Delegated runs stay outside the work fold until their turn settles.
     /// Failed or cancelled runs retain that row so their report stays visible.
     pub pinned: HashSet<usize>,
+    /// The pinned runs in source order, with the name and state their
+    /// group header shows.
+    pub agents: Vec<(usize, String, ToolState)>,
 }
 pub(crate) struct Group {
     pub start: usize,
@@ -70,11 +73,14 @@ pub(crate) fn collect(rows: &[Row], from: usize, streaming: bool) -> Phases {
             && let Ok(mut call) = serde_json::from_str::<ToolCall>(&rows[at].text)
         {
             let standalone = match call.panel() {
-                Some(Panel::Agent(_))
+                Some(Panel::Agent(run))
                     if live_turn.is_some_and(|turn| at >= turn)
                         || matches!(call.state, ToolState::Failed | ToolState::Cancelled) =>
                 {
                     result.pinned.insert(at);
+                    result
+                        .agents
+                        .push((at, run.title().to_owned(), call.state.clone()));
                     true
                 }
                 Some(Panel::Tasks(_)) => true,

@@ -1,0 +1,400 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		1F6417E9D312694700108811 /* Tree.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBCCF660CD34DA87844F90FA /* Tree.swift */; };
+		82790FBD0CCFEC041F6D5E0E /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46D25C61D1C2D08A47FD3C5A /* App.swift */; };
+		A73A52518C33F59416045709 /* Runner.swift in Sources */ = {isa = PBXBuildFile; fileRef = B742B67248ADA859699631C2 /* Runner.swift */; };
+		C4A1E2EB6DE5E17C2D8D3220 /* Server.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70875329352904F808837E43 /* Server.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		6CF23EA4DDB7EFDBC330D6AF /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = B7C7A35D8284EC86F0900B67 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8FFB0E3A12B568D24A83A728;
+			remoteInfo = MonoRunner;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		46D25C61D1C2D08A47FD3C5A /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		70875329352904F808837E43 /* Server.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Server.swift; sourceTree = "<group>"; };
+		8BC5EC7B49E93E37D5163DCF /* MonoRunnerUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = MonoRunnerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		B742B67248ADA859699631C2 /* Runner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Runner.swift; sourceTree = "<group>"; };
+		BB9FF9FBA23F5EE3DAFD57B8 /* MonoRunner.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = MonoRunner.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DBCCF660CD34DA87844F90FA /* Tree.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tree.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		25C68C9F45438E5189A96F12 = {
+			isa = PBXGroup;
+			children = (
+				9DBB2F0A573C091535A47B13 /* MonoRunner */,
+				A81AC74952E4B18A431547DA /* MonoRunnerUITests */,
+				F39D71A2A6C358A952D718F5 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9DBB2F0A573C091535A47B13 /* MonoRunner */ = {
+			isa = PBXGroup;
+			children = (
+				46D25C61D1C2D08A47FD3C5A /* App.swift */,
+			);
+			path = MonoRunner;
+			sourceTree = "<group>";
+		};
+		A81AC74952E4B18A431547DA /* MonoRunnerUITests */ = {
+			isa = PBXGroup;
+			children = (
+				B742B67248ADA859699631C2 /* Runner.swift */,
+				70875329352904F808837E43 /* Server.swift */,
+				DBCCF660CD34DA87844F90FA /* Tree.swift */,
+			);
+			path = MonoRunnerUITests;
+			sourceTree = "<group>";
+		};
+		F39D71A2A6C358A952D718F5 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				BB9FF9FBA23F5EE3DAFD57B8 /* MonoRunner.app */,
+				8BC5EC7B49E93E37D5163DCF /* MonoRunnerUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		13091CB88D3D6B8CEB34BADC /* MonoRunnerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 708FB8448CAC797D4B01D19A /* Build configuration list for PBXNativeTarget "MonoRunnerUITests" */;
+			buildPhases = (
+				3C1BA003F946F24E739F45F5 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7884A9150E1042A78D159CD8 /* PBXTargetDependency */,
+			);
+			name = MonoRunnerUITests;
+			packageProductDependencies = (
+			);
+			productName = MonoRunnerUITests;
+			productReference = 8BC5EC7B49E93E37D5163DCF /* MonoRunnerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		8FFB0E3A12B568D24A83A728 /* MonoRunner */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A7C00CDC7671AA68A6455DCC /* Build configuration list for PBXNativeTarget "MonoRunner" */;
+			buildPhases = (
+				13CAF34F7D56BCF6D64B5514 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = MonoRunner;
+			packageProductDependencies = (
+			);
+			productName = MonoRunner;
+			productReference = BB9FF9FBA23F5EE3DAFD57B8 /* MonoRunner.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		B7C7A35D8284EC86F0900B67 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					13091CB88D3D6B8CEB34BADC = {
+						TestTargetID = 8FFB0E3A12B568D24A83A728;
+					};
+				};
+			};
+			buildConfigurationList = 85AF057C188F0D53FBF92518 /* Build configuration list for PBXProject "MonoRunner" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 25C68C9F45438E5189A96F12;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = F39D71A2A6C358A952D718F5 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8FFB0E3A12B568D24A83A728 /* MonoRunner */,
+				13091CB88D3D6B8CEB34BADC /* MonoRunnerUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		13CAF34F7D56BCF6D64B5514 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				82790FBD0CCFEC041F6D5E0E /* App.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3C1BA003F946F24E739F45F5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A73A52518C33F59416045709 /* Runner.swift in Sources */,
+				C4A1E2EB6DE5E17C2D8D3220 /* Server.swift in Sources */,
+				1F6417E9D312694700108811 /* Tree.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7884A9150E1042A78D159CD8 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8FFB0E3A12B568D24A83A728 /* MonoRunner */;
+			targetProxy = 6CF23EA4DDB7EFDBC330D6AF /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		35C4FB0259B2B36893ECEB51 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		74A8EC5BC636742430B8BE0F /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.monocode.desktop.simulator-runner.uitests";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MonoRunner;
+			};
+			name = Release;
+		};
+		A155739C91E264A3E4D6C010 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "monoBOT Runner";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.monocode.desktop.simulator-runner";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		BE63F7479AA95B5981F5ABC0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.monocode.desktop.simulator-runner.uitests";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = MonoRunner;
+			};
+			name = Debug;
+		};
+		D34E3E8D35B1A46818BD7974 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "monoBOT Runner";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.monocode.desktop.simulator-runner";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EB1B0CB81C1CE124E12CB1F9 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		708FB8448CAC797D4B01D19A /* Build configuration list for PBXNativeTarget "MonoRunnerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BE63F7479AA95B5981F5ABC0 /* Debug */,
+				74A8EC5BC636742430B8BE0F /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		85AF057C188F0D53FBF92518 /* Build configuration list for PBXProject "MonoRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EB1B0CB81C1CE124E12CB1F9 /* Debug */,
+				35C4FB0259B2B36893ECEB51 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A7C00CDC7671AA68A6455DCC /* Build configuration list for PBXNativeTarget "MonoRunner" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D34E3E8D35B1A46818BD7974 /* Debug */,
+				A155739C91E264A3E4D6C010 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = B7C7A35D8284EC86F0900B67 /* Project object */;
+}

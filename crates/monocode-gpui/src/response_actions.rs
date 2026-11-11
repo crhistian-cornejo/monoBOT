@@ -37,6 +37,11 @@ pub(crate) enum Request {
         kind: TransferKind,
         anchor: AnchorSlot,
     },
+    /// A reply's changed-files card: this session's recorded changes, at
+    /// one file or all of them.
+    OpenChanges {
+        path: Option<String>,
+    },
 }
 #[derive(Clone)]
 pub(crate) struct Transfer {
