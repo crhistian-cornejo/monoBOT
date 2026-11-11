@@ -14,7 +14,7 @@ use crate::{
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, FontWeight,
     HighlightStyle, Hsla, ListAlignment, ListState, Role, SharedString, StyledText, Subscription,
-    WeakEntity, Window, div, list, prelude::*, px, rgb,
+    Task, WeakEntity, Window, div, list, prelude::*, px, rgb,
 };
 use monocode_core::orchestration::board::{self, Board, Kind, Member, Post, Section, State};
 use std::{collections::HashMap, sync::Arc};
@@ -58,6 +58,11 @@ pub(crate) struct SwarmPanel {
     divider: Option<u64>,
     shown: bool,
     pub(crate) timeline: Timeline,
+    /// Redraws Members once a second while someone's time is running.
+    clock: Option<Task<()>>,
+    /// What the header says when nobody works: a run is Finished, a
+    /// group of agents only Idle.
+    rest_label: &'static str,
     focus: FocusHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -231,9 +236,16 @@ impl SwarmPanel {
             divider: None,
             shown: false,
             timeline: Timeline::default(),
+            clock: None,
+            rest_label: "Finished",
             focus: cx.focus_handle(),
             _subscriptions: subscriptions,
         }
+    }
+
+    /// For a team that rests between requests rather than finishing.
+    pub(crate) fn set_rest_label(&mut self, label: &'static str) {
+        self.rest_label = label;
     }
 
     #[cfg(test)]
@@ -331,6 +343,7 @@ impl SwarmPanel {
             self.mark_seen();
         } else {
             self.timeline.pause();
+            self.clock = None;
         }
         cx.notify();
     }
@@ -429,7 +442,7 @@ impl SwarmPanel {
                             } else {
                                 content(0.3)
                             }))
-                            .child(if live { "Live" } else { "Finished" }),
+                            .child(if live { "Live" } else { self.rest_label }),
                     ),
             )
             .child(
@@ -568,7 +581,33 @@ impl SwarmPanel {
             .into_any_element()
     }
 
-    fn members_tab(&self, cx: &mut Context<Self>) -> AnyElement {
+    /// Keep Members' times moving while it is on screen and someone works.
+    fn run_clock(&mut self, cx: &mut Context<Self>) {
+        let wanted = self.shown
+            && self.tab == SwarmTab::Members
+            && self.board.members.iter().any(|m| m.active_since.is_some());
+        if !wanted {
+            self.clock = None;
+            return;
+        }
+        if self.clock.is_some() {
+            return;
+        }
+        self.clock = Some(cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor()
+                    .timer(std::time::Duration::from_secs(1))
+                    .await;
+                if this.update(cx, |_, cx| cx.notify()).is_err() {
+                    return;
+                }
+            }
+        }));
+    }
+
+    fn members_tab(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.run_clock(cx);
+        let now = monocode_core::time::now_ms();
         let query = self
             .member_query
             .read(cx)
@@ -628,7 +667,7 @@ impl SwarmPanel {
                 }
                 section = Some(this_section);
             }
-            children.push(self.member_row(ix, member, cx));
+            children.push(self.member_row(ix, member, now, cx));
         }
         div()
             .flex_1()
@@ -650,7 +689,13 @@ impl SwarmPanel {
             .into_any_element()
     }
 
-    fn member_row(&self, ix: usize, member: &Member, cx: &mut Context<Self>) -> AnyElement {
+    fn member_row(
+        &self,
+        ix: usize,
+        member: &Member,
+        now: u64,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let handle = member.handle.clone();
         let state = if member.coordinator() {
             Section::Coordinator.label().to_owned()
@@ -661,12 +706,16 @@ impl SwarmPanel {
             .model
             .clone()
             .unwrap_or_else(|| member.provider.clone());
-        let meta = match (model.is_empty(), member.latest_seq) {
-            (true, 0) => String::new(),
-            (true, seq) => format!("#{seq}"),
-            (false, 0) => model,
-            (false, seq) => format!("{model} · #{seq}"),
-        };
+        let worked = member.worked(now);
+        let meta = [
+            (!model.is_empty()).then_some(model),
+            (member.latest_seq > 0).then(|| format!("#{}", member.latest_seq)),
+            (worked >= 1_000).then(|| board::duration(worked)),
+        ]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" · ");
         let opens = member.session.is_some();
         div()
             .id(SharedString::from(format!("swarm-member-{handle}")))
@@ -854,6 +903,9 @@ fn post_row(board: &Board, post: &Post, new: bool, panel: WeakEntity<SwarmPanel>
 
 impl Render for SwarmPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.tab != SwarmTab::Members {
+            self.clock = None;
+        }
         let body = match self.tab {
             SwarmTab::Board => self.board_tab(cx),
             SwarmTab::Members => self.members_tab(cx),

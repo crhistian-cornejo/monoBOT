@@ -90,6 +90,20 @@ impl SettingsView {
                     |this, on, cx| this.update(cx, |p| p.fold_finished_work = on),
                 )],
             ),
+            self.row(
+                Some("swarm-offer"),
+                false,
+                "Let agents start swarms",
+                Some("A coding chat may turn itself into a coordinator for a large task and hand parts to parallel agents, as /swarm does. Each works in its own temporary worktree.".into()),
+                vec![self.toggle(
+                    "swarm-offer",
+                    "Let agents start swarms",
+                    p.swarm_offer,
+                    false,
+                    cx,
+                    |this, on, cx| this.update(cx, |p| p.swarm_offer = on),
+                )],
+            ),
         ];
         let composer = vec![
             self.row(

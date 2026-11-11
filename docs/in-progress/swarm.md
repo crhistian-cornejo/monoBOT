@@ -12,7 +12,7 @@ swarm añade la parte social y la vista, y no reescribe el orquestador.
 ```mermaid
 flowchart TD
     U["Usuario: /swarm tarea<br/>conversation/commands.rs"]:::hecho --> S
-    M["Modelo en un chat de código<br/>control swarm.start"]:::pendiente --> S
+    M["Modelo en un chat de código<br/>control swarm (Ajustes › Chat)"]:::hecho --> S
     O["/orchestrator + tarjeta de plan<br/>conversation/orchestration.rs"] --> L
     S["start_swarm: Run::swarm sin tareas<br/>shell/orchestration.rs"]:::hecho --> L
     L["Run del coordinador<br/>orchestration/control.rs"] --> D["delegate → dispatch_worker"]
@@ -27,13 +27,13 @@ flowchart TD
     P --> PB["Board"]:::hecho
     P --> PM["Members"]:::hecho
     P --> PG["Graph: swarm/graph.rs"]:::hecho
-    P -. "Classic: pestaña en la barra lateral" .-> CL["classic_sidebar.rs"]:::pendiente
-    G["Grupos de agentes personales<br/>mono/groups"]:::pendiente -.-> P
+    P -. "Classic: pestaña en la barra lateral" .-> CL["classic_sidebar.rs"]:::hecho
+    G["Grupos de agentes personales<br/>mono/groups/board.rs → pestaña Board"]:::hecho -.-> P
     classDef hecho fill:#22c55e,stroke:#15803d,color:#000
     classDef pendiente fill:#f59e0b,stroke:#b45309,color:#000
 ```
 
-*Verde: hecho en la fase 1. Naranja: pendiente. Gris: ya existía.*
+*Verde: hecho (fases 1 a 3). Gris: ya existía.*
 
 - **`/swarm <tarea>`**: el chat se convierte en coordinador. El shell abre un
   `Run::swarm` (sin tareas y sin tarjeta) y después envía el mensaje con
@@ -93,40 +93,74 @@ flowchart TD
   - El último post lanza un solo pulso; con movimiento reducido se dibuja
     resaltado y sin animación. Nada de E/S en el hilo de la interfaz.
 
+## Fases 2 y 3 y detalles (10 de noviembre)
+
+- **Layout Classic.** `ClassicSidebarTab::Swarm` aparece al final de la tira
+  de pestañas y en el rail compacto (icono `users`) mientras el chat en vista
+  tiene tablero. No entra en el orden guardado ni se arrastra, y no se guarda
+  como pestaña del proyecto. Un `/swarm` nuevo la abre sola; cuando el tablero
+  se va, la barra vuelve a Sessions (`shell/classic_sidebar.rs`,
+  `shell/project_rail.rs`, `sync_swarm`, `reveal_swarm`).
+- **Que el modelo decida** (Ajustes › Chat › «Let agents start swarms»,
+  apagado por defecto):
+  - Un chat de código con el ajuste encendido recibe una vez por conversación
+    del proveedor la regla `control::swarm_offer` (como las reglas de
+    Operator, con `Introduction`), en `runtime.rs`.
+  - `control swarm {"title":"…"}` convierte el chat en coordinador a mitad de
+    turno: el shell abre el `Run::swarm` y la respuesta trae las reglas del
+    run (`control::swarm_started`), así que el modelo delega en ese mismo
+    turno. Repetida, devuelve el swarm que ya abrió. Un worker, un chat de
+    Mono o uno remoto no pueden; con el ajuste apagado, el error dice dónde
+    se enciende (`shell/orchestration.rs` `agent_swarm`).
+- **Harness y modelo por rol desde `/swarm`.** Las palabras del principio
+  `@rol=harness` o `@rol=harness/modelo` fijan ese rol, por ejemplo
+  `/swarm @verifier=codex @tester=claude/opus Migrar auth`
+  (`control::swarm_roles`).
+  - Al abrir el run se comprueba que el harness y el modelo existen
+    (`Run::check_roles`); si no, el mensaje vuelve al compositor con el
+    motivo.
+  - `delegate` con ese handle rellena harness y modelo y rechaza otros. El
+    prompt del coordinador nombra los roles fijados.
+- **Grupos de agentes personales** (pestaña **Board** del panel de un grupo,
+  entre Members y Call):
+  - `mono/groups/board.rs` convierte el chat del grupo en un `Board`. El
+    mensaje del usuario sale del Principal a todos o a quien nombre con @, la
+    respuesta de cada miembro le reporta al Principal (y a quien nombre) y la
+    última palabra del Principal va a todos.
+  - Board, Members y Graph son la misma vista (`SwarmPanel`). La cabecera dice
+    «Idle» en lugar de «Finished» cuando nadie contesta.
+  - Un clic en un miembro abre su asiento en el grupo (`Route::Session`).
+  - El tablero solo se rehace si cambió el chat o quién contesta.
+- **Detalles:**
+  - Un clic en un nodo del Graph abre el chat de ese miembro; bajo el
+    puntero el nodo se resalta.
+  - El deslizador de la línea de tiempo sigue al ratón fuera de su caja y
+    suelta donde se suelte el botón (`window.on_mouse_event` en captura).
+  - Members muestra cuánto ha trabajado cada miembro, sumando sus tramos en
+    Working o Needs input (`Member::worked`, `board::duration`). Mientras
+    alguien trabaja y la pestaña está a la vista, se repinta una vez por
+    segundo.
+
 ## Estado
 
 | Pieza | Estado |
 | --- | --- |
-| Core: board, `post`/`board`, `Run::swarm`, prompts, ramas, `sweep` | Hecho; `cargo test -p monocode-core orchestration` en verde (18 tests) |
-| GPUI: pestaña Swarm, `/swarm`, enrutado de menciones, guardado | Hecho; `cargo check -p monocode-gpui` limpio |
-| Tests de GPUI (`swarm/tests.rs`, `shell/orchestration/tests.rs`) | Escritos, **sin ejecutar**: la compilación se paró a petición del usuario |
+| Core: board, `post`/`board`, `Run::swarm`, prompts, ramas, `sweep` | Hecho; tests de `orchestration` en verde |
+| Core: tiempo por miembro, roles fijados, `control swarm`, tablero de grupos | Hecho; `orchestration` y `mono::groups` en verde (114 tests) |
+| GPUI: pestaña Swarm, `/swarm`, enrutado de menciones, guardado | Hecho |
+| GPUI: Classic, `control swarm`, roles, nodos y deslizador, Board de grupos | Hecho; tests en `swarm/tests.rs`, `shell/orchestration/tests.rs` y `monos/tests.rs` |
 | Probado a mano en la app (Windows y macOS) | Pendiente |
 
 ## Pendiente
 
-1. **Ejecutar los tests de GPUI** y corregir lo que salga:
-   `cargo xtask cargo test -p monocode-gpui --profile native-dev swarm`. Si
-   `cargo xtask dev` está abierto, `xtask.exe` está bloqueado: usa
-   `cargo test` directamente.
-2. **Layout Classic**: en Classic el panel derecho no se muestra en los
-   proyectos de código, así que la pestaña Swarm no se ve. Hay que añadir
-   `ClassicSidebarTab::Swarm` (fuera del orden guardado, como Terminal en el
-   panel), su botón en el rail compacto (`project_rail.rs`) y su panel en
-   `classic_tool_pane`.
-3. **Probar en la app**, en Focused y en Classic y en Windows y en macOS: un
-   `/swarm` real con Claude Code y Codex, menciones entre workers, revisión,
-   limpieza de ramas, y que el run se restaure tras cerrar la app.
-4. **Fase 2: que el modelo decida**. Una acción `control swarm.start` (o una
-   línea en las instrucciones de los chats de código) para que el modelo
-   convierta su chat en coordinador cuando la tarea es grande, con un
-   interruptor en Ajustes › Chat. También: modelo y harness por rol desde
-   `/swarm` (por ejemplo, verificador con otro modelo).
-5. **Fase 3: agentes personales**. La misma pestaña para los grupos de
-   `mono/groups`: un adaptador de las rondas y menciones del grupo al
-   `Board`, para que el Principal reparta una tarea larga y se vean Board,
-   Members y Graph igual que en código.
-6. Detalles: clic en un nodo del grafo para abrir su chat; arrastrar el
-   deslizador fuera de su caja; mostrar en Members cuánto lleva cada worker.
+1. **Probar en la app**, en Focused y en Classic y en Windows y en macOS:
+   - un `/swarm` real con Claude Code y Codex, con un rol fijado;
+   - menciones entre workers, revisión y limpieza de ramas;
+   - que el run se restaure tras cerrar la app;
+   - un chat con «Let agents start swarms» encendido que decida abrir uno;
+   - la pestaña Board de un grupo con varios miembros contestando.
+2. El tiempo de trabajo empieza a contar en esta versión: los tableros
+   guardados antes no tienen tramos y muestran solo lo trabajado desde ahora.
 
 ## No objetivos
 

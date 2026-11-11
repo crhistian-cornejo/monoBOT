@@ -96,10 +96,32 @@ pub struct Member {
     pub accepted: bool,
     /// Posts up to this sequence number have reached it.
     pub delivered: u64,
+    /// Time spent working or waiting for input in earlier stretches, in ms.
+    pub worked_ms: u64,
+    /// When the current stretch of work began, while it lasts.
+    pub active_since: Option<u64>,
 }
 impl Member {
     pub fn coordinator(&self) -> bool {
         self.task.is_none()
+    }
+    /// How long it has worked in all, counting the stretch under way.
+    pub fn worked(&self, now: u64) -> u64 {
+        self.worked_ms
+            + self
+                .active_since
+                .map_or(0, |since| now.saturating_sub(since))
+    }
+    /// Starts or ends a stretch of work as its state becomes `state`.
+    fn track(&mut self, state: State, at: u64) {
+        match (self.active_since, state.active()) {
+            (None, true) => self.active_since = Some(at),
+            (Some(since), false) => {
+                self.worked_ms += at.saturating_sub(since);
+                self.active_since = None;
+            }
+            _ => {}
+        }
     }
     pub fn section(&self) -> Section {
         if self.coordinator() {
@@ -318,6 +340,16 @@ pub fn since(start: u64, at: u64) -> String {
     }
 }
 
+/// How long something took, such as "45s", "3m 12s" or "1h 04m".
+pub fn duration(ms: u64) -> String {
+    let seconds = ms / 1000;
+    match seconds {
+        0..=59 => format!("{seconds}s"),
+        60..=3599 => format!("{}m {:02}s", seconds / 60, seconds % 60),
+        _ => format!("{}h {:02}m", seconds / 3600, seconds % 3600 / 60),
+    }
+}
+
 /// Where each of `count` members sits, normalized to 0..1: the coordinator
 /// at the top and the others evenly round an ellipse, clockwise.
 pub fn layout(count: usize) -> Vec<(f32, f32)> {
@@ -388,6 +420,72 @@ impl Board {
                 .find(|h| self.member(h).is_none())
                 .unwrap(),
         }
+    }
+
+    /// A board for a team that is not an orchestration run, such as a group
+    /// of personal agents: `lead` stands where the coordinator does.
+    pub fn team(title: &str, mut lead: Member) -> Self {
+        lead.task = None;
+        Self {
+            version: 1,
+            title: self::title(title),
+            live: false,
+            members: vec![lead],
+            next_seq: 1,
+            ..Default::default()
+        }
+    }
+
+    /// Adds a member under a free handle made from `name`; returns it.
+    pub fn join(&mut self, name: &str, mut member: Member) -> String {
+        let handle = self.free_handle(Some(name));
+        member.handle = handle.clone();
+        if member.task.is_none() {
+            member.task = Some(handle.clone());
+        }
+        self.members.push(member);
+        handle
+    }
+
+    /// Records what a member said elsewhere, addressed to `to` and to the
+    /// members its words @name; with nobody named and `everyone`, to all.
+    /// Unknown @words are left as text.
+    pub fn record(
+        &mut self,
+        from: &str,
+        to: &[&str],
+        text: &str,
+        kind: Kind,
+        at: u64,
+        everyone: bool,
+    ) -> Option<u64> {
+        let from = self.member(from)?.handle.clone();
+        if text.trim().is_empty() {
+            return None;
+        }
+        let mut names: Vec<String> = Vec::new();
+        let mut all = false;
+        for word in to.iter().map(|t| t.to_string()).chain(mention_words(text)) {
+            if word == "all" {
+                all = true;
+            } else if let Some(member) = self.member(&word) {
+                if member.handle != from && !names.contains(&member.handle) {
+                    names.push(member.handle.clone());
+                }
+            }
+        }
+        if names.is_empty() && everyone {
+            all = true;
+        }
+        Some(self.push(Post {
+            at,
+            from,
+            to: names,
+            all,
+            text: text.into(),
+            kind,
+            ..Default::default()
+        }))
     }
 
     /// Whether `handle` may be given to a new member.
@@ -497,6 +595,7 @@ impl Board {
             } else {
                 State::Done
             };
+            lead.track(lead.state, at);
             if lead.session.is_none() {
                 lead.session = Some(run.lead);
             }
@@ -609,6 +708,7 @@ impl Board {
                 );
             }
             let member = &mut self.members[ix];
+            member.track(state, at);
             member.state = state;
             member.assignment = task.title.clone();
             member.session = task.session.or(member.session);

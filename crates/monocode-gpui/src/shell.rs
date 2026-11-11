@@ -1751,12 +1751,17 @@ impl Shell {
     }
     /// Sidebar.tsx's `gitRoot`: the active session's worktree or folder.
     fn sync_git(&mut self, cx: &mut Context<Self>) {
-        self.classic_sidebar_tab = self
-            .workspace
-            .classic_sidebar_tabs
-            .get(&self.workspace.project)
-            .map(|id| classic_sidebar::ClassicSidebarTab::from_id(id))
-            .unwrap_or_default();
+        // Swarm is never saved: it stays while the chat in view has a board.
+        let swarm = self.classic_sidebar_tab == classic_sidebar::ClassicSidebarTab::Swarm
+            && self.classic_swarm_available(cx);
+        if !swarm {
+            self.classic_sidebar_tab = self
+                .workspace
+                .classic_sidebar_tabs
+                .get(&self.workspace.project)
+                .map(|id| classic_sidebar::ClassicSidebarTab::from_id(id))
+                .unwrap_or_default();
+        }
         let session = self
             .workspace
             .active
@@ -1830,9 +1835,12 @@ impl Shell {
             monos.update(cx, |monos, cx| monos.close(cx));
         }
         self.classic_sidebar_tab = tab;
-        self.workspace
-            .classic_sidebar_tabs
-            .insert(self.workspace.project.clone(), tab.id().into());
+        // Swarm lasts as long as its board, so a project reopens elsewhere.
+        if tab != classic_sidebar::ClassicSidebarTab::Swarm {
+            self.workspace
+                .classic_sidebar_tabs
+                .insert(self.workspace.project.clone(), tab.id().into());
+        }
         self.close_preview(cx);
         self.sidebar_auto_hidden = false;
         self.set_sidebar_visible(true, cx);
@@ -1854,6 +1862,11 @@ impl Shell {
                 .into_any_element(),
             classic_sidebar::ClassicSidebarTab::Changes => panel
                 .changes
+                .clone()
+                .cached(StyleRefinement::default().size_full())
+                .into_any_element(),
+            classic_sidebar::ClassicSidebarTab::Swarm => panel
+                .swarm
                 .clone()
                 .cached(StyleRefinement::default().size_full())
                 .into_any_element(),

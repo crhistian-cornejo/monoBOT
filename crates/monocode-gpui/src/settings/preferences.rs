@@ -71,6 +71,9 @@ pub(crate) struct Preferences {
     /// A finished reply folds its work under "worked for"; off keeps the
     /// text and tool groups inline.
     pub fold_finished_work: bool,
+    /// A coding chat may turn itself into a swarm coordinator for a large
+    /// task (`control swarm`), as /swarm does.
+    pub swarm_offer: bool,
     pub follow_up: String,
     pub model_controls: String,
     pub autocorrect: bool,
@@ -178,6 +181,7 @@ impl Default for Preferences {
             autocorrect: false,
             format_on_save: true,
             autosave: false,
+            swarm_offer: false,
             diff_view: "editor".into(),
             composer_mascot: true,
             empty_session: "ink".into(),

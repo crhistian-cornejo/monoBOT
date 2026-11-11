@@ -49,6 +49,15 @@ impl Conversation {
         if self.input.read(cx).is_composing() {
             return;
         }
+        let (roles, request) =
+            match monocode_core::orchestration::control::swarm_roles(request.trim()) {
+                Ok(parsed) => parsed,
+                Err(error) => {
+                    self.status = error;
+                    cx.notify();
+                    return;
+                }
+            };
         let request = request.trim();
         if request.is_empty() {
             self.status = "Describe the task after /swarm.".into();
@@ -84,7 +93,7 @@ impl Conversation {
         let attachments = std::mem::take(&mut self.attachments);
         let mut message = self.message(text.to_owned(), attachments, None, cx);
         message.prepared_prompt = Some(monocode_core::orchestration::control::swarm_prompt(
-            &prepared, &cli,
+            &prepared, &cli, &roles,
         ));
         self.input.update(cx, |input, cx| {
             input.take(cx);
@@ -94,6 +103,7 @@ impl Conversation {
         self.status = "Starting the swarm…".into();
         cx.emit(composer_features::StartSwarm {
             request: request.to_owned(),
+            roles,
             message,
         });
         cx.notify();

@@ -202,3 +202,35 @@ fn old_posts_are_dropped_and_long_ones_refused() {
     assert_eq!(view["posts"].as_array().unwrap().len(), 2);
     assert_eq!(view["members"][0]["handle"], "coordinator");
 }
+
+#[test]
+fn members_add_up_the_time_they_work() {
+    let mut board = Board::new("Migrate auth");
+    let mut run = run(vec![task("t1", None)]);
+    board.sync(&run, NONE, 1_000);
+    assert_eq!(board.members[1].worked(9_000), 0, "queued is not work");
+    run.schedule();
+    board.sync(&run, NONE, 2_000);
+    assert_eq!(
+        board.members[1].worked(5_000),
+        3_000,
+        "the stretch under way"
+    );
+    run.settle("t1", 1, true, "Done.", None);
+    board.sync(&run, NONE, 12_000);
+    assert_eq!(
+        board.members[1].worked(60_000),
+        10_000,
+        "standing by stops it"
+    );
+    // Another turn adds to what it already worked.
+    run.tasks[0].status = crate::orchestration::control::Status::Running;
+    run.tasks[0].dispatch += 1;
+    board.sync(&run, NONE, 20_000);
+    assert_eq!(board.members[1].worked(25_000), 15_000);
+    // The coordinator works while the run is live.
+    assert_eq!(board.members[0].worked(21_000), 20_000);
+    assert_eq!(duration(45_000), "45s");
+    assert_eq!(duration(192_000), "3m 12s");
+    assert_eq!(duration(3_840_000), "1h 04m");
+}

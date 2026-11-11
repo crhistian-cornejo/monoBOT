@@ -603,7 +603,7 @@ fn swarm_opens_a_run_without_a_card_and_shows_its_tab(cx: &mut TestAppContext) {
                 text: "/swarm Migrate auth".into(),
                 ..Default::default()
             };
-            shell.start_swarm(lead, "Migrate auth".into(), message, cx);
+            shell.start_swarm(lead, "Migrate auth".into(), Vec::new(), message, cx);
         })
         .unwrap();
     cx.run_until_parked();
@@ -620,10 +620,143 @@ fn swarm_opens_a_run_without_a_card_and_shows_its_tab(cx: &mut TestAppContext) {
                 text: "/swarm Again".into(),
                 ..Default::default()
             };
-            shell.start_swarm(lead, "Again".into(), message, cx);
+            shell.start_swarm(lead, "Again".into(), Vec::new(), message, cx);
             // It goes back to the composer.
             let view = shell.sessions[&lead].read(cx);
             assert_eq!(view.input.read(cx).content, "/swarm Again");
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn classic_shows_the_swarm_as_a_sidebar_tab_until_its_board_goes(cx: &mut TestAppContext) {
+    let (window, lead, _dir) = shell(cx);
+    window
+        .update(cx, |shell, window, cx| {
+            shell.workspace.classic_layout = true;
+            shell.ensure_right_panel(window, cx);
+            let message = monocode_core::follow_up::Message {
+                id: "m1".into(),
+                text: "/swarm Migrate auth".into(),
+                ..Default::default()
+            };
+            shell.start_swarm(lead, "Migrate auth".into(), Vec::new(), message, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            assert!(shell.classic_swarm_available(cx));
+            assert_eq!(
+                shell.classic_sidebar_tab,
+                classic_sidebar::ClassicSidebarTab::Swarm,
+                "a new swarm opens its tab"
+            );
+            // The tab is never saved as the project's tab.
+            assert_ne!(
+                shell
+                    .workspace
+                    .classic_sidebar_tabs
+                    .get(&shell.workspace.project)
+                    .map(String::as_str),
+                Some("swarm")
+            );
+            shell.orchestrations.remove(&lead);
+            shell.orchestration_summaries.remove(&lead);
+            shell.orchestration_control.boards.remove(&lead);
+            shell.sync_swarm(cx);
+            assert!(!shell.classic_swarm_available(cx));
+            assert_eq!(
+                shell.classic_sidebar_tab,
+                classic_sidebar::ClassicSidebarTab::Sessions
+            );
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn an_agent_starts_a_swarm_only_when_the_user_lets_it(cx: &mut TestAppContext) {
+    let (window, lead, _dir) = shell(cx);
+    let refused = window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            call(shell, lead, "swarm", "s1", json!({"title": "Big task"}), cx)
+        })
+        .unwrap();
+    let error = refused.try_recv().unwrap().unwrap_err();
+    assert!(error.contains("Settings > Chat"), "{error}");
+    cx.update(|cx| {
+        cx.set_global(crate::settings::Preferences {
+            swarm_offer: true,
+            ..Default::default()
+        })
+    });
+    let missing = window
+        .update(cx, |shell, _, cx| {
+            call(shell, lead, "swarm", "s2", json!({}), cx)
+        })
+        .unwrap();
+    assert!(missing.try_recv().unwrap().unwrap_err().contains("title"));
+    let started = window
+        .update(cx, |shell, _, cx| {
+            call(shell, lead, "swarm", "s3", json!({"title": "Big task"}), cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let value = started.try_recv().unwrap().unwrap();
+    assert_eq!(value["handle"], "coordinator");
+    assert!(
+        value["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("control --help")
+    );
+    window
+        .update(cx, |shell, _, cx| {
+            let live = shell.orchestrations.get(&lead).expect("a run");
+            assert!(live.run.swarm && live.lead_busy);
+            assert_eq!(live.board.title, "Big task");
+            assert!(shell.right_panel.clone().unwrap().read(cx).swarm_tab());
+            // Asked again, it answers with the swarm it already opened.
+            let again = call(shell, lead, "swarm", "s4", json!({"title": "Other"}), cx);
+            assert_eq!(again.try_recv().unwrap().unwrap()["title"], "Big task");
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn a_role_pinned_to_a_harness_the_run_lacks_sends_swarm_back(cx: &mut TestAppContext) {
+    let (window, lead, _dir) = shell(cx);
+    window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            let message = monocode_core::follow_up::Message {
+                id: "m1".into(),
+                text: "/swarm @verifier=nowhere Migrate auth".into(),
+                ..Default::default()
+            };
+            let roles = vec![control::Role {
+                handle: "verifier".into(),
+                provider: "nowhere".into(),
+                model: None,
+            }];
+            shell.start_swarm(lead, "Migrate auth".into(), roles, message, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            assert!(!shell.orchestrations.contains_key(&lead));
+            let view = shell.sessions[&lead].read(cx);
+            assert_eq!(
+                view.input.read(cx).content,
+                "/swarm @verifier=nowhere Migrate auth"
+            );
+            assert!(
+                view.status_line().contains("nowhere"),
+                "{}",
+                view.status_line()
+            );
         })
         .unwrap();
 }

@@ -6424,3 +6424,62 @@ fn on_speakers_the_mic_stays_closed_while_members_answer(cx: &mut TestAppContext
         &mic.calls()[before..]
     );
 }
+
+#[gpui::test]
+fn a_groups_board_tab_draws_its_chat_as_a_swarm_board(cx: &mut TestAppContext) {
+    let s = setup(cx);
+    cx.update(|cx| cx.set_reduce_motion(true));
+    let (lead, others) = make_group(&s, 2, cx);
+    s.manager.update(cx, |m, cx| {
+        m.roster.get_mut(&others[0]).unwrap().name = "Cash".into();
+        m.roster.get_mut(&others[1]).unwrap().name = "Docs".into();
+        m.settings = None;
+        let chat = m.chats[&s.id].clone();
+        chat.update(cx, |chat, cx| {
+            chat.transcript.update(cx, |transcript, cx| {
+                let at = transcript.source_rows().len();
+                transcript.patch(
+                    at,
+                    vec![monocode_core::transcript::Row {
+                        role: "user".into(),
+                        text: "Close October, @Cash first".into(),
+                        first: true,
+                        sent_at: Some(1_000),
+                    }],
+                    cx,
+                );
+            })
+        });
+        m.select_overview(OverviewTab::Members, cx);
+    });
+    let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
+    visual.run_until_parked();
+    let tab = visual.debug_bounds("mono-overview-Board").unwrap();
+    visual.simulate_click(tab.center(), Default::default());
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("swarm-panel").is_some());
+    let view = s
+        .manager
+        .update(visual, |m, _| m.group_board_view())
+        .expect("the board's view");
+    view.update(visual, |panel, _| {
+        let board = panel.board();
+        let handles: Vec<_> = board.members.iter().map(|m| m.handle.as_str()).collect();
+        assert_eq!(
+            handles.len(),
+            3,
+            "the lead and its two members: {handles:?}"
+        );
+        assert!(handles.contains(&"cash") && handles.contains(&"docs"));
+        let ask = &board.posts[0];
+        assert_eq!(ask.from, board.members[0].handle);
+        assert_eq!(ask.to, ["cash"], "the user's @Cash names it");
+        assert!(!board.live);
+    });
+    let _ = lead;
+    // Members opens a member's own seat in the group, when it has one.
+    let tab = visual.debug_bounds("swarm-tab-Members").unwrap();
+    visual.simulate_click(tab.center(), Default::default());
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("swarm-member-cash").is_some());
+}

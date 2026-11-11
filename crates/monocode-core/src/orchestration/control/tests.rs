@@ -358,3 +358,85 @@ fn receipts_return_the_first_result_and_reject_reused_ids() {
         .unwrap()
         .contains("finish"));
 }
+
+#[test]
+fn swarm_roles_pin_a_harness_and_model_to_a_handle() {
+    let (roles, rest) =
+        swarm_roles("@Verifier=codex @tester=claude/opus  Migrate auth @x=y").unwrap();
+    assert_eq!(rest, "Migrate auth @x=y", "only leading words are roles");
+    assert_eq!(
+        roles,
+        [
+            Role {
+                handle: "verifier".into(),
+                provider: "codex".into(),
+                model: None
+            },
+            Role {
+                handle: "tester".into(),
+                provider: "claude".into(),
+                model: Some("opus".into())
+            },
+        ]
+    );
+    assert_eq!(
+        swarm_roles("Plain task").unwrap(),
+        (Vec::new(), "Plain task".into())
+    );
+    assert!(swarm_roles("@all=codex task").is_err());
+    assert!(swarm_roles("@v=codex @v=claude task")
+        .unwrap_err()
+        .contains("twice"));
+    assert!(swarm_roles("@v=claude/ task").is_err());
+
+    let mut run = run(&[("a", "lib", &[])], 4);
+    run.roles = roles;
+    assert!(run.check_roles().is_ok());
+    run.roles.push(Role {
+        handle: "docs".into(),
+        provider: "gemini".into(),
+        model: None,
+    });
+    assert!(run.check_roles().unwrap_err().contains("gemini"));
+    run.roles.pop();
+
+    // A pinned handle needs no harness, and refuses another one.
+    let (value, _) = run
+        .execute(
+            "delegate",
+            &json!({"title":"t","prompt":"p","files":["tests"],"handle":"tester"}),
+            &none,
+        )
+        .unwrap();
+    let id = value["taskId"].as_str().unwrap();
+    let task = run.task(id).unwrap();
+    assert_eq!(
+        (task.provider.as_str(), task.model.as_deref()),
+        ("claude", Some("opus"))
+    );
+    let error = run
+        .execute(
+            "delegate",
+            &json!({"title":"v","harness":"claude","prompt":"p","files":["src"],"handle":"verifier"}),
+            &none,
+        )
+        .unwrap_err();
+    assert!(error.contains("pinned @verifier to codex"), "{error}");
+    let error = run
+        .execute(
+            "delegate",
+            &json!({"title":"t2","prompt":"p","files":["docs"],"handle":"tester","model":"sonnet"}),
+            &none,
+        )
+        .unwrap_err();
+    assert!(error.contains("pinned @tester to opus"), "{error}");
+    // The prompt names the pins; the started payload carries the rules.
+    assert!(swarm_prompt("Do it", "/bin/m", &run.roles).contains("@tester on claude with opus"));
+    let started = swarm_started("Do it", "/bin/m", &[]);
+    assert_eq!(started["handle"], "coordinator");
+    assert!(started["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("control --help"));
+    assert!(swarm_offer("/bin/m").contains("control swarm"));
+}

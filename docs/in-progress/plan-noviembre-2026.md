@@ -252,7 +252,7 @@ flowchart TD
   - Va con el reloj compartido a 30 fps como máximo. El `img` de GPUI repintaría la ventana al ritmo de la pantalla.
   - Más lento con la app oculta o la pantalla bloqueada.
   - Fijo en el primer fotograma con movimiento reducido.
-- **Sin probar:** no se ha visto en la app, y los tests de GPUI esperan a que el módulo `swarm` de otra sesión compile.
+- **Sin probar en la app.** Los tests de GPUI de `project_background` (5, entre ellos `a_moving_background_shows_each_frame_for_its_own_time`) pasaron en macOS el 10 de noviembre.
 
 **Fase 2, vídeo en Windows, hecha el 10 de noviembre:**
 
@@ -264,7 +264,7 @@ flowchart TD
   - Se pausa con la ventana oculta, la pantalla bloqueada o movimiento reducido; el primer fotograma siempre se muestra.
   - En memoria solo hay un fotograma, no el clip.
 - **macOS:** todavía dice "Video backgrounds play on Windows for now". Falta AVFoundation (`AVAssetReader` con salida BGRA escalada), que no se puede compilar ni probar desde Windows.
-- **Sin probar en la app:** los tests de GPUI esperan a que el módulo `swarm` de otra sesión compile.
+- **Sin probar en la app.** Los tests de GPUI de `project_background` pasan en macOS; el vídeo solo se puede ver en Windows.
 
 **Fases:**
 

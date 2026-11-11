@@ -23,6 +23,8 @@ pub(super) enum OverviewTab {
     Subagents,
     /// A group's members, with adding and removing.
     Members,
+    /// The group's chat as a board: who asked whom, who answered.
+    Board,
     /// The group's local voice call.
     Call,
     /// A workstream's pull requests, from its `ws/<slug>/` branches.
@@ -42,7 +44,7 @@ pub(super) enum OverviewTab {
 pub(super) fn overview_tabs(mono: &Mono) -> &'static [OverviewTab] {
     use OverviewTab::*;
     if mono.is_group() {
-        &[Members, Call, Documents, Habits]
+        &[Members, Board, Call, Documents, Habits]
     } else if mono.is_workstream() {
         // Its agents, their pull requests, and the shared folder.
         &[Sessions, Prs, Files]
@@ -1131,6 +1133,9 @@ impl Monos {
         if self.overview_tab == OverviewTab::Call && tab != OverviewTab::Call {
             self.call_hang_up(cx);
         }
+        if tab != OverviewTab::Board {
+            self.hide_group_board(cx);
+        }
         if tab != OverviewTab::Changes {
             self.pause_changes(cx);
         }
@@ -1260,6 +1265,7 @@ impl Monos {
                     "users",
                     mono.group.as_ref().map(|g| g.members.len()).unwrap_or(0),
                 ),
+                OverviewTab::Board => (tab, "Board", "share", 0),
                 OverviewTab::Call => (tab, "Call", "mic-01", 0),
                 OverviewTab::Prs => (tab, "PRs", "git-pull-request", self.open_pr_count(mono)),
                 OverviewTab::Files => (tab, "Files", "folder-01", 0),
@@ -1298,6 +1304,7 @@ impl Monos {
                     OverviewTab::Bots => "mono-overview-Bots",
                     OverviewTab::Subagents => "mono-overview-Subagents",
                     OverviewTab::Members => "mono-overview-Members",
+                    OverviewTab::Board => "mono-overview-Board",
                     OverviewTab::Call => "mono-overview-Call",
                     OverviewTab::Prs => "mono-overview-Prs",
                     OverviewTab::Files => "mono-overview-Files",
@@ -1366,6 +1373,7 @@ impl Monos {
             OverviewTab::Bots => self.delegations_list(mono, cx),
             OverviewTab::Subagents => self.subagents_list(mono, cx),
             OverviewTab::Members => self.members_list(mono, cx),
+            OverviewTab::Board => self.group_board(mono, cx),
             OverviewTab::Call => self.call_panel(mono, cx),
             OverviewTab::Prs => self.workstream_prs(mono, cx),
             OverviewTab::Files => self.workstream_files(mono, cx),

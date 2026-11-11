@@ -20,6 +20,8 @@ pub(crate) struct OpenOrchestrationAgents;
 /// coordinator, then sends `message` (or hands it back with an error).
 pub(crate) struct StartSwarm {
     pub request: String,
+    /// Harness and model the user pinned to roles (`@verifier=codex`).
+    pub roles: Vec<monocode_core::orchestration::control::Role>,
     pub message: monocode_core::follow_up::Message,
 }
 impl EventEmitter<StartSwarm> for Conversation {}
@@ -813,6 +815,16 @@ impl Conversation {
         cx: &mut Context<Self>,
     ) {
         self.launch_message(message, cx);
+    }
+    /// What the composer's status line says.
+    #[cfg(test)]
+    pub(crate) fn status_line(&self) -> &str {
+        &self.status
+    }
+    /// The agent turned this chat into a swarm's coordinator mid-turn.
+    pub(crate) fn swarm_opened_by_agent(&mut self, cx: &mut Context<Self>) {
+        self.status = "The agent started a swarm; its board is in the Swarm tab.".into();
+        cx.notify();
     }
     /// The run could not start: the message goes back to the composer.
     pub(crate) fn swarm_failed(

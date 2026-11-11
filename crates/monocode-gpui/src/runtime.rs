@@ -697,6 +697,27 @@ fn run_turn_using(
             }
             introductions.push((introduction, due));
         }
+        // A coding chat the user lets start swarms learns how, once per
+        // provider conversation.
+        if !raw_native_command && settings.swarm_offer && !settings.orchestrator {
+            let executable = std::env::current_exe().map_err(|e| e.to_string())?;
+            let rules =
+                monocode_core::orchestration::control::swarm_offer(&executable.to_string_lossy());
+            let introduction = monocode_core::introduction::Introduction::new(
+                format!(
+                    "swarm-offer:{}:{}:{}",
+                    summary.id,
+                    kind.id(),
+                    settings.account.id
+                ),
+                serde_json::json!({"rules": monocode_core::mono::files::content_hash(&rules)}),
+            );
+            let due = introduction.due(&*locked(&store)?, provider_id.as_deref())?;
+            if due {
+                prompt = format!("{rules}\n\n{prompt}");
+            }
+            introductions.push((introduction, due));
+        }
         // Every foreground session receives an independent visual capability.
         // This happens after configuration was persisted, and Settings' env is
         // transport-only, so credentials never enter saved conversation settings.

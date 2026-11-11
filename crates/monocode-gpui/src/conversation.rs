@@ -1205,6 +1205,14 @@ impl Conversation {
             .is_some_and(|p| !p.claude_hooks);
         settings.model = self.model.clone();
         settings.environment.extend(self.app_environment.clone());
+        settings.swarm_offer = !self.is_remote()
+            && self.settings.mono.is_none()
+            && self.managed_by.is_none()
+            && self.orchestration_progress.is_none()
+            && !self.app_environment.is_empty()
+            && cx
+                .try_global::<crate::settings::Preferences>()
+                .is_some_and(|p| p.swarm_offer);
         if settings.remote_action.as_ref().is_none_or(|action| {
             (action["type"] == "send"
                 && action["draftBlockId"].is_null()

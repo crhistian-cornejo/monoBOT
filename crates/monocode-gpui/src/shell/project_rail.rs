@@ -730,6 +730,9 @@ impl Shell {
                 tabs.push(tab);
             }
         }
+        if self.classic_swarm_available(cx) {
+            tabs.push(ClassicSidebarTab::Swarm);
+        }
         let mono_rail =
             if self.workspace.project_rail_monos_pinned && self.workspace.preferences.monos {
                 self.monos
@@ -846,6 +849,7 @@ impl Shell {
                     ClassicSidebarTab::Sessions => ("Sessions", "chatting"),
                     ClassicSidebarTab::Files => ("Explorer", "file-script"),
                     ClassicSidebarTab::Changes => ("Changes", "git-branch"),
+                    ClassicSidebarTab::Swarm => ("Swarm", "users"),
                 };
                 let selected = workspace_active
                     && self.workspace.sidebar_visible
@@ -862,6 +866,7 @@ impl Shell {
                         ClassicSidebarTab::Sessions => "rail-workspace-sessions",
                         ClassicSidebarTab::Files => "rail-workspace-files",
                         ClassicSidebarTab::Changes => "rail-workspace-changes",
+                        ClassicSidebarTab::Swarm => "rail-workspace-swarm",
                     },
                     label,
                     glyph,

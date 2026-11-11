@@ -1332,3 +1332,126 @@ impl Monos {
         .to_owned()
     }
 }
+
+/// A group's Board tab: the Swarm view over the group's chat.
+pub(super) struct GroupBoard {
+    view: Entity<crate::swarm::SwarmPanel>,
+    /// What the board was last built from, to skip rebuilding it unchanged.
+    key: Option<(String, usize, usize, Vec<bool>)>,
+    _open: Subscription,
+}
+
+impl Monos {
+    /// The group's chat as a board: its asks, its members' answers and the
+    /// @names between them, with Members and Graph as in a coding swarm.
+    pub(super) fn group_board(&mut self, mono: &Mono, cx: &mut Context<Self>) -> AnyElement {
+        let Some(group) = mono.group.as_ref() else {
+            return div().into_any_element();
+        };
+        let Some(chat) = self.open_chat(&mono.id) else {
+            return div()
+                .p_4()
+                .text_size(px(12.))
+                .text_color(content(0.45))
+                .child("Open the group's chat to see its board.")
+                .into_any_element();
+        };
+        if self.group_board.is_none() {
+            let view = cx.new(|cx| {
+                let mut panel = crate::swarm::SwarmPanel::new(cx);
+                panel.set_rest_label("Idle");
+                panel
+            });
+            let open = cx.subscribe(&view, |this, _, event: &crate::swarm::OpenMember, cx| {
+                this.route = Some(Route::Session(event.0));
+                cx.notify();
+            });
+            self.group_board = Some(GroupBoard {
+                view,
+                key: None,
+                _open: open,
+            });
+        }
+        let roster = native::members(&self.roster.monos);
+        let lead = group_lead(group, &roster).cloned();
+        let seat = |id: &str, name: String| {
+            let busy = self
+                .groups
+                .seats
+                .get(&(mono.id.clone(), id.to_owned()))
+                .and_then(|s| s.view.as_ref())
+                .is_some_and(|v| v.read(cx).busy);
+            monocode_core::mono::groups::board::Seat {
+                id: id.to_owned(),
+                name,
+                // The app's seat, else one the desktop app made.
+                session: mono
+                    .seats
+                    .get(id)
+                    .copied()
+                    .or_else(|| group.seats.get(id).and_then(|s| s.parse().ok())),
+                busy,
+            }
+        };
+        let chat_view = chat.read(cx);
+        let session = chat_view.summary.id;
+        let lead_seat = monocode_core::mono::groups::board::Seat {
+            id: lead.as_ref().map(|m| m.id.clone()).unwrap_or_default(),
+            name: lead
+                .as_ref()
+                .map_or_else(|| mono.label(), |m| m.name.clone()),
+            session: Some(session),
+            busy: chat_view.busy,
+        };
+        let members: Vec<_> = group
+            .members
+            .iter()
+            .filter(|id| Some(id.as_str()) != lead.as_ref().map(|m| m.id.as_str()))
+            .map(|id| {
+                let name = roster
+                    .iter()
+                    .find(|m| &m.id == id)
+                    .map_or_else(|| id.clone(), |m| m.name.clone());
+                seat(id, name)
+            })
+            .collect();
+        let rows = chat_view.mono_rows(cx);
+        let key = (
+            mono.id.clone(),
+            rows.len(),
+            rows.last().map_or(0, |r| r.text.len()),
+            std::iter::once(lead_seat.busy)
+                .chain(members.iter().map(|s| s.busy))
+                .collect::<Vec<_>>(),
+        );
+        let board = self.group_board.as_mut().unwrap();
+        if board.key.as_ref() != Some(&key) {
+            let blocks = native::blocks(rows);
+            let built = monocode_core::mono::groups::board::board(
+                &mono.label(),
+                &lead_seat,
+                &members,
+                &blocks,
+            );
+            board.key = Some(key);
+            board.view.update(cx, |v, cx| {
+                v.set_board(session, Arc::new(built), cx);
+            });
+        }
+        let view = board.view.clone();
+        view.update(cx, |v, cx| v.set_shown(true, cx));
+        view.into_any_element()
+    }
+
+    #[cfg(test)]
+    pub(super) fn group_board_view(&self) -> Option<Entity<crate::swarm::SwarmPanel>> {
+        self.group_board.as_ref().map(|b| b.view.clone())
+    }
+
+    /// The Board tab is hidden: its view stops counting what is new.
+    pub(super) fn hide_group_board(&mut self, cx: &mut Context<Self>) {
+        if let Some(board) = &self.group_board {
+            board.view.update(cx, |v, cx| v.set_shown(false, cx));
+        }
+    }
+}

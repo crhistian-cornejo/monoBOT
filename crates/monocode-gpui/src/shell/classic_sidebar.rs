@@ -10,6 +10,9 @@ pub(super) enum ClassicSidebarTab {
     Sessions,
     Files,
     Changes,
+    /// The board of the chat in view's swarm, while it has one. It ends the
+    /// strip and stays out of the saved order, as Swarm does in the panel.
+    Swarm,
 }
 
 impl ClassicSidebarTab {
@@ -18,9 +21,11 @@ impl ClassicSidebarTab {
             Self::Sessions => "sessions",
             Self::Files => "files",
             Self::Changes => "changes",
+            Self::Swarm => "swarm",
         }
     }
 
+    /// A saved id; Swarm is never saved, so it comes back as Sessions.
     pub(super) fn from_id(id: &str) -> Self {
         match id {
             "files" => Self::Files,
@@ -34,6 +39,7 @@ impl ClassicSidebarTab {
             Self::Sessions => None,
             Self::Files => Some(RightTab::Files),
             Self::Changes => Some(RightTab::Changes),
+            Self::Swarm => Some(RightTab::Swarm),
         }
     }
 
@@ -42,6 +48,7 @@ impl ClassicSidebarTab {
             Self::Sessions => "Sessions",
             Self::Files => "Explorer",
             Self::Changes => "Changes",
+            Self::Swarm => "Swarm",
         }
     }
 
@@ -50,6 +57,7 @@ impl ClassicSidebarTab {
             Self::Sessions => 0,
             Self::Files => 1,
             Self::Changes => 2,
+            Self::Swarm => 3,
         }
     }
 
@@ -76,7 +84,7 @@ impl ClassicSidebarTab {
 
 #[derive(Default)]
 pub(super) struct WorkspaceTabs {
-    bounds: [AnchorSlot; 3],
+    bounds: [AnchorSlot; 4],
     drag: Option<WorkspaceTabDrag>,
     shifts: HashMap<ClassicSidebarTab, TabShift>,
     skip_click: bool,
@@ -485,9 +493,15 @@ impl Shell {
         } else {
             String::new()
         };
-        // Three equal tabs share the strip after px-2 and its two 1pt gaps;
-        // each button has a further 8pt of horizontal padding per side.
-        let changes_width = ((self.workspace.sidebar_width - 18.) / 3. - 16.).max(0.);
+        let mut tabs = ClassicSidebarTab::normalize(&self.workspace.classic_sidebar_tab_order);
+        if self.classic_swarm_available(cx) {
+            tabs.push(ClassicSidebarTab::Swarm);
+        }
+        // Equal tabs share the strip after px-2 and its 1pt gaps; each
+        // button has a further 8pt of horizontal padding per side.
+        let count = tabs.len() as f32;
+        let changes_width =
+            ((self.workspace.sidebar_width - 16. - (count - 1.)) / count - 16.).max(0.);
         let reordering = self
             .classic_tabs
             .drag
@@ -506,89 +520,83 @@ impl Shell {
             .px_2()
             .border_b_1()
             .border_color(content(0.07))
-            .children(
-                ClassicSidebarTab::normalize(&self.workspace.classic_sidebar_tab_order)
-                    .into_iter()
-                    .map(|tab| {
-                        let active = self.classic_sidebar_tab == tab;
-                        let offset = self.classic_tabs.offset(tab);
-                        let dragging = self
-                            .classic_tabs
-                            .drag
-                            .as_ref()
-                            .is_some_and(|drag| drag.active && drag.tab == tab);
+            .children(tabs.into_iter().map(|tab| {
+                let active = self.classic_sidebar_tab == tab;
+                let offset = self.classic_tabs.offset(tab);
+                let dragging = self
+                    .classic_tabs
+                    .drag
+                    .as_ref()
+                    .is_some_and(|drag| drag.active && drag.tab == tab);
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .items_center()
+                    .child(self.classic_tabs.bounds[tab.index()].probe())
+                    .child(
                         div()
+                            .id(SharedString::from(format!(
+                                "classic-workspace-tab-{}",
+                                tab.id()
+                            )))
+                            .debug_selector(move || format!("classic-workspace-tab-{}", tab.id()))
+                            .role(Role::Tab)
+                            .aria_label(if tab == ClassicSidebarTab::Changes && changes {
+                                format!("Changes +{additions} -{deletions}")
+                            } else {
+                                tab.label().to_owned()
+                            })
+                            .aria_selected(active)
+                            .cursor_pointer()
+                            .when(dragging, |d| d.cursor(CursorStyle::ClosedHand))
                             .relative()
-                            .flex_1()
+                            .left(px(offset))
+                            .h(px(24.))
+                            .w_full()
                             .min_w_0()
-                            .h_full()
+                            .px_2()
+                            .rounded_md()
                             .flex()
                             .items_center()
-                            .child(self.classic_tabs.bounds[tab.index()].probe())
-                            .child(
-                                div()
-                                    .id(SharedString::from(format!(
-                                        "classic-workspace-tab-{}",
-                                        tab.id()
-                                    )))
-                                    .debug_selector(move || {
-                                        format!("classic-workspace-tab-{}", tab.id())
-                                    })
-                                    .role(Role::Tab)
-                                    .aria_label(if tab == ClassicSidebarTab::Changes && changes {
-                                        format!("Changes +{additions} -{deletions}")
-                                    } else {
-                                        tab.label().to_owned()
-                                    })
-                                    .aria_selected(active)
-                                    .cursor_pointer()
-                                    .when(dragging, |d| d.cursor(CursorStyle::ClosedHand))
-                                    .relative()
-                                    .left(px(offset))
-                                    .h(px(24.))
-                                    .w_full()
-                                    .min_w_0()
-                                    .px_2()
-                                    .rounded_md()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(12.))
-                                    .text_color(content(if active { 1. } else { 0.5 }))
-                                    .when(active, |d| d.bg(content(0.1)))
-                                    .when(!active && (!reordering || dragging), |d| {
-                                        d.hover(|s| s.bg(content(0.05)).text_color(content(1.)))
-                                    })
-                                    .when(dragging && !active, |d| {
-                                        d.bg(content(0.05)).text_color(content(1.))
-                                    })
-                                    .child(if tab == ClassicSidebarTab::Changes && changes {
-                                        ChangeStats {
-                                            added: added.clone(),
-                                            deleted: deleted.clone(),
-                                            available: changes_width,
-                                        }
-                                        .into_any_element()
-                                    } else {
-                                        div().min_w_0().truncate().child(tab.label()).into_any()
-                                    })
-                                    .on_mouse_down(
-                                        MouseButton::Left,
-                                        cx.listener(move |this, event, window, cx| {
-                                            window.focus(&this.focus, cx);
-                                            this.start_classic_sidebar_tab(tab, event);
-                                            cx.stop_propagation();
-                                        }),
-                                    )
-                                    .on_click(cx.listener(move |this, _, window, cx| {
-                                        if std::mem::take(&mut this.classic_tabs.skip_click) {
-                                            return;
-                                        }
-                                        this.select_classic_sidebar_tab(tab, window, cx)
-                                    })),
+                            .justify_center()
+                            .text_size(px(12.))
+                            .text_color(content(if active { 1. } else { 0.5 }))
+                            .when(active, |d| d.bg(content(0.1)))
+                            .when(!active && (!reordering || dragging), |d| {
+                                d.hover(|s| s.bg(content(0.05)).text_color(content(1.)))
+                            })
+                            .when(dragging && !active, |d| {
+                                d.bg(content(0.05)).text_color(content(1.))
+                            })
+                            .child(if tab == ClassicSidebarTab::Changes && changes {
+                                ChangeStats {
+                                    added: added.clone(),
+                                    deleted: deleted.clone(),
+                                    available: changes_width,
+                                }
+                                .into_any_element()
+                            } else {
+                                div().min_w_0().truncate().child(tab.label()).into_any()
+                            })
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(move |this, event, window, cx| {
+                                    window.focus(&this.focus, cx);
+                                    this.start_classic_sidebar_tab(tab, event);
+                                    cx.stop_propagation();
+                                }),
                             )
-                    }),
-            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                if std::mem::take(&mut this.classic_tabs.skip_click) {
+                                    return;
+                                }
+                                this.select_classic_sidebar_tab(tab, window, cx)
+                            })),
+                    )
+            }))
             .into_any()
     }
 
@@ -636,7 +644,18 @@ impl Shell {
             .into_any()
     }
 
+    /// Whether the chat in view has a swarm board for the Swarm tab.
+    pub(super) fn classic_swarm_available(&self, cx: &App) -> bool {
+        self.right_panel
+            .as_ref()
+            .is_some_and(|panel| panel.read(cx).swarm_tab())
+    }
+
     fn start_classic_sidebar_tab(&mut self, tab: ClassicSidebarTab, event: &MouseDownEvent) {
+        // Swarm comes and goes with its board, so it is not reordered.
+        if tab == ClassicSidebarTab::Swarm {
+            return;
+        }
         let order = ClassicSidebarTab::normalize(&self.workspace.classic_sidebar_tab_order);
         let Some(bounds) = order
             .iter()

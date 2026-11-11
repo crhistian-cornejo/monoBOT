@@ -151,6 +151,10 @@ pub struct Settings {
     /// The `/goal` this conversation works toward, if any.
     pub goal: Option<crate::goal::Goal>,
     pub orchestrator: bool,
+    /// The user lets this coding chat turn itself into a swarm coordinator
+    /// (Settings › Chat); its rule is introduced once per conversation.
+    #[serde(skip)]
+    pub swarm_offer: bool,
     pub new_worktree: bool,
     pub worktree_base: Option<String>,
     pub worktree_cwd: Option<String>,

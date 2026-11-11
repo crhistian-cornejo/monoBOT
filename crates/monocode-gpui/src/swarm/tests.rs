@@ -197,3 +197,81 @@ fn new_posts_since_the_last_visit_sit_under_new(cx: &mut TestAppContext) {
         })
         .unwrap();
 }
+
+#[gpui::test]
+fn a_graph_node_opens_its_members_chat(cx: &mut TestAppContext) {
+    let window = open(cx);
+    let opened = Rc::new(std::cell::Cell::new(None));
+    let seen = opened.clone();
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    window
+        .update(visual, |p, _, cx| {
+            let entity = cx.entity();
+            cx.subscribe(&entity, move |_, _, event: &OpenMember, _| {
+                seen.set(Some(event.0))
+            })
+            .detach();
+            p.select(SwarmTab::Graph, cx);
+        })
+        .unwrap();
+    visual.refresh().unwrap();
+    let nodes = window
+        .update(visual, |p, _, _| p.timeline.node_bounds())
+        .unwrap();
+    let worker = window
+        .update(visual, |p, _, _| {
+            p.board()
+                .members
+                .iter()
+                .position(|m| m.handle == "worker-1")
+        })
+        .unwrap()
+        .unwrap();
+    let (bounds, _) = nodes.iter().find(|(_, m)| *m == worker).copied().unwrap();
+    visual.simulate_mouse_move(bounds.center(), None, Default::default());
+    assert_eq!(
+        window.update(visual, |p, _, _| p.timeline.hover).unwrap(),
+        Some(worker)
+    );
+    visual.simulate_click(bounds.center(), Default::default());
+    assert_eq!(opened.get(), Some(11));
+}
+
+#[gpui::test]
+fn the_timeline_follows_a_drag_past_its_track(cx: &mut TestAppContext) {
+    let window = open(cx);
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    window
+        .update(visual, |p, _, cx| p.select(SwarmTab::Graph, cx))
+        .unwrap();
+    visual.refresh().unwrap();
+    let track = visual.debug_bounds("swarm-timeline").unwrap();
+    let len = window
+        .update(visual, |p, _, _| p.board().posts.len())
+        .unwrap();
+    let start = gpui::point(track.left() + gpui::px(1.), track.center().y);
+    visual.simulate_mouse_down(start, gpui::MouseButton::Left, Default::default());
+    visual.run_until_parked();
+    assert_eq!(
+        window.update(visual, |p, _, _| p.timeline.cursor).unwrap(),
+        0
+    );
+    // Well past the track's right end and below it, the drag still counts.
+    let past = gpui::point(
+        track.right() + gpui::px(300.),
+        track.bottom() + gpui::px(80.),
+    );
+    visual.simulate_mouse_move(past, Some(gpui::MouseButton::Left), Default::default());
+    visual.run_until_parked();
+    assert_eq!(
+        window.update(visual, |p, _, _| p.timeline.cursor).unwrap(),
+        len
+    );
+    visual.simulate_mouse_up(past, gpui::MouseButton::Left, Default::default());
+    visual.run_until_parked();
+    assert!(
+        !window
+            .update(visual, |p, _, _| p.timeline.sliding())
+            .unwrap()
+    );
+}

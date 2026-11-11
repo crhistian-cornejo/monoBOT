@@ -146,6 +146,8 @@ pub(crate) struct Monos {
     pub(crate) details: Entity<overview::Overview>,
     original_chrome: bool,
     overview_tab: OverviewTab,
+    /// A group's chat drawn as a board, made the first time it shows.
+    group_board: Option<groups::GroupBoard>,
     overview_previous: OverviewTab,
     /// When the Overview tab last appeared for a Mono, so its graph draws in.
     dashboard_shown: Option<(String, std::time::Instant)>,
@@ -555,6 +557,7 @@ impl Monos {
             details,
             original_chrome: false,
             overview_tab: OverviewTab::Overview,
+            group_board: None,
             overview_previous: OverviewTab::Overview,
             dashboard_shown: None,
             contributions: HashMap::new(),

@@ -17,9 +17,9 @@ const MAX_REQUESTS: usize = 512;
 pub const MAX_CONTINUATIONS: u32 = 20;
 const RESULT_CHARS: usize = 20_000;
 
-pub const ACTIONS: [&str; 14] = [
+pub const ACTIONS: [&str; 15] = [
     "list", "delegate", "get", "wait", "steer", "message", "retry", "cancel", "respond", "answer",
-    "review", "finish", "post", "board",
+    "review", "finish", "post", "board", "swarm",
 ];
 /// What a worker may call: the board, and nothing that steers the run.
 pub const WORKER_ACTIONS: [&str; 2] = ["post", "board"];
@@ -38,7 +38,8 @@ Actions, with the JSON object each one takes:
             Queue a worker and return its taskId and board handle. "model" is
             optional and defaults to the first model list allows for that
             harness. "handle" is optional: a role name such as verifier or
-            tester; workers are worker-1, worker-2... otherwise.
+            tester; workers are worker-1, worker-2... otherwise. For a
+            handle the user pinned from /swarm, leave out harness and model.
             "files" is the write scope: project-relative paths, where a
             directory covers its descendants and ["."] reserves the whole
             checkout. "dependsOn" holds taskIds that must be reviewed first.
@@ -78,6 +79,11 @@ Actions, with the JSON object each one takes:
             coordinator when it is idle. Workers may call post and board.
   board     {"since":0,"limit":50}
             The members, their state, and the latest posts after "since".
+  swarm     {"title":"Migrate auth to v2"}
+            From an ordinary coding chat: turn this chat into the coordinator
+            of a swarm for a large task, so you can delegate. Only when the
+            user allows it in Settings > Chat; once a run is open, the other
+            actions apply.
 
 Usual loop: list -> delegate ... -> wait or get -> steer an agent that drifts,
 unblock one with respond or answer -> inspect the changes yourself -> message
@@ -289,6 +295,58 @@ pub struct Run {
     pub next_id: u64,
     /// Started with /swarm: the lead plans and delegates without a card.
     pub swarm: bool,
+    /// Harness and model the user pinned to a role from `/swarm`.
+    pub roles: Vec<Role>,
+}
+
+/// A role the user gave a harness (and optionally a model) from `/swarm`,
+/// such as `@verifier=codex/gpt-5.5`: delegating that handle uses them.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Role {
+    pub handle: String,
+    pub provider: String,
+    pub model: Option<String>,
+}
+
+/// The `@role=harness[/model]` words at the start of a `/swarm` request,
+/// and the request without them.
+pub fn swarm_roles(request: &str) -> Result<(Vec<Role>, String), String> {
+    let mut roles: Vec<Role> = Vec::new();
+    let mut rest = request.trim_start();
+    while let Some(word) = rest.split_whitespace().next() {
+        let Some(pin) = word.strip_prefix('@') else {
+            break;
+        };
+        let Some((handle, target)) = pin.split_once('=') else {
+            break;
+        };
+        let handle = super::board::handle_from(handle);
+        let (provider, model) = match target.split_once('/') {
+            Some((provider, model)) => (provider, Some(model.to_owned())),
+            None => (target, None),
+        };
+        if handle.is_empty()
+            || handle == "all"
+            || handle == super::board::COORDINATOR
+            || provider.is_empty()
+            || model.as_deref() == Some("")
+        {
+            return Err(format!(
+                "Write a role as @role=harness or @role=harness/model, such as @verifier=codex; \"{word}\" is not one."
+            ));
+        }
+        if roles.iter().any(|r| r.handle == handle) {
+            return Err(format!("@{handle} is given twice."));
+        }
+        roles.push(Role {
+            handle,
+            provider: provider.to_owned(),
+            model,
+        });
+        rest = rest[word.len()..].trim_start();
+    }
+    Ok((roles, rest.to_owned()))
 }
 
 /// The key a run is saved under.
@@ -371,6 +429,7 @@ fn fields(action: &str) -> Option<&'static [&'static str]> {
         ],
         "post" => &["text"],
         "board" => &["since", "limit"],
+        "swarm" => &["title"],
         "get" | "cancel" | "review" => &["taskId"],
         "wait" => &["timeoutSeconds"],
         "steer" | "message" => &["taskId", "text"],
@@ -456,10 +515,53 @@ pub fn board_instructions(cli: &str, handle: &str, members: &[String]) -> String
 
 /// The lead's first turn of a /swarm run: the user's request, with the
 /// rules for coordinating it.
-pub fn swarm_prompt(request: &str, cli: &str) -> String {
+pub fn swarm_prompt(request: &str, cli: &str, roles: &[Role]) -> String {
     format!(
-        "{request}\n\n<monocode_swarm>\nThe user started a swarm for this request: you are its coordinator. Inspect the project with read-only tools, then split the work into bounded assignments with disjoint write scopes and delegate them now through the control CLI; do not ask the user to approve a plan. Give each worker a handle that says its role (for example implementer, tester, verifier), run independent work in parallel (up to {MAX_WORKERS} at once) and add a verifier that runs the tests across the combined result once the builders are reviewed. Each worker works in its own temporary branch and worktree; review applies its changes to your checkout and removes them, so nothing is left behind. Leave project edits to the workers. When everything is reviewed and verified, call finish and summarize what changed.\n</monocode_swarm>\n\n{}",
+        "{request}\n\nThe user started a swarm for this request.\n\n{}\n\n{}",
+        swarm_rules(roles),
         lead_instructions(cli)
+    )
+}
+
+/// What a coding chat is told once when the user lets models start swarms:
+/// it may turn itself into a coordinator for a large task.
+pub fn swarm_offer(cli: &str) -> String {
+    let cli = shell_path(cli);
+    format!(
+        "<monocode_swarm_option>\nFor a large task that splits into independent parts (several areas of the code, or building and verifying in parallel), you may turn this chat into the coordinator of a swarm: run `{cli} control swarm --json '{{\"title\":\"Short task title\"}}'`. It answers with the rules for delegating to parallel workers, each in its own worktree, on a board the user watches. Do it only when parallel agents clearly beat working alone; a small or sequential task stays here. Credentials are already in your environment; never print them.\n</monocode_swarm_option>"
+    )
+}
+
+/// What the `swarm` action answers once the chat is a coordinator: the
+/// rules of the run, so the model can delegate in the same turn.
+pub fn swarm_started(title: &str, cli: &str, roles: &[Role]) -> Value {
+    json!({
+        "started": true,
+        "title": title,
+        "handle": super::board::COORDINATOR,
+        "instructions": format!("{}\n\n{}", swarm_rules(roles), lead_instructions(cli)),
+    })
+}
+
+/// How the coordinator should run the swarm, with any roles the user pinned.
+fn swarm_rules(roles: &[Role]) -> String {
+    let pinned = if roles.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " The user pinned these roles: {}. Delegate each with its handle; its harness and model are filled in, so omit them.",
+            roles
+                .iter()
+                .map(|r| match &r.model {
+                    Some(model) => format!("@{} on {} with {model}", r.handle, r.provider),
+                    None => format!("@{} on {}", r.handle, r.provider),
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "<monocode_swarm>\nYou are this swarm's coordinator. Inspect the project with read-only tools, then split the work into bounded assignments with disjoint write scopes and delegate them now through the control CLI; do not ask the user to approve a plan. Give each worker a handle that says its role (for example implementer, tester, verifier), run independent work in parallel (up to {MAX_WORKERS} at once) and add a verifier that runs the tests across the combined result once the builders are reviewed.{pinned} Each worker works in its own temporary branch and worktree; review applies its changes to your checkout and removes them, so nothing is left behind. Leave project edits to the workers. When everything is reviewed and verified, call finish and summarize what changed.\n</monocode_swarm>"
     )
 }
 
@@ -560,6 +662,39 @@ impl Run {
             swarm: true,
             ..Default::default()
         }
+    }
+
+    /// Every pinned role names a harness and model this run may use.
+    pub fn check_roles(&self) -> Result<(), String> {
+        for role in &self.roles {
+            let Some(choice) = self.choices.iter().find(|c| c.provider == role.provider) else {
+                return Err(format!(
+                    "@{} asks for \"{}\", which is not available here. Harnesses: {}.",
+                    role.handle,
+                    role.provider,
+                    listed(
+                        &self
+                            .choices
+                            .iter()
+                            .map(|c| c.provider.clone())
+                            .collect::<Vec<_>>()
+                    )
+                ));
+            };
+            if let Some(model) = role.model.as_ref().filter(|m| !choice.models.contains(m)) {
+                return Err(format!(
+                    "@{} asks for {} with \"{model}\". Its models: {}.",
+                    role.handle,
+                    role.provider,
+                    if choice.models.is_empty() {
+                        "only its default; leave the model out".into()
+                    } else {
+                        listed(&choice.models)
+                    }
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn new_id(&mut self) -> String {
@@ -947,6 +1082,7 @@ impl Run {
                 ))
             }
             "post" | "board" => Err("The board is not available for this run.".into()),
+            "swarm" => Err("This chat already coordinates a run; delegate within it.".into()),
             _ => Err("Unknown action. Run control --help.".into()),
         }
     }
@@ -955,7 +1091,36 @@ impl Run {
         if self.tasks.len() >= MAX_TASKS {
             return Err(format!("This run has reached its {MAX_TASKS}-task limit"));
         }
-        let harness = text(input, "harness", 64)?;
+        let handle = match input.get("handle") {
+            None | Some(Value::Null) => None,
+            Some(_) => {
+                let handle = super::board::handle_from(&text(input, "handle", 32)?);
+                if handle.is_empty() || handle == "all" || handle == super::board::COORDINATOR {
+                    return Err(
+                        "Invalid handle: use a short role name such as verifier or tester".into(),
+                    );
+                }
+                Some(handle)
+            }
+        };
+        let pinned = handle
+            .as_ref()
+            .and_then(|h| self.roles.iter().find(|r| &r.handle == h))
+            .cloned();
+        let harness = match (&pinned, input.get("harness")) {
+            (Some(role), None | Some(Value::Null)) => role.provider.clone(),
+            (Some(role), Some(_)) => {
+                let harness = text(input, "harness", 64)?;
+                if harness != role.provider {
+                    return Err(format!(
+                        "The user pinned @{} to {}; omit harness or use it.",
+                        role.handle, role.provider
+                    ));
+                }
+                harness
+            }
+            (None, _) => text(input, "harness", 64)?,
+        };
         let choice = self
             .choices
             .iter()
@@ -972,10 +1137,18 @@ impl Run {
                     )
                 )
             })?;
-        let model = match input.get("model") {
-            None | Some(Value::Null) => choice.models.first().cloned(),
-            Some(_) => {
+        let pinned_model = pinned.as_ref().and_then(|r| r.model.clone());
+        let model = match (input.get("model"), pinned_model) {
+            (None | Some(Value::Null), Some(model)) => Some(model),
+            (None | Some(Value::Null), None) => choice.models.first().cloned(),
+            (Some(_), pinned_model) => {
                 let model = text(input, "model", 256)?;
+                if let Some(pinned_model) = pinned_model.filter(|p| *p != model) {
+                    return Err(format!(
+                        "The user pinned @{} to {pinned_model}; omit model or use it.",
+                        handle.as_deref().unwrap_or_default()
+                    ));
+                }
                 if !choice.models.contains(&model) {
                     return Err(format!(
                         "Choose a model ID returned by list for {harness}: {}.",
@@ -994,18 +1167,6 @@ impl Run {
         let files = strings(input, "files", 64)?;
         check_scopes(&files)?;
         let depends_on = strings(input, "dependsOn", 40)?;
-        let handle = match input.get("handle") {
-            None | Some(Value::Null) => None,
-            Some(_) => {
-                let handle = super::board::handle_from(&text(input, "handle", 32)?);
-                if handle.is_empty() || handle == "all" || handle == super::board::COORDINATOR {
-                    return Err(
-                        "Invalid handle: use a short role name such as verifier or tester".into(),
-                    );
-                }
-                Some(handle)
-            }
-        };
         let missing: Vec<String> = depends_on
             .iter()
             .filter(|id| {

@@ -6,16 +6,19 @@
 use super::{SwarmPanel, live_color, post_header, rich_text};
 use crate::{right_panel::tabular, theme::*};
 use gpui::{
-    AnyElement, App, BorderStyle, Bounds, Context, MouseButton, MouseDownEvent, MouseMoveEvent,
-    PathBuilder, Pixels, Point, SharedString, Task, Window, canvas, div, fill, point, prelude::*,
-    px, quad, size,
+    AnyElement, App, BorderStyle, Bounds, Context, DispatchPhase, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, PathBuilder, Pixels, Point, SharedString, Task, Window, canvas,
+    div, fill, point, prelude::*, px, quad, size,
 };
 use monocode_core::orchestration::board::{self, Board, Edge};
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     rc::Rc,
     time::{Duration, Instant},
 };
+
+/// Where the last paint put each node, by member index.
+type Nodes = Rc<RefCell<Vec<(Bounds<Pixels>, usize)>>>;
 
 /// How long the newest edge's pulse travels.
 const PULSE: Duration = Duration::from_millis(650);
@@ -40,6 +43,10 @@ pub(crate) struct Timeline {
     pulse: Option<Instant>,
     slider: Rc<Cell<Option<Bounds<Pixels>>>>,
     dragging: bool,
+    /// Where the last paint put each node, by member index, for clicks.
+    nodes: Nodes,
+    /// The member whose node is under the pointer.
+    pub(crate) hover: Option<usize>,
 }
 impl Default for Timeline {
     fn default() -> Self {
@@ -55,6 +62,8 @@ impl Default for Timeline {
             pulse: None,
             slider: Rc::default(),
             dragging: false,
+            nodes: Rc::default(),
+            hover: None,
         }
     }
 }
@@ -69,6 +78,15 @@ impl Timeline {
         } else {
             self.cursor = self.cursor.min(len);
         }
+    }
+    /// Where the last paint put each member's node.
+    #[cfg(test)]
+    pub(crate) fn node_bounds(&self) -> Vec<(Bounds<Pixels>, usize)> {
+        self.nodes.borrow().clone()
+    }
+    #[cfg(test)]
+    pub(crate) fn sliding(&self) -> bool {
+        self.dragging
     }
     pub(crate) fn pause(&mut self) {
         self.playing = false;
@@ -102,6 +120,8 @@ struct Scene {
     /// The post at the cursor: its edges are highlighted.
     current: u64,
     pulse: Option<Instant>,
+    hover: Option<usize>,
+    nodes: Nodes,
 }
 
 fn unit(v: Point<f32>) -> Point<f32> {
@@ -254,6 +274,8 @@ fn paint(bounds: Bounds<Pixels>, scene: &Scene, window: &mut Window, cx: &mut Ap
     }
 
     let surface = pane_fill();
+    let mut nodes = scene.nodes.borrow_mut();
+    nodes.clear();
     for (slot, &member) in scene.visible.iter().enumerate() {
         let c = center(slot);
         let (bw, bh) = (widths[slot], NODE_HEIGHT);
@@ -261,16 +283,18 @@ fn paint(bounds: Bounds<Pixels>, scene: &Scene, window: &mut Window, cx: &mut Ap
             point(px(c.x - bw / 2.), px(c.y - bh / 2.)),
             size(px(bw), px(bh)),
         );
+        nodes.push((node, member));
         let involved = scene
             .edges
             .iter()
             .any(|e| e.last == scene.current && (e.from == member || e.to == member));
+        let hovered = scene.hover == Some(member);
         window.paint_quad(quad(
             node,
             px(bh / 2.),
-            surface,
+            if hovered { content(0.08) } else { surface },
             px(1.),
-            content(if involved { 0.85 } else { 0.25 }),
+            content(if involved || hovered { 0.85 } else { 0.25 }),
             BorderStyle::Solid,
         ));
         if scene.silent[member] {
@@ -443,6 +467,44 @@ impl SwarmPanel {
                 .and_then(|ix| board.posts.get(ix))
                 .map_or(0, |p| p.seq),
             pulse: self.timeline.pulse,
+            hover: self.timeline.hover,
+            nodes: self.timeline.nodes.clone(),
+        }
+    }
+
+    /// The member whose node holds `position`, as last painted.
+    fn node_at(&self, position: Point<Pixels>) -> Option<usize> {
+        self.timeline
+            .nodes
+            .borrow()
+            .iter()
+            .find(|(bounds, _)| bounds.contains(&position))
+            .map(|(_, member)| *member)
+    }
+
+    fn hover_node(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let hover = self.node_at(position);
+        if self.timeline.hover != hover {
+            self.timeline.hover = hover;
+            cx.notify();
+        }
+    }
+
+    /// A click on a node opens that member's chat.
+    fn click_node(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        if let Some(handle) = self
+            .node_at(position)
+            .and_then(|ix| self.board.members.get(ix))
+            .map(|m| m.handle.clone())
+        {
+            self.open_member(&handle, cx);
+        }
+    }
+
+    fn stop_sliding(&mut self, cx: &mut Context<Self>) {
+        if self.timeline.dragging {
+            self.timeline.dragging = false;
+            cx.notify();
         }
     }
 
@@ -468,6 +530,8 @@ impl SwarmPanel {
             cursor as f32 / len as f32
         };
         let slider = self.timeline.slider.clone();
+        let panel = cx.entity().downgrade();
+        let dragging = self.timeline.dragging;
         let playing = self.timeline.playing;
         let live = self.timeline.live && cursor == len;
         let scene = self.scene();
@@ -545,6 +609,36 @@ impl SwarmPanel {
                                     )
                                     .corner_radii(knob),
                                 );
+                                // A drag follows the pointer past the track
+                                // and ends wherever the button is let go.
+                                if dragging {
+                                    let moves = panel.clone();
+                                    window.on_mouse_event(
+                                        move |event: &MouseMoveEvent, phase, _, cx| {
+                                            if phase != DispatchPhase::Capture {
+                                                return;
+                                            }
+                                            let _ = moves.update(cx, |this, cx| {
+                                                if event.pressed_button == Some(MouseButton::Left) {
+                                                    this.slide_to(event.position.x, cx);
+                                                } else {
+                                                    this.stop_sliding(cx);
+                                                }
+                                            });
+                                        },
+                                    );
+                                    let release = panel.clone();
+                                    window.on_mouse_event(
+                                        move |event: &MouseUpEvent, phase, _, cx| {
+                                            if phase == DispatchPhase::Capture
+                                                && event.button == MouseButton::Left
+                                            {
+                                                let _ = release
+                                                    .update(cx, |this, cx| this.stop_sliding(cx));
+                                            }
+                                        },
+                                    );
+                                }
                             },
                         )
                         .size_full(),
@@ -555,19 +649,6 @@ impl SwarmPanel {
                             this.timeline.dragging = true;
                             this.slide_to(event.position.x, cx);
                         }),
-                    )
-                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
-                        if this.timeline.dragging {
-                            if event.pressed_button == Some(MouseButton::Left) {
-                                this.slide_to(event.position.x, cx);
-                            } else {
-                                this.timeline.dragging = false;
-                            }
-                        }
-                    }))
-                    .on_mouse_up(
-                        MouseButton::Left,
-                        cx.listener(|this, _, _, _| this.timeline.dragging = false),
                     ),
             )
             .child(
@@ -705,13 +786,32 @@ impl SwarmPanel {
             .child(controls)
             .child(options)
             .child(
-                div().flex_shrink_0().h(px(280.)).mx_2().my_2().child(
-                    canvas(
-                        |_, _, _| {},
-                        move |bounds, _, window, cx| paint(bounds, &scene, window, cx),
-                    )
-                    .size_full(),
-                ),
+                div()
+                    .id("swarm-graph-canvas")
+                    .debug_selector(|| "swarm-graph-canvas".into())
+                    .flex_shrink_0()
+                    .h(px(280.))
+                    .mx_2()
+                    .my_2()
+                    .when(self.timeline.hover.is_some(), |d| d.cursor_pointer())
+                    .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
+                        this.hover_node(event.position, cx)
+                    }))
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        if !*hovered && this.timeline.hover.take().is_some() {
+                            cx.notify();
+                        }
+                    }))
+                    .on_click(cx.listener(|this, event: &gpui::ClickEvent, _, cx| {
+                        this.click_node(event.position(), cx)
+                    }))
+                    .child(
+                        canvas(
+                            |_, _, _| {},
+                            move |bounds, _, window, cx| paint(bounds, &scene, window, cx),
+                        )
+                        .size_full(),
+                    ),
             )
             .child(legend)
             .children(card)

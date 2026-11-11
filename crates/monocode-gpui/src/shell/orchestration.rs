@@ -119,7 +119,13 @@ impl Shell {
     ) {
         self.observations
             .push(cx.subscribe(view, move |this, _, event: &StartSwarm, cx| {
-                this.start_swarm(id, event.request.clone(), event.message.clone(), cx)
+                this.start_swarm(
+                    id,
+                    event.request.clone(),
+                    event.roles.clone(),
+                    event.message.clone(),
+                    cx,
+                )
             }));
         self.observations.push(cx.subscribe(
             view,
@@ -859,6 +865,16 @@ impl Shell {
             .strip_prefix("control.")
             .unwrap_or_default()
             .to_owned();
+        if action == "swarm" {
+            if !valid_request_id(&call.request_id) {
+                let _ = call.reply.send(Err(
+                    "request ID must use letters, digits, underscores or hyphens".into(),
+                ));
+                return;
+            }
+            self.agent_swarm(call, cx);
+            return;
+        }
         // The lead, or one of its workers: those only reach the board.
         let (lead, worker) = if self.orchestrations.contains_key(&call.session) {
             (call.session, None)
@@ -875,7 +891,7 @@ impl Shell {
             (*lead, Some(handle))
         } else {
             let _ = call.reply.send(Err(
-                "No orchestration run is open for this chat. The user starts one with /swarm or from the plan card."
+                "No orchestration run is open for this chat. The user starts one with /swarm or from the plan card; with Settings > Chat allowing it, control swarm starts one."
                     .into(),
             ));
             return;
@@ -887,13 +903,7 @@ impl Shell {
             ));
             return;
         }
-        if call.request_id.is_empty()
-            || call.request_id.len() > 128
-            || !call
-                .request_id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        {
+        if !valid_request_id(&call.request_id) {
             let _ = call.reply.send(Err(
                 "request ID must use letters, digits, underscores or hyphens".into(),
             ));
@@ -1148,6 +1158,15 @@ impl Control {
 
 /// The harnesses a lead may assign: the installed ones with their models,
 /// plus whatever was already assigned. Reads catalogs: run it off the UI.
+/// A control call's request ID: 1–128 letters, digits, `_` or `-`.
+fn valid_request_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
 fn run_choices(
     profiles: Vec<(Kind, monocode_core::accounts::Profile)>,
     assigned: Vec<(String, Option<String>)>,
@@ -1211,31 +1230,121 @@ impl Shell {
         &mut self,
         lead: i64,
         request: String,
+        roles: Vec<control::Role>,
         message: monocode_core::follow_up::Message,
         cx: &mut Context<Self>,
     ) {
-        let fail = move |this: &mut Self,
-                         message: monocode_core::follow_up::Message,
-                         error: String,
-                         cx: &mut Context<Self>| {
-            if let Some(view) = this.sessions.get(&lead) {
-                view.update(cx, |v, cx| v.swarm_failed(message, error, cx));
+        self.open_swarm(lead, request, roles, cx, move |this, opened, cx| {
+            let Some(view) = this.sessions.get(&lead).cloned() else {
+                return;
+            };
+            match opened {
+                Ok(()) => view.update(cx, |v, cx| v.launch_swarm(message, cx)),
+                Err(error) => view.update(cx, |v, cx| v.swarm_failed(message, error, cx)),
             }
+        });
+    }
+
+    /// `control swarm` from a coding chat's own turn: the user lets agents
+    /// start swarms, so the chat becomes the coordinator and is told the
+    /// rules in the answer, to delegate in the same turn.
+    fn agent_swarm(&mut self, call: Call, cx: &mut Context<Self>) {
+        let session = call.session;
+        let cli = std::env::current_exe()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "monocode-gpui".into());
+        // A retried call finds the swarm it opened.
+        if let Some(live) = self.orchestrations.get(&session) {
+            let _ = call.reply.send(if live.run.swarm {
+                Ok(control::swarm_started(
+                    &live.run.request,
+                    &cli,
+                    &live.run.roles,
+                ))
+            } else {
+                Err("This chat already coordinates a run; delegate within it.".into())
+            });
+            return;
+        }
+        if self.swarm_lead(session).is_some() {
+            let _ = call.reply.send(Err(
+                "Workers cannot start a swarm. Ask @coordinator on the board instead.".into(),
+            ));
+            return;
+        }
+        let allowed = cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.swarm_offer);
+        if !allowed {
+            let _ = call.reply.send(Err(
+                "The user has not let agents start swarms (Settings > Chat). Work on the task here, or suggest /swarm to the user."
+                    .into(),
+            ));
+            return;
+        }
+        let eligible = self.sessions.get(&session).is_some_and(|view| {
+            let view = view.read(cx);
+            view.settings.mono.is_none() && !view.is_remote() && !view.settings.worktree_removed
+        });
+        if !eligible {
+            let _ = call
+                .reply
+                .send(Err("A swarm is not available in this chat.".into()));
+            return;
+        }
+        let title = call
+            .input
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| t.chars().take(160).collect::<String>());
+        let Some(title) = title else {
+            let _ = call
+                .reply
+                .send(Err("Give the swarm a short \"title\" for the task.".into()));
+            return;
         };
+        let reply = call.reply;
+        self.open_swarm(
+            session,
+            title.clone(),
+            Vec::new(),
+            cx,
+            move |this, opened, cx| {
+                let _ = reply.send(opened.map(|()| control::swarm_started(&title, &cli, &[])));
+                if let Some(view) = this.sessions.get(&session) {
+                    view.update(cx, |v, cx| v.swarm_opened_by_agent(cx));
+                }
+            },
+        );
+    }
+
+    /// Open a run with no tasks for chat `lead`, then call `done` with the
+    /// outcome; on success the lead counts as busy, as it is mid-turn or
+    /// about to start one.
+    fn open_swarm(
+        &mut self,
+        lead: i64,
+        request: String,
+        roles: Vec<control::Role>,
+        cx: &mut Context<Self>,
+        done: impl FnOnce(&mut Self, Result<(), String>, &mut Context<Self>) + 'static,
+    ) {
         if self.orchestrations.contains_key(&lead) {
-            return fail(
+            return done(
                 self,
-                message,
-                "Resume or stop this chat's current run before starting another.".into(),
+                Err("Resume or stop this chat's current run before starting another.".into()),
                 cx,
             );
         }
         if self.app_bridge.is_none() && !cx.is_test() {
-            return fail(
+            return done(
                 self,
-                message,
-                "monoBOT app access is unavailable, so the coordinator cannot launch agents."
-                    .into(),
+                Err(
+                    "monoBOT app access is unavailable, so the coordinator cannot launch agents."
+                        .into(),
+                ),
                 cx,
             );
         }
@@ -1253,10 +1362,9 @@ impl Shell {
             monocode_core::files::path_key(live.checkout())
                 == monocode_core::files::path_key(&checkout)
         }) {
-            return fail(
+            return done(
                 self,
-                message,
-                "Another run is already using this checkout.".into(),
+                Err("Another run is already using this checkout.".into()),
                 cx,
             );
         }
@@ -1273,9 +1381,9 @@ impl Shell {
             let (isolated, choices) = work.await;
             let _ = this.update(cx, |this, cx| {
                 if this.orchestrations.contains_key(&lead) {
-                    return fail(this, message, "This chat already has a run.".into(), cx);
+                    return done(this, Err("This chat already has a run.".into()), cx);
                 }
-                let run = Run::swarm(
+                let mut run = Run::swarm(
                     lead,
                     &project,
                     &checkout,
@@ -1284,13 +1392,15 @@ impl Shell {
                     choices,
                     control::MAX_WORKERS,
                 );
+                run.roles = roles;
+                if let Err(error) = run.check_roles() {
+                    return done(this, Err(error), cx);
+                }
                 this.sweep_worktrees(&run, cx);
                 let mut live = Live::new(run);
                 live.lead_busy = true;
                 this.orchestrations.insert(lead, live);
-                if let Some(view) = this.sessions.get(&lead) {
-                    view.update(cx, |v, cx| v.launch_swarm(message, cx));
-                }
+                done(this, Ok(()), cx);
                 this.pump_orchestration(lead, cx);
                 this.reveal_swarm(cx);
             });
@@ -1460,6 +1570,7 @@ impl Shell {
             }
         });
         let swarm = panel.read(cx).swarm.clone();
+        let had = panel.read(cx).swarm_tab();
         match (lead, board) {
             (Some(lead), Some(board)) => {
                 swarm.update(cx, |s, cx| s.set_board(lead, board, cx));
@@ -1470,18 +1581,43 @@ impl Shell {
                 swarm.update(cx, |s, cx| s.clear(cx));
             }
         }
+        let has = panel.read(cx).swarm_tab();
+        if had != has && self.workspace.classic_layout {
+            // Classic shows the board as a sidebar tab; without a board that
+            // tab gives way to Sessions.
+            if !has && self.classic_sidebar_tab == classic_sidebar::ClassicSidebarTab::Swarm {
+                self.classic_sidebar_tab = classic_sidebar::ClassicSidebarTab::Sessions;
+                panel.update(cx, |p, cx| p.set_sidebar_tab(None, cx));
+            }
+            self.notify_sidebar(cx);
+            self.projects_frame.update(cx, |_, cx| cx.notify());
+        }
     }
 
     /// A new swarm opens its tab beside the coordinator.
     fn reveal_swarm(&mut self, cx: &mut Context<Self>) {
         self.sync_swarm(cx);
-        if let Some(panel) = &self.right_panel
-            && panel.read(cx).swarm_tab()
-        {
-            panel.update(cx, |p, cx| {
-                p.select(crate::right_panel::RightTab::Swarm, cx)
-            });
+        let Some(panel) = self.right_panel.clone() else {
+            return;
+        };
+        if !panel.read(cx).swarm_tab() {
+            return;
         }
+        if self.workspace.classic_layout {
+            if self.session_sidebar_available(cx) {
+                self.classic_sidebar_tab = classic_sidebar::ClassicSidebarTab::Swarm;
+                self.sidebar_auto_hidden = false;
+                self.set_sidebar_visible(true, cx);
+                self.sync_right_panel(cx);
+                self.notify_sidebar(cx);
+                self.projects_frame.update(cx, |_, cx| cx.notify());
+                cx.notify();
+            }
+            return;
+        }
+        panel.update(cx, |p, cx| {
+            p.select(crate::right_panel::RightTab::Swarm, cx)
+        });
     }
 
     /// Read a lead's saved board off the UI thread.
