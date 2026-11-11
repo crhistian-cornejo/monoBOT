@@ -227,10 +227,11 @@ impl Monos {
                     .py_1()
                     .text_size(px(13.))
                     .line_height(px(20.))
-                    .child(crate::transcript::subagent_mascot(
-                        &name,
+                    .child(crate::transcript::subagent_mark(
+                        ("bot-subagent-mark", ix),
                         &call.state,
                         active,
+                        cx.reduce_motion(),
                     ))
                     .child(
                         div()

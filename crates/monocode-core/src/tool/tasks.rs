@@ -329,6 +329,14 @@ impl AgentRun {
             format!("{label}, {failed} failed")
         }
     }
+    /// What the subagent is doing now, as one plain line: its newest step.
+    pub fn latest_step(&self) -> Option<String> {
+        self.steps
+            .iter()
+            .rev()
+            .map(|step| plain_line(&step.text))
+            .find(|line| !line.is_empty())
+    }
     pub fn model_name(&self, provider: crate::provider::Kind) -> Option<String> {
         let id = self.model.as_deref()?.trim();
         if id.is_empty()
@@ -471,6 +479,26 @@ fn agent_path_name(input: &Value) -> Option<String> {
         caps[0].to_ascii_uppercase()
     });
     Some(format!("{label} subagent"))
+}
+
+/// The first line of `text` that says something, as plain text: link targets,
+/// code ticks, list bullets, heading marks and runs of spaces dropped, for a
+/// one-line summary under a subagent's title.
+pub fn plain_line(text: &str) -> String {
+    static LINK: std::sync::LazyLock<regex::Regex> =
+        std::sync::LazyLock::new(|| regex::Regex::new(r"\[([^\]]+)\]\([^)]*\)").unwrap());
+    let Some(line) = text
+        .lines()
+        .map(|line| line.trim().trim_start_matches(['#', '-', '*', '>']).trim())
+        .find(|line| !line.is_empty())
+    else {
+        return String::new();
+    };
+    LINK.replace_all(line, "$1")
+        .replace(['`', '*'], "")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn agent_prefix_end(title: &str) -> Option<usize> {
@@ -745,6 +773,30 @@ pub fn desktop_agent(run: &AgentRun) -> Value {
 mod tests {
     use super::*;
     use serde_json::json;
+    #[test]
+    fn a_subagent_summary_is_one_plain_line() {
+        assert_eq!(
+            plain_line("\n## Done\n\nWrote [the report](docs/a.md) in `docs`"),
+            "Done"
+        );
+        assert_eq!(
+            plain_line("  - **Read** `src/main.rs`   twice\nmore"),
+            "Read src/main.rs twice"
+        );
+        assert_eq!(plain_line(" \n \n"), "");
+        let step = |text: &str| AgentStep {
+            id: text.into(),
+            kind: "tool".into(),
+            text: text.into(),
+            ..AgentStep::default()
+        };
+        let run = AgentRun {
+            steps: vec![step("Read Cargo.toml"), step("Search `todo`"), step("  ")],
+            ..AgentRun::default()
+        };
+        assert_eq!(run.latest_step().as_deref(), Some("Search todo"));
+        assert_eq!(AgentRun::default().latest_step(), None);
+    }
     #[test]
     fn codex_saved_placeholders_recover_path_titles_without_losing_steps() {
         let mut block = json!({

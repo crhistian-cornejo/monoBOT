@@ -123,6 +123,20 @@ impl SettingsView {
                     |this, on, cx| this.update(cx, |p| p.swarm_offer = on),
                 )],
             ),
+            self.row(
+                Some("chief-offer"),
+                false,
+                "Let Claude hand work to your monos",
+                Some("For a large task that splits into parallel parts, a Claude chat may hand it to Chief, who gives each part to one of your code monos in its own chat and worktree, reviews their work and sends the chat one summary. New monos stay with you.".into()),
+                vec![self.toggle(
+                    "chief-offer",
+                    "Let Claude hand work to your monos",
+                    p.chief_offer,
+                    false,
+                    cx,
+                    |this, on, cx| this.update(cx, |p| p.chief_offer = on),
+                )],
+            ),
         ];
         let composer = vec![
             self.row(

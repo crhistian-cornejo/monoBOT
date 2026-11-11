@@ -155,6 +155,10 @@ pub struct Settings {
     /// (Settings › Chat); its rule is introduced once per conversation.
     #[serde(skip)]
     pub swarm_offer: bool,
+    /// A Claude coding chat may hand a large task to Chief and the user's
+    /// monos (Settings › Chat); introduced once per conversation.
+    #[serde(skip)]
+    pub chief_offer: bool,
     pub new_worktree: bool,
     pub worktree_base: Option<String>,
     pub worktree_cwd: Option<String>,

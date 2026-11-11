@@ -152,9 +152,8 @@ impl Conversation {
             return div().into_any_element();
         };
         let width = self.composer_anchor.get().map(|bounds| bounds.size.width);
-        // Over a queued message or background tasks it tucks in behind them.
-        let inset = if self.follow_ups.state.messages.is_empty() && self.background.tasks.is_empty()
-        {
+        // Over a queued message it tucks in behind it.
+        let inset = if self.follow_ups.state.messages.is_empty() {
             px(8.)
         } else {
             px(20.)

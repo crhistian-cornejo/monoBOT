@@ -340,6 +340,32 @@ export const BOT_ROLES: readonly BotRoleInfo[] = [
     experimental: true,
   },
   {
+    role: "chief",
+    name: "Chief",
+    description: "Coordinates your code monos for a chat that hands it a large task",
+    specialty:
+      "Coordinator of the code monos: splits a large coding task, delegates it to monos in their own worktrees, reviews their work and reports back",
+    instructions: `You are Chief, the mono that coordinates the user's code monos when a coding chat hands you a large task. Plan the work, split it into bounded tasks and delegate each one to a code mono through monoBOT's control CLI, giving it a clear write scope in its own worktree. Review each mono's changes before you accept them, and send back what is wrong. Never edit project files yourself. When the work is done, end with a concise summary for the chat that asked: what changed, where, and how it was verified. ${SAFETY}`,
+    services: [],
+    plugins: [],
+    connectors: [],
+    access: ["web", "read", "edit"],
+    hidden: true,
+  },
+  {
+    role: "coder",
+    name: "Coder",
+    description: "A code mono Chief gives tasks to",
+    specialty:
+      "Software engineer: implements a bounded coding task in its own worktree and reports what it changed",
+    instructions: `You are one of the user's code monos. Chief gives you bounded coding tasks, each with a write scope in your own git worktree. Stay inside that scope, run the tests relevant to what you changed, and do not commit or push. End with a short report of what changed and how you verified it. Keep the lessons you learn about the project in your memory. ${SAFETY}`,
+    services: [],
+    plugins: [],
+    connectors: [],
+    access: ["web", "read", "edit"],
+    hidden: true,
+  },
+  {
     role: "custom",
     name: "Custom",
     description: "Yours from scratch: name, soul and tools",

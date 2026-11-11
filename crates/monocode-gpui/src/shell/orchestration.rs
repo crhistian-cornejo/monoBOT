@@ -44,6 +44,8 @@ pub(super) struct Live {
     board_dirty: bool,
     /// Results of recent posts by request ID, so a retried post lands once.
     posted: HashMap<String, Value>,
+    /// Code monos this run made, up to `control::MAX_NEW_MONOS`.
+    new_monos: usize,
 }
 impl Live {
     fn new(run: Run) -> Self {
@@ -58,6 +60,7 @@ impl Live {
             board_loaded: true,
             board_dirty: true,
             posted: HashMap::new(),
+            new_monos: 0,
         }
     }
     pub(super) fn checkout(&self) -> &str {
@@ -438,6 +441,7 @@ impl Shell {
     }
 
     pub(super) fn orchestration_session_changed(&mut self, id: i64, cx: &mut Context<Self>) {
+        self.deliver_chief_reports(id, cx);
         let leads: Vec<i64> = self
             .orchestrations
             .iter()
@@ -583,6 +587,7 @@ impl Shell {
     }
 
     fn dispatch_worker(&mut self, lead: i64, id: String, cx: &mut Context<Self>) {
+        let member = self.bind_mono(lead, &id, cx);
         let Some(live) = self.orchestrations.get(&lead) else {
             return;
         };
@@ -638,7 +643,16 @@ impl Shell {
         };
         let name = format!("{lead}-{}-{}", task.id, monocode_core::time::now_ms());
         let dispatch = task.dispatch;
+        // A mono's worker is titled with its name and starts as that mono.
+        let title = match &member {
+            Some((_, mono)) => format!("{} · {}", mono.name, task.title),
+            None => format!("Agent · {}", task.title),
+        };
+        let first_turn = existing.is_none();
         let work = cx.background_executor().spawn(async move {
+            let identity = member
+                .filter(|_| first_turn)
+                .map(|(root, mono)| monocode_core::mono::crew::identity(&root, &mono));
             let workspace = if isolated {
                 Some(match task.workspace.clone() {
                     Some(worker) if std::path::Path::new(&worker.checkout).is_dir() => worker,
@@ -659,7 +673,7 @@ impl Shell {
                     let store = locked(&store)?;
                     let mut summary = store.create(stored_provider(&task.provider), &project)?;
                     summary.provider = task.provider.clone();
-                    summary.title = format!("Agent · {}", task.title);
+                    summary.title = title;
                     store.title(summary.id, &summary.title)?;
                     store.save_agent_settings(summary.id, &settings)?;
                     Ok::<_, String>(Some(summary))
@@ -677,13 +691,21 @@ impl Shell {
                     return Err(error);
                 }
             };
-            Ok::<_, String>((created, settings, workspace))
+            Ok::<_, String>((created, settings, workspace, identity))
         });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
                 match result {
-                    Ok((created, settings, workspace)) => {
+                    Ok((created, settings, workspace, identity)) => {
+                        let prompt = match identity {
+                            Some(identity) => format!(
+                                "{identity}
+
+{prompt}"
+                            ),
+                            None => prompt,
+                        };
                         let session = match created {
                             Some(summary) => {
                                 let session = summary.id;
@@ -722,6 +744,58 @@ impl Shell {
             });
         })
         .detach();
+    }
+
+    /// In a Chief run, the persistent mono that does task `id`: the one
+    /// Chief named, else a free one that fits, else a new one while the run
+    /// may still make one. Returns where its files are and the mono.
+    fn bind_mono(
+        &mut self,
+        lead: i64,
+        id: &str,
+        cx: &mut Context<Self>,
+    ) -> Option<(std::path::PathBuf, monocode_core::mono::Mono)> {
+        let live = self.orchestrations.get(&lead)?;
+        live.run.requester?;
+        let task = live.run.task(id)?.clone();
+        let may_create = live.new_monos < control::MAX_NEW_MONOS;
+        // Busy in any run: a mono does one task at a time.
+        let busy: HashSet<String> = self
+            .orchestrations
+            .values()
+            .flat_map(|live| live.run.tasks.iter())
+            .filter(|t| {
+                t.id != task.id
+                    && matches!(t.status, Status::Queued | Status::Running)
+                    && t.mono.is_some()
+            })
+            .filter_map(|t| t.mono.clone())
+            .collect();
+        let monos = self.monos.clone()?;
+        let (mono, made) = monos.update(cx, |m, cx| {
+            m.crew_for_task(
+                task.mono.as_deref(),
+                task.handle.as_deref(),
+                &task.title,
+                &|mono| busy.contains(mono),
+                may_create,
+                cx,
+            )
+        })?;
+        let member = monos.read(cx).crew_member(&mono)?;
+        let live = self.orchestrations.get_mut(&lead)?;
+        if made {
+            live.new_monos += 1;
+            live.run.crew.push(control::CrewMember {
+                id: mono.clone(),
+                name: member.1.name.clone(),
+                specialty: member.1.specialty.clone().unwrap_or_default(),
+            });
+        }
+        if let Some(task) = live.run.task_mut(id) {
+            task.mono = Some(mono);
+        }
+        Some(member)
     }
 
     /// Once the lead is idle, hand it worker results and requests it has not
@@ -825,8 +899,14 @@ impl Shell {
         let paused = live.run.status == RunStatus::Paused;
         let ended = matches!(live.run.status, RunStatus::Finished | RunStatus::Stopped);
         let workers: Vec<i64> = live.run.tasks.iter().filter_map(|t| t.session).collect();
+        let report = ended
+            .then(|| live.run.requester.zip(live.run.chief_report()))
+            .flatten();
         if ended {
             self.orchestrations.remove(&lead);
+        }
+        if let Some((requester, report)) = report {
+            self.queue_chief_report(requester, report, cx);
         }
         if self.orchestration_summaries.get(&lead) != Some(&summary) {
             let store = self.store.clone();
@@ -865,14 +945,21 @@ impl Shell {
             .strip_prefix("control.")
             .unwrap_or_default()
             .to_owned();
-        if action == "swarm" {
+        // A lead's own `chief` call falls through to its run, which refuses it.
+        if action == "swarm"
+            || (action == "chief" && !self.orchestrations.contains_key(&call.session))
+        {
             if !valid_request_id(&call.request_id) {
                 let _ = call.reply.send(Err(
                     "request ID must use letters, digits, underscores or hyphens".into(),
                 ));
                 return;
             }
-            self.agent_swarm(call, cx);
+            if action == "chief" {
+                self.agent_chief(call, cx);
+            } else {
+                self.agent_swarm(call, cx);
+            }
             return;
         }
         // The lead, or one of its workers: those only reach the board.
@@ -1320,6 +1407,254 @@ impl Shell {
         );
     }
 
+    /// `control chief` from a coding chat's own turn: Chief, a mono in its
+    /// own chat, leads a run for the brief, giving tasks to the user's code
+    /// monos; the chat that asked gets Chief's summary once it is over.
+    fn agent_chief(&mut self, call: Call, cx: &mut Context<Self>) {
+        let requester = call.session;
+        let text = |key: &str, max: usize| {
+            call.input
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(|t| t.chars().take(max).collect::<String>())
+        };
+        let (Some(title), Some(brief)) = (text("title", 160), text("brief", 30_000)) else {
+            let _ = call.reply.send(Err(
+                "Give Chief a short \"title\" and a self-contained \"brief\".".into(),
+            ));
+            return;
+        };
+        // A retried call finds the run it opened, even paused.
+        if let Some(lead) = self
+            .orchestrations
+            .iter()
+            .find(|(_, live)| live.run.requester == Some(requester))
+            .map(|(lead, _)| *lead)
+        {
+            let _ = call.reply.send(Ok(control::chief_started(&title, lead)));
+            return;
+        }
+        let refusal = if self.orchestrations.contains_key(&requester) {
+            Some("This chat already coordinates a run; delegate within it.")
+        } else if self
+            .orchestrations
+            .values()
+            .any(|live| live.run.worker(requester).is_some())
+        {
+            Some("A mono cannot hand work to Chief. Ask @coordinator on the board instead.")
+        } else if !cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.chief_offer)
+        {
+            Some(
+                "The user has turned off handing work to monos (Settings > Chat). Work on the task here.",
+            )
+        } else if !self.sessions.get(&requester).is_some_and(|view| {
+            let view = view.read(cx);
+            view.settings.mono.is_none() && !view.is_remote() && !view.settings.worktree_removed
+        }) {
+            Some("Chief is not available in this chat.")
+        } else if self.app_bridge.is_none() && !cx.is_test() {
+            Some("monoBOT app access is unavailable, so Chief cannot launch monos.")
+        } else {
+            None
+        };
+        if let Some(refusal) = refusal {
+            let _ = call.reply.send(Err(refusal.into()));
+            return;
+        }
+        let Some((_, crew)) = self
+            .monos
+            .clone()
+            .and_then(|monos| monos.update(cx, |m, cx| m.chief_crew(cx)))
+        else {
+            let _ = call.reply.send(Err(
+                "Your monos are still loading; try again in a moment.".into()
+            ));
+            return;
+        };
+        let view = self.sessions[&requester].read(cx);
+        let project = view.summary.cwd.clone();
+        let checkout = view
+            .settings
+            .worktree_cwd
+            .clone()
+            .unwrap_or_else(|| project.clone());
+        if self.orchestrations.values().any(|live| {
+            monocode_core::files::path_key(live.checkout())
+                == monocode_core::files::path_key(&checkout)
+        }) {
+            let _ = call
+                .reply
+                .send(Err("Another run is already using this checkout.".into()));
+            return;
+        }
+        let assigned = vec![(view.summary.provider.clone(), view.settings.model.clone())];
+        let fallback = view.summary.provider.clone();
+        let profiles = self.run_profiles(&project, cx);
+        let claude = profiles
+            .iter()
+            .find(|(kind, _)| *kind == Kind::Claude)
+            .map(|(_, profile)| profile.clone())
+            .unwrap_or_default();
+        let path = checkout.clone();
+        let test = cx.is_test();
+        let reply = call.reply;
+        let work = cx.background_executor().spawn(async move {
+            let isolated = isolation::available(std::path::Path::new(&path));
+            // Opus at medium when Claude is installed; otherwise the
+            // requester's own harness and model.
+            // Tests keep the requester's fixture harness, which starts no agent.
+            let defaults = if !test && monocode_core::provider::resolve(Kind::Claude).is_some() {
+                control::Defaults::chief(
+                    &monocode_core::catalog::models_for(Kind::Claude, &claude).unwrap_or_default(),
+                )
+            } else {
+                control::Defaults {
+                    provider: fallback,
+                    ..Default::default()
+                }
+            };
+            let mut assigned = assigned;
+            assigned.push((defaults.provider.clone(), defaults.model.clone()));
+            (isolated, run_choices(profiles, assigned), defaults)
+        });
+        cx.spawn(async move |this, cx| {
+            let (isolated, choices, defaults) = work.await;
+            let _ = this.update(cx, |this, cx| {
+                let template = control::Task {
+                    provider: defaults.provider.clone(),
+                    model: defaults.model.clone(),
+                    effort: defaults.effort.clone(),
+                    ..Default::default()
+                };
+                let Some(mut settings) = this.worker_settings(requester, &template, cx) else {
+                    let _ = reply.send(Err("The chat that asked is gone.".into()));
+                    return;
+                };
+                settings.worktree_cwd = Some(checkout.clone());
+                let store = this.store.clone();
+                let provider = defaults.provider.clone();
+                let chief_title = format!("Chief · {title}");
+                let saved = settings.clone();
+                let project_dir = project.clone();
+                let created = cx.background_executor().spawn(async move {
+                    let store = locked(&store)?;
+                    let mut summary = store.create(stored_provider(&provider), &project_dir)?;
+                    summary.provider = provider;
+                    summary.title = chief_title;
+                    store.title(summary.id, &summary.title)?;
+                    store.save_agent_settings(summary.id, &saved)?;
+                    store.save_started_link(summary.id, requester)?;
+                    Ok::<_, String>(summary)
+                });
+                cx.spawn(async move |this, cx| {
+                    let created = created.await;
+                    let _ = this.update(cx, |this, cx| {
+                        let summary = match created {
+                            Ok(summary) => summary,
+                            Err(error) => {
+                                let _ = reply.send(Err(error));
+                                return;
+                            }
+                        };
+                        if this
+                            .orchestrations
+                            .values()
+                            .any(|live| live.run.requester == Some(requester))
+                        {
+                            let _ =
+                                reply.send(Err("Chief is already working for this chat.".into()));
+                            return;
+                        }
+                        let chief = summary.id;
+                        this.session_worktrees
+                            .insert(chief, settings.worktree_cwd.clone());
+                        this.started_by.insert(chief, requester);
+                        this.add(summary, cx);
+                        let run = Run::chief(
+                            chief,
+                            requester,
+                            &project,
+                            &checkout,
+                            isolated,
+                            &brief,
+                            choices,
+                            Some(defaults),
+                            crew,
+                        );
+                        this.sweep_worktrees(&run, cx);
+                        let prompt = control::chief_prompt(&brief, &cli(), &run.crew);
+                        let mut live = Live::new(run);
+                        live.lead_busy = true;
+                        this.orchestrations.insert(chief, live);
+                        if let Some(view) = this.sessions.get(&chief) {
+                            view.update(cx, |v, cx| v.install_transfer(settings, Some(prompt), cx));
+                        }
+                        let _ = reply.send(Ok(control::chief_started(&title, chief)));
+                        this.invalidate_chrome(cx);
+                        this.pump_orchestration(chief, cx);
+                        this.reveal_swarm(cx);
+                        cx.notify();
+                    });
+                })
+                .detach();
+            });
+        })
+        .detach();
+    }
+
+    /// Queue Chief's report for the chat that asked, saved until it lands.
+    fn queue_chief_report(&mut self, requester: i64, report: String, cx: &mut Context<Self>) {
+        let queue = self.chief_reports.entry(requester).or_default();
+        queue.push(report);
+        self.save_chief_reports(requester, cx);
+        self.deliver_chief_reports(requester, cx);
+    }
+
+    fn save_chief_reports(&mut self, requester: i64, cx: &mut Context<Self>) {
+        let reports = self
+            .chief_reports
+            .get(&requester)
+            .cloned()
+            .unwrap_or_default();
+        let store = self.store.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let _ = locked(&store).and_then(|s| s.save_chief_reports(requester, &reports));
+            })
+            .detach();
+    }
+
+    /// Hand the chat that asked Chief's reports once it is idle, as one
+    /// internal turn; never over the user's own turn or draft.
+    pub(super) fn deliver_chief_reports(&mut self, requester: i64, cx: &mut Context<Self>) {
+        if !self.chief_reports.contains_key(&requester) {
+            return;
+        }
+        if self.ensure_session(requester, cx).is_none() {
+            // The chat is gone: nobody is left to read them.
+            self.chief_reports.remove(&requester);
+            self.save_chief_reports(requester, cx);
+            return;
+        }
+        let Some(view) = self.sessions.get(&requester).cloned() else {
+            return;
+        };
+        if !view.read(cx).ready_for_external(cx) {
+            return;
+        }
+        let Some(reports) = self.chief_reports.remove(&requester) else {
+            return;
+        };
+        self.save_chief_reports(requester, cx);
+        view.update(cx, |v, cx| {
+            v.send_coordinator_report(reports.join("\n\n"), cx)
+        });
+    }
+
     /// Open a run with no tasks for chat `lead`, then call `done` with the
     /// outcome; on success the lead counts as busy, as it is mid-turn or
     /// about to start one.
@@ -1546,7 +1881,7 @@ impl Shell {
         }
         self.orchestrations
             .iter()
-            .find(|(_, live)| live.run.worker(id).is_some())
+            .find(|(_, live)| live.run.worker(id).is_some() || live.run.requester == Some(id))
             .map(|(lead, _)| *lead)
             .or_else(|| {
                 self.orchestration_summaries
@@ -1554,6 +1889,51 @@ impl Shell {
                     .find(|(_, summary)| summary.tasks.iter().any(|t| t.session == Some(id)))
                     .map(|(lead, _)| *lead)
             })
+    }
+
+    /// In a Chief run, the members that are monos: Chief as the
+    /// coordinator, and each task's mono.
+    fn member_looks(
+        &self,
+        lead: i64,
+        board: &Board,
+        cx: &App,
+    ) -> HashMap<String, crate::swarm::MemberLook> {
+        let (Some(live), Some(monos)) = (self.orchestrations.get(&lead), self.monos.as_ref())
+        else {
+            return HashMap::new();
+        };
+        let roster = &monos.read(cx).roster;
+        let look = |id: &str| {
+            roster
+                .monos
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| crate::swarm::MemberLook {
+                    face: m.face().into_owned(),
+                    color: m.color,
+                    name: m.label(),
+                })
+        };
+        board
+            .members
+            .iter()
+            .filter_map(|member| {
+                let mono = if member.handle == board::COORDINATOR {
+                    live.run.requester?;
+                    // There is one Chief; the roster keeps it across restarts.
+                    roster
+                        .monos
+                        .iter()
+                        .find(|m| monocode_core::mono::crew::is_chief(m))?
+                        .id
+                        .clone()
+                } else {
+                    live.run.task(member.task.as_deref()?)?.mono.clone()?
+                };
+                Some((member.handle.clone(), look(&mono)?))
+            })
+            .collect()
     }
 
     /// Show the board of the chat in view in the Swarm tab, or drop the tab.
@@ -1573,7 +1953,11 @@ impl Shell {
         let had = panel.read(cx).swarm_tab();
         match (lead, board) {
             (Some(lead), Some(board)) => {
-                swarm.update(cx, |s, cx| s.set_board(lead, board, cx));
+                let looks = self.member_looks(lead, &board, cx);
+                swarm.update(cx, |s, cx| {
+                    s.set_board(lead, board, cx);
+                    s.set_looks(looks, cx);
+                });
                 panel.update(cx, |p, cx| p.set_swarm_tab(true, cx));
             }
             _ => {

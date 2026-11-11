@@ -98,6 +98,8 @@ pub enum Outfit {
     Bow,
     Beret,
     Phone,
+    Captain,
+    HardHat,
 }
 
 impl Outfit {
@@ -115,6 +117,8 @@ impl Outfit {
             "social" => Self::Bow,
             "images" => Self::Beret,
             "phone" => Self::Phone,
+            "chief" => Self::Captain,
+            "coder" => Self::HardHat,
             _ => Self::Plain,
         }
     }
@@ -130,6 +134,8 @@ impl Outfit {
                 | Self::Mortarboard
                 | Self::Explorer
                 | Self::Beret
+                | Self::Captain
+                | Self::HardHat
         )
     }
 
@@ -142,6 +148,8 @@ impl Outfit {
             Self::Mortarboard => 0.08,
             Self::Explorer => 0.05,
             Self::Beret => -0.16,
+            Self::Captain => 0.06,
+            Self::HardHat => -0.05,
             _ => 0.,
         }
     }
@@ -848,6 +856,49 @@ impl Scene {
                     &mut best,
                     cone(hp, V(0.12, up(0.13), 0.), V(0.14, up(0.21), 0.), 0.03, 0.03),
                     matter(mix(felt, INK, 0.3), 0.2),
+                );
+            }
+            Outfit::Captain => {
+                // A white peaked cap: a flat top wider than its navy band,
+                // a short black visor in front and a gold badge on the band.
+                let navy = [0.13, 0.17, 0.34];
+                let top = melt(
+                    cylinder(hp, V(0., up(0.06), 0.), 0.33, 0.07),
+                    ellipsoid(hp, V(0., up(0.14), 0.), V(0.47, 0.08, 0.45)),
+                    0.05,
+                );
+                closer(&mut best, top, matter([0.97, 0.97, 0.95], 0.35));
+                closer(
+                    &mut best,
+                    cylinder(hp, V(0., up(-0.03), 0.), 0.345, 0.05),
+                    matter(navy, 0.4),
+                );
+                let visor = ellipsoid(hp, V(0., up(-0.08), 0.34), V(0.29, 0.035, 0.20));
+                closer(&mut best, visor.max(-(hp.2 - 0.22)), matter(INK, 0.9));
+                closer(
+                    &mut best,
+                    ellipsoid(hp, V(0., up(-0.01), 0.35), V(0.07, 0.05, 0.03)),
+                    matter(GOLD, 1.),
+                );
+            }
+            Outfit::HardHat => {
+                // A safety-yellow shell with a ridge down the middle and a
+                // thin brim all round.
+                let yellow = [1.0, 0.80, 0.10];
+                let shell = melt(
+                    ellipsoid(hp, V(0., up(-0.01), 0.), V(0.45, 0.29, 0.45)),
+                    ellipsoid(hp, V(0., up(0.0), 0.), V(0.07, 0.32, 0.43)),
+                    0.04,
+                );
+                closer(
+                    &mut best,
+                    shell.max(-(hp.1 - up(-0.06))),
+                    matter(yellow, 0.75),
+                );
+                closer(
+                    &mut best,
+                    cylinder(hp, V(0., up(-0.06), 0.04), 0.54, 0.016),
+                    matter(mix(yellow, INK, 0.12), 0.75),
                 );
             }
             Outfit::Flag => {

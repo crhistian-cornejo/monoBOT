@@ -50,6 +50,13 @@ pub(crate) fn spinner_at(fraction: f32) -> gpui::Div {
             }))
         }))
 }
+/// Tailwind teal-400, as TitleBar.tsx: what finished work shows.
+const DONE: u32 = 0x2dd4bf;
+/// The circled check of finished work: a session, a subagent.
+pub(crate) fn done_check(side: f32) -> gpui::Svg {
+    icon("check-circle-2", side).text_color(rgb(DONE))
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum State {
     Idle,
@@ -113,12 +120,11 @@ impl Render for SessionMark {
                 .role(Role::Image)
                 .aria_label("Working")
                 .into_any_element(),
-            // Tailwind teal-400 and amber-400, as TitleBar.tsx.
             State::Done => div()
                 .id("session-done")
                 .role(Role::Image)
                 .aria_label("Done")
-                .child(icon("check-circle-2", 14.).text_color(rgb(0x2dd4bf)))
+                .child(done_check(14.))
                 .into_any_element(),
             State::Attention => div()
                 .id("session-attention")

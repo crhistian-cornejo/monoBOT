@@ -154,6 +154,21 @@ Windows toasts show monoBOT's logo: at startup the app writes it to
 `IconUri` of its AppUserModelID (`dev.usemono.gpui`), which GPUI registers by
 name only.
 
+## Subagents and background work in the chat
+
+A reply's subagents (Claude's Task tool, Codex's agents) list under it, one
+row each, as T3 Code shows them: a status mark (the working spinner, the
+teal check once done, a red cross when it failed, a dashed circle when its
+turn ended first), the title, the model and step count, and under it the
+latest step while it runs or the first line of its report once done. Two or
+more share a header, "6 subagents · 3 working · 3 done", with one mark for the
+group. Mono faces belong to the user's own agents, so a provider's subagent
+never wears one (`transcript/subagent_mark.rs`).
+
+Commands and subagents still running after the reply sit in the chat too, as
+a card under it ("2 tasks running in background · Claude Code continues when
+they finish"), not over the composer (`transcript/background.rs`).
+
 ## Agents tab
 
 When the Claude chat in view starts subagents or a workflow, the right panel

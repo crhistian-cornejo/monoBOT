@@ -41,9 +41,20 @@ impl SwarmTab {
     }
 }
 
+/// The mono a member is, in a Chief run: its face, colour and name.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct MemberLook {
+    pub face: String,
+    pub color: u32,
+    pub name: String,
+}
+
 pub(crate) struct SwarmPanel {
     lead: Option<i64>,
     board: Arc<Board>,
+    /// Members that are monos, by handle; the others wear the board's
+    /// pixel mascots.
+    looks: Arc<HashMap<String, MemberLook>>,
     tab: SwarmTab,
     query: Entity<Input>,
     member_query: Entity<Input>,
@@ -90,8 +101,11 @@ pub(crate) fn live_color() -> Hsla {
     rgb(DIFF_ADD).into()
 }
 
-fn member_avatar(ix: usize, member: &Member, side: f32) -> AnyElement {
-    let (mascot, _) = Board::look(ix);
+fn member_avatar(ix: usize, member: &Member, look: Option<&MemberLook>, side: f32) -> AnyElement {
+    let (mascot, color) = match look {
+        Some(look) => (look.face.as_str(), look.color),
+        None => (Board::look(ix).0, member_color(ix)),
+    };
     let status = if member.state == State::Working {
         "working"
     } else {
@@ -110,7 +124,7 @@ fn member_avatar(ix: usize, member: &Member, side: f32) -> AnyElement {
         .justify_center()
         .child(avatar::avatar(
             mascot,
-            member_color(ix),
+            color,
             status,
             side,
             !member.state.active(),
@@ -226,6 +240,7 @@ impl SwarmPanel {
         Self {
             lead: None,
             board: Arc::new(Board::default()),
+            looks: Default::default(),
             tab: SwarmTab::Board,
             query,
             member_query,
@@ -291,6 +306,14 @@ impl SwarmPanel {
         self.timeline
             .follow(self.board.posts.len(), latest > latest_before && same, cx);
         cx.notify();
+    }
+
+    /// Which members are monos, for their faces and names.
+    pub(crate) fn set_looks(&mut self, looks: HashMap<String, MemberLook>, cx: &mut Context<Self>) {
+        if *self.looks != looks {
+            self.looks = Arc::new(looks);
+            cx.notify();
+        }
     }
 
     /// Forget the board when the chat in view has none.
@@ -552,6 +575,7 @@ impl SwarmPanel {
     fn board_tab(&self, cx: &mut Context<Self>) -> AnyElement {
         let entity = cx.entity().downgrade();
         let board = self.board.clone();
+        let looks = self.looks.clone();
         let rows = self.rows.clone();
         let divider = self.divider;
         let body = if self.board.posts.is_empty() {
@@ -566,7 +590,7 @@ impl SwarmPanel {
                     return div().into_any_element();
                 };
                 let new = divider.is_some_and(|d| post.seq == d);
-                post_row(&board, post, new, entity.clone())
+                post_row(&board, &looks, post, new, entity.clone())
             })
             .size_full()
             .into_any_element()
@@ -697,6 +721,7 @@ impl SwarmPanel {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let handle = member.handle.clone();
+        let look = self.looks.get(&handle);
         let state = if member.coordinator() {
             Section::Coordinator.label().to_owned()
         } else {
@@ -736,7 +761,7 @@ impl SwarmPanel {
                     .hover(|s| s.bg(content(0.04)))
                     .on_click(cx.listener(move |this, _, _, cx| this.open_member(&handle, cx)))
             })
-            .child(member_avatar(ix, member, 22.))
+            .child(member_avatar(ix, member, look, 22.))
             .child(
                 div()
                     .flex_1()
@@ -756,7 +781,10 @@ impl SwarmPanel {
                                     .text_size(px(12.5))
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(content(0.95))
-                                    .child(format!("@{}", member.handle)),
+                                    .child(match look {
+                                        Some(look) => format!("{} · @{}", look.name, member.handle),
+                                        None => format!("@{}", member.handle),
+                                    }),
                             )
                             .child(
                                 div()
@@ -824,13 +852,20 @@ fn empty(text: &'static str) -> AnyElement {
 
 /// One post of the Board tab, after the «New» divider when it is the first
 /// unseen one.
-fn post_row(board: &Board, post: &Post, new: bool, panel: WeakEntity<SwarmPanel>) -> AnyElement {
+fn post_row(
+    board: &Board,
+    looks: &HashMap<String, MemberLook>,
+    post: &Post,
+    new: bool,
+    panel: WeakEntity<SwarmPanel>,
+) -> AnyElement {
     let ix = board
         .members
         .iter()
         .position(|m| m.handle == post.from)
         .unwrap_or(0);
     let member = board.members.get(ix).cloned().unwrap_or_default();
+    let look = looks.get(&member.handle).cloned();
     let from = post.from.clone();
     let automatic = post.kind != Kind::Message;
     div()
@@ -878,7 +913,7 @@ fn post_row(board: &Board, post: &Post, new: bool, panel: WeakEntity<SwarmPanel>
                                 let _ = panel.update(cx, |this, cx| this.open_member(&from, cx));
                             })
                         })
-                        .child(member_avatar(ix, &member, 18.)),
+                        .child(member_avatar(ix, &member, look.as_ref(), 18.)),
                 )
                 .child(
                     div()

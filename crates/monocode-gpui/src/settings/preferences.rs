@@ -78,6 +78,9 @@ pub(crate) struct Preferences {
     /// A coding chat may turn itself into a swarm coordinator for a large
     /// task (`control swarm`), as /swarm does.
     pub swarm_offer: bool,
+    /// A Claude coding chat may hand a large parallel task to Chief, who
+    /// coordinates the user's persistent code monos (`control chief`).
+    pub chief_offer: bool,
     pub follow_up: String,
     pub model_controls: String,
     pub autocorrect: bool,
@@ -196,6 +199,7 @@ impl Default for Preferences {
             tool_visibility: "all".into(),
             fold_finished_work: true,
             swarm_offer: false,
+            chief_offer: true,
             follow_up: "steer".into(),
             model_controls: "menu".into(),
             autocorrect: false,

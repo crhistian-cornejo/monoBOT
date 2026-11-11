@@ -395,6 +395,16 @@ fn agent(
         monocode_core::provider::Kind::parse(&view.provider)
             .unwrap_or(monocode_core::provider::Kind::Codex),
     );
+    // Under the title, as T3 Code's rows: what it does now while it runs,
+    // its answer's first line once it finished. Open, the trail says it.
+    let detail = if open {
+        None
+    } else if call.state == ToolState::Running {
+        run.latest_step().filter(|_| active)
+    } else {
+        report.map(monocode_core::tool::tasks::plain_line)
+    }
+    .filter(|line| !line.is_empty());
     let header = div()
         .id(SharedString::from(key.clone()))
         .debug_selector(move || format!("subagent-{start}"))
@@ -429,73 +439,107 @@ fn agent(
             d.cursor_pointer().hover(|s| s.bg(content(0.08)))
         })
         .when(has_detail && open, |d| d.bg(content(0.08)))
-        .child(super::mascot::subagent_mascot(
-            &name,
-            &call.state,
-            active && view.visible,
-        ))
+        .when(detail.is_some(), |d| d.items_start())
+        .child(
+            div()
+                .h(px(20.))
+                .flex()
+                .items_center()
+                .child(super::subagent_mark(
+                    SharedString::from(format!("subagent-mark:{start}:{}", call.id)),
+                    &call.state,
+                    active && view.visible,
+                    cx.reduce_motion(),
+                )),
+        )
         .child(
             div()
                 .flex()
-                .items_baseline()
-                .gap_2()
+                .flex_col()
                 .min_w_0()
                 .flex_1()
                 .child(
                     div()
-                        .flex_1()
+                        .flex()
+                        .items_baseline()
+                        .gap_2()
                         .min_w_0()
-                        .truncate()
-                        .text_color(if failed {
-                            rgb(0xf87171).into()
-                        } else {
-                            content(0.75)
-                        })
-                        .group_hover("subagent-row", |s| {
-                            s.text_color(if failed {
-                                rgb(0xf87171).into()
-                            } else {
-                                content(1.)
-                            })
-                        })
-                        .child(if active && view.visible && !cx.reduce_motion() {
-                            crate::activity::shimmer(
-                                name.clone(),
-                                view.started_at.elapsed().as_secs_f32(),
+                        .w_full()
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_color(if failed {
+                                    rgb(0xf87171).into()
+                                } else {
+                                    content(0.75)
+                                })
+                                .group_hover("subagent-row", |s| {
+                                    s.text_color(if failed {
+                                        rgb(0xf87171).into()
+                                    } else {
+                                        content(1.)
+                                    })
+                                })
+                                .child(if active && view.visible && !cx.reduce_motion() {
+                                    crate::activity::shimmer(
+                                        name.clone(),
+                                        view.started_at.elapsed().as_secs_f32(),
+                                    )
+                                } else {
+                                    div().child(name).into_any_element()
+                                }),
+                        )
+                        .when(model.is_some() || !status.is_empty(), |d| {
+                            d.child(
+                                div()
+                                    .flex()
+                                    .items_baseline()
+                                    .gap_2()
+                                    .min_w_0()
+                                    .max_w(gpui::relative(0.55))
+                                    .flex_shrink_0()
+                                    .text_size(px(12.))
+                                    .text_color(content(0.4))
+                                    .when_some(model, |d, model| {
+                                        d.child(div().min_w_0().truncate().child(model))
+                                    })
+                                    .when(!status.is_empty(), |d| {
+                                        d.child(div().flex_shrink_0().child(status))
+                                    }),
                             )
-                        } else {
-                            div().child(name).into_any_element()
                         }),
                 )
-                .when(model.is_some() || !status.is_empty(), |d| {
+                .when_some(detail, |d, detail| {
                     d.child(
                         div()
-                            .flex()
-                            .items_baseline()
-                            .gap_2()
+                            .w_full()
                             .min_w_0()
-                            .max_w(gpui::relative(0.55))
-                            .flex_shrink_0()
+                            .truncate()
                             .text_size(px(12.))
-                            .text_color(content(0.4))
-                            .when_some(model, |d, model| {
-                                d.child(div().min_w_0().truncate().child(model))
+                            .line_height(px(16.))
+                            .text_color(if failed {
+                                rgb(0xf87171).into()
+                            } else {
+                                content(0.45)
                             })
-                            .when(!status.is_empty(), |d| {
-                                d.child(div().flex_shrink_0().child(status))
-                            }),
+                            .child(detail),
                     )
                 }),
         )
-        .child(if has_detail {
-            icon("chevron-right", 14.)
-                .flex_shrink_0()
-                .text_color(content(0.35))
-                .with_transformation(Transformation::rotate(percentage(rotation * 0.25)))
-                .into_any_element()
-        } else {
-            div().size(px(14.)).flex_shrink_0().into_any_element()
-        })
+        .child(
+            // On the title's line when a detail line sits under it.
+            div().h(px(20.)).flex().items_center().child(if has_detail {
+                icon("chevron-right", 14.)
+                    .flex_shrink_0()
+                    .text_color(content(0.35))
+                    .with_transformation(Transformation::rotate(percentage(rotation * 0.25)))
+                    .into_any_element()
+            } else {
+                div().size(px(14.)).flex_shrink_0().into_any_element()
+            }),
+        )
         .on_click(cx.listener(move |this, _, _, cx| {
             if has_detail {
                 this.toggle_agent_part(toggle_key.clone(), !open, start, cx);

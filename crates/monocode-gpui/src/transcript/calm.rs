@@ -1,7 +1,7 @@
 //! The quieter transcript: which steps a reply shows (Settings › Chat ›
 //! Tool visibility), the last thought under a running phase's live line,
 //! the files a settled turn changed and the header that gathers a turn's
-//! subagents under their faces.
+//! subagents under one status mark.
 use super::*;
 use crate::right_panel::tabular;
 use gpui::AnyElement;
@@ -125,16 +125,16 @@ pub(super) fn turn_changes(rows: &[Row]) -> Option<Arc<TurnChanges>> {
 pub(super) struct Subagents {
     /// The first run's row; the group is known by it.
     pub first: usize,
-    pub faces: Vec<(String, ToolState)>,
+    pub members: Vec<(String, ToolState)>,
 }
 impl Subagents {
     fn label(&self) -> String {
         let count =
-            |state: fn(&ToolState) -> bool| self.faces.iter().filter(|(_, s)| state(s)).count();
+            |state: fn(&ToolState) -> bool| self.members.iter().filter(|(_, s)| state(s)).count();
         let working = count(|s| *s == ToolState::Running);
         let done = count(|s| *s == ToolState::Completed);
         let failed = count(|s| matches!(s, ToolState::Failed | ToolState::Cancelled));
-        let mut parts = vec![format!("{} subagents", self.faces.len())];
+        let mut parts = vec![format!("{} subagents", self.members.len())];
         if working > 0 {
             parts.push(format!("{working} working"));
         }
@@ -150,8 +150,6 @@ impl Subagents {
 
 /// The files shown before a "more" line.
 const FILES: usize = 5;
-/// How far each face tucks under the one before it.
-const FACE_OVERLAP: f32 = 5.;
 
 impl TranscriptView {
     /// The files the settled turn `turn..turn_end` changed, read once per
@@ -332,7 +330,8 @@ impl TranscriptView {
             .into_any_element()
     }
 
-    /// "3 subagents · 2 working · 1 done" beside their faces; a click shows
+    /// "3 subagents · 2 working · 1 done" beside one mark for the group (the
+    /// spinner while any works, the check once all are done); a click shows
     /// or hides their cards.
     pub(super) fn subagents_header(
         &mut self,
@@ -343,19 +342,23 @@ impl TranscriptView {
         let open = !self.folded_subagents(first);
         let label = group.label();
         let working = group
-            .faces
+            .members
             .iter()
             .any(|(_, state)| *state == ToolState::Running);
-        let faces = group.faces.iter().enumerate().map(|(ix, (name, state))| {
-            div()
-                .when(ix > 0, |d| d.ml(px(-FACE_OVERLAP)))
-                .rounded_full()
-                .child(super::mascot::subagent_mascot(
-                    name,
-                    state,
-                    *state == ToolState::Running && !cx.reduce_motion(),
-                ))
-        });
+        let live = self.streaming && self.visible;
+        let marks: Vec<_> = group
+            .members
+            .iter()
+            .map(|(_, state)| super::subagent_mark::mark(state, live))
+            .collect();
+        let state = match super::subagent_mark::group_mark(&marks) {
+            super::subagent_mark::Mark::Working => ToolState::Running,
+            super::subagent_mark::Mark::Done => ToolState::Completed,
+            super::subagent_mark::Mark::Failed => ToolState::Failed,
+            super::subagent_mark::Mark::Stopped => ToolState::Cancelled,
+        };
+        let mark =
+            super::subagent_mark(("subagents-mark", first), &state, live, cx.reduce_motion());
         div()
             .id(("subagents", first))
             .debug_selector(move || format!("subagents-{first}"))
@@ -374,7 +377,7 @@ impl TranscriptView {
             .text_color(content(0.5))
             .cursor_pointer()
             .hover(|s| s.text_color(content(0.8)))
-            .child(div().flex().items_center().flex_shrink_0().children(faces))
+            .child(mark)
             .child(
                 div()
                     .min_w_0()

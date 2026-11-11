@@ -440,3 +440,216 @@ fn swarm_roles_pin_a_harness_and_model_to_a_handle() {
         .contains("control --help"));
     assert!(swarm_offer("/bin/m").contains("control swarm"));
 }
+
+fn chief_run() -> Run {
+    Run::chief(
+        9,
+        3,
+        "/repo",
+        "/repo",
+        true,
+        "Migrate auth",
+        vec![
+            Choice {
+                provider: "claude".into(),
+                models: vec!["sonnet".into(), "opus".into()],
+            },
+            Choice {
+                provider: "codex".into(),
+                models: Vec::new(),
+            },
+        ],
+        Some(Defaults {
+            provider: "claude".into(),
+            model: Some("opus".into()),
+            effort: Some("medium".into()),
+        }),
+        vec![CrewMember {
+            id: "mono-a".into(),
+            name: "Ada".into(),
+            specialty: "Rust backends".into(),
+        }],
+    )
+}
+
+#[test]
+fn chief_delegates_with_opus_at_medium_unless_told_otherwise() {
+    let mut run = chief_run();
+    assert_eq!((run.lead, run.requester), (9, Some(3)));
+    let (task, _) = run
+        .execute(
+            "delegate",
+            &json!({"title":"Keys","prompt":"Rotate keys","files":["src/keys"]}),
+            &none,
+        )
+        .unwrap();
+    let task = run.task(task["taskId"].as_str().unwrap()).unwrap();
+    assert_eq!(task.provider, "claude");
+    assert_eq!(task.model.as_deref(), Some("opus"));
+    assert_eq!(task.effort.as_deref(), Some("medium"));
+
+    // Another model keeps its own default effort.
+    let (task, _) = run
+        .execute(
+            "delegate",
+            &json!({"title":"Docs","prompt":"Write docs","files":["docs"],"model":"sonnet"}),
+            &none,
+        )
+        .unwrap();
+    let task = run.task(task["taskId"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (task.model.as_deref(), task.effort.as_deref()),
+        (Some("sonnet"), None)
+    );
+    let (task, _) = run
+        .execute(
+            "delegate",
+            &json!({"title":"Tests","prompt":"Test","files":["tests"],"harness":"codex"}),
+            &none,
+        )
+        .unwrap();
+    let task = run.task(task["taskId"].as_str().unwrap()).unwrap();
+    assert_eq!(
+        (task.model.as_deref(), task.effort.as_deref()),
+        (None, None)
+    );
+}
+
+#[test]
+fn chief_gives_a_task_to_a_named_mono_once_at_a_time() {
+    let mut run = chief_run();
+    let (task, _) = run
+        .execute(
+            "delegate",
+            &json!({"title":"Keys","prompt":"Rotate","files":["src/keys"],"mono":"ada"}),
+            &none,
+        )
+        .unwrap();
+    let id = task["taskId"].as_str().unwrap().to_owned();
+    assert_eq!(run.task(&id).unwrap().mono.as_deref(), Some("mono-a"));
+    assert!(run.mono_busy("mono-a"));
+    let busy = run
+        .execute(
+            "delegate",
+            &json!({"title":"More","prompt":"More","files":["src/more"],"mono":"Ada"}),
+            &none,
+        )
+        .unwrap_err();
+    assert!(busy.contains("already working"), "{busy}");
+    let unknown = run
+        .execute(
+            "delegate",
+            &json!({"title":"More","prompt":"More","files":["src/more"],"mono":"Zed"}),
+            &none,
+        )
+        .unwrap_err();
+    assert!(unknown.contains("Crew: Ada"), "{unknown}");
+    let (list, _) = run.execute("list", &json!({}), &none).unwrap();
+    assert_eq!(list["crew"][0]["mono"], "Ada");
+    assert_eq!(list["crew"][0]["busy"], true);
+    assert_eq!(list["defaults"]["effort"], "medium");
+
+    // An ordinary swarm has no crew.
+    let mut swarm = Run::swarm(7, "/repo", "/repo", true, "Go", run.choices.clone(), 2);
+    let refused = swarm
+        .execute(
+            "delegate",
+            &json!({"title":"A","prompt":"A","files":["a"],"harness":"claude","mono":"Ada"}),
+            &none,
+        )
+        .unwrap_err();
+    assert!(refused.contains("only for Chief"), "{refused}");
+}
+
+#[test]
+fn chief_finishes_with_a_summary_for_the_chat_that_asked() {
+    let mut run = chief_run();
+    assert_eq!(run.chief_report(), None, "nothing to report while it runs");
+    let missing = run.execute("finish", &json!({}), &none).unwrap_err();
+    assert!(missing.contains("summary"), "{missing}");
+    run.execute(
+        "finish",
+        &json!({"summary":"Keys rotate on login; tests pass."}),
+        &none,
+    )
+    .unwrap();
+    let report = run.chief_report().unwrap();
+    assert!(report.contains("Request: Migrate auth"), "{report}");
+    assert!(
+        report.contains("Keys rotate on login; tests pass."),
+        "{report}"
+    );
+
+    // An ordinary run reports nothing and needs no summary.
+    let mut swarm = Run::swarm(7, "/repo", "/repo", true, "Go", run.choices.clone(), 2);
+    swarm.execute("finish", &json!({}), &none).unwrap();
+    assert_eq!(swarm.chief_report(), None);
+
+    let mut stopped = chief_run();
+    stopped.stop();
+    assert!(stopped
+        .chief_report()
+        .unwrap()
+        .contains("stopped before it finished"));
+}
+
+#[test]
+fn saved_runs_from_before_chief_still_load() {
+    let old = json!({"version":1,"lead":7,"project":"/repo","checkout":"/repo","status":"active","tasks":[{"id":"t1","title":"A","provider":"claude"}]});
+    let run: Run = serde_json::from_value(old).unwrap();
+    assert_eq!(run.requester, None);
+    assert!(run.crew.is_empty());
+    assert_eq!(run.tasks[0].mono, None);
+}
+
+#[test]
+fn the_chief_prompts_carry_the_crew_and_the_rules() {
+    let crew = [CrewMember {
+        id: "mono-a".into(),
+        name: "Ada".into(),
+        specialty: "Rust backends".into(),
+    }];
+    let prompt = chief_prompt("Migrate auth", "/bin/monobot", &crew);
+    assert!(prompt.starts_with("Migrate auth"));
+    assert!(prompt.contains("Ada (Rust backends)"));
+    assert!(prompt.contains("finish with {\"summary\""));
+    assert!(chief_prompt("X", "/bin/monobot", &[]).contains("no monos yet"));
+    assert!(chief_offer("/bin/monobot").contains("control chief"));
+    assert_eq!(chief_started("Auth", 12)["chief"], 12);
+    check_fields("chief", &json!({"title":"A","brief":"B"})).unwrap();
+    assert!(check_fields("chief", &json!({"title":"A","model":"x"})).is_err());
+}
+
+#[test]
+fn chief_defaults_to_opus_at_medium_from_the_catalog() {
+    let model = |id: &str, alias: Option<&str>, efforts: &[&str]| crate::catalog::Model {
+        id: id.into(),
+        name: id.into(),
+        alias_target: alias.map(Into::into),
+        efforts: efforts.iter().map(|e| (*e).into()).collect(),
+        default_effort: efforts.iter().find(|e| **e == "high").map(|e| (*e).into()),
+        fast: false,
+        thinking: false,
+        default: false,
+        tiers: Vec::new(),
+        controls: Vec::new(),
+    };
+    let catalog = [
+        model("claude-sonnet-5", None, &["low", "medium", "high"]),
+        model(
+            "opus",
+            Some("claude-opus-5-5"),
+            &["low", "medium", "high", "max"],
+        ),
+    ];
+    let defaults = Defaults::chief(&catalog);
+    assert_eq!(defaults.provider, "claude");
+    assert_eq!(defaults.model.as_deref(), Some("opus"));
+    assert_eq!(defaults.effort.as_deref(), Some("medium"));
+    // Without medium, the model's own default effort.
+    let defaults = Defaults::chief(&[model("opus", None, &["low", "high", "max"])]);
+    assert_eq!(defaults.effort.as_deref(), Some("high"));
+    // No Opus at all: Claude's default model.
+    let defaults = Defaults::chief(&[model("claude-sonnet-5", None, &["medium"])]);
+    assert_eq!((defaults.model, defaults.effort), (None, None));
+}

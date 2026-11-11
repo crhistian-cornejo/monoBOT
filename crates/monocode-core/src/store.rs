@@ -504,6 +504,21 @@ impl Store {
             .filter_map(|(lead, value)| Some((lead, serde_json::from_str(&value).ok()?)))
             .collect())
     }
+    /// Chief's summaries still waiting for the chat that asked, by that chat.
+    pub fn chief_reports(&self) -> Result<std::collections::HashMap<i64, Vec<String>>, String> {
+        Ok(self
+            .settings_with_prefix("chief-report:")?
+            .into_iter()
+            .filter_map(|(chat, value)| {
+                let reports: Vec<String> = serde_json::from_str(&value).ok()?;
+                (!reports.is_empty()).then_some((chat, reports))
+            })
+            .collect())
+    }
+    pub fn save_chief_reports(&self, chat: i64, reports: &[String]) -> Result<(), String> {
+        let value = serde_json::to_string(reports).map_err(|e| e.to_string())?;
+        self.save_setting(&format!("chief-report:{chat}"), &value)
+    }
     pub fn save_orchestration_run(
         &self,
         run: &crate::orchestration::control::Run,
@@ -1331,8 +1346,15 @@ mod tests {
             ..Default::default()
         };
         store.save_orchestration_run(&run).unwrap();
+        store
+            .save_chief_reports(lead, &["Chief finished.".into()])
+            .unwrap();
+        store.save_chief_reports(child, &[]).unwrap();
         drop(store);
         let mut store = Store::open(&path).unwrap();
+        let reports = store.chief_reports().unwrap();
+        assert_eq!(reports[&lead], ["Chief finished."]);
+        assert!(!reports.contains_key(&child), "an emptied queue is gone");
         assert_eq!(store.started_links().unwrap()[&child], lead);
         assert_eq!(store.orchestration_summaries().unwrap()[&lead], summary);
         assert_eq!(store.orchestration_runs().unwrap()[&lead], run);

@@ -899,6 +899,57 @@ impl Monos {
         cx.emit(Changed);
         cx.notify();
     }
+    /// Chief's own mono, made the first time a chat hands work to Chief,
+    /// and the user's code monos it may give tasks to.
+    pub(crate) fn chief_crew(
+        &mut self,
+        cx: &mut Context<Self>,
+    ) -> Option<(
+        String,
+        Vec<monocode_core::orchestration::control::CrewMember>,
+    )> {
+        let (chief, made) = mono::crew::ensure_chief(&mut self.roster, &self.root)?;
+        if made {
+            self.save(cx);
+            self.changed(cx);
+        }
+        Some((chief, mono::crew::members(&self.roster)))
+    }
+
+    /// The code mono that does a task: the one Chief named, else a free one
+    /// that fits, else, when `may_create`, a new one that stays with the
+    /// user. Its id, and whether it was just made.
+    pub(crate) fn crew_for_task(
+        &mut self,
+        asked: Option<&str>,
+        handle: Option<&str>,
+        title: &str,
+        busy: &dyn Fn(&str) -> bool,
+        may_create: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<(String, bool)> {
+        if let Some(id) = asked.filter(|id| self.roster.monos.iter().any(|m| m.id == *id)) {
+            return Some((id.to_owned(), false));
+        }
+        if let Some(id) = mono::crew::pick(&self.roster, handle, title, busy) {
+            return Some((id, false));
+        }
+        if !may_create {
+            return None;
+        }
+        let id = mono::crew::create(&mut self.roster, &self.root, handle, title)?;
+        self.save(cx);
+        self.changed(cx);
+        Some((id, true))
+    }
+
+    /// A crew mono and the folder its files live in, to read its identity
+    /// off the UI thread.
+    pub(crate) fn crew_member(&self, id: &str) -> Option<(PathBuf, Mono)> {
+        let mono = self.roster.monos.iter().find(|m| m.id == id)?.clone();
+        Some((self.root.clone(), mono))
+    }
+
     fn save(&mut self, cx: &mut Context<Self>) {
         self.sync_soon();
         let roster = self.roster.clone();

@@ -643,6 +643,9 @@ pub(crate) struct Shell {
     orchestration_control: orchestration::Control,
     /// Each lead's last orchestration, whose agents hang under it in the sidebar.
     orchestration_summaries: HashMap<i64, monocode_core::orchestration::Summary>,
+    /// Chief's summaries waiting for the chat that handed it the work, by
+    /// that chat; delivered once it is idle.
+    chief_reports: HashMap<i64, Vec<String>>,
     /// Sessions an /operator thread started, by the session that started them.
     started_by: HashMap<i64, i64>,
     /// The sidebar rails under orchestrators and /operator threads.
@@ -1076,6 +1079,7 @@ impl Shell {
             orchestrations: orchestration::restore(sidebar_metadata.orchestration_runs),
             orchestration_control: Default::default(),
             orchestration_summaries: sidebar_metadata.orchestrations,
+            chief_reports: sidebar_metadata.chief_reports,
             started_by: sidebar_metadata.started_by,
             rails: Default::default(),
             usage_footer: cx.new(|cx| UsageFooter::new(active_kind, cx)),

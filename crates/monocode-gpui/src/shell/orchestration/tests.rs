@@ -760,3 +760,153 @@ fn a_role_pinned_to_a_harness_the_run_lacks_sends_swarm_back(cx: &mut TestAppCon
         })
         .unwrap();
 }
+
+#[gpui::test]
+fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut TestAppContext) {
+    let (window, requester, _dir) = shell(cx);
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    let missing = window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            call(
+                shell,
+                requester,
+                "chief",
+                "c1",
+                json!({"title": "Auth"}),
+                cx,
+            )
+        })
+        .unwrap();
+    assert!(missing.try_recv().unwrap().unwrap_err().contains("brief"));
+    let started = window
+        .update(cx, |shell, _, cx| {
+            call(
+                shell,
+                requester,
+                "chief",
+                "c2",
+                json!({"title": "Auth", "brief": "Rotate the keys in src"}),
+                cx,
+            )
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let value = started.try_recv().unwrap().unwrap();
+    let chief = value["chief"].as_i64().unwrap();
+    assert!(
+        value["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("End your turn")
+    );
+    window
+        .update(cx, |shell, _, cx| {
+            let live = &shell.orchestrations[&chief];
+            assert_eq!(live.run.requester, Some(requester));
+            assert_eq!(live.run.request, "Rotate the keys in src");
+            assert_eq!(shell.started_by[&chief], requester);
+            assert!(
+                shell.sessions[&chief]
+                    .read(cx)
+                    .summary
+                    .title
+                    .starts_with("Chief · ")
+            );
+            let monos = shell.monos.as_ref().unwrap().read(cx);
+            assert!(
+                monos
+                    .roster
+                    .monos
+                    .iter()
+                    .any(monocode_core::mono::crew::is_chief),
+                "Chief stays as one of the user's agents"
+            );
+            // The chat that asked shows Chief's board.
+            assert_eq!(shell.swarm_lead(requester), Some(chief));
+            // Asked again, it answers with the run it opened.
+            let again = call(
+                shell,
+                requester,
+                "chief",
+                "c3",
+                json!({"title": "Auth", "brief": "Again"}),
+                cx,
+            );
+            assert_eq!(again.try_recv().unwrap().unwrap()["chief"], chief);
+            // The fixture harness ends Chief's first turn at once; keep the
+            // run going and Chief idle under a draft, as a real turn would.
+            let live = shell.orchestrations.get_mut(&chief).unwrap();
+            live.run.status = RunStatus::Active;
+            live.run.error = None;
+            live.lead_busy = false;
+            hold_lead(shell, chief, cx);
+        })
+        .unwrap();
+    let delegated = window
+        .update(cx, |shell, _, cx| {
+            call(
+                shell,
+                chief,
+                "delegate",
+                "d1",
+                json!({"title": "Keys", "prompt": "Rotate them", "files": ["src"], "handle": "tester"}),
+                cx,
+            )
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let task = delegated.try_recv().unwrap().unwrap()["taskId"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    window
+        .update(cx, |shell, _, cx| {
+            let live = &shell.orchestrations[&chief];
+            let mono = live.run.task(&task).unwrap().mono.clone().expect("a mono");
+            assert_eq!(live.new_monos, 1);
+            assert!(
+                live.run
+                    .crew
+                    .iter()
+                    .any(|m| m.id == mono && m.name == "Tester")
+            );
+            let monos = shell.monos.as_ref().unwrap().read(cx);
+            let made = monos.roster.monos.iter().find(|m| m.id == mono).unwrap();
+            assert!(monocode_core::mono::crew::is_coder(made));
+            let worker = live.run.task(&task).unwrap().session.expect("a session");
+            assert!(
+                shell.sessions[&worker]
+                    .read(cx)
+                    .summary
+                    .title
+                    .starts_with("Tester · ")
+            );
+        })
+        .unwrap();
+    // Chief drops the task and finishes: the chat that asked gets one report.
+    let finished = window
+        .update(cx, |shell, _, cx| {
+            call(shell, chief, "cancel", "x1", json!({"taskId": task}), cx);
+            call(
+                shell,
+                chief,
+                "finish",
+                "f1",
+                json!({"summary": "Nothing changed; the keys task was dropped."}),
+                cx,
+            )
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert!(finished.try_recv().unwrap().is_ok());
+    window
+        .update(cx, |shell, _, _| {
+            assert!(!shell.orchestrations.contains_key(&chief));
+            assert!(
+                !shell.chief_reports.contains_key(&requester),
+                "the idle chat that asked got the report at once"
+            );
+        })
+        .unwrap();
+}

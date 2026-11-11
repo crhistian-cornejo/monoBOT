@@ -141,6 +141,53 @@ flowchart TD
     alguien trabaja y la pestaña está a la vista, se repinta una vez por
     segundo.
 
+## Chief y los monos de código (11 de noviembre)
+
+Un chat de código de Claude puede pasarle una tarea grande a **Chief**, un
+mono que coordina a los monos de código del usuario en su propio chat. El
+chat que pidió el trabajo recibe un único resumen cuando termina. Usa el
+motor del swarm; lo nuevo es quién lidera y quién trabaja.
+
+```mermaid
+flowchart TD
+    M["Chat de código de Claude<br/>regla control::chief_offer (runtime.rs)"]:::nuevo --> C
+    C["control chief {title, brief}<br/>shell/orchestration.rs agent_chief"]:::nuevo --> S
+    S["Sesión «Chief · …»: lead del Run::chief<br/>requester = el chat; started link al chat"]:::nuevo --> D
+    D["delegate (Opus 5.5 medio por defecto,<br/>mono opcional del crew)"]:::nuevo --> B
+    B["bind_mono: el que pidió Chief, uno libre que encaje<br/>o uno nuevo (máx. 4 por run) · mono/crew.rs"]:::nuevo --> W
+    W["Worker «Nombre · tarea» en su worktree<br/>empieza con su SOUL y su MEMORY"]:::nuevo --> R
+    R["review → diff al checkout del chat que pidió"] --> F
+    F["finish {summary} → Run::chief_report"]:::nuevo --> Q
+    Q["Cola chief-report:&lt;chat&gt; (guardada)<br/>se entrega cuando el chat está libre"]:::nuevo --> M
+    W & S --> P["Pestaña Swarm: Chief y cada mono con su cara<br/>swarm.rs MemberLook"]:::nuevo
+    classDef nuevo fill:#f59e0b,stroke:#b45309,color:#000
+```
+
+*Naranja: nuevo.*
+
+- **Cuándo se ofrece.** Ajustes › Chat › «Let Claude hand work to your
+  monos», encendido por defecto. Un chat de código de Claude (no un mono, ni
+  un worker, ni uno remoto) recibe la regla una vez por conversación del
+  proveedor. Los subagentes nativos de Claude siguen disponibles para leer e
+  investigar rápido; Chief es para trabajo en paralelo que cambia código.
+- **Chief** es un bot con el rol oculto `chief` (gorra de capitán), creado la
+  primera vez. Su sesión trabaja en el checkout del chat que pidió el trabajo
+  y aparece colgada de él en la barra lateral.
+- **Los monos de código** son bots con el rol oculto `coder` (casco amarillo)
+  y se quedan con el usuario: Chief los reutiliza en tareas futuras por nombre
+  (`"mono"` en `delegate`) o la app elige uno libre cuya especialidad encaje.
+  Solo crea uno nuevo si no hay libre, hasta 4 por run. Su worker es una
+  sesión de código normal (no un chat de bot, que tiene las ediciones
+  recortadas) titulada con su nombre, y su primer turno empieza con su SOUL y
+  su MEMORY (`crew::identity`).
+- **Modelo:** `Defaults::chief` elige Opus 5.5 del catálogo de Claude (o el
+  alias `opus`) con esfuerzo medio si lo ofrece. Sin Claude instalado, el
+  harness y el modelo del chat que pidió.
+- **El informe:** `finish` exige `summary` en un run de Chief. Al terminar o
+  pararse el run, `chief_report` se guarda en `chief-report:<chat>` y se
+  entrega como turno interno cuando ese chat está libre, nunca encima de un
+  turno o un borrador del usuario.
+
 ## Estado
 
 | Pieza | Estado |

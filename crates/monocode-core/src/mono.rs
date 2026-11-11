@@ -7,6 +7,7 @@ pub mod bots;
 pub mod bridge;
 pub mod brief;
 pub mod cards;
+pub mod crew;
 pub mod delegations;
 mod desktop;
 pub mod files;

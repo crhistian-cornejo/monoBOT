@@ -1,4 +1,5 @@
 pub(crate) mod attachments;
+mod background;
 pub(crate) mod burst;
 mod calm;
 mod citations;
@@ -11,8 +12,8 @@ mod history;
 pub(crate) use history::{HistoryPager, PreparedHistory};
 mod links;
 pub(crate) mod live_phase;
-mod mascot;
-pub(crate) use mascot::subagent_mascot;
+mod subagent_mark;
+pub(crate) use subagent_mark::subagent_mark;
 mod measurements;
 mod mono_divider;
 mod outline;
@@ -165,6 +166,8 @@ enum Body {
     MonoCard(serde_json::Value),
     /// A queued message's bubble, by its index in `pending`.
     Pending(usize),
+    /// The commands and subagents still running after the reply.
+    Background,
     /// LaunchedSessionCard for a session the run started.
     Launch(i64),
     /// A commit pill turn's status line, then its card.
@@ -762,6 +765,8 @@ pub(crate) struct TranscriptView {
     /// and Thinking header are already painted in the source transcript.
     submitted_mono_message: Option<String>,
     saved_draft: Option<monocode_core::follow_up::Message>,
+    /// Commands and subagents still running after the reply.
+    background: background::Background,
     /// Pending messages just taken, including any entrance still in flight.
     taken: Vec<TakenMessage>,
     pending_entrances: HashMap<String, Instant>,
@@ -2735,6 +2740,7 @@ impl TranscriptView {
             pending: Vec::new(),
             submitted_mono_message: None,
             saved_draft: None,
+            background: Default::default(),
             taken: Vec::new(),
             pending_entrances: HashMap::new(),
             launches: HashMap::new(),
@@ -3640,7 +3646,7 @@ impl TranscriptView {
                 subagents = (runs.len() > 1).then(|| {
                     Arc::new(calm::Subagents {
                         first: runs[0].0,
-                        faces: runs
+                        members: runs
                             .iter()
                             .map(|(_, name, state)| (name.clone(), state.clone()))
                             .collect(),
@@ -4378,6 +4384,7 @@ impl TranscriptView {
             mono_divider::insert(&mut self.rows, &self.messages, display_start);
         }
         self.push_saved_draft();
+        self.push_background();
         let mut pinned_answers = HashMap::new();
         if !activity.pinned.is_empty() {
             let mut parked: HashMap<usize, Vec<UiRow>> = HashMap::new();
@@ -4665,6 +4672,7 @@ impl TranscriptView {
                     | Body::Pending(_)
                     | Body::Launch(_)
                     | Body::SavedDraft
+                    | Body::Background
             ) {
                 return false;
             }
@@ -5123,6 +5131,7 @@ impl TranscriptView {
         }
         match self.rows[ix].body {
             Body::SavedDraft => return self.saved_draft_row(cx),
+            Body::Background => return self.background_row(cx),
             Body::Pending(i) => return self.pending_row(i, cx),
             Body::Launch(id) => return self.launch_row(ix, id, cx),
             _ => {}
@@ -5371,7 +5380,9 @@ impl TranscriptView {
                 crate::monos::cards::render(value, chosen.as_deref(), cx)
             }
             Body::MonoDivider => mono_divider::render(),
-            Body::Pending(_) | Body::Launch(_) | Body::SavedDraft => div().into_any_element(),
+            Body::Pending(_) | Body::Launch(_) | Body::SavedDraft | Body::Background => {
+                div().into_any_element()
+            }
             Body::Actions { turn, complete } => {
                 // Tighten only a visible Mono reply followed by a user bubble;
                 // stacked user messages keep their existing spacing.

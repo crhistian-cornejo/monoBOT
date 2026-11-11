@@ -17,10 +17,13 @@ const MAX_REQUESTS: usize = 512;
 pub const MAX_CONTINUATIONS: u32 = 20;
 const RESULT_CHARS: usize = 20_000;
 
-pub const ACTIONS: [&str; 15] = [
+pub const ACTIONS: [&str; 16] = [
     "list", "delegate", "get", "wait", "steer", "message", "retry", "cancel", "respond", "answer",
-    "review", "finish", "post", "board", "swarm",
+    "review", "finish", "post", "board", "swarm", "chief",
 ];
+/// The persistent monos a Chief run may create, at most, beyond those it
+/// reuses: each one stays as a personal agent.
+pub const MAX_NEW_MONOS: usize = 4;
 /// What a worker may call: the board, and nothing that steers the run.
 pub const WORKER_ACTIONS: [&str; 2] = ["post", "board"];
 
@@ -40,6 +43,9 @@ Actions, with the JSON object each one takes:
             harness. "handle" is optional: a role name such as verifier or
             tester; workers are worker-1, worker-2... otherwise. For a
             handle the user pinned from /swarm, leave out harness and model.
+            In a Chief run, harness and model may be left out for the run's
+            defaults, and "mono":"<name from crew>" gives the task to one of
+            your existing monos; without it the app picks or creates one.
             "files" is the write scope: project-relative paths, where a
             directory covers its descendants and ["."] reserves the whole
             checkout. "dependsOn" holds taskIds that must be reviewed first.
@@ -70,8 +76,9 @@ Actions, with the JSON object each one takes:
             Accept a completed task's result. Its changes are applied from the
             worker's own worktree to your checkout; a write outside its scope
             is refused and the worktree kept.
-  finish    {}
-            End the run, once every task is accepted or cancelled.
+  finish    {} or, as Chief, {"summary":"What changed, where, how it was verified"}
+            End the run, once every task is accepted or cancelled. Chief's
+            summary goes back to the chat that asked for the work.
   post      {"text":"@worker-2 the KeyRing API changed: use `Lookup(kid)`"}
             Post on the run's board, which the user watches live. Name
             members with @handle, or everyone with @all. A running member
@@ -84,6 +91,11 @@ Actions, with the JSON object each one takes:
             of a swarm for a large task, so you can delegate. Only when the
             user allows it in Settings > Chat; once a run is open, the other
             actions apply.
+  chief     {"title":"Migrate auth to v2","brief":"Self-contained request"}
+            From an ordinary coding chat: hand a large task that splits into
+            parallel parts to Chief, a mono that coordinates your monos in
+            its own chat. End your turn after it starts; Chief's summary
+            comes back to this chat as a message when the work is done.
 
 Usual loop: list -> delegate ... -> wait or get -> steer an agent that drifts,
 unblock one with respond or answer -> inspect the changes yourself -> message
@@ -193,6 +205,9 @@ pub struct Task {
     pub dispatch: u64,
     /// Files carried over to the lead when it was reviewed.
     pub integrated: Vec<String>,
+    /// The persistent mono that does this task, in a Chief run: asked for
+    /// by name in `delegate`, or the one the app picked or created.
+    pub mono: Option<String>,
 }
 impl Task {
     fn active(&self) -> bool {
@@ -297,6 +312,70 @@ pub struct Run {
     pub swarm: bool,
     /// Harness and model the user pinned to a role from `/swarm`.
     pub roles: Vec<Role>,
+    /// The chat that handed this run to Chief, who is the lead. It gets
+    /// `report` once the run ends.
+    pub requester: Option<i64>,
+    /// Chief's summary for the requester, from `finish`.
+    pub report: Option<String>,
+    /// What `delegate` uses when harness, model or effort are left out.
+    pub defaults: Option<Defaults>,
+    /// The user's code monos Chief may give tasks to, by name.
+    pub crew: Vec<CrewMember>,
+}
+
+/// A Chief run's worker defaults: Claude Opus at medium effort, resolved
+/// from the catalog by the app.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Defaults {
+    pub provider: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+}
+
+impl Defaults {
+    /// Claude Opus 5.5 at medium effort, from Claude's catalog: its exact
+    /// id when listed, else the `opus` alias, else any Opus; medium when the
+    /// model offers it, else its default effort. No Opus leaves the model to
+    /// Claude's default.
+    pub fn chief(models: &[crate::catalog::Model]) -> Self {
+        const OPUS: &str = "claude-opus-5-5";
+        let is = |m: &&crate::catalog::Model, id: &str| {
+            m.id == id || m.alias_target.as_deref() == Some(id)
+        };
+        let opus = models
+            .iter()
+            .find(|m| is(m, OPUS))
+            .or_else(|| models.iter().find(|m| is(m, "opus")))
+            .or_else(|| {
+                models.iter().find(|m| {
+                    m.id.contains("opus")
+                        || m.alias_target
+                            .as_deref()
+                            .is_some_and(|a| a.contains("opus"))
+                })
+            });
+        Self {
+            provider: crate::provider::Kind::Claude.id().into(),
+            model: opus.map(|m| m.id.clone()),
+            effort: opus.and_then(|m| {
+                m.efforts
+                    .iter()
+                    .find(|e| *e == "medium")
+                    .cloned()
+                    .or_else(|| m.default_effort.clone())
+            }),
+        }
+    }
+}
+
+/// One of the user's persistent monos, as Chief sees it.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CrewMember {
+    pub id: String,
+    pub name: String,
+    pub specialty: String,
 }
 
 /// A role the user gave a harness (and optionally a model) from `/swarm`,
@@ -417,7 +496,8 @@ pub fn check_scopes(files: &[String]) -> Result<(), String> {
 }
 fn fields(action: &str) -> Option<&'static [&'static str]> {
     Some(match action {
-        "list" | "finish" => &[],
+        "list" => &[],
+        "finish" => &["summary"],
         "delegate" => &[
             "title",
             "harness",
@@ -426,10 +506,12 @@ fn fields(action: &str) -> Option<&'static [&'static str]> {
             "files",
             "dependsOn",
             "handle",
+            "mono",
         ],
         "post" => &["text"],
         "board" => &["since", "limit"],
         "swarm" => &["title"],
+        "chief" => &["title", "brief"],
         "get" | "cancel" | "review" => &["taskId"],
         "wait" => &["timeoutSeconds"],
         "steer" | "message" => &["taskId", "text"],
@@ -565,6 +647,48 @@ fn swarm_rules(roles: &[Role]) -> String {
     )
 }
 
+/// What a Claude coding chat is told once: it may hand a large parallel task
+/// to Chief and the user's monos instead of doing it alone.
+pub fn chief_offer(cli: &str) -> String {
+    let cli = shell_path(cli);
+    format!(
+        "<monocode_monos>\nThe user's monos can work for you. For a large task that splits into independent parts (several areas of the code, or building and verifying in parallel), hand it to Chief: run `{cli} control chief --json '{{\"title\":\"Short task title\",\"brief\":\"Self-contained request: goal, constraints, where the code is, how to verify\"}}'`. Chief coordinates monos in their own chats and worktrees, which the user watches in the right panel, reviews their work into this checkout and sends you one summary as a message when it is done. After it starts, end your turn and do not edit the files it works on. A small or sequential task stays here, and your own subagents remain fine for quick reading and research. Credentials are already in your environment; never print them.\n</monocode_monos>"
+    )
+}
+
+/// Chief's first turn: the brief, its crew and the rules of the run.
+pub fn chief_prompt(brief: &str, cli: &str, crew: &[CrewMember]) -> String {
+    let crew = if crew.is_empty() {
+        "You have no monos yet; each task you delegate gets a new one, which stays with the user afterwards.".to_owned()
+    } else {
+        format!(
+            "Your crew: {}. Give a task to one with \"mono\":\"<name>\" when its specialty fits; leave mono out and the app picks or creates one (at most {MAX_NEW_MONOS} new monos per run).",
+            crew.iter()
+                .map(|m| if m.specialty.is_empty() {
+                    m.name.clone()
+                } else {
+                    format!("{} ({})", m.name, m.specialty)
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    format!(
+        "{brief}\n\n<monocode_chief>\nYou are Chief, the mono that coordinates the user's monos. Another chat handed you the request above; it waits for your summary. Inspect the project with read-only tools, split the work into bounded assignments with disjoint write scopes and delegate them now through the control CLI; do not ask the user to approve a plan. Leave harness and model out unless a task needs another one: the run's defaults apply. {crew} Run independent work in parallel (up to {MAX_WORKERS} at once) and add a verifier that runs the tests across the combined result once the builders are reviewed. Each mono works in its own branch and worktree; review applies its changes to the checkout of the chat that asked and removes them. Leave project edits to the monos. When everything is reviewed and verified, call finish with {{\"summary\":\"...\"}}: what changed, where, and how it was verified, for the chat that asked.\n</monocode_chief>\n\n{}",
+        lead_instructions(cli)
+    )
+}
+
+/// What the `chief` action answers the chat that asked: Chief has the work.
+pub fn chief_started(title: &str, chief: i64) -> Value {
+    json!({
+        "started": true,
+        "title": title,
+        "chief": chief,
+        "instructions": "Chief is coordinating the monos in its own chat; the user watches them in the right panel. End your turn now with one short line for the user. Chief's summary reaches this chat as a message when the work is done; then review the changes and continue. Until then, do not edit the files Chief works on.",
+    })
+}
+
 /// Quote the executable for a POSIX shell only when needed.
 pub fn shell_path(path: &str) -> String {
     if path
@@ -661,6 +785,37 @@ impl Run {
             request: request.into(),
             swarm: true,
             ..Default::default()
+        }
+    }
+
+    /// A run another chat handed to Chief: Chief's own session leads it,
+    /// delegating to monos with the run's defaults, and `requester` gets
+    /// its summary once it is over.
+    #[allow(clippy::too_many_arguments)]
+    pub fn chief(
+        chief: i64,
+        requester: i64,
+        project: &str,
+        checkout: &str,
+        isolated: bool,
+        brief: &str,
+        choices: Vec<Choice>,
+        defaults: Option<Defaults>,
+        crew: Vec<CrewMember>,
+    ) -> Self {
+        Self {
+            requester: Some(requester),
+            defaults,
+            crew,
+            ..Self::swarm(
+                chief,
+                project,
+                checkout,
+                isolated,
+                brief,
+                choices,
+                MAX_WORKERS,
+            )
         }
     }
 
@@ -868,10 +1023,21 @@ impl Run {
         }
         match action {
             "list" => Ok((
-                json!({
-                    "run": self.view(needs),
-                    "harnesses": self.choices.iter().map(|c| json!({"harness":c.provider,"models":c.models})).collect::<Vec<_>>(),
-                }),
+                {
+                    let mut list = json!({
+                        "run": self.view(needs),
+                        "harnesses": self.choices.iter().map(|c| json!({"harness":c.provider,"models":c.models})).collect::<Vec<_>>(),
+                    });
+                    if self.requester.is_some() {
+                        list["defaults"] = json!(self.defaults);
+                        list["crew"] = self
+                            .crew
+                            .iter()
+                            .map(|m| json!({"mono": m.name, "specialty": m.specialty, "busy": self.mono_busy(&m.id)}))
+                            .collect();
+                    }
+                    list
+                },
                 Effect::None,
             )),
             "wait" => {
@@ -1071,6 +1237,13 @@ impl Run {
                         listed(&outstanding)
                     ));
                 }
+                if self.requester.is_some() {
+                    if matches!(input.get("summary"), None | Some(Value::Null)) {
+                        return Err("As Chief, finish with {\"summary\":\"...\"}: what changed, where, and how it was verified. It goes back to the chat that asked for the work.".into());
+                    }
+                    let summary = text(input, "summary", RESULT_CHARS)?;
+                    self.report = Some(summary);
+                }
                 let (accepted, unreviewed) = self.release_workers();
                 self.status = RunStatus::Finished;
                 Ok((
@@ -1082,7 +1255,9 @@ impl Run {
                 ))
             }
             "post" | "board" => Err("The board is not available for this run.".into()),
-            "swarm" => Err("This chat already coordinates a run; delegate within it.".into()),
+            "swarm" | "chief" => {
+                Err("This chat already coordinates a run; delegate within it.".into())
+            }
             _ => Err("Unknown action. Run control --help.".into()),
         }
     }
@@ -1119,8 +1294,17 @@ impl Run {
                 }
                 harness
             }
+            (None, None | Some(Value::Null)) if self.defaults.is_some() => {
+                self.defaults.as_ref().unwrap().provider.clone()
+            }
             (None, _) => text(input, "harness", 64)?,
         };
+        // The run's defaults apply to their own harness only.
+        let defaults = self
+            .defaults
+            .as_ref()
+            .filter(|d| d.provider == harness)
+            .cloned();
         let choice = self
             .choices
             .iter()
@@ -1140,7 +1324,11 @@ impl Run {
         let pinned_model = pinned.as_ref().and_then(|r| r.model.clone());
         let model = match (input.get("model"), pinned_model) {
             (None | Some(Value::Null), Some(model)) => Some(model),
-            (None | Some(Value::Null), None) => choice.models.first().cloned(),
+            (None | Some(Value::Null), None) => defaults
+                .as_ref()
+                .and_then(|d| d.model.clone())
+                .filter(|m| choice.models.is_empty() || choice.models.contains(m))
+                .or_else(|| choice.models.first().cloned()),
             (Some(_), pinned_model) => {
                 let model = text(input, "model", 256)?;
                 if let Some(pinned_model) = pinned_model.filter(|p| *p != model) {
@@ -1183,20 +1371,103 @@ impl Run {
                 listed(&missing)
             ));
         }
+        let mono = match input.get("mono") {
+            None | Some(Value::Null) => None,
+            Some(_) if self.requester.is_none() => {
+                return Err("mono is only for Chief runs; leave it out.".into());
+            }
+            Some(_) => {
+                let wanted = text(input, "mono", 80)?;
+                let member = self
+                    .crew
+                    .iter()
+                    .find(|m| m.id == wanted || m.name.eq_ignore_ascii_case(&wanted))
+                    .ok_or_else(|| {
+                        format!(
+                            "No mono named \"{wanted}\" in your crew. Use a name from list's crew, or leave mono out and the app picks or creates one. Crew: {}.",
+                            listed(&self.crew.iter().map(|m| m.name.clone()).collect::<Vec<_>>())
+                        )
+                    })?;
+                if self.mono_busy(&member.id) {
+                    return Err(format!(
+                        "{} is already working on a task of this run; give this one to another mono or wait.",
+                        member.name
+                    ));
+                }
+                Some(member.id.clone())
+            }
+        };
+        // The default effort goes with the default model only.
+        let effort = defaults
+            .filter(|d| d.model.is_none() || d.model == model)
+            .and_then(|d| d.effort);
         let id = self.new_id();
         self.tasks.push(Task {
             id: id.clone(),
             title,
             provider: harness,
             model,
+            effort,
             prompt,
             files,
             depends_on,
             handle,
+            mono,
             delivered: true,
             ..Default::default()
         });
         Ok((json!({"taskId": id, "status": "queued"}), Effect::None))
+    }
+
+    /// A mono already has a queued or running task in this run.
+    pub fn mono_busy(&self, id: &str) -> bool {
+        self.tasks.iter().any(|t| {
+            t.mono.as_deref() == Some(id) && matches!(t.status, Status::Queued | Status::Running)
+        })
+    }
+
+    /// What Chief's run tells the chat that asked for it, once it is over:
+    /// the summary and the files it brought in, or why it stopped.
+    pub fn chief_report(&self) -> Option<String> {
+        self.requester?;
+        let files: Vec<&str> = self
+            .tasks
+            .iter()
+            .filter(|t| t.accepted)
+            .flat_map(|t| t.integrated.iter().map(String::as_str))
+            .collect();
+        let files = if files.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "
+
+Files brought into this checkout: {}.",
+                files.join(", ")
+            )
+        };
+        let body = match self.status {
+            RunStatus::Finished => format!(
+                "Chief finished the work you handed over.
+
+{}{files}",
+                self.report.as_deref().unwrap_or("Chief left no summary.")
+            ),
+            RunStatus::Stopped => format!(
+                "Chief's run was stopped before it finished.{files}
+Tell the user what is left, or continue the work yourself."
+            ),
+            _ => return None,
+        };
+        Some(format!(
+            "<monocode_chief_report>
+Request: {}
+
+{body}
+Review the changes in this checkout and continue the user's task from here.
+</monocode_chief_report>",
+            self.request
+        ))
     }
 
     /// Mark a reviewed task accepted, with the files applied to the lead.

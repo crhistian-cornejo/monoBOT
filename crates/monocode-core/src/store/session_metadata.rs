@@ -13,6 +13,8 @@ pub struct SessionSidebarMetadata {
     pub orchestrations: HashMap<i64, orchestration::Summary>,
     /// Lead-supervised runs still open (active or paused), for resuming.
     pub orchestration_runs: HashMap<i64, orchestration::control::Run>,
+    /// Chief's summaries waiting for the chat that asked, by that chat.
+    pub chief_reports: HashMap<i64, Vec<String>>,
     pub groups: HashMap<String, session_groups::Groups>,
     pub reminders: Vec<super::Reminder>,
 }
@@ -103,6 +105,7 @@ impl Store {
             },
             started_by: self.started_links().unwrap_or_default(),
             orchestrations: self.orchestration_summaries().unwrap_or_default(),
+            chief_reports: self.chief_reports().unwrap_or_default(),
             orchestration_runs: self
                 .orchestration_runs()
                 .unwrap_or_default()

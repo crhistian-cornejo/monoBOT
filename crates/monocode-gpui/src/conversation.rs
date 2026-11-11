@@ -1213,14 +1213,16 @@ impl Conversation {
             .is_some_and(|p| !p.claude_hooks);
         settings.model = self.model.clone();
         settings.environment.extend(self.app_environment.clone());
-        settings.swarm_offer = !self.is_remote()
+        let coding = !self.is_remote()
             && self.settings.mono.is_none()
             && self.managed_by.is_none()
             && self.orchestration_progress.is_none()
-            && !self.app_environment.is_empty()
-            && cx
-                .try_global::<crate::settings::Preferences>()
-                .is_some_and(|p| p.swarm_offer);
+            && !self.app_environment.is_empty();
+        let preferences = cx.try_global::<crate::settings::Preferences>();
+        settings.swarm_offer = coding && preferences.is_some_and(|p| p.swarm_offer);
+        settings.chief_offer = coding
+            && self.summary.provider == Kind::Claude.id()
+            && preferences.is_some_and(|p| p.chief_offer);
         if settings.remote_action.as_ref().is_none_or(|action| {
             (action["type"] == "send"
                 && action["draftBlockId"].is_null()
@@ -1535,7 +1537,7 @@ impl Conversation {
                             this.summary.updated_at = monocode_core::time::now_ms();
                             this.busy = false;
                             this.stopping = false;
-                            this.clear_background();
+                            this.clear_background(cx);
                             if this.is_remote() {
                                 this.refresh_remote_snapshot(cx);
                             }
@@ -2877,7 +2879,7 @@ impl Conversation {
             self.save_follow_ups(cx);
         }
         self.follow_ups.ready = false;
-        self.clear_background();
+        self.clear_background(cx);
         self.approvals.clear();
         self.questions.clear();
         self.controls = None;
@@ -2989,7 +2991,6 @@ impl Conversation {
             .children(self.reset_offer_notice(cx))
             .children(self.provider_retry_notice(cx))
             .child(self.changes_shelf(window, cx))
-            .child(self.background_shelf(window, cx))
             .child(self.message_queue(window, cx))
             .children(if self.is_remote() { None } else { self.auth_notice(cx) })
             .children(self.trust_notice(cx))
