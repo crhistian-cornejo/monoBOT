@@ -5,6 +5,7 @@
 
 mod accounts;
 mod activity;
+mod agents_pane;
 mod app_menu;
 mod app_window;
 mod arcade;

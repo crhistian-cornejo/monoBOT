@@ -1,9 +1,11 @@
 //! Sidebar.tsx's inset `RightPanel`: the project tools beside the card, with
 //! reorderable Explorer / Changes / History tabs in the title bar, a
 //! Terminal tab when the terminal lives in the panel, a trailing Swarm
-//! tab while the chat in view has an orchestration board, and a Simulator
-//! tab on a Mac while the iOS Simulator connector is on.
+//! tab while the chat in view has an orchestration board, an Agents tab
+//! while its Claude chat has subagents or workflows, and a Simulator tab on
+//! a Mac while the iOS Simulator connector is on.
 use crate::{
+    agents_pane::AgentsPane,
     changes::Changes,
     explorer::Explorer,
     git_status::{GitChanged, ProjectGit},
@@ -75,6 +77,9 @@ pub(crate) enum RightTab {
     /// The booted iOS simulator, live, while its connector is on (macOS).
     /// Never part of the saved order.
     Simulator,
+    /// The Claude chat in view's subagents and workflows, live, while it has
+    /// any. Never part of the saved order.
+    Agents,
 }
 impl RightTab {
     fn label(self) -> &'static str {
@@ -85,18 +90,22 @@ impl RightTab {
             Self::Terminal => "Terminal",
             Self::Swarm => "Swarm",
             Self::Simulator => "Simulator",
+            Self::Agents => "Agents",
         }
+    }
+    /// Tabs that come and go, outside the saved and reorderable order.
+    fn transient(self) -> bool {
+        matches!(
+            self,
+            Self::Terminal | Self::Changes | Self::Swarm | Self::Simulator | Self::Agents
+        )
     }
     /// loadRightPanelTabOrder: unique known tabs, the missing ones appended.
     /// Changes has no tab; the title bar's diff stat opens it.
     pub(crate) fn normalize(order: &[RightTab]) -> Vec<RightTab> {
         let mut out = Vec::new();
         for tab in order.iter().chain(&[Self::Files, Self::Graph]) {
-            if !matches!(
-                tab,
-                Self::Terminal | Self::Changes | Self::Swarm | Self::Simulator
-            ) && !out.contains(tab)
-            {
+            if !tab.transient() && !out.contains(tab) {
                 out.push(*tab);
             }
         }
@@ -107,6 +116,8 @@ impl RightTab {
 pub(crate) enum PanelEvent {
     Tab(RightTab),
     Reordered(Vec<RightTab>),
+    /// The Agents tab came or went.
+    AgentsTab,
 }
 
 /// Whether the Simulator tab is offered: on a Mac, with the iOS Simulator
@@ -291,8 +302,11 @@ pub(crate) struct RightPanel {
     terminal_tab: bool,
     pub(crate) swarm: Entity<SwarmPanel>,
     simulator: Entity<SimulatorPane>,
+    pub(crate) agents: Entity<AgentsPane>,
     /// Whether the Swarm tab ends the strip.
     swarm_tab: bool,
+    /// Whether the Agents tab follows it: the chat in view has agents.
+    agents_tab: bool,
     /// Classic reserves the title bar's height; rounded content starts at
     /// the card's top edge, below the window-wide title bar.
     top_inset: f32,
@@ -323,9 +337,17 @@ impl RightPanel {
         let history = cx.new(|cx| History::new(git.clone(), window, cx));
         let swarm = cx.new(SwarmPanel::new);
         let simulator = cx.new(SimulatorPane::new);
+        let agents = cx.new(AgentsPane::new);
         let subscriptions = vec![
             cx.observe(&git, |_, _, cx| cx.notify()),
             cx.subscribe(&git, |_, _, _: &GitChanged, cx| cx.notify()),
+            cx.subscribe(
+                &agents,
+                |this, agents, _: &crate::agents_pane::AgentsChanged, cx| {
+                    let has = agents.read(cx).has_agents();
+                    this.set_agents_tab(has, cx);
+                },
+            ),
         ];
         let panel = cx.entity();
         let tabs = cx.new(|cx| ProjectTabs {
@@ -340,9 +362,12 @@ impl RightPanel {
             history,
             swarm,
             simulator,
+            agents,
             swarm_tab: false,
-            // The board that was in view may be gone; Explorer stands in.
-            tab: if tab == RightTab::Swarm {
+            agents_tab: false,
+            // The board or agents that were in view may be gone; Explorer
+            // stands in.
+            tab: if matches!(tab, RightTab::Swarm | RightTab::Agents) {
                 RightTab::Files
             } else {
                 tab
@@ -356,7 +381,7 @@ impl RightPanel {
             drag: None,
             reveal: None,
             skip_click: false,
-            tab_bounds: (0..6).map(|_| Default::default()).collect(),
+            tab_bounds: (0..7).map(|_| Default::default()).collect(),
             _subscriptions: subscriptions,
         }
     }
@@ -373,6 +398,9 @@ impl RightPanel {
         if self.swarm_tab {
             tabs.push(RightTab::Swarm);
         }
+        if self.agents_tab {
+            tabs.push(RightTab::Agents);
+        }
         if simulator_tab() {
             tabs.push(RightTab::Simulator);
         }
@@ -380,6 +408,21 @@ impl RightPanel {
     }
     pub(crate) fn swarm_tab(&self) -> bool {
         self.swarm_tab
+    }
+    pub(crate) fn agents_tab(&self) -> bool {
+        self.agents_tab
+    }
+    /// Adds or removes the Agents tab; Explorer takes over when it goes.
+    fn set_agents_tab(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.agents_tab == enabled {
+            return;
+        }
+        self.agents_tab = enabled;
+        if !enabled && self.tab == RightTab::Agents {
+            self.select(RightTab::Files, cx);
+        }
+        cx.emit(PanelEvent::AgentsTab);
+        cx.notify();
     }
     /// Adds or removes the Swarm tab; Explorer takes over when it goes.
     pub(crate) fn set_swarm_tab(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -464,12 +507,16 @@ impl RightPanel {
         let simulator = shown && tab == RightTab::Simulator && simulator_tab();
         self.simulator
             .update(cx, |s, cx| s.set_shown(simulator, cx));
+        self.agents.update(cx, |a, cx| {
+            a.set_shown(shown && tab == RightTab::Agents, cx)
+        });
     }
     pub(crate) fn focus_pane(&self, window: &mut Window, cx: &mut App) {
         let focus = match (self.shown, self.tab) {
             (true, RightTab::Files) => self.explorer.focus_handle(cx),
             (true, RightTab::Graph) => self.history.focus_handle(cx),
             (true, RightTab::Simulator) => self.simulator.focus_handle(cx),
+            (true, RightTab::Agents) => self.agents.focus_handle(cx),
             _ => self.focus.clone(),
         };
         window.focus(&focus, cx);
@@ -510,14 +557,7 @@ impl RightPanel {
         let bounds: Vec<Option<Bounds<Pixels>>> = tabs
             .iter()
             .zip(&self.tab_bounds)
-            .map(|(tab, slot)| {
-                slot.get().filter(|_| {
-                    !matches!(
-                        tab,
-                        RightTab::Terminal | RightTab::Swarm | RightTab::Simulator
-                    )
-                })
-            })
+            .map(|(tab, slot)| slot.get().filter(|_| !tab.transient()))
             .collect();
         if let Some(Some(own)) = bounds.get(from) {
             let centre = own.center().x + drag.offset;
@@ -592,6 +632,7 @@ impl RightPanel {
                     RightTab::Terminal => ("right-panel-tab-Terminal", "terminal"),
                     RightTab::Swarm => ("right-panel-tab-Swarm", "users"),
                     RightTab::Simulator => ("right-panel-tab-Simulator", "smart-phone"),
+                    RightTab::Agents => ("right-panel-tab-Agents", "bot"),
                 };
                 let unfolded = match progress {
                     Some((_, p)) if active => p,
@@ -693,6 +734,7 @@ impl Render for RightPanel {
                 .clone()
                 .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
                 .into_any_element(),
+            RightTab::Agents => self.agents.clone().into_any_element(),
             RightTab::Simulator if simulator_tab() => self.simulator.clone().into_any_element(),
             // The connector was switched off while its tab was open.
             RightTab::Simulator => self

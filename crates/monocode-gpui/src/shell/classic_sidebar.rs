@@ -13,6 +13,9 @@ pub(super) enum ClassicSidebarTab {
     /// The board of the chat in view's swarm, while it has one. It ends the
     /// strip and stays out of the saved order, as Swarm does in the panel.
     Swarm,
+    /// The Claude chat in view's subagents and workflows, while it has any.
+    /// Never saved, like Swarm.
+    Agents,
 }
 
 impl ClassicSidebarTab {
@@ -22,6 +25,7 @@ impl ClassicSidebarTab {
             Self::Files => "files",
             Self::Changes => "changes",
             Self::Swarm => "swarm",
+            Self::Agents => "agents",
         }
     }
 
@@ -40,6 +44,7 @@ impl ClassicSidebarTab {
             Self::Files => Some(RightTab::Files),
             Self::Changes => Some(RightTab::Changes),
             Self::Swarm => Some(RightTab::Swarm),
+            Self::Agents => Some(RightTab::Agents),
         }
     }
 
@@ -49,6 +54,7 @@ impl ClassicSidebarTab {
             Self::Files => "Explorer",
             Self::Changes => "Changes",
             Self::Swarm => "Swarm",
+            Self::Agents => "Agents",
         }
     }
 
@@ -58,6 +64,7 @@ impl ClassicSidebarTab {
             Self::Files => 1,
             Self::Changes => 2,
             Self::Swarm => 3,
+            Self::Agents => 4,
         }
     }
 
@@ -84,7 +91,7 @@ impl ClassicSidebarTab {
 
 #[derive(Default)]
 pub(super) struct WorkspaceTabs {
-    bounds: [AnchorSlot; 4],
+    bounds: [AnchorSlot; 5],
     drag: Option<WorkspaceTabDrag>,
     shifts: HashMap<ClassicSidebarTab, TabShift>,
     skip_click: bool,
@@ -497,6 +504,9 @@ impl Shell {
         if self.classic_swarm_available(cx) {
             tabs.push(ClassicSidebarTab::Swarm);
         }
+        if self.classic_agents_available(cx) {
+            tabs.push(ClassicSidebarTab::Agents);
+        }
         // Equal tabs share the strip after px-2 and its 1pt gaps; each
         // button has a further 8pt of horizontal padding per side.
         let count = tabs.len() as f32;
@@ -651,9 +661,16 @@ impl Shell {
             .is_some_and(|panel| panel.read(cx).swarm_tab())
     }
 
+    /// Whether the Claude chat in view has agents for the Agents tab.
+    pub(super) fn classic_agents_available(&self, cx: &App) -> bool {
+        self.right_panel
+            .as_ref()
+            .is_some_and(|panel| panel.read(cx).agents_tab())
+    }
+
     fn start_classic_sidebar_tab(&mut self, tab: ClassicSidebarTab, event: &MouseDownEvent) {
-        // Swarm comes and goes with its board, so it is not reordered.
-        if tab == ClassicSidebarTab::Swarm {
+        // Swarm and Agents come and go with the chat, so they are not reordered.
+        if matches!(tab, ClassicSidebarTab::Swarm | ClassicSidebarTab::Agents) {
             return;
         }
         let order = ClassicSidebarTab::normalize(&self.workspace.classic_sidebar_tab_order);

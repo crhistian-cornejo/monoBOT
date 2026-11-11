@@ -154,6 +154,27 @@ Windows toasts show monoBOT's logo: at startup the app writes it to
 `IconUri` of its AppUserModelID (`dev.usemono.gpui`), which GPUI registers by
 name only.
 
+## Agents tab
+
+When the Claude chat in view starts subagents or a workflow, the right panel
+(and the Classic sidebar) gets an **Agents** tab. It lists each workflow run
+with its phases in the script's order, and under each phase its agents. Every
+agent shows whether it is running, done, failed or stopped, how long it has
+taken, and its latest step (`Bash · cargo test …`, `Edit · system.rs`) or, once
+done, the first line of its report. Subagents started outside a workflow are
+listed below the runs. Running runs open by default and finished runs fold;
+clicking a run's header flips it.
+
+Claude Code does not stream this work to the app; it writes it under
+`<CLAUDE_CONFIG_DIR>/projects/<cwd>/<session>/` (`subagents/agent-*.jsonl` and
+`.meta.json`, `subagents/workflows/<run>/journal.jsonl`, and the run's script
+in `workflows/scripts/`). `monocode_core::claude_runs` reads those files and
+only rereads the ones whose size or time changed. The pane
+(`crates/monocode-gpui/src/agents_pane.rs`) polls it off the UI thread: every
+1.5 s while the tab is on screen and every 6 s otherwise, which is only to
+know whether the tab should be there. An unfinished agent whose transcript
+has not moved for 20 minutes counts as stopped.
+
 ## Dictation
 
 Dictation runs on this machine: the microphone feeds a Silero voice detector

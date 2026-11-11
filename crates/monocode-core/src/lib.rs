@@ -8,6 +8,7 @@ pub mod automations;
 pub mod catalog;
 pub mod checkpoint;
 pub mod citations;
+pub mod claude_runs;
 pub mod connectors;
 pub mod context;
 pub mod desktop_preferences;

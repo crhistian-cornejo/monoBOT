@@ -1754,8 +1754,10 @@ impl Shell {
     /// Sidebar.tsx's `gitRoot`: the active session's worktree or folder.
     fn sync_git(&mut self, cx: &mut Context<Self>) {
         // Swarm is never saved: it stays while the chat in view has a board.
-        let swarm = self.classic_sidebar_tab == classic_sidebar::ClassicSidebarTab::Swarm
-            && self.classic_swarm_available(cx);
+        let swarm = (self.classic_sidebar_tab == classic_sidebar::ClassicSidebarTab::Swarm
+            && self.classic_swarm_available(cx))
+            || (self.classic_sidebar_tab == classic_sidebar::ClassicSidebarTab::Agents
+                && self.classic_agents_available(cx));
         if !swarm {
             self.classic_sidebar_tab = self
                 .workspace
@@ -1838,7 +1840,10 @@ impl Shell {
         }
         self.classic_sidebar_tab = tab;
         // Swarm lasts as long as its board, so a project reopens elsewhere.
-        if tab != classic_sidebar::ClassicSidebarTab::Swarm {
+        if !matches!(
+            tab,
+            classic_sidebar::ClassicSidebarTab::Swarm | classic_sidebar::ClassicSidebarTab::Agents
+        ) {
             self.workspace
                 .classic_sidebar_tabs
                 .insert(self.workspace.project.clone(), tab.id().into());
@@ -1872,6 +1877,7 @@ impl Shell {
                 .clone()
                 .cached(StyleRefinement::default().size_full())
                 .into_any_element(),
+            classic_sidebar::ClassicSidebarTab::Agents => panel.agents.clone().into_any_element(),
             classic_sidebar::ClassicSidebarTab::Sessions => div().into_any_element(),
         }
     }
@@ -2006,6 +2012,10 @@ impl Shell {
                         }
                     }
                     PanelEvent::Reordered(order) => this.workspace.right_panel_tabs = order.clone(),
+                    PanelEvent::AgentsTab => {
+                        this.agents_tab_changed(cx);
+                        return;
+                    }
                 }
                 this.persist(cx);
             }));

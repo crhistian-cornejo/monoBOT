@@ -733,6 +733,9 @@ impl Shell {
         if self.classic_swarm_available(cx) {
             tabs.push(ClassicSidebarTab::Swarm);
         }
+        if self.classic_agents_available(cx) {
+            tabs.push(ClassicSidebarTab::Agents);
+        }
         let mono_rail =
             if self.workspace.project_rail_monos_pinned && self.workspace.preferences.monos {
                 self.monos
@@ -850,6 +853,7 @@ impl Shell {
                     ClassicSidebarTab::Files => ("Explorer", "file-script"),
                     ClassicSidebarTab::Changes => ("Changes", "git-branch"),
                     ClassicSidebarTab::Swarm => ("Swarm", "users"),
+                    ClassicSidebarTab::Agents => ("Agents", "bot"),
                 };
                 let selected = workspace_active
                     && self.workspace.sidebar_visible
@@ -867,6 +871,7 @@ impl Shell {
                         ClassicSidebarTab::Files => "rail-workspace-files",
                         ClassicSidebarTab::Changes => "rail-workspace-changes",
                         ClassicSidebarTab::Swarm => "rail-workspace-swarm",
+                        ClassicSidebarTab::Agents => "rail-workspace-agents",
                     },
                     label,
                     glyph,

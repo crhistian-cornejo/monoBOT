@@ -1592,6 +1592,39 @@ impl Shell {
             self.notify_sidebar(cx);
             self.projects_frame.update(cx, |_, cx| cx.notify());
         }
+        self.sync_agents(cx);
+    }
+
+    /// The Agents tab follows the chat in view.
+    pub(super) fn sync_agents(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = self.right_panel.clone() else {
+            return;
+        };
+        let chat = self
+            .workspace
+            .active
+            .and_then(|id| self.sessions.get(&id).map(|chat| (id, chat.downgrade())));
+        let agents = panel.read(cx).agents.clone();
+        agents.update(cx, |pane, cx| pane.set_chat(chat, cx));
+    }
+
+    /// The Agents tab came or went; in Classic its sidebar tab gives way to
+    /// Sessions when it goes.
+    pub(super) fn agents_tab_changed(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = self.right_panel.clone() else {
+            return;
+        };
+        if !self.workspace.classic_layout {
+            return;
+        }
+        if !panel.read(cx).agents_tab()
+            && self.classic_sidebar_tab == classic_sidebar::ClassicSidebarTab::Agents
+        {
+            self.classic_sidebar_tab = classic_sidebar::ClassicSidebarTab::Sessions;
+            panel.update(cx, |p, cx| p.set_sidebar_tab(None, cx));
+        }
+        self.notify_sidebar(cx);
+        self.projects_frame.update(cx, |_, cx| cx.notify());
     }
 
     /// A new swarm opens its tab beside the coordinator.
