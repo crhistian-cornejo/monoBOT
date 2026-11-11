@@ -34,15 +34,20 @@ monoBOT is one interface for the agent CLIs you already pay for: **Claude Code, 
 
 ## Download
 
-Installers come from monoBOT's update service on Cloudflare:
+<!-- downloads:start -->
+
+Installers come from monoBOT's update service on Cloudflare. **Latest: 0.0.4**
 
 | Platform | Installer |
 | --- | --- |
-| Windows 10/11 (x64) | [MonoBOT setup (.exe)](https://monobot-updates.getecho.workers.dev/download/windows) |
-| macOS (Apple silicon / Intel) | Coming soon: signed and notarized builds are on the way |
+| Windows 10/11 (x64) | [MonoBOT_0.0.4_x64-setup.exe](https://monobot-updates.getecho.workers.dev/download/windows) |
+| macOS (Apple silicon) | [MonoBOT_0.0.4_aarch64.dmg](https://monobot-updates.getecho.workers.dev/download/macos-arm64) |
+| macOS (Intel) | [MonoBOT_0.0.4_x64.dmg](https://monobot-updates.getecho.workers.dev/download/macos-x64) |
 | Linux | Coming soon: build from source in the meantime |
 
 The latest version and its files: [`downloads.json`](https://monobot-updates.getecho.workers.dev/downloads.json).
+
+<!-- downloads:end -->
 
 **Updates install themselves.** monoBOT checks when it opens and every four hours. A new version downloads in the background and is verified against monoBOT's signing key. Then it installs when you restart (on Windows, also when you quit). If an update can't finish, the sidebar offers the installer to download by hand.
 

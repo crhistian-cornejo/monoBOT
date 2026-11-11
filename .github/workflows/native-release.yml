@@ -388,3 +388,71 @@ jobs:
           BASE="${MONOBOT_UPDATES_URL%/}"
           curl --fail --silent --show-error "$BASE/downloads.json" | jq -e --arg v "$MONOCODE_NATIVE_VERSION" '.version == $v'
           curl --fail --silent --show-error --head "$BASE/download/windows" | grep -i '^location:'
+
+  # The README's Download section names the latest version and its files.
+  # The /download/<key> links are stable: the Worker always sends them to the
+  # newest release, so only the version and file names need rewriting here.
+  readme:
+    name: Point the README at the new version
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      MONOBOT_UPDATES_URL: ${{ secrets.MONOBOT_UPDATES_URL }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Rewrite the download section from downloads.json
+        run: |
+          set -euo pipefail
+          BASE="${MONOBOT_UPDATES_URL%/}"
+          DATA="$(curl --fail --silent --show-error "$BASE/downloads.json")"
+          VERSION="$(jq -r '.version' <<<"$DATA")"
+          GEN="$RUNNER_TEMP/downloads.md"
+          {
+            echo
+            echo "Installers come from monoBOT's update service on Cloudflare. **Latest: ${VERSION}**"
+            echo
+            echo "| Platform | Installer |"
+            echo "| --- | --- |"
+            row() {
+              local file
+              file="$(jq -r --arg k "$2" '.files[$k] // empty' <<<"$DATA")"
+              if [ -n "$file" ]; then
+                printf '| %s | [%s](%s/download/%s) |\n' "$1" "$file" "$BASE" "$2"
+              fi
+            }
+            row "Windows 10/11 (x64)" windows
+            row "macOS (Apple silicon)" macos-arm64
+            row "macOS (Intel)" macos-x64
+            row "Linux (AppImage)" linux-appimage
+            row "Linux (.deb)" linux-deb
+            row "Linux (.rpm)" linux-rpm
+            if [ "$(jq '[.files | keys[] | select(startswith("linux-"))] | length' <<<"$DATA")" = "0" ]; then
+              echo "| Linux | Coming soon: build from source in the meantime |"
+            fi
+            echo
+            echo "The latest version and its files: [\`downloads.json\`](${BASE}/downloads.json)."
+            echo
+          } > "$GEN"
+          awk -v gen="$GEN" '
+            /<!-- downloads:start -->/ { print; while ((getline line < gen) > 0) print line; skip = 1; next }
+            /<!-- downloads:end -->/ { skip = 0; print; next }
+            !skip { print }
+          ' README.md > "$RUNNER_TEMP/README.md" && mv "$RUNNER_TEMP/README.md" README.md
+          grep -q "Latest: ${VERSION}" README.md
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          if git diff --cached --quiet; then
+            echo "README already lists monoBOT ${VERSION}."
+            exit 0
+          fi
+          git commit -m "README: downloads for monoBOT ${VERSION} [skip ci]"
+          git push origin HEAD:main
