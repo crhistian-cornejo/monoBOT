@@ -4,10 +4,12 @@
 //! executes what `monocode_core::orchestration::control` decides: it creates
 //! the worker sessions and worktrees, routes their approvals and questions to
 //! the lead, applies reviewed changes and saves the run so an interrupted one
-//! can resume.
+//! can resume. Each run keeps a board (`orchestration::board`) the lead and
+//! its workers post on; the Swarm tab draws the board of the chat in view.
+//! `/swarm` starts a run with no plan card: the lead delegates by itself.
 use super::*;
 use crate::conversation::composer_features::{
-    OpenOrchestrationAgents, ResumeOrchestration, StartOrchestration, StopOrchestration,
+    OpenOrchestrationAgents, ResumeOrchestration, StartOrchestration, StartSwarm, StopOrchestration,
 };
 use monocode_core::{
     agent::Settings,
@@ -15,11 +17,13 @@ use monocode_core::{
     mono::bridge::Call,
     orchestration::{
         self,
+        board::{self, Board},
         control::{self, Choice, Effect, NeedsInput, Run, RunStatus, Status},
         isolation,
     },
 };
 use serde_json::{Value, json};
+use std::sync::Arc;
 
 /// A run the app is executing, with what only lives in memory.
 pub(super) struct Live {
@@ -33,16 +37,27 @@ pub(super) struct Live {
     blocked: Vec<String>,
     /// The run as last saved; a different snapshot is saved and wakes waiters.
     saved: String,
+    board: Board,
+    /// A restored run's board comes from disk; until then it is not saved.
+    board_loaded: bool,
+    /// The board changed in a way `Board::sync` does not report.
+    board_dirty: bool,
+    /// Results of recent posts by request ID, so a retried post lands once.
+    posted: HashMap<String, Value>,
 }
 impl Live {
     fn new(run: Run) -> Self {
         Self {
+            board: Board::new(&run.request),
             run,
             waiters: Vec::new(),
             turns: HashMap::new(),
             lead_busy: false,
             blocked: Vec::new(),
             saved: String::new(),
+            board_loaded: true,
+            board_dirty: true,
+            posted: HashMap::new(),
         }
     }
     pub(super) fn checkout(&self) -> &str {
@@ -54,10 +69,15 @@ impl Live {
 /// overwrites a newer one.
 #[derive(Default)]
 pub(super) struct Control {
-    saver: Option<async_channel::Sender<(i64, String)>>,
+    /// Saves (setting key, value) in order.
+    saver: Option<async_channel::Sender<(String, String)>>,
     next_waiter: u64,
     /// A lead whose agents open beside it on the next render.
     open_agents: Option<i64>,
+    /// Boards by lead, for the Swarm tab: None when the lead has none.
+    boards: HashMap<i64, Option<Arc<Board>>>,
+    /// Leads whose saved board is being read.
+    loading: HashSet<i64>,
 }
 
 /// Runs saved as active were interrupted when the app closed: their workers
@@ -66,7 +86,9 @@ pub(super) fn restore(runs: HashMap<i64, Run>) -> HashMap<i64, Live> {
     runs.into_iter()
         .map(|(lead, mut run)| {
             run.pause("monoBOT closed while this run was working. Its agents were stopped.");
-            (lead, Live::new(run))
+            let mut live = Live::new(run);
+            live.board_loaded = false;
+            (lead, live)
         })
         .collect()
 }
@@ -95,6 +117,10 @@ impl Shell {
         id: i64,
         cx: &mut Context<Self>,
     ) {
+        self.observations
+            .push(cx.subscribe(view, move |this, _, event: &StartSwarm, cx| {
+                this.start_swarm(id, event.request.clone(), event.message.clone(), cx)
+            }));
         self.observations.push(cx.subscribe(
             view,
             move |this, _, event: &StartOrchestration, cx| {
@@ -221,19 +247,7 @@ impl Shell {
         let model = conversation.settings.model.clone();
         // The harnesses the lead may assign: the installed ones, with their
         // models, plus whatever the card already assigned.
-        let profiles: Vec<_> = if cx.is_test() {
-            Vec::new()
-        } else {
-            Kind::ALL
-                .into_iter()
-                .map(|kind| {
-                    let profile = crate::accounts::get(cx)
-                        .map(|center| center.read(cx).selected(kind, &project))
-                        .unwrap_or_default();
-                    (kind, profile)
-                })
-                .collect()
-        };
+        let profiles = self.run_profiles(&project, cx);
         let mut assigned: Vec<(String, Option<String>)> = plan
             .tasks
             .iter()
@@ -248,35 +262,7 @@ impl Shell {
         let path = checkout.clone();
         let work = cx.background_executor().spawn(async move {
             let isolated = isolation::available(std::path::Path::new(&path));
-            let mut choices: Vec<Choice> = profiles
-                .into_iter()
-                .filter(|(kind, _)| monocode_core::provider::resolve(*kind).is_some())
-                .map(|(kind, profile)| Choice {
-                    provider: kind.id().into(),
-                    models: monocode_core::catalog::models_for(kind, &profile)
-                        .unwrap_or_default()
-                        .into_iter()
-                        .map(|m| m.id)
-                        .collect(),
-                })
-                .collect();
-            for (provider, model) in assigned {
-                let index = match choices.iter().position(|c| c.provider == provider) {
-                    Some(ix) => ix,
-                    None => {
-                        choices.push(Choice {
-                            provider,
-                            models: Vec::new(),
-                        });
-                        choices.len() - 1
-                    }
-                };
-                if let Some(model) = model
-                    && !choices[index].models.contains(&model)
-                {
-                    choices[index].models.insert(0, model);
-                }
-            }
+            let choices = run_choices(profiles, assigned);
             (isolated, choices)
         });
         cx.spawn(async move |this, cx| {
@@ -305,6 +291,7 @@ impl Shell {
                     }
                 };
                 let prompt = run.start_prompt(&cli());
+                this.sweep_worktrees(&run, cx);
                 this.orchestrations.insert(lead, Live::new(run));
                 if let Some(view) = this.sessions.get(&lead) {
                     view.update(cx, |v, cx| {
@@ -473,6 +460,15 @@ impl Shell {
         };
         let finished = live.lead_busy && !busy;
         live.lead_busy = busy;
+        // A swarm whose lead answered without delegating anything is over.
+        if finished
+            && success
+            && live.run.swarm
+            && live.run.tasks.is_empty()
+            && live.run.status == RunStatus::Active
+        {
+            live.run.status = RunStatus::Finished;
+        }
         if finished && !success && live.run.status == RunStatus::Active {
             let sessions = live.run.pause(
                 "The lead was interrupted. Its agents were stopped; review and resume the run.",
@@ -527,6 +523,17 @@ impl Shell {
             .get_mut(&lead)
             .map(|live| live.run.schedule())
             .unwrap_or_default();
+        if !started.is_empty() {
+            let needs = self.needs(lead, cx);
+            if let Some(live) = self.orchestrations.get_mut(&lead) {
+                live.board.sync(
+                    &live.run,
+                    &|t| needs.contains_key(&t.id),
+                    monocode_core::time::now_ms(),
+                );
+                live.board_dirty = true;
+            }
+        }
         for task in started {
             self.dispatch_worker(lead, task, cx);
         }
@@ -597,6 +604,32 @@ impl Shell {
             &task.files,
             isolated,
         );
+        // What was said to it on the board, and how to use it.
+        let prompt = match self.orchestrations.get_mut(&lead).and_then(|live| {
+            let handle = live
+                .board
+                .members
+                .iter()
+                .find(|m| m.task.as_deref() == Some(id.as_str()))?
+                .handle
+                .clone();
+            let members: Vec<String> = live
+                .board
+                .members
+                .iter()
+                .map(|m| m.handle.clone())
+                .collect();
+            let inbox = live.board.inbox(&handle);
+            live.board_dirty |= inbox.is_some();
+            let rules = control::board_instructions(&cli(), &handle, &members);
+            Some(match inbox {
+                Some(inbox) => format!("{inbox}\n\n{rules}"),
+                None => rules,
+            })
+        }) {
+            Some(note) => format!("{prompt}\n\n{note}"),
+            None => prompt,
+        };
         let name = format!("{lead}-{}-{}", task.id, monocode_core::time::now_ms());
         let dispatch = task.dispatch;
         let work = cx.background_executor().spawn(async move {
@@ -702,7 +735,32 @@ impl Shell {
         match live.run.continuation(&|t| needs.get(&t.id).cloned()) {
             Ok(Some(prompt)) => {
                 live.lead_busy = true;
-                let prompt = format!("{prompt}\n\n{}", control::lead_instructions(&cli()));
+                let posts = live.board.inbox(board::COORDINATOR);
+                live.board_dirty |= posts.is_some();
+                let prompt = match posts {
+                    Some(posts) => format!(
+                        "{prompt}\n\n{posts}\n\n{}",
+                        control::lead_instructions(&cli())
+                    ),
+                    None => format!("{prompt}\n\n{}", control::lead_instructions(&cli())),
+                };
+                if let Some(view) = self.sessions.get(&lead) {
+                    view.update(cx, |v, cx| v.send_coordinator_report(prompt, cx));
+                }
+            }
+            // Workers addressed the coordinator on the board.
+            Ok(None)
+                if live.board.pending(board::COORDINATOR)
+                    && live.run.continuations < control::MAX_CONTINUATIONS =>
+            {
+                live.run.continuations += 1;
+                live.lead_busy = true;
+                live.board_dirty = true;
+                let posts = live.board.inbox(board::COORDINATOR).unwrap_or_default();
+                let prompt = format!(
+                    "{posts}\n\nAnswer the board when it helps the workers, steer or message them, and keep supervising the run.\n\n{}",
+                    control::lead_instructions(&cli())
+                );
                 if let Some(view) = self.sessions.get(&lead) {
                     view.update(cx, |v, cx| v.send_coordinator_report(prompt, cx));
                 }
@@ -725,13 +783,29 @@ impl Shell {
         let Some(live) = self.orchestrations.get_mut(&lead) else {
             return;
         };
+        let board_changed = live.board.sync(
+            &live.run,
+            &|t| needs.contains_key(&t.id),
+            monocode_core::time::now_ms(),
+        ) || std::mem::take(&mut live.board_dirty);
+        let board_loaded = live.board_loaded;
+        let mut swarm_changed = false;
+        if board_loaded && board_changed {
+            let snapshot = serde_json::to_string(&live.board).unwrap_or_default();
+            self.orchestration_control
+                .boards
+                .insert(lead, Some(Arc::new(live.board.clone())));
+            self.orchestration_control
+                .save(board::setting_key(lead), snapshot, &self.store, cx);
+            swarm_changed = true;
+        }
         let snapshot = serde_json::to_string(&live.run).unwrap_or_default();
         let blocked = live.run.blocked_keys(&|t| needs.get(&t.id).cloned());
         let changed = snapshot != live.saved || blocked != live.blocked;
         if snapshot != live.saved {
             live.saved = snapshot.clone();
             self.orchestration_control
-                .save(lead, snapshot, &self.store, cx);
+                .save(control::setting_key(lead), snapshot, &self.store, cx);
         }
         live.blocked = blocked;
         if changed {
@@ -770,6 +844,12 @@ impl Shell {
                 view.update(cx, |v, cx| v.set_managed_by((!ended).then_some(lead), cx));
             }
         }
+        if !board_loaded {
+            self.load_board(lead, cx);
+        }
+        if swarm_changed {
+            self.sync_swarm(cx);
+        }
     }
 
     /// One `control.*` call from a lead's provider process.
@@ -779,10 +859,30 @@ impl Shell {
             .strip_prefix("control.")
             .unwrap_or_default()
             .to_owned();
-        let lead = call.session;
-        if !self.orchestrations.contains_key(&lead) {
+        // The lead, or one of its workers: those only reach the board.
+        let (lead, worker) = if self.orchestrations.contains_key(&call.session) {
+            (call.session, None)
+        } else if let Some((lead, live)) = self
+            .orchestrations
+            .iter()
+            .find(|(_, live)| live.run.worker(call.session).is_some())
+        {
+            let handle = live
+                .board
+                .handle_of(call.session)
+                .unwrap_or_default()
+                .to_owned();
+            (*lead, Some(handle))
+        } else {
             let _ = call.reply.send(Err(
-                "No orchestration run is open for this chat. The user starts one from the plan card."
+                "No orchestration run is open for this chat. The user starts one with /swarm or from the plan card."
+                    .into(),
+            ));
+            return;
+        };
+        if worker.is_some() && !control::WORKER_ACTIONS.contains(&action.as_str()) {
+            let _ = call.reply.send(Err(
+                "Workers can only use post and board. Ask @coordinator on the board for anything else."
                     .into(),
             ));
             return;
@@ -799,6 +899,11 @@ impl Shell {
             ));
             return;
         }
+        if matches!(action.as_str(), "post" | "board") {
+            let from = worker.unwrap_or_else(|| board::COORDINATOR.to_owned());
+            self.board_call(lead, from, &action, call, cx);
+            return;
+        }
         let mutating = !matches!(action.as_str(), "list" | "get" | "wait");
         let fingerprint = app::fingerprint(&action, &call.input);
         let needs = self.needs(lead, cx);
@@ -808,13 +913,32 @@ impl Shell {
             let _ = call.reply.send(result);
             return;
         }
-        let (value, effect) = match live.run.execute(&action, &call.input, &needs) {
+        let (mut value, effect) = match live.run.execute(&action, &call.input, &needs) {
             Ok(done) => done,
             Err(error) => {
                 let _ = call.reply.send(Err(error));
                 return;
             }
         };
+        // A delegated task joins the board at once, so the lead learns its handle.
+        if action == "delegate" {
+            live.board.sync(
+                &live.run,
+                &|t| needs(t).is_some(),
+                monocode_core::time::now_ms(),
+            );
+            live.board_dirty = true;
+            let handle = value["taskId"].as_str().and_then(|id| {
+                live.board
+                    .members
+                    .iter()
+                    .find(|m| m.task.as_deref() == Some(id))
+                    .map(|m| m.handle.clone())
+            });
+            if let Some(handle) = handle {
+                value["handle"] = handle.into();
+            }
+        }
         if action == "wait" {
             if !live.run.waitable(&needs) {
                 let _ = call.reply.send(Ok(value));
@@ -1005,21 +1129,397 @@ impl Shell {
 }
 
 impl Control {
-    fn save(&mut self, lead: i64, snapshot: String, store: &Database, cx: &mut Context<Shell>) {
+    fn save(&mut self, key: String, snapshot: String, store: &Database, cx: &mut Context<Shell>) {
         let saver = self.saver.get_or_insert_with(|| {
-            let (tx, rx) = async_channel::unbounded::<(i64, String)>();
+            let (tx, rx) = async_channel::unbounded::<(String, String)>();
             let store = store.clone();
             cx.background_executor()
                 .spawn(async move {
-                    while let Ok((lead, snapshot)) = rx.recv().await {
-                        let _ = locked(&store)
-                            .and_then(|s| s.save_setting(&control::setting_key(lead), &snapshot));
+                    while let Ok((key, snapshot)) = rx.recv().await {
+                        let _ = locked(&store).and_then(|s| s.save_setting(&key, &snapshot));
                     }
                 })
                 .detach();
             tx
         });
-        let _ = saver.try_send((lead, snapshot));
+        let _ = saver.try_send((key, snapshot));
+    }
+}
+
+/// The harnesses a lead may assign: the installed ones with their models,
+/// plus whatever was already assigned. Reads catalogs: run it off the UI.
+fn run_choices(
+    profiles: Vec<(Kind, monocode_core::accounts::Profile)>,
+    assigned: Vec<(String, Option<String>)>,
+) -> Vec<Choice> {
+    let mut choices: Vec<Choice> = profiles
+        .into_iter()
+        .filter(|(kind, _)| monocode_core::provider::resolve(*kind).is_some())
+        .map(|(kind, profile)| Choice {
+            provider: kind.id().into(),
+            models: monocode_core::catalog::models_for(kind, &profile)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|m| m.id)
+                .collect(),
+        })
+        .collect();
+    for (provider, model) in assigned {
+        let index = match choices.iter().position(|c| c.provider == provider) {
+            Some(ix) => ix,
+            None => {
+                choices.push(Choice {
+                    provider,
+                    models: Vec::new(),
+                });
+                choices.len() - 1
+            }
+        };
+        if let Some(model) = model
+            && !choices[index].models.contains(&model)
+        {
+            choices[index].models.insert(0, model);
+        }
+    }
+    choices
+}
+
+impl Shell {
+    /// The account profile of each harness for `project`.
+    fn run_profiles(
+        &self,
+        project: &str,
+        cx: &App,
+    ) -> Vec<(Kind, monocode_core::accounts::Profile)> {
+        if cx.is_test() {
+            return Vec::new();
+        }
+        Kind::ALL
+            .into_iter()
+            .map(|kind| {
+                let profile = crate::accounts::get(cx)
+                    .map(|center| center.read(cx).selected(kind, project))
+                    .unwrap_or_default();
+                (kind, profile)
+            })
+            .collect()
+    }
+
+    /// `/swarm`: open a run with no tasks for this chat, then send its
+    /// message; the lead plans and delegates from its first turn.
+    fn start_swarm(
+        &mut self,
+        lead: i64,
+        request: String,
+        message: monocode_core::follow_up::Message,
+        cx: &mut Context<Self>,
+    ) {
+        let fail = move |this: &mut Self,
+                         message: monocode_core::follow_up::Message,
+                         error: String,
+                         cx: &mut Context<Self>| {
+            if let Some(view) = this.sessions.get(&lead) {
+                view.update(cx, |v, cx| v.swarm_failed(message, error, cx));
+            }
+        };
+        if self.orchestrations.contains_key(&lead) {
+            return fail(
+                self,
+                message,
+                "Resume or stop this chat's current run before starting another.".into(),
+                cx,
+            );
+        }
+        if self.app_bridge.is_none() && !cx.is_test() {
+            return fail(
+                self,
+                message,
+                "monoBOT app access is unavailable, so the coordinator cannot launch agents."
+                    .into(),
+                cx,
+            );
+        }
+        let Some(view) = self.sessions.get(&lead) else {
+            return;
+        };
+        let conversation = view.read(cx);
+        let project = conversation.summary.cwd.clone();
+        let checkout = conversation
+            .settings
+            .worktree_cwd
+            .clone()
+            .unwrap_or_else(|| project.clone());
+        if self.orchestrations.values().any(|live| {
+            monocode_core::files::path_key(live.checkout())
+                == monocode_core::files::path_key(&checkout)
+        }) {
+            return fail(
+                self,
+                message,
+                "Another run is already using this checkout.".into(),
+                cx,
+            );
+        }
+        let provider = conversation.summary.provider.clone();
+        let model = conversation.settings.model.clone();
+        let profiles = self.run_profiles(&project, cx);
+        let assigned = vec![(provider.clone(), model.clone())];
+        let path = checkout.clone();
+        let work = cx.background_executor().spawn(async move {
+            let isolated = isolation::available(std::path::Path::new(&path));
+            (isolated, run_choices(profiles, assigned))
+        });
+        cx.spawn(async move |this, cx| {
+            let (isolated, choices) = work.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.orchestrations.contains_key(&lead) {
+                    return fail(this, message, "This chat already has a run.".into(), cx);
+                }
+                let run = Run::swarm(
+                    lead,
+                    &project,
+                    &checkout,
+                    isolated,
+                    &request,
+                    choices,
+                    control::MAX_WORKERS,
+                );
+                this.sweep_worktrees(&run, cx);
+                let mut live = Live::new(run);
+                live.lead_busy = true;
+                this.orchestrations.insert(lead, live);
+                if let Some(view) = this.sessions.get(&lead) {
+                    view.update(cx, |v, cx| v.launch_swarm(message, cx));
+                }
+                this.pump_orchestration(lead, cx);
+                this.reveal_swarm(cx);
+            });
+        })
+        .detach();
+    }
+
+    /// Clear worker worktrees and branches earlier runs left in this
+    /// repository, keeping those of every open run.
+    fn sweep_worktrees(&self, run: &Run, cx: &mut Context<Self>) {
+        if !run.isolated {
+            return;
+        }
+        let keep: Vec<String> = self
+            .orchestrations
+            .values()
+            .flat_map(|live| live.run.tasks.iter())
+            .filter_map(|t| t.workspace.as_ref().map(|w| w.checkout.clone()))
+            .collect();
+        let checkout = run.checkout.clone();
+        cx.background_executor()
+            .spawn(async move {
+                let _ = isolation::sweep(std::path::Path::new(&checkout), &keep);
+            })
+            .detach();
+    }
+
+    /// `control post` and `control board`, from the lead or a worker.
+    fn board_call(
+        &mut self,
+        lead: i64,
+        from: String,
+        action: &str,
+        call: Call,
+        cx: &mut Context<Self>,
+    ) {
+        if let Err(error) = control::check_fields(action, &call.input) {
+            let _ = call.reply.send(Err(error));
+            return;
+        }
+        let Some(live) = self.orchestrations.get_mut(&lead) else {
+            return;
+        };
+        if action == "board" {
+            let since = call.input.get("since").and_then(Value::as_u64).unwrap_or(0);
+            let limit = call
+                .input
+                .get("limit")
+                .and_then(Value::as_u64)
+                .unwrap_or(50)
+                .clamp(1, 200) as usize;
+            let _ = call.reply.send(Ok(live.board.view(since, limit)));
+            return;
+        }
+        let key = format!("{from}:{}", call.request_id);
+        if let Some(value) = live.posted.get(&key) {
+            let _ = call.reply.send(Ok(value.clone()));
+            return;
+        }
+        if live.run.status != RunStatus::Active {
+            let _ = call.reply.send(Err(live.run.inactive_reason()));
+            return;
+        }
+        if from.is_empty() {
+            let _ = call.reply.send(Err(
+                "This agent is still joining the board; retry shortly.".into()
+            ));
+            return;
+        }
+        let text = call
+            .input
+            .get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let post = match live.board.post(&from, text, monocode_core::time::now_ms()) {
+            Ok(post) => post,
+            Err(error) => {
+                let _ = call.reply.send(Err(error));
+                return;
+            }
+        };
+        live.board_dirty = true;
+        let value = json!({"seq": post.seq, "to": post.to, "all": post.all});
+        if live.posted.len() >= 1_000 {
+            live.posted.clear();
+        }
+        live.posted.insert(key, value.clone());
+        let _ = call.reply.send(Ok(value));
+        self.deliver_posts(lead, cx);
+        self.pump_orchestration(lead, cx);
+    }
+
+    /// Hand running workers the posts addressed to them, as guidance on
+    /// their current turn. Stopped ones get them with their next turn, the
+    /// coordinator when it is idle.
+    fn deliver_posts(&mut self, lead: i64, cx: &mut Context<Self>) {
+        let Some(live) = self.orchestrations.get(&lead) else {
+            return;
+        };
+        let targets: Vec<(String, i64)> = live
+            .run
+            .tasks
+            .iter()
+            .filter(|t| t.status == Status::Running)
+            .filter_map(|t| {
+                let member = live
+                    .board
+                    .members
+                    .iter()
+                    .find(|m| m.task.as_deref() == Some(t.id.as_str()))?;
+                live.board
+                    .pending(&member.handle)
+                    .then(|| (member.handle.clone(), t.session))
+                    .and_then(|(handle, session)| Some((handle, session?)))
+            })
+            .collect();
+        for (handle, session) in targets {
+            let Some(view) = self.sessions.get(&session).cloned() else {
+                continue;
+            };
+            let Some(live) = self.orchestrations.get_mut(&lead) else {
+                return;
+            };
+            let before = live.board.member(&handle).map_or(0, |m| m.delivered);
+            let Some(text) = live.board.inbox(&handle) else {
+                continue;
+            };
+            live.board_dirty = true;
+            let steered = view.update(cx, |v, cx| v.steer_external(text, cx));
+            if !steered
+                && let Some(live) = self.orchestrations.get_mut(&lead)
+                && let Some(member) = live.board.members.iter_mut().find(|m| m.handle == handle)
+            {
+                member.delivered = before;
+            }
+        }
+    }
+
+    /// The lead whose board goes with chat `id`: its own, or its lead's.
+    fn swarm_lead(&self, id: i64) -> Option<i64> {
+        if self.orchestrations.contains_key(&id) || self.orchestration_summaries.contains_key(&id) {
+            return Some(id);
+        }
+        self.orchestrations
+            .iter()
+            .find(|(_, live)| live.run.worker(id).is_some())
+            .map(|(lead, _)| *lead)
+            .or_else(|| {
+                self.orchestration_summaries
+                    .iter()
+                    .find(|(_, summary)| summary.tasks.iter().any(|t| t.session == Some(id)))
+                    .map(|(lead, _)| *lead)
+            })
+    }
+
+    /// Show the board of the chat in view in the Swarm tab, or drop the tab.
+    pub(super) fn sync_swarm(&mut self, cx: &mut Context<Self>) {
+        let Some(panel) = self.right_panel.clone() else {
+            return;
+        };
+        let lead = self.workspace.active.and_then(|id| self.swarm_lead(id));
+        let board = lead.and_then(|lead| match self.orchestration_control.boards.get(&lead) {
+            Some(board) => board.clone(),
+            None => {
+                self.load_board(lead, cx);
+                None
+            }
+        });
+        let swarm = panel.read(cx).swarm.clone();
+        match (lead, board) {
+            (Some(lead), Some(board)) => {
+                swarm.update(cx, |s, cx| s.set_board(lead, board, cx));
+                panel.update(cx, |p, cx| p.set_swarm_tab(true, cx));
+            }
+            _ => {
+                panel.update(cx, |p, cx| p.set_swarm_tab(false, cx));
+                swarm.update(cx, |s, cx| s.clear(cx));
+            }
+        }
+    }
+
+    /// A new swarm opens its tab beside the coordinator.
+    fn reveal_swarm(&mut self, cx: &mut Context<Self>) {
+        self.sync_swarm(cx);
+        if let Some(panel) = &self.right_panel
+            && panel.read(cx).swarm_tab()
+        {
+            panel.update(cx, |p, cx| {
+                p.select(crate::right_panel::RightTab::Swarm, cx)
+            });
+        }
+    }
+
+    /// Read a lead's saved board off the UI thread.
+    fn load_board(&mut self, lead: i64, cx: &mut Context<Self>) {
+        if !self.orchestration_control.loading.insert(lead) {
+            return;
+        }
+        let store = self.store.clone();
+        let work = cx.background_executor().spawn(async move {
+            locked(&store)
+                .and_then(|s| s.setting(&board::setting_key(lead)))
+                .ok()
+                .flatten()
+                .and_then(|raw| serde_json::from_str::<Board>(&raw).ok())
+        });
+        cx.spawn(async move |this, cx| {
+            let saved = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.orchestration_control.loading.remove(&lead);
+                if let Some(live) = this.orchestrations.get_mut(&lead)
+                    && !live.board_loaded
+                {
+                    if let Some(saved) = saved {
+                        live.board = saved;
+                    }
+                    live.board_loaded = true;
+                    live.board_dirty = true;
+                    this.publish_orchestration(lead, cx);
+                    return;
+                }
+                this.orchestration_control
+                    .boards
+                    .entry(lead)
+                    .or_insert_with(|| saved.map(Arc::new));
+                this.sync_swarm(cx);
+            });
+        })
+        .detach();
     }
 }
 

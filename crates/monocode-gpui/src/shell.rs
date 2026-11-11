@@ -1808,6 +1808,7 @@ impl Shell {
                 p.set_terminal_tab(terminal_tab, cx);
             });
         }
+        self.sync_swarm(cx);
     }
     fn select_classic_sidebar_tab(
         &mut self,
@@ -1958,6 +1959,16 @@ impl Shell {
                             cx,
                         )
                     });
+                }
+            },
+        ));
+        let swarm = panel.read(cx).swarm.clone();
+        self.observations.push(cx.subscribe_in(
+            &swarm,
+            window,
+            |this, _, event: &crate::swarm::OpenMember, window, cx| {
+                if this.ensure_session(event.0, cx).is_some() {
+                    this.open(event.0, window, cx);
                 }
             },
         ));
@@ -5531,6 +5542,11 @@ impl Shell {
     /// opens from the diff stat instead.
     fn right_tab_count(&self, cx: &App) -> usize {
         2 + usize::from(self.terminal_in_panel(cx))
+            + usize::from(
+                self.right_panel
+                    .as_ref()
+                    .is_some_and(|p| p.read(cx).swarm_tab()),
+            )
     }
     /// The toggle's room at the end of the strip: `pl-1.5`, the button, `pr-3`.
     fn toggle_room(&self, cx: &App) -> f32 {

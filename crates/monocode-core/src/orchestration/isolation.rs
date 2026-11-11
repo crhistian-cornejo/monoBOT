@@ -1,10 +1,12 @@
-//! Each worker of a lead-supervised run edits its own detached worktree
-//! (`createOrchestrationWorktree`, `session_checkpoint_apply`). The worktree
-//! starts from a snapshot of the lead's checkout, uncommitted and untracked
-//! files included, so a worker sees what the lead sees. Accepting the worker
-//! applies only the difference from that snapshot back to the lead's checkout,
-//! and refuses it when the worker wrote outside its scopes. Synchronous: run
-//! these on a background executor.
+//! Each worker of a lead-supervised run edits its own worktree, on a
+//! temporary branch under `monobot/swarm/` (`createOrchestrationWorktree`,
+//! `session_checkpoint_apply`). The worktree starts from a snapshot of the
+//! lead's checkout, uncommitted and untracked files included, so a worker
+//! sees what the lead sees. Accepting the worker applies only the difference
+//! from that snapshot back to the lead's checkout, and refuses it when the
+//! worker wrote outside its scopes; removing it deletes the worktree and its
+//! branch. `sweep` clears what an interrupted run left behind. Synchronous:
+//! run these on a background executor.
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -15,7 +17,18 @@ pub struct Worker {
     pub checkout: String,
     /// Commit of the lead's files when the worker started.
     pub base: String,
+    /// The temporary branch the worktree has checked out; empty for
+    /// worktrees made before branches (detached).
+    pub branch: String,
 }
+
+/// Where worker branches live.
+pub const BRANCH_PREFIX: &str = "monobot/swarm/";
+/// Worker worktree folders start with this.
+const FOLDER_PREFIX: &str = "mc-worker-";
+/// A leftover worker worktree with changes is kept this long for the user
+/// to inspect, then swept.
+const KEEP_CHANGED: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
 
 fn git(cwd: &Path, index: Option<&Path>, args: &[&str]) -> Result<String, String> {
     if crate::files::remote::is_remote(cwd) {
@@ -128,7 +141,8 @@ fn root(lead: &Path) -> Result<PathBuf, String> {
     )))
 }
 
-/// A detached worktree holding the lead's files as they are now.
+/// A worktree on its own temporary branch, holding the lead's files as they
+/// are now.
 pub fn create(lead: &Path, name: &str) -> Result<Worker, String> {
     if name.is_empty()
         || !name
@@ -140,20 +154,22 @@ pub fn create(lead: &Path, name: &str) -> Result<Worker, String> {
     let base = snapshot(lead)?;
     let parent = root(lead)?;
     std::fs::create_dir_all(&parent).map_err(|e| e.to_string())?;
-    let path = parent.join(format!("mc-worker-{name}"));
+    let path = parent.join(format!("{FOLDER_PREFIX}{name}"));
     if path.exists() {
         return Err(format!(
             "A worker worktree already exists at {}",
             path.display()
         ));
     }
+    let branch = format!("{BRANCH_PREFIX}{name}");
     git(
         lead,
         None,
         &[
             "worktree",
             "add",
-            "--detach",
+            "-b",
+            &branch,
             "--",
             &path.to_string_lossy(),
             &base,
@@ -167,7 +183,11 @@ pub fn create(lead: &Path, name: &str) -> Result<Worker, String> {
         .to_string_lossy()
         .trim_end_matches('/')
         .to_owned();
-    Ok(Worker { checkout, base })
+    Ok(Worker {
+        checkout,
+        base,
+        branch,
+    })
 }
 
 /// Whether `path` falls under one of the project-relative `scopes`.
@@ -241,19 +261,110 @@ pub fn integrate(worker: &Worker, lead: &Path, scopes: &[String]) -> Result<Vec<
     Ok(files)
 }
 
-/// Remove the worker's worktree. A missing one is pruned.
+/// Remove the worker's worktree and its branch. A missing one is pruned.
 pub fn remove(lead: &Path, worker: &Worker) -> Result<(), String> {
     let path = Path::new(&worker.checkout);
-    if !path.exists() {
+    if path.exists() {
+        // The worker may work in a subfolder of its worktree.
+        let top = git(path, None, &["rev-parse", "--show-toplevel"])
+            .map(|top| top.trim().to_owned())
+            .unwrap_or_else(|_| worker.checkout.clone());
+        crate::provider::discard_worktree(Path::new(&top));
+        git(lead, None, &["worktree", "remove", "--force", "--", &top])?;
+    } else {
         let _ = git(lead, None, &["worktree", "prune"]);
-        return Ok(());
     }
-    // The worker may work in a subfolder of its worktree.
-    let top = git(path, None, &["rev-parse", "--show-toplevel"])
-        .map(|top| top.trim().to_owned())
-        .unwrap_or_else(|_| worker.checkout.clone());
-    crate::provider::discard_worktree(Path::new(&top));
-    git(lead, None, &["worktree", "remove", "--force", "--", &top]).map(|_| ())
+    delete_branch(lead, &worker.branch);
+    Ok(())
+}
+
+/// Delete one of our temporary branches; anything else is left alone.
+fn delete_branch(lead: &Path, branch: &str) {
+    if branch.starts_with(BRANCH_PREFIX)
+        && branch
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_/".contains(&b))
+    {
+        let _ = git(lead, None, &["branch", "-D", branch]);
+    }
+}
+
+/// What `sweep` removed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Swept {
+    pub worktrees: usize,
+    pub branches: usize,
+}
+
+/// Clear what interrupted runs left behind in the lead's repository: worker
+/// worktrees no run still uses (`keep`, their checkouts) once they hold no
+/// changes, or once they are a week old, and worker branches no worktree
+/// has checked out. Returns how much went.
+pub fn sweep(lead: &Path, keep: &[String]) -> Result<Swept, String> {
+    if !available(lead) {
+        return Ok(Swept::default());
+    }
+    let _ = git(lead, None, &["worktree", "prune"]);
+    // Compare worktree folder names: checkouts may be canonical paths
+    // (verbatim `\\?\` ones on Windows) that Git lists differently.
+    let folder = |path: &str| {
+        Path::new(path)
+            .components()
+            .rev()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .find(|c| c.starts_with(FOLDER_PREFIX))
+    };
+    let kept: Vec<String> = keep.iter().filter_map(|k| folder(k)).collect();
+    let mut swept = Swept::default();
+    let mut used = Vec::new();
+    for tree in crate::git::worktrees(lead)? {
+        let path = Path::new(&tree.path);
+        let ours = path
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy().starts_with(FOLDER_PREFIX));
+        let in_use = folder(&tree.path).is_some_and(|f| kept.contains(&f));
+        if !ours || in_use || tree.main {
+            used.extend(tree.branch);
+            continue;
+        }
+        // HEAD is the worker's starting snapshot: any status is its work.
+        let clean = git(path, None, &["status", "--porcelain"]).is_ok_and(|s| s.trim().is_empty());
+        let old = std::fs::metadata(path.join(".git"))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age > KEEP_CHANGED);
+        if clean || old {
+            crate::provider::discard_worktree(path);
+            if git(
+                lead,
+                None,
+                &["worktree", "remove", "--force", "--", &tree.path],
+            )
+            .is_ok()
+            {
+                swept.worktrees += 1;
+                continue;
+            }
+        }
+        used.extend(tree.branch);
+    }
+    let branches = git(
+        lead,
+        None,
+        &[
+            "for-each-ref",
+            "--format=%(refname:short)",
+            &format!("refs/heads/{}", BRANCH_PREFIX.trim_end_matches('/')),
+        ],
+    )?;
+    for branch in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
+        if branch.starts_with(BRANCH_PREFIX) && !used.iter().any(|u| u == branch) {
+            delete_branch(lead, branch);
+            swept.branches += 1;
+        }
+    }
+    Ok(swept)
 }
 
 #[cfg(test)]
@@ -330,6 +441,48 @@ mod tests {
 
         remove(&lead, &worker).unwrap();
         assert!(!checkout.exists());
+        // Its temporary branch goes with it.
+        assert!(worker.branch.starts_with(BRANCH_PREFIX));
+        assert_eq!(
+            super::git(&lead, None, &["branch", "--list", &worker.branch]).unwrap(),
+            ""
+        );
+    }
+
+    #[test]
+    fn sweep_clears_leftovers_but_keeps_live_and_changed_workers() {
+        let dir = repo();
+        let lead = dir.path().join("project");
+        let live = create(&lead, "live").unwrap();
+        let idle = create(&lead, "idle").unwrap();
+        let busy = create(&lead, "busy").unwrap();
+        std::fs::write(Path::new(&busy.checkout).join("src/lib.rs"), "work\n").unwrap();
+        // A branch whose worktree is long gone.
+        super::git(&lead, None, &["branch", "monobot/swarm/orphan", "HEAD"]).unwrap();
+        // A branch of the user's is never touched.
+        super::git(&lead, None, &["branch", "feature", "HEAD"]).unwrap();
+        let swept = sweep(&lead, std::slice::from_ref(&live.checkout)).unwrap();
+        assert_eq!(
+            swept,
+            Swept {
+                worktrees: 1,
+                branches: 2
+            }
+        );
+        assert!(Path::new(&live.checkout).exists());
+        assert!(!Path::new(&idle.checkout).exists());
+        assert!(
+            Path::new(&busy.checkout).exists(),
+            "work is kept for a week"
+        );
+        let branches = super::git(&lead, None, &["branch", "--list"]).unwrap();
+        assert!(branches.contains("feature"));
+        assert!(branches.contains(&live.branch));
+        assert!(branches.contains(&busy.branch));
+        assert!(!branches.contains("orphan"));
+        assert!(!branches.contains(&idle.branch));
+        remove(&lead, &live).unwrap();
+        remove(&lead, &busy).unwrap();
     }
 
     #[test]

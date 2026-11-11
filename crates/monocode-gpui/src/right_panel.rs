@@ -1,12 +1,14 @@
 //! Sidebar.tsx's inset `RightPanel`: the project tools beside the card, with
-//! reorderable Explorer / Changes / History tabs in the title bar, and a
-//! trailing Terminal tab when the terminal lives in the panel.
+//! reorderable Explorer / Changes / History tabs in the title bar, a
+//! Terminal tab when the terminal lives in the panel, and a trailing Swarm
+//! tab while the chat in view has an orchestration board.
 use crate::{
     changes::Changes,
     explorer::Explorer,
     git_status::{GitChanged, ProjectGit},
     history::History,
     project_tabs::{TabLabel, TabReveal, tab_button},
+    swarm::SwarmPanel,
     theme::*,
 };
 use gpui::{
@@ -62,9 +64,12 @@ pub(crate) enum RightTab {
     Files,
     Changes,
     Graph,
-    /// The project's terminal, when it opens in the panel. Always last and
-    /// never part of the saved order.
+    /// The project's terminal, when it opens in the panel. Never part of
+    /// the saved order.
     Terminal,
+    /// The board of the chat in view's swarm, while it has one. Always last
+    /// and never part of the saved order.
+    Swarm,
 }
 impl RightTab {
     fn label(self) -> &'static str {
@@ -73,6 +78,7 @@ impl RightTab {
             Self::Changes => "Changes",
             Self::Graph => "History",
             Self::Terminal => "Terminal",
+            Self::Swarm => "Swarm",
         }
     }
     /// loadRightPanelTabOrder: unique known tabs, the missing ones appended.
@@ -80,7 +86,7 @@ impl RightTab {
     pub(crate) fn normalize(order: &[RightTab]) -> Vec<RightTab> {
         let mut out = Vec::new();
         for tab in order.iter().chain(&[Self::Files, Self::Graph]) {
-            if !matches!(tab, Self::Terminal | Self::Changes) && !out.contains(tab) {
+            if !matches!(tab, Self::Terminal | Self::Changes | Self::Swarm) && !out.contains(tab) {
                 out.push(*tab);
             }
         }
@@ -259,6 +265,9 @@ pub(crate) struct RightPanel {
     sidebar_tab: Option<RightTab>,
     /// Whether the Terminal tab follows the others; the shell draws its pane.
     terminal_tab: bool,
+    pub(crate) swarm: Entity<SwarmPanel>,
+    /// Whether the Swarm tab ends the strip.
+    swarm_tab: bool,
     /// Classic reserves the title bar's height; rounded content starts at
     /// the card's top edge, below the window-wide title bar.
     top_inset: f32,
@@ -287,6 +296,7 @@ impl RightPanel {
         let explorer = cx.new(|cx| Explorer::new(git.clone(), window, cx));
         let changes = cx.new(|cx| Changes::new(git.clone(), window, cx));
         let history = cx.new(|cx| History::new(git.clone(), window, cx));
+        let swarm = cx.new(SwarmPanel::new);
         let subscriptions = vec![
             cx.observe(&git, |_, _, cx| cx.notify()),
             cx.subscribe(&git, |_, _, _: &GitChanged, cx| cx.notify()),
@@ -302,7 +312,14 @@ impl RightPanel {
             explorer,
             changes,
             history,
-            tab,
+            swarm,
+            swarm_tab: false,
+            // The board that was in view may be gone; Explorer stands in.
+            tab: if tab == RightTab::Swarm {
+                RightTab::Files
+            } else {
+                tab
+            },
             order: RightTab::normalize(&order),
             shown: false,
             sidebar_tab: None,
@@ -312,7 +329,7 @@ impl RightPanel {
             drag: None,
             reveal: None,
             skip_click: false,
-            tab_bounds: (0..4).map(|_| Default::default()).collect(),
+            tab_bounds: (0..5).map(|_| Default::default()).collect(),
             _subscriptions: subscriptions,
         }
     }
@@ -320,13 +337,30 @@ impl RightPanel {
         self.tab
     }
     /// The tabs in strip order: the saved two, with Terminal between them
-    /// when enabled.
+    /// when enabled and Swarm at the end while there is a board.
     pub(crate) fn tabs(&self) -> Vec<RightTab> {
         let mut tabs = self.order.clone();
         if self.terminal_tab {
             tabs.insert(1.min(tabs.len()), RightTab::Terminal);
         }
+        if self.swarm_tab {
+            tabs.push(RightTab::Swarm);
+        }
         tabs
+    }
+    pub(crate) fn swarm_tab(&self) -> bool {
+        self.swarm_tab
+    }
+    /// Adds or removes the Swarm tab; Explorer takes over when it goes.
+    pub(crate) fn set_swarm_tab(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        if self.swarm_tab == enabled {
+            return;
+        }
+        self.swarm_tab = enabled;
+        if !enabled && self.tab == RightTab::Swarm {
+            self.select(RightTab::Files, cx);
+        }
+        cx.notify();
     }
     /// Adds or removes the Terminal tab; Explorer takes over when it goes.
     pub(crate) fn set_terminal_tab(&mut self, enabled: bool, cx: &mut Context<Self>) {
@@ -395,6 +429,8 @@ impl RightPanel {
         self.history.update(cx, |h, cx| {
             h.set_enabled(shown && tab == RightTab::Graph, cx)
         });
+        self.swarm
+            .update(cx, |s, cx| s.set_shown(shown && tab == RightTab::Swarm, cx));
     }
     pub(crate) fn focus_pane(&self, window: &mut Window, cx: &mut App) {
         let focus = match (self.shown, self.tab) {
@@ -440,7 +476,10 @@ impl RightPanel {
         let bounds: Vec<Option<Bounds<Pixels>>> = tabs
             .iter()
             .zip(&self.tab_bounds)
-            .map(|(tab, slot)| slot.get().filter(|_| *tab != RightTab::Terminal))
+            .map(|(tab, slot)| {
+                slot.get()
+                    .filter(|_| !matches!(tab, RightTab::Terminal | RightTab::Swarm))
+            })
             .collect();
         if let Some(Some(own)) = bounds.get(from) {
             let centre = own.center().x + drag.offset;
@@ -513,6 +552,7 @@ impl RightPanel {
                     RightTab::Changes => ("right-panel-tab-Changes", "git-branch"),
                     RightTab::Graph => ("right-panel-tab-History", "clock"),
                     RightTab::Terminal => ("right-panel-tab-Terminal", "terminal"),
+                    RightTab::Swarm => ("right-panel-tab-Swarm", "users"),
                 };
                 let unfolded = match progress {
                     Some((_, p)) if active => p,
@@ -606,6 +646,11 @@ impl Render for RightPanel {
                 .into_any_element(),
             RightTab::Graph => self
                 .history
+                .clone()
+                .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
+                .into_any_element(),
+            RightTab::Swarm => self
+                .swarm
                 .clone()
                 .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
                 .into_any_element(),

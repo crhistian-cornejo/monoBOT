@@ -14,13 +14,15 @@ use std::collections::{BTreeMap, HashSet};
 pub const MAX_TASKS: usize = 40;
 pub const MAX_WORKERS: usize = 4;
 const MAX_REQUESTS: usize = 512;
-const MAX_CONTINUATIONS: u32 = 20;
+pub const MAX_CONTINUATIONS: u32 = 20;
 const RESULT_CHARS: usize = 20_000;
 
-pub const ACTIONS: [&str; 12] = [
+pub const ACTIONS: [&str; 14] = [
     "list", "delegate", "get", "wait", "steer", "message", "retry", "cancel", "respond", "answer",
-    "review", "finish",
+    "review", "finish", "post", "board",
 ];
+/// What a worker may call: the board, and nothing that steers the run.
+pub const WORKER_ACTIONS: [&str; 2] = ["post", "board"];
 
 pub const HELP: &str = r#"monoBOT local control — supervise this orchestration run from the lead agent.
 
@@ -32,9 +34,11 @@ Actions, with the JSON object each one takes:
             harness/model IDs you may assign.
   delegate  {"title":"Short title","harness":"<id from list>",
              "model":"<id from list>","prompt":"Self-contained instructions",
-             "files":["src/feature"],"dependsOn":["<taskId>"]}
-            Queue a worker and return its taskId. "model" is optional and
-            defaults to the first model list allows for that harness.
+             "files":["src/feature"],"dependsOn":["<taskId>"],"handle":"verifier"}
+            Queue a worker and return its taskId and board handle. "model" is
+            optional and defaults to the first model list allows for that
+            harness. "handle" is optional: a role name such as verifier or
+            tester; workers are worker-1, worker-2... otherwise.
             "files" is the write scope: project-relative paths, where a
             directory covers its descendants and ["."] reserves the whole
             checkout. "dependsOn" holds taskIds that must be reviewed first.
@@ -67,6 +71,13 @@ Actions, with the JSON object each one takes:
             is refused and the worktree kept.
   finish    {}
             End the run, once every task is accepted or cancelled.
+  post      {"text":"@worker-2 the KeyRing API changed: use `Lookup(kid)`"}
+            Post on the run's board, which the user watches live. Name
+            members with @handle, or everyone with @all. A running member
+            gets the post at once; a stopped one with its next turn; the
+            coordinator when it is idle. Workers may call post and board.
+  board     {"since":0,"limit":50}
+            The members, their state, and the latest posts after "since".
 
 Usual loop: list -> delegate ... -> wait or get -> steer an agent that drifts,
 unblock one with respond or answer -> inspect the changes yourself -> message
@@ -160,6 +171,8 @@ pub struct Task {
     pub prompt: String,
     pub files: Vec<String>,
     pub depends_on: Vec<String>,
+    /// The handle asked for on the board, such as "verifier".
+    pub handle: Option<String>,
     pub status: Status,
     pub accepted: bool,
     pub result: String,
@@ -274,6 +287,8 @@ pub struct Run {
     /// needsInput keys already put to the lead.
     pub announced: Vec<String>,
     pub next_id: u64,
+    /// Started with /swarm: the lead plans and delegates without a card.
+    pub swarm: bool,
 }
 
 /// The key a run is saved under.
@@ -345,7 +360,17 @@ pub fn check_scopes(files: &[String]) -> Result<(), String> {
 fn fields(action: &str) -> Option<&'static [&'static str]> {
     Some(match action {
         "list" | "finish" => &[],
-        "delegate" => &["title", "harness", "model", "prompt", "files", "dependsOn"],
+        "delegate" => &[
+            "title",
+            "harness",
+            "model",
+            "prompt",
+            "files",
+            "dependsOn",
+            "handle",
+        ],
+        "post" => &["text"],
+        "board" => &["since", "limit"],
         "get" | "cancel" | "review" => &["taskId"],
         "wait" => &["timeoutSeconds"],
         "steer" | "message" => &["taskId", "text"],
@@ -412,7 +437,29 @@ pub fn recovery_turn(reason: &str) -> String {
 pub fn lead_instructions(cli: &str) -> String {
     let cli = shell_path(cli);
     format!(
-        "<monocode_orchestration>\nYou are the lead of a local monoBOT run. Coordinate the user's task using `{cli} control`. Run `{cli} control --help` before your first command; it documents every action, its exact JSON fields and the retry rule. Credentials are already in your environment; never print them.\nEach call prints one JSON line and exits non-zero unless \"ok\" is true; read the \"error\" text, it says what to do next. Unknown JSON fields are rejected. If a call fails before reaching monoBOT, retry it with the same --request-id so the work is never queued twice.\nUse list to discover allowed harness/model IDs. Delegate bounded tasks with project-relative files (directories reserve their descendants), self-contained prompts and dependsOn task IDs. You may read and plan; leave project file edits to workers. Never start workers outside this CLI. Workers with overlapping files are queued.\nAgents never prompt the user. When one needs an approval or answers a question, list, get and wait report it as needsInput on that task, and you decide with respond or answer; it stays stopped until you do. Put it to the user in this conversation only when the call is genuinely theirs.\nSteer a running agent with steer; use message once it has stopped. completed means a turn finished, not that the work passed review. Review the actual changes (each worker has its own worktree, reported as workspace in get), message a worker for fixes, and use review to accept each completed task: that applies its changes to your checkout. Call finish only when required work and combined validation are complete. You receive worker results automatically when idle; use bounded wait calls while supervising. If the run is paused, stop polling, report the reason and ask the user to click Resume.\n</monocode_orchestration>"
+        "<monocode_orchestration>\nYou are the lead of a local monoBOT run. Coordinate the user's task using `{cli} control`. Run `{cli} control --help` before your first command; it documents every action, its exact JSON fields and the retry rule. Credentials are already in your environment; never print them.\nEach call prints one JSON line and exits non-zero unless \"ok\" is true; read the \"error\" text, it says what to do next. Unknown JSON fields are rejected. If a call fails before reaching monoBOT, retry it with the same --request-id so the work is never queued twice.\nUse list to discover allowed harness/model IDs. Delegate bounded tasks with project-relative files (directories reserve their descendants), self-contained prompts and dependsOn task IDs. You may read and plan; leave project file edits to workers. Never start workers outside this CLI. Workers with overlapping files are queued.\nAgents never prompt the user. When one needs an approval or answers a question, list, get and wait report it as needsInput on that task, and you decide with respond or answer; it stays stopped until you do. Put it to the user in this conversation only when the call is genuinely theirs.\nSteer a running agent with steer; use message once it has stopped. completed means a turn finished, not that the work passed review. Review the actual changes (each worker has its own worktree, reported as workspace in get), message a worker for fixes, and use review to accept each completed task: that applies its changes to your checkout. Call finish only when required work and combined validation are complete. You receive worker results automatically when idle; use bounded wait calls while supervising. If the run is paused, stop polling, report the reason and ask the user to click Resume.\nThe run has a live board the user watches: you are @coordinator, and each worker has a handle (delegate returns it). Use post to brief several workers at once, to connect a worker with the one whose work it depends on, or to hand finished work to a verifier; workers post there too, and what they address to you reaches you when you are idle.\n</monocode_orchestration>"
+    )
+}
+
+/// What a worker of a run is told about its board, appended to its turns.
+pub fn board_instructions(cli: &str, handle: &str, members: &[String]) -> String {
+    let cli = shell_path(cli);
+    format!(
+        "<monocode_board>\nYou are @{handle} on this run's board, which the user and the other agents watch live. Members: {}. Post short, concrete updates others need (an interface you changed, a blocker, a finding for the verifier) with `{cli} control post --json '{{\"text\":\"@handle ...\"}}'`, naming members with @handle or everyone with @all, and read it with `{cli} control board`. Posts addressed to you arrive with your turns. Do not post routine progress; your final report reaches @coordinator by itself. Credentials are already in your environment; never print them.\n</monocode_board>",
+        members
+            .iter()
+            .map(|m| format!("@{m}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// The lead's first turn of a /swarm run: the user's request, with the
+/// rules for coordinating it.
+pub fn swarm_prompt(request: &str, cli: &str) -> String {
+    format!(
+        "{request}\n\n<monocode_swarm>\nThe user started a swarm for this request: you are its coordinator. Inspect the project with read-only tools, then split the work into bounded assignments with disjoint write scopes and delegate them now through the control CLI; do not ask the user to approve a plan. Give each worker a handle that says its role (for example implementer, tester, verifier), run independent work in parallel (up to {MAX_WORKERS} at once) and add a verifier that runs the tests across the combined result once the builders are reviewed. Each worker works in its own temporary branch and worktree; review applies its changes to your checkout and removes them, so nothing is left behind. Leave project edits to the workers. When everything is reviewed and verified, call finish and summarize what changed.\n</monocode_swarm>\n\n{}",
+        lead_instructions(cli)
     )
 }
 
@@ -487,6 +534,32 @@ impl Run {
             });
         }
         Ok(run)
+    }
+
+    /// A run started with /swarm: no tasks yet; the lead plans and
+    /// delegates them itself.
+    pub fn swarm(
+        lead: i64,
+        project: &str,
+        checkout: &str,
+        isolated: bool,
+        request: &str,
+        choices: Vec<Choice>,
+        max_workers: usize,
+    ) -> Self {
+        Self {
+            version: 1,
+            lead,
+            project: project.into(),
+            checkout: checkout.into(),
+            isolated,
+            status: RunStatus::Active,
+            max_workers: max_workers.clamp(1, MAX_WORKERS),
+            choices,
+            request: request.into(),
+            swarm: true,
+            ..Default::default()
+        }
     }
 
     fn new_id(&mut self) -> String {
@@ -873,6 +946,7 @@ impl Run {
                     },
                 ))
             }
+            "post" | "board" => Err("The board is not available for this run.".into()),
             _ => Err("Unknown action. Run control --help.".into()),
         }
     }
@@ -920,6 +994,18 @@ impl Run {
         let files = strings(input, "files", 64)?;
         check_scopes(&files)?;
         let depends_on = strings(input, "dependsOn", 40)?;
+        let handle = match input.get("handle") {
+            None | Some(Value::Null) => None,
+            Some(_) => {
+                let handle = super::board::handle_from(&text(input, "handle", 32)?);
+                if handle.is_empty() || handle == "all" || handle == super::board::COORDINATOR {
+                    return Err(
+                        "Invalid handle: use a short role name such as verifier or tester".into(),
+                    );
+                }
+                Some(handle)
+            }
+        };
         let missing: Vec<String> = depends_on
             .iter()
             .filter(|id| {
@@ -945,6 +1031,7 @@ impl Run {
             prompt,
             files,
             depends_on,
+            handle,
             delivered: true,
             ..Default::default()
         });

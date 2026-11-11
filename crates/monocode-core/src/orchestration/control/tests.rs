@@ -260,6 +260,7 @@ fn isolated_reviews_integrate_and_finish_needs_every_task_settled() {
     let worker = Worker {
         checkout: "/repo-worktrees/mc-worker-a".into(),
         base: "abc".into(),
+        ..Default::default()
     };
     run.prepared(&a, 1, 1, Some(worker.clone()));
     run.prepared(&b, 1, 2, None);

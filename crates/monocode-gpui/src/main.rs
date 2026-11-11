@@ -89,6 +89,7 @@ mod settings;
 mod shell;
 mod site_icons;
 mod sound;
+mod swarm;
 mod syntax;
 mod tab_label;
 mod tab_motion;

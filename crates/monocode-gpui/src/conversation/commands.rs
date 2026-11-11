@@ -23,6 +23,10 @@ impl Conversation {
         if self.goal_command(&text, cx) {
             return true;
         }
+        if let Some(request) = monocode_core::composer::consume_command(&text, "swarm") {
+            self.swarm_command(&text, request, cx);
+            return true;
+        }
         if let Some(request) = monocode_core::composer::consume_command(&text, "visualize") {
             self.visualize_command(&text, request, cx);
             return true;
@@ -37,6 +41,62 @@ impl Conversation {
         }
         self.compact_context(cx);
         true
+    }
+
+    /// `/swarm <request>`: this chat becomes the coordinator of a run whose
+    /// agents it plans and launches itself, without a plan card.
+    fn swarm_command(&mut self, text: &str, request: &str, cx: &mut Context<Self>) {
+        if self.input.read(cx).is_composing() {
+            return;
+        }
+        let request = request.trim();
+        if request.is_empty() {
+            self.status = "Describe the task after /swarm.".into();
+            cx.notify();
+            return;
+        }
+        if self.busy || self.stopping || !self.follow_ups.state.messages.is_empty() {
+            self.status = "Wait for the current turn and queued messages before /swarm.".into();
+            cx.notify();
+            return;
+        }
+        if self.orchestration_progress.is_some() || self.managed_by.is_some() {
+            self.status = "This chat is already part of a run. Finish or stop it first.".into();
+            cx.notify();
+            return;
+        }
+        if !self.history_ready()
+            || self.attaching
+            || self.account_switching
+            || self.preparing_worktree
+            || self.is_remote()
+            || self.settings.mono.is_some()
+            || self.settings.worktree_removed
+        {
+            self.status = "/swarm is not available in this session.".into();
+            cx.notify();
+            return;
+        }
+        let prepared = self.completion.read(cx).prepare_prompt(request);
+        let cli = std::env::current_exe()
+            .map(|path| path.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "monocode-gpui".into());
+        let attachments = std::mem::take(&mut self.attachments);
+        let mut message = self.message(text.to_owned(), attachments, None, cx);
+        message.prepared_prompt = Some(monocode_core::orchestration::control::swarm_prompt(
+            &prepared, &cli,
+        ));
+        self.input.update(cx, |input, cx| {
+            input.take(cx);
+        });
+        self.completion
+            .update(cx, |completion, cx| completion.dismiss(cx));
+        self.status = "Starting the swarm…".into();
+        cx.emit(composer_features::StartSwarm {
+            request: request.to_owned(),
+            message,
+        });
+        cx.notify();
     }
 
     fn visualize_command(&mut self, text: &str, request: &str, cx: &mut Context<Self>) {

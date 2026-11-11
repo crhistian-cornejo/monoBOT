@@ -2,6 +2,7 @@
 //! the lead then supervises its workers through `control`. Each worker gets
 //! its own worktree (`isolation`), and overlapping scopes are serialized even
 //! when they have no explicit dependency.
+pub mod board;
 pub mod control;
 pub mod isolation;
 use serde::{Deserialize, Serialize};

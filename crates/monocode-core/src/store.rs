@@ -1067,7 +1067,7 @@ impl Store {
         tx.execute("DELETE FROM native_reminders WHERE session_id=?1", [id])
             .map_err(|e| e.to_string())?;
         tx.execute(
-            "DELETE FROM native_settings WHERE key IN (?1,?2,?3,?5,?6,?7,?8,?9) OR key LIKE ?4",
+            "DELETE FROM native_settings WHERE key IN (?1,?2,?3,?5,?6,?7,?8,?9,?10) OR key LIKE ?4",
             params![
                 format!("agent:{id}"),
                 format!("context:{id}"),
@@ -1077,7 +1077,8 @@ impl Store {
                 format!("orchestration:{id}"),
                 format!("inbox-ask:{id}"),
                 format!("automation:{id}"),
-                format!("orchestration-run:{id}")
+                format!("orchestration-run:{id}"),
+                crate::orchestration::board::setting_key(id)
             ],
         )
         .map_err(|e| e.to_string())?;

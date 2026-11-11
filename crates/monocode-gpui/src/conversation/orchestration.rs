@@ -16,6 +16,13 @@ pub(crate) struct StopOrchestration;
 pub(crate) struct ResumeOrchestration;
 /// Open every worker of the lead's run beside it.
 pub(crate) struct OpenOrchestrationAgents;
+/// `/swarm <request>`: the shell opens a run with this chat as its
+/// coordinator, then sends `message` (or hands it back with an error).
+pub(crate) struct StartSwarm {
+    pub request: String,
+    pub message: monocode_core::follow_up::Message,
+}
+impl EventEmitter<StartSwarm> for Conversation {}
 
 /// Tasks shown before «Show N more tasks».
 const FOLDED_TASKS: usize = 4;
@@ -795,6 +802,32 @@ impl Conversation {
                 );
         }
         Some(card.into_any_element())
+    }
+}
+
+impl Conversation {
+    /// The run for a /swarm message is ready: send it.
+    pub(crate) fn launch_swarm(
+        &mut self,
+        message: monocode_core::follow_up::Message,
+        cx: &mut Context<Self>,
+    ) {
+        self.launch_message(message, cx);
+    }
+    /// The run could not start: the message goes back to the composer.
+    pub(crate) fn swarm_failed(
+        &mut self,
+        message: monocode_core::follow_up::Message,
+        error: String,
+        cx: &mut Context<Self>,
+    ) {
+        if self.input.read(cx).content.trim().is_empty() {
+            self.input
+                .update(cx, |input, cx| input.set_text(message.text.clone(), cx));
+            self.attachments = message.attachments;
+        }
+        self.status = error;
+        cx.notify();
     }
 }
 

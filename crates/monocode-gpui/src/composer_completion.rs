@@ -79,6 +79,7 @@ impl Choice {
             Some("commit") => (GitAction::Commit.icon(), 0xfed7aa, 0xc2410c),
             Some("visualize") => return ("command-visualize", accent_color()),
             Some("goal") => return ("circle-dot", accent_color()),
+            Some("swarm") => return ("users", accent_color()),
             _ => {
                 return (
                     if self.insertion.starts_with("@note/") {
@@ -240,6 +241,7 @@ impl Completion {
                 "/plan",
                 "/operator",
                 "/orchestrator",
+                "/swarm",
                 "/compact",
                 "/mcp",
                 "/btw",
@@ -311,6 +313,7 @@ impl Completion {
             "/plan",
             "/operator",
             "/orchestrator",
+            "/swarm",
             "/compact",
             "/mcp",
             "/btw",
@@ -670,6 +673,7 @@ impl Completion {
                     "/plan",
                     "/operator",
                     "/orchestrator",
+                    "/swarm",
                     "/compact",
                     "/mcp",
                     "/btw",
@@ -855,6 +859,11 @@ impl Completion {
                     "Orchestrator",
                     "Plan and coordinate agent work",
                 ),
+                (
+                    "swarm",
+                    "Swarm",
+                    "Launch agents that work in parallel on a live board",
+                ),
                 ("operator", "Operator", "Give this thread access to monoBOT"),
                 ("plan", "Plan mode", "Review a plan before building"),
                 (
@@ -922,7 +931,13 @@ impl Completion {
                             builtin: Some(id),
                             mode: (!matches!(
                                 id,
-                                "compact" | "btw" | "stage" | "commit" | "visualize" | "goal"
+                                "compact"
+                                    | "btw"
+                                    | "stage"
+                                    | "commit"
+                                    | "visualize"
+                                    | "goal"
+                                    | "swarm"
                             ))
                             .then_some(id),
                             file: false,
@@ -1427,6 +1442,7 @@ mod tests {
                     [
                         "/draft",
                         "/orchestrator",
+                        "/swarm",
                         "/operator",
                         "/plan",
                         "/btw",

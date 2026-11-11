@@ -31,6 +31,7 @@ things were, move it to `old/`.
 | [port-plan.md](in-progress/port-plan.md) | The phased plan and its progress table |
 | [limitations.md](in-progress/limitations.md) | Known limits and what still needs runtime checks, per area and platform |
 | [mail-workspace.md](in-progress/mail-workspace.md) | Mail, bot inboxes and agenda with Cloudflare and Mailflare; deployment checklist |
+| [swarm.md](in-progress/swarm.md) | `/swarm`: parallel agents on a live board (Board, Members, Graph); phase 1 built, what is left and the full plan |
 | [workstreams.md](in-progress/workstreams.md) | Workstreams (beta): multi-day work run by an orchestrator |
 | [ivy-review.md](in-progress/ivy-review.md) | What to take from IVY: harness and agent gaps, Decider, live and group calls, dictation |
 | [performance-audit.md](in-progress/performance-audit.md) | Audit of Nov 9: measured cost at rest and at work, what was fixed in live calls, the notch and polling, what is left, and what macOS 27 adds |

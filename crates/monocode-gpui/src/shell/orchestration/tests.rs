@@ -452,3 +452,178 @@ fn an_interrupted_run_comes_back_paused_and_resumes_its_worker_in_place(cx: &mut
         })
         .unwrap();
 }
+
+/// One `control` call from a worker's own session.
+fn worker_call(
+    shell: &mut Shell,
+    session: i64,
+    action: &str,
+    request: &str,
+    input: Value,
+    cx: &mut Context<Shell>,
+) -> mpsc::Receiver<Result<Value, String>> {
+    call(shell, session, action, request, input, cx)
+}
+
+#[gpui::test]
+fn the_board_follows_the_run_and_workers_post_on_it(cx: &mut TestAppContext) {
+    let (window, lead, dir) = shell(cx);
+    let repo = dir.path().join("project").canonicalize().unwrap();
+    let repo = repo.to_string_lossy().into_owned();
+    window
+        .update(cx, |shell, window, cx| {
+            hold_lead(shell, lead, cx);
+            shell.ensure_right_panel(window, cx);
+            shell
+                .orchestrations
+                .insert(lead, Live::new(run(lead, &repo, false, &["src", "README"])));
+            shell.pump_orchestration(lead, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let (worker, replies) = window
+        .update(cx, |shell, _, cx| {
+            let live = &shell.orchestrations[&lead];
+            let handles: Vec<_> = live
+                .board
+                .members
+                .iter()
+                .map(|m| m.handle.clone())
+                .collect();
+            assert_eq!(handles, ["coordinator", "worker-1", "worker-2"]);
+            // Both were assigned; the fixture provider failed both turns.
+            let kinds: Vec<_> = live.board.posts.iter().map(|p| p.kind).collect();
+            assert_eq!(
+                kinds.iter().filter(|k| **k == board::Kind::Assign).count(),
+                2
+            );
+            assert_eq!(kinds.iter().filter(|k| **k == board::Kind::Fail).count(), 2);
+            let worker = live.run.tasks[0].session.unwrap();
+            let post = worker_call(
+                shell,
+                worker,
+                "post",
+                "p1",
+                json!({"text": "@worker-2 the `README` is mine"}),
+                cx,
+            );
+            let again = worker_call(
+                shell,
+                worker,
+                "post",
+                "p1",
+                json!({"text": "@worker-2 the `README` is mine"}),
+                cx,
+            );
+            let steer = worker_call(shell, worker, "delegate", "d0", json!({}), cx);
+            let unknown = call(shell, lead, "post", "p2", json!({"text": "@ghost hi"}), cx);
+            let read = worker_call(shell, worker, "board", "b1", json!({"since": 0}), cx);
+            let delegated = call(
+                shell,
+                lead,
+                "delegate",
+                "d1",
+                json!({"title": "Verify", "harness": "fixture", "prompt": "Run the tests",
+                       "files": ["tests"], "handle": "Verifier"}),
+                cx,
+            );
+            (worker, (post, again, steer, unknown, read, delegated))
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let (post, again, steer, unknown, read, delegated) = replies;
+    let post = post.try_recv().unwrap().unwrap();
+    assert_eq!(post["to"], json!(["worker-2"]));
+    assert_eq!(
+        again.try_recv().unwrap().unwrap(),
+        post,
+        "a retried post lands once"
+    );
+    assert!(
+        steer
+            .try_recv()
+            .unwrap()
+            .unwrap_err()
+            .contains("only use post and board")
+    );
+    assert!(unknown.try_recv().unwrap().unwrap_err().contains("@ghost"));
+    let read = read.try_recv().unwrap().unwrap();
+    assert!(
+        read["posts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["from"] == "worker-1")
+    );
+    assert_eq!(delegated.try_recv().unwrap().unwrap()["handle"], "verifier");
+    window
+        .update(cx, |shell, _, cx| {
+            let live = &shell.orchestrations[&lead];
+            assert_eq!(
+                live.board
+                    .posts
+                    .iter()
+                    .filter(|p| p.kind == board::Kind::Message)
+                    .count(),
+                1
+            );
+            // worker-2 stopped: the post waits for its next turn.
+            assert!(live.board.pending("worker-2"));
+            // The Swarm tab shows the lead's board, and a worker's too.
+            let panel = shell.right_panel.clone().unwrap();
+            assert!(panel.read(cx).swarm_tab());
+            let swarm = panel.read(cx).swarm.clone();
+            assert_eq!(swarm.read(cx).lead(), Some(lead));
+            assert_eq!(swarm.read(cx).board().posts.len(), live.board.posts.len());
+            assert_eq!(shell.swarm_lead(worker), Some(lead));
+        })
+        .unwrap();
+    // The board is saved under the lead.
+    let saved = window
+        .update(cx, |shell, _, _| {
+            locked(&shell.store)
+                .unwrap()
+                .setting(&board::setting_key(lead))
+                .unwrap()
+        })
+        .unwrap()
+        .expect("a saved board");
+    let saved: Board = serde_json::from_str(&saved).unwrap();
+    assert_eq!(saved.members.len(), 4);
+}
+
+#[gpui::test]
+fn swarm_opens_a_run_without_a_card_and_shows_its_tab(cx: &mut TestAppContext) {
+    let (window, lead, _dir) = shell(cx);
+    window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            let message = monocode_core::follow_up::Message {
+                id: "m1".into(),
+                text: "/swarm Migrate auth".into(),
+                ..Default::default()
+            };
+            shell.start_swarm(lead, "Migrate auth".into(), message, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            let live = shell.orchestrations.get(&lead).expect("a run");
+            assert!(live.run.swarm);
+            assert_eq!(live.board.title, "Migrate auth");
+            let panel = shell.right_panel.clone().unwrap();
+            assert!(panel.read(cx).swarm_tab());
+            assert_eq!(panel.read(cx).tab(), crate::right_panel::RightTab::Swarm);
+            // A second /swarm on the same chat is refused.
+            let message = monocode_core::follow_up::Message {
+                text: "/swarm Again".into(),
+                ..Default::default()
+            };
+            shell.start_swarm(lead, "Again".into(), message, cx);
+            // It goes back to the composer.
+            let view = shell.sessions[&lead].read(cx);
+            assert_eq!(view.input.read(cx).content, "/swarm Again");
+        })
+        .unwrap();
+}

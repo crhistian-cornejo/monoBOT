@@ -1,5 +1,5 @@
 pub(crate) use super::orchestration::{
-    OpenOrchestrationAgents, ResumeOrchestration, StartOrchestration, StopOrchestration,
+    OpenOrchestrationAgents, ResumeOrchestration, StartOrchestration, StartSwarm, StopOrchestration,
 };
 use super::*;
 use std::path::PathBuf;
