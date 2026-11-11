@@ -763,8 +763,8 @@ fn run_turn_using(
         planning = request.settings.plan;
         let antigravity = request.kind == Kind::Antigravity;
         let mut plan_tools = std::collections::HashSet::new();
-        // A turn going round in circles is stopped (`loop_guard`): each new
-        // call by its id, and the answer as it grows. A provider that takes a
+        // A turn going round in circles is stopped (`loop_guard`): each call
+        // once it has finished, and the answer as it grows. A provider that takes a
         // steer is reminded first, on the same channel as the user's controls.
         let (mut guard, reminders, controls) = if request.kind.can_steer() {
             let (reminders, controls) = Reminders::join(controls);
@@ -777,7 +777,6 @@ fn run_turn_using(
             (monocode_core::loop_guard::Guard::default(), None, controls)
         };
         let mut reminded = 0;
-        let mut guarded_calls = std::collections::HashSet::new();
         let mut turn_text = String::new();
         // The running-work list attributes the provider and its tools to this session.
         let result = monocode_core::process::owned_by(summary.id, || {
@@ -935,20 +934,18 @@ fn run_turn_using(
                             {
                                 compacted = true;
                             }
-                            if guarded_calls.insert(tool.id.clone()) {
-                                match guard.call(&tool) {
-                                    Some(monocode_core::loop_guard::Repeat::Stop(reason)) => {
-                                        return Err(reason.into());
-                                    }
-                                    Some(monocode_core::loop_guard::Repeat::Remind(text)) => {
-                                        if let Some(reminders) = &reminders {
-                                            reminded += 1;
-                                            reminders.send(reminded, text);
-                                            status = "Reminded the agent that it keeps repeating the same call".into();
-                                        }
-                                    }
-                                    None => {}
+                            match guard.call(&tool) {
+                                Some(monocode_core::loop_guard::Repeat::Stop(reason)) => {
+                                    return Err(reason.into());
                                 }
+                                Some(monocode_core::loop_guard::Repeat::Remind(text)) => {
+                                    if let Some(reminders) = &reminders {
+                                        reminded += 1;
+                                        reminders.send(reminded, text);
+                                        status = "Reminded the agent that it keeps repeating the same call".into();
+                                    }
+                                }
+                                None => {}
                             }
                             if antigravity
                                 && !images_wanted

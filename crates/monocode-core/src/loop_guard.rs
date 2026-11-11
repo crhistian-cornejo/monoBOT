@@ -4,22 +4,58 @@
 //! anywhere. Rules, not a model: they look at what the turn already says and
 //! cost nothing. Conservative on purpose: only long verbatim repeats that
 //! fill most of the end of the answer, and only the same call with the same
-//! input many times in a row, trip them. Ported from IVY's `agents/guard.rs`.
+//! input and the same result many times in a row, trip them. Ported from
+//! IVY's `agents/guard.rs`.
 //!
 //! A provider that takes a message mid-turn is reminded first, as DeepSeek
-//! Harness's repeat reminder does: the third and fifth identical call ask the
-//! agent to read the last result and change approach or finish, and only the
-//! eighth stops the turn. A reminder costs one short message; a stop throws
-//! the turn away.
-use crate::tool::ToolCall;
+//! Harness's repeat reminder does: the third, fifth and eighth identical call
+//! ask the agent to read the last result and change approach or finish, and
+//! only the twelfth stops the turn. A reminder costs one short message; a
+//! stop ends the turn, and the conversation offers to carry on
+//! (`provider_retry`'s `Looping`).
+//!
+//! A call is judged once it has finished, never while it runs: a provider
+//! announces a call before its input has streamed in, so judging it then
+//! would take any run of calls to one tool for the same call. And it is the
+//! same call only when its result is the same too.
+//!
+//! Waiting is not going round in circles: a call to a waiting tool, a command
+//! that sleeps, or any call that took a while lets time pass, so it starts
+//! the count over. An agent that checks on a slow type-check, sleeps and
+//! checks again is never stopped for it.
+use std::collections::{HashMap, HashSet};
+use std::time::{Duration, Instant};
 
-/// The same call, with the same input, this many times in a row stops a turn
-/// whose provider cannot be reminded mid-turn.
-pub const SAME_CALLS: usize = 6;
+use crate::tool::{ToolCall, ToolState};
+
+/// The same call, with the same input and result, this many times in a row
+/// stops a turn whose provider cannot be reminded mid-turn.
+pub const SAME_CALLS: usize = 8;
 /// When the provider can be reminded: the counts that remind it, and the one
 /// that stops the turn.
-const REMIND_AT: [usize; 2] = [3, 5];
-pub const SAME_CALLS_REMINDED: usize = 8;
+const REMIND_AT: [usize; 3] = [3, 5, 8];
+pub const SAME_CALLS_REMINDED: usize = 12;
+/// A call that ran at least this long was waiting on something.
+const WAITED: Duration = Duration::from_secs(15);
+/// Tools whose job is to wait on other work (lowercase).
+const WAITING_TOOLS: [&str; 8] = [
+    "taskoutput",
+    "bashoutput",
+    "agentoutputtool",
+    "monitor",
+    "schedulewakeup",
+    "wait",
+    "sleep",
+    "await",
+];
+/// Inputs that wait: shell sleeps and blocking reads of a background task.
+const WAITING_INPUTS: [&str; 5] = [
+    "sleep ",
+    "start-sleep",
+    "timeout /t",
+    "\"block\": true",
+    "\"block\":true",
+];
 /// Every reminder is sent as a steer with this id prefix, so the transcript
 /// can tell it from a message the user wrote.
 const REMINDER_ID: &str = "loop-guard-reminder-";
@@ -34,7 +70,7 @@ const PASSAGE: usize = 60;
 /// Why the turn was stopped.
 pub const REPEATING: &str =
     "Stopped: the model kept writing the same text. Ask again, perhaps in other words.";
-pub const LOOPING: &str = "Stopped: the agent kept repeating the same action without getting anywhere. Look at what it did and ask again with more detail.";
+pub const LOOPING: &str = "Stopped: the agent made the same call and got the same result again and again. Continue to have it try another way.";
 
 /// What to do about a call that repeats the one before it.
 #[derive(Debug, PartialEq, Eq)]
@@ -48,6 +84,9 @@ pub enum Repeat {
 /// What one turn has done so far, as the guards look at it.
 #[derive(Debug, Default)]
 pub struct Guard {
+    /// When each running call was first seen.
+    started: HashMap<String, Instant>,
+    judged: HashSet<String>,
     last_call: String,
     same: usize,
     looked_at: usize,
@@ -73,10 +112,34 @@ impl Guard {
         repeating(text).then_some(REPEATING)
     }
 
-    /// After a new call: whether to remind the agent or stop the turn, when
-    /// it is the same one again.
+    /// After any update to a call: once it has finished, whether to remind
+    /// the agent or stop the turn, when it is the same call with the same
+    /// result as the one before. Each call is judged once.
     pub fn call(&mut self, call: &ToolCall) -> Option<Repeat> {
-        let key = format!("{}\u{1f}{}", call.name, call.input);
+        self.call_at(call, Instant::now())
+    }
+
+    fn call_at(&mut self, call: &ToolCall, now: Instant) -> Option<Repeat> {
+        match call.state {
+            ToolState::Running => {
+                self.started.entry(call.id.clone()).or_insert(now);
+                return None;
+            }
+            ToolState::Cancelled => return None,
+            ToolState::Completed | ToolState::Failed => {}
+        }
+        if !self.judged.insert(call.id.clone()) {
+            return None;
+        }
+        let took_a_while = self
+            .started
+            .remove(&call.id)
+            .is_some_and(|at| now.saturating_duration_since(at) >= WAITED);
+        if took_a_while || waiting(call) {
+            (self.last_call, self.same) = (String::new(), 0);
+            return None;
+        }
+        let key = format!("{}\u{1f}{}\u{1f}{}", call.name, call.input, call.output);
         if key == self.last_call {
             self.same += 1;
         } else {
@@ -97,10 +160,17 @@ impl Guard {
     }
 }
 
+/// Whether a call's job is to wait on other work.
+fn waiting(call: &ToolCall) -> bool {
+    let name = call.name.to_ascii_lowercase();
+    let input = call.input.to_ascii_lowercase();
+    WAITING_TOOLS.contains(&name.as_str()) || WAITING_INPUTS.iter().any(|w| input.contains(w))
+}
+
 /// What the agent reads when it repeats itself.
 fn reminder(tool: &str, times: usize) -> String {
     format!(
-        "monoBOT: you made the same {tool} call with the same input {times} times in a row. Read its last result before you call it again. If it did not help, change your approach; if the work is done, finish and report."
+        "monoBOT: you made the same {tool} call {times} times in a row and got the same result each time. Read that result before you call it again. If it did not help, change your approach; if you are waiting on something, wait longer between checks; if the work is done, finish and report."
     )
 }
 
@@ -183,14 +253,23 @@ mod tests {
         );
     }
 
+    /// A finished call, with a fresh id each time as a provider gives it.
+    fn finished(id: usize, name: &str, input: &str, output: &str) -> ToolCall {
+        let mut call = ToolCall::new(&id.to_string(), name);
+        call.input = input.into();
+        call.output = output.into();
+        call.state = ToolState::Completed;
+        call
+    }
+
     #[test]
     fn the_same_call_many_times_in_a_row_stops_the_turn() {
-        let call = |input: &str| {
-            let mut call = ToolCall::new("1", "Bash");
-            call.input = input.into();
-            call
-        };
         let mut guard = Guard::default();
+        let mut id = 0;
+        let mut call = |input: &str| {
+            id += 1;
+            finished(id, "Bash", input, "same answer")
+        };
         for _ in 0..SAME_CALLS - 1 {
             assert_eq!(guard.call(&call("ls folder")), None);
         }
@@ -206,16 +285,87 @@ mod tests {
     }
 
     #[test]
+    fn calls_are_judged_once_finished_not_while_their_input_streams() {
+        let mut guard = Guard::reminding();
+        for n in 0..SAME_CALLS_REMINDED * 2 {
+            // Announced before its input arrives, then updated, then done.
+            let mut call = ToolCall::new(&n.to_string(), "Bash");
+            assert_eq!(guard.call(&call), None, "announced");
+            call.input = format!("step {n}");
+            assert_eq!(guard.call(&call), None, "still running");
+            call.state = ToolState::Completed;
+            assert_eq!(guard.call(&call), None, "different commands: {n}");
+            assert_eq!(guard.call(&call), None, "judged once");
+        }
+        let mut cancelled = finished(99, "Bash", "step", "");
+        cancelled.state = ToolState::Cancelled;
+        assert_eq!(guard.call(&cancelled), None);
+    }
+
+    #[test]
+    fn waiting_on_work_whose_answer_changes_is_not_a_loop() {
+        let mut guard = Guard::reminding();
+        for n in 0..SAME_CALLS_REMINDED * 2 {
+            let output = format!("still checking… {n} files");
+            let said = guard.call(&finished(n, "Bash", "tail build.log", &output));
+            assert_eq!(said, None);
+        }
+    }
+
+    #[test]
+    fn checking_on_a_slow_job_between_waits_is_not_a_loop() {
+        let mut guard = Guard::reminding();
+        let mut id = 0;
+        let mut next = |name: &str, input: &str| {
+            id += 1;
+            finished(id, name, input, "running")
+        };
+        for _ in 0..SAME_CALLS_REMINDED * 2 {
+            // The same check with the same answer, a wait in between.
+            assert_eq!(guard.call(&next("Bash", "ls out")), None);
+            assert_eq!(guard.call(&next("Bash", "sleep 30")), None);
+            assert_eq!(guard.call(&next("Bash", "ls out")), None);
+            let wait = r#"{"task_id": "b1", "block": true}"#;
+            assert_eq!(guard.call(&next("Bash", wait)), None);
+            assert_eq!(guard.call(&next("PowerShell", "Start-Sleep 20")), None);
+            assert_eq!(guard.call(&next("TaskOutput", "b1")), None);
+            assert_eq!(guard.call(&next("Monitor", "b1")), None);
+        }
+    }
+
+    #[test]
+    fn a_call_that_took_a_while_starts_the_count_over() {
+        let mut guard = Guard::reminding();
+        let start = Instant::now();
+        for n in 0..SAME_CALLS_REMINDED * 2 {
+            let call = finished(n, "Bash", "pnpm exec tsc --noEmit", "");
+            let mut running = call.clone();
+            running.state = ToolState::Running;
+            let at = start + WAITED * (2 * n as u32);
+            assert_eq!(guard.call_at(&running, at), None);
+            assert_eq!(guard.call_at(&call, at + WAITED), None, "{n}");
+        }
+        // The same quick call keeps counting.
+        let at = start + WAITED * 100;
+        for n in 1..=3 {
+            let call = finished(1000 + n, "Bash", "pnpm exec tsc --noEmit", "");
+            let mut running = call.clone();
+            running.state = ToolState::Running;
+            guard.call_at(&running, at);
+            let said = guard.call_at(&call, at + Duration::from_secs(1));
+            assert_eq!(said.is_some(), n == 3, "{n}: {said:?}");
+        }
+    }
+
+    #[test]
     fn a_provider_that_takes_a_steer_is_reminded_before_the_turn_stops() {
-        let mut call = ToolCall::new("1", "Bash");
-        call.input = "cargo test".into();
         let mut guard = Guard::reminding();
         for times in 1..=SAME_CALLS_REMINDED {
-            let said = guard.call(&call);
+            let said = guard.call(&finished(times, "Bash", "cargo test", "1 failed"));
             match times {
-                3 | 5 => assert!(
+                3 | 5 | 8 => assert!(
                     matches!(&said, Some(Repeat::Remind(text))
-                        if text.contains(&format!("same Bash call with the same input {times} times"))),
+                        if text.contains(&format!("same Bash call {times} times"))),
                     "{times}: {said:?}"
                 ),
                 SAME_CALLS_REMINDED => assert_eq!(said, Some(Repeat::Stop(LOOPING))),

@@ -40,17 +40,28 @@ does not fill the conversation (`composer::attachment_excerpt`). Files over
 `monocode_core::loop_guard` watches every turn:
 
 - **The same text over and over** stops the turn.
-- **The same tool call with the same input, many times in a row** depends on
-  the provider:
+- **The same tool call with the same input and the same result, many times in
+  a row** depends on the provider. A call is judged once it has finished:
+  providers announce a call before its input streams in, and judging it then
+  took any run of calls to one tool (eight different `Bash` commands, say) for
+  a loop. A call whose answer changes, like checking on a background job, is
+  progress and never counts. Waiting starts the count over: a waiting tool
+  (`TaskOutput`, `BashOutput`, `Monitor`, `ScheduleWakeup`…), a command that
+  sleeps (`sleep`, `Start-Sleep`, `timeout /t`, a blocking task read) or any
+  call that ran 15 s or more. An agent that checks a slow type-check, waits
+  and checks again is never stopped for it.
   - A provider that takes a message mid-turn (`Kind::can_steer`: Codex, Claude
-    Code, Cursor, Pi, omp, Hermes and OpenCode) is reminded at the 3rd and 5th
-    repeat and stopped at the 8th. The reminder asks the agent to read the last
-    result, then change its approach or finish. It travels as a steer on the
-    turn's control channel. The chat shows it as the turn's status, not as a
-    message from the user.
-  - Any other provider is stopped at the 6th repeat.
+    Code, Cursor, Pi, omp, Hermes and OpenCode) is reminded at the 3rd, 5th
+    and 8th repeat and stopped at the 12th. The reminder asks the agent to read
+    the last result, then change its approach, wait longer or finish. It
+    travels as a steer on the turn's control channel. The chat shows it as the
+    turn's status, not as a message from the user.
+  - Any other provider is stopped at the 8th repeat.
 
-The stop reason stays as the turn's error row.
+The stop reason stays as the turn's error row. A stop for repeated calls also
+shows the provider-retry notice above the composer (`provider_retry`'s
+`Looping`), with **Continue** and no countdown: it sends the turn on, asking
+the agent to read the result it kept getting and try another way.
 
 ## Goals
 

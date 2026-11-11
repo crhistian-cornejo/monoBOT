@@ -2,11 +2,10 @@
 //! sent again by itself after a growing wait, with a notice above the composer
 //! that counts down and offers Retry now (providerRetry.ts,
 //! ProviderRetryNotice.tsx). The decisions are core's (provider_retry).
+//! A turn the loop guard stopped gets the same notice with Continue and no
+//! countdown.
 use super::*;
 use monocode_core::provider_retry::{self as retry, ProviderRetry};
-
-/// What a retry sends: the same words as resuming after a usage limit.
-const CONTINUE_PROMPT: &str = "Continue from where you left off.";
 
 #[derive(Default)]
 pub(super) struct RetryState {
@@ -110,7 +109,7 @@ impl Conversation {
         self.provider_retry.retry = Some(current.sending());
         self.provider_retry.clock = None;
         self.status = "Ready".into();
-        self.launch_prompt(CONTINUE_PROMPT.into(), cx);
+        self.launch_prompt(retry::prompt(&current).into(), cx);
         cx.emit(SessionChanged);
         cx.notify();
     }
@@ -126,6 +125,7 @@ impl Conversation {
         let current = self.provider_retry.retry.as_ref().filter(|r| !r.sending)?;
         let now = monocode_core::time::now_ms();
         let counting = current.retry_at.is_some();
+        let action = retry::action(current);
         let button = |id: &'static str, label: &'static str| {
             div()
                 .id(id)
@@ -179,9 +179,9 @@ impl Conversation {
                                 .child(retry::status(current, now)),
                         )
                         .child(
-                            button("provider-retry-now", "Retry now")
+                            button("provider-retry-now", action)
                                 .child(icon("rotate-ccw", 14.))
-                                .child("Retry now")
+                                .child(action)
                                 .on_click(
                                     cx.listener(|this, _, _, cx| this.retry_provider_now(cx)),
                                 ),
@@ -263,5 +263,26 @@ mod tests {
                 .update(visual, |v, _, _| v.provider_retry.retry.is_none())
                 .unwrap()
         );
+
+        // A turn stopped going in circles offers Continue, with no countdown.
+        window
+            .update(visual, |v, _, cx| {
+                v.status = monocode_core::loop_guard::LOOPING.into();
+                v.note_provider_retry(false, cx);
+            })
+            .unwrap();
+        let stopped = window
+            .update(visual, |v, _, _| v.provider_retry.retry.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(stopped.reason, retry::Reason::Looping);
+        assert_eq!(stopped.retry_at, None);
+        assert!(
+            !window
+                .update(visual, |v, _, _| v.retry_scheduled())
+                .unwrap()
+        );
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("provider-retry-now").is_some());
     }
 }

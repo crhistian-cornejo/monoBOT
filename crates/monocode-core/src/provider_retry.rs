@@ -16,6 +16,11 @@
 //!
 //! Usage, credit and spending limits ([`crate::usage::Limit::from_error`]) are
 //! never retried; they keep their own notice.
+//!
+//! A turn the loop guard stopped ([`crate::loop_guard::LOOPING`]) gets the
+//! same notice without a countdown: sending it again by itself would most
+//! likely go round the same circle, but one click carries on, and tells the
+//! agent to read the last result and try another way.
 
 use regex::Regex;
 use std::sync::OnceLock;
@@ -34,6 +39,8 @@ pub enum Reason {
     Overloaded,
     Server,
     Connection,
+    /// The loop guard stopped the turn: carried on only when the user asks.
+    Looping,
 }
 
 impl Reason {
@@ -42,9 +49,15 @@ impl Reason {
         match self {
             Reason::Overloaded | Reason::Server => 60_000,
             Reason::Connection => 15_000,
+            Reason::Looping => 0,
         }
     }
 }
+
+/// What a retry sends, after a transient failure or a usage limit.
+pub const CONTINUE_PROMPT: &str = "Continue from where you left off.";
+/// What carrying on after the loop guard sends.
+const UNSTUCK_PROMPT: &str = "Continue from where you left off. Before, you made the same call and got the same result again and again: read that result, then take a different approach, or finish and report if the work is done.";
 
 /// The provider failed the last turn with a transient error.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -83,6 +96,9 @@ pub fn reason(message: &str) -> Option<Reason> {
     static OVERLOADED: OnceLock<Regex> = OnceLock::new();
     static SERVER: OnceLock<Regex> = OnceLock::new();
     static CONNECTION: OnceLock<Regex> = OnceLock::new();
+    if message.starts_with(crate::loop_guard::LOOPING) {
+        return Some(Reason::Looping);
+    }
     if crate::usage::Limit::from_error(message).is_some() {
         return None;
     }
@@ -136,7 +152,10 @@ pub fn next(session: &Session, message: &str, now: u64, random: f64) -> Option<P
     }
     let attempt = session.retry.map_or(0, |r| r.attempt) + 1;
     // Scheduled runs come back on their own schedule; don't add turns to them.
-    let automatic = attempt <= MAX_RETRIES && !session.automation && !session.ephemeral;
+    let automatic = attempt <= MAX_RETRIES
+        && !session.automation
+        && !session.ephemeral
+        && reason != Reason::Looping;
     Some(ProviderRetry {
         reason,
         attempt,
@@ -176,11 +195,31 @@ pub fn title(retry: &ProviderRetry) -> &'static str {
         Reason::Overloaded => "Provider is overloaded",
         Reason::Server => "Provider error",
         Reason::Connection => "Connection lost",
+        Reason::Looping => "Stopped going in circles",
+    }
+}
+
+/// The notice's button.
+pub fn action(retry: &ProviderRetry) -> &'static str {
+    match retry.reason {
+        Reason::Looping => "Continue",
+        _ => "Retry now",
+    }
+}
+
+/// What the button, or the countdown, sends.
+pub fn prompt(retry: &ProviderRetry) -> &'static str {
+    match retry.reason {
+        Reason::Looping => UNSTUCK_PROMPT,
+        _ => CONTINUE_PROMPT,
     }
 }
 
 /// "Retry 2 of 4 in 1m 30s", or why it won't retry by itself.
 pub fn status(retry: &ProviderRetry, now: u64) -> String {
+    if retry.reason == Reason::Looping {
+        return "The agent repeated a call that kept giving the same result".into();
+    }
     let Some(at) = retry.retry_at else {
         return if retry.attempt > MAX_RETRIES {
             format!("Gave up after {MAX_RETRIES} retries")
@@ -415,6 +454,32 @@ mod tests {
         assert_eq!(
             title(&retry(Reason::Connection, 1, None, false)),
             "Connection lost"
+        );
+    }
+
+    #[test]
+    fn a_turn_stopped_going_in_circles_waits_for_the_user_to_continue() {
+        let message = crate::loop_guard::LOOPING;
+        assert_eq!(reason(message), Some(Reason::Looping));
+        assert_eq!(
+            reason(&format!("{message} · Saving failed: disk full")),
+            Some(Reason::Looping)
+        );
+        let stopped = next(&Session::default(), message, 0, 0.0).unwrap();
+        assert_eq!(stopped, retry(Reason::Looping, 1, None, false));
+        assert!(!due(
+            &Session {
+                retry: Some(&stopped),
+                ..Default::default()
+            },
+            u64::MAX
+        ));
+        assert_eq!(action(&stopped), "Continue");
+        assert!(prompt(&stopped).contains("take a different approach"));
+        let server = retry(Reason::Server, 1, None, false);
+        assert_eq!(
+            (action(&server), prompt(&server)),
+            ("Retry now", CONTINUE_PROMPT)
         );
     }
 }
