@@ -53,6 +53,39 @@ an NSIS installer on Windows, all under `native-dist/` and named
 `xtask/packaging/native-installer.nsi`. `cargo xtask bundle-macos` wraps an
 existing build in `monoBOT.app` without packaging it.
 
+### Signed macOS builds on your Mac (and in git worktrees)
+
+`cargo xtask build` signs `target/release/monoBOT.app` ad hoc. With
+`MONOCODE_NATIVE_SIGNING_IDENTITY` it signs with that identity, the hardened
+runtime and `assets/macos/Entitlements.plist`, but does not notarize:
+
+```sh
+security find-identity -v -p codesigning     # the SHA-1 hash of the Developer ID
+MONOCODE_NATIVE_SIGNING_IDENTITY=<sha1> cargo xtask build
+```
+
+Give the SHA-1 hash, not the name: when the keychain holds two Developer ID
+certificates with the same name (a renewal, or one from the old G1 authority
+next to a G2 one), `codesign` refuses the name as ambiguous. Pick the
+certificate issued by "Developer ID Certification Authority G2"; the G1
+authority expires on 1 February 2027.
+
+The same commands work in a git worktree. It has its own `target/`, so the
+first release build there is a full one, and it reuses the dictation libraries
+the main checkout already downloaded (`target/sherpa-onnx-prebuilt`).
+
+For a notarized `.app` and `.dmg` like the release, build with
+`MONOCODE_NATIVE_VERSION` set (the executable embeds it) and package:
+
+```sh
+MONOCODE_NATIVE_VERSION=0.0.3 cargo build --locked -p monocode-gpui --release
+MONOCODE_NATIVE_VERSION=0.0.3 APPLE_SIGNING_IDENTITY=<sha1> \
+  APPLE_API_KEY_PATH=<AuthKey_ID.p8> APPLE_API_KEY=<key id> APPLE_API_ISSUER=<issuer id> \
+  cargo xtask package macos target/release/monocode-gpui native-dist aarch64
+```
+
+`package` stops before signing anything if a notarization value is missing.
+
 The Windows installer is not signed yet. Endpoint protection such as Sophos
 (HitmanPro.Alert "Lockdown", policy `LockdownNewFile`, type
 `BrowserAncestorPowershell`) treats a freshly downloaded unsigned installer as
@@ -97,7 +130,26 @@ Repository secrets the workflow needs:
 | `R2_ACCOUNT_ID`, `R2_BUCKET_NAME` | Cloudflare account and `monobot-releases` |
 | `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | An R2 API token limited to `monobot-releases` (Object Read & Write) |
 | `MONOBOT_UPDATER_PRIVATE_KEY`, `MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD`, `MONOBOT_UPDATER_PUBKEY` | The minisign key pair that signs updates (`cargo xtask update-keys <dir>` creates one; the password comes from `MONOBOT_UPDATER_PRIVATE_KEY_PASSWORD`) |
-| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8` | Developer ID signing and notarization |
+| `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8` | Developer ID signing and notarization (below) |
+
+The Apple secrets go in together: with none of them a release ships without
+macOS and warns; with only some, the first job fails and names the missing
+ones. Their values:
+
+- `APPLE_CERTIFICATE`: the Developer ID Application certificate and its
+  private key, exported from Keychain Access as a `.p12` (only that one
+  certificate), in base64: `base64 -i DeveloperID.p12 | gh secret set APPLE_CERTIFICATE`.
+- `APPLE_CERTIFICATE_PASSWORD`: the password you gave the `.p12`.
+- `APPLE_SIGNING_IDENTITY`: the certificate's name, `Developer ID Application:
+  <name> (<team id>)`. The runner's keychain holds only that certificate, so
+  the name is not ambiguous there.
+- `APPLE_API_KEY`, `APPLE_API_ISSUER`, `APPLE_API_KEY_P8`: an App Store
+  Connect API key (Users and Access → Integrations → Team Keys, Developer
+  role): its key id, the issuer id shown above the list, and the contents of
+  `AuthKey_<key id>.p8` (`gh secret set APPLE_API_KEY_P8 < AuthKey_<key id>.p8`).
+
+`gh secret set NAME` with no value asks for it, so nothing lands in the shell
+history.
 
 The Windows installer's pictures (`assets/installer/`) and every icon come
 from `assets/logo/monobot.svg` through `cargo xtask logo`. The installer

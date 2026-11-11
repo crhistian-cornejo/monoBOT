@@ -28,9 +28,25 @@ jobs:
     steps:
       - id: plan
         env:
-          HAS_APPLE: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_SIGNING_IDENTITY != '' && secrets.APPLE_API_KEY_P8 != '' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY != '' }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER != '' }}
+          APPLE_API_KEY_P8: ${{ secrets.APPLE_API_KEY_P8 != '' }}
         run: |
           set -euo pipefail
+          # All six Apple secrets, or none. Some of them would only fail at
+          # notarization, after the whole Mac build.
+          HAS_APPLE=true
+          MISSING=()
+          for NAME in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_API_KEY APPLE_API_ISSUER APPLE_API_KEY_P8; do
+            if [ "${!NAME}" != true ]; then HAS_APPLE=false; MISSING+=("$NAME"); fi
+          done
+          if [ "$HAS_APPLE" = false ] && (( ${#MISSING[@]} < 6 )); then
+            echo "::error::Missing Apple secrets: ${MISSING[*]}"
+            exit 1
+          fi
           # Like release.yml: AppKit draws its controls (traffic lights, menus)
           # for the SDK the app links against, and only the newest Apple
           # silicon images ship a current one, so Intel cross-compiles there.

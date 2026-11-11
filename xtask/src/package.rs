@@ -171,6 +171,25 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
                 .as_deref()
                 .filter(|id| *id != "-")
                 .ok_or("Public previews require a Developer ID signing identity")?;
+            // Fail before signing and packaging, not at the first notarytool call.
+            let (Some(key_path), Some(key_id), Some(issuer)) = (
+                env.apple_api_key_path.as_deref(),
+                env.apple_api_key.as_deref(),
+                env.apple_api_issuer.as_deref(),
+            ) else {
+                let missing: Vec<&str> = [
+                    ("APPLE_API_KEY_PATH", env.apple_api_key_path.is_none()),
+                    ("APPLE_API_KEY", env.apple_api_key.is_none()),
+                    ("APPLE_API_ISSUER", env.apple_api_issuer.is_none()),
+                ]
+                .into_iter()
+                .filter_map(|(name, missing)| missing.then_some(name))
+                .collect();
+                return Err(format!(
+                    "Notarization needs an App Store Connect API key: set {}",
+                    missing.join(", ")
+                ));
+            };
             let profile_dir = binary.parent().ok_or("The executable has no folder")?;
             let app = bundle_macos(
                 &Bundle {
@@ -188,11 +207,11 @@ pub fn package_native(package: &Package, tools: &dyn Tools) -> Result<Vec<Artifa
                         .args(["notarytool", "submit"])
                         .arg(file)
                         .arg("--key")
-                        .arg(env.apple_api_key_path.as_deref().unwrap_or_default())
+                        .arg(key_path)
                         .arg("--key-id")
-                        .arg(env.apple_api_key.as_deref().unwrap_or_default())
+                        .arg(key_id)
                         .arg("--issuer")
-                        .arg(env.apple_api_issuer.as_deref().unwrap_or_default())
+                        .arg(issuer)
                         .args(["--wait", "--output-format", "json"])
                         .capture(),
                 )?;
@@ -642,6 +661,38 @@ mod tests {
         )
         .unwrap_err();
         assert!(error.contains("Developer ID"), "{error}");
+    }
+
+    #[test]
+    fn mac_packages_need_the_notary_key_before_signing_anything() {
+        let directory = tempfile::tempdir().unwrap();
+        let release = directory.path().join("release");
+        fs::create_dir_all(&release).unwrap();
+        let binary = release.join("monocode-gpui");
+        fs::write(&binary, "#!/bin/sh\nprintf 'monoBOT 0.16.0\\n'\n").unwrap();
+        set_mode(&binary, 0o755).unwrap();
+        let error = package_native(
+            &Package {
+                root: &root(),
+                kind: "macos",
+                binary: &binary,
+                out: &directory.path().join("out"),
+                version: "0.16.0",
+                arch: "aarch64",
+                env: &PackageEnv {
+                    apple_signing_identity: Some("Developer ID Application: Fixture (T)".into()),
+                    apple_api_key: Some("KEYID".into()),
+                    ..Default::default()
+                },
+            },
+            &FakeApple::default(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            error,
+            "Notarization needs an App Store Connect API key: set APPLE_API_KEY_PATH, APPLE_API_ISSUER"
+        );
+        assert!(!release.join(BUNDLE_NAME).exists(), "nothing was bundled");
     }
 
     #[test]
