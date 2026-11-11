@@ -7,6 +7,10 @@ use crate::{
 };
 use gpui::{AnyElement, Context, SharedString, div, prelude::*, px};
 use monocode_core::provider::Kind;
+/// What to do with a limit reset near a limit.
+const LIMIT_RESETS: [(&str, &str); 3] =
+    [("off", "Off"), ("ask", "Ask"), ("automatic", "Automatic")];
+
 impl SettingsView {
     pub(super) fn providers_page(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let p = self.prefs.clone();
@@ -35,6 +39,24 @@ impl SettingsView {
                     false,
                     cx,
                     |this, on, cx| this.update(cx, |p| p.show_remaining_usage = on),
+                )],
+            ),
+            self.row(
+                Some("limit-resets"),
+                false,
+                "Limit resets",
+                Some("Claude Code's 5-hour, weekly, Fable and full resets, and Codex's banked resets. At 98% of a limit monoBOT asks whether to use one when you reach it; Automatic uses it at the limit without asking and the agent keeps going.".into()),
+                vec![self.segmented(
+                    "limit-resets",
+                    "Limit resets",
+                    p.limit_resets.id(),
+                    &LIMIT_RESETS,
+                    cx,
+                    |this, value, cx| {
+                        this.update(cx, |p| {
+                            p.limit_resets = monocode_core::usage::resets::Mode::from_id(value)
+                        })
+                    },
                 )],
             ),
             self.row(

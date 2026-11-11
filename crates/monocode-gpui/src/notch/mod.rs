@@ -285,9 +285,22 @@ pub(crate) struct Notch {
     level_sender: Option<async_channel::Sender<monocode_core::notch::system::Level>>,
     /// Tries again to take the keys while the system does not allow it yet.
     keys_task: Option<Task<()>>,
-    /// What plays (Windows), and the player's commands.
+    /// What plays: the lead player, the one the closed notch, the lyrics
+    /// and the queue follow.
     media: Option<monocode_core::notch::media::Playing>,
-    media_commands: Option<std::sync::mpsc::Sender<platform::MediaCommand>>,
+    /// Every player as the system last reported them, in its order.
+    players: Vec<monocode_core::notch::media::Playing>,
+    /// Which player leads (`media`) and which come after.
+    lineup: monocode_core::notch::media::Lineup,
+    /// The player beside the lead in Home's second column, if any, and its
+    /// cover's bytes with the image drawn.
+    beside: Option<monocode_core::notch::media::Playing>,
+    beside_art: Option<(std::sync::Arc<[u8]>, std::sync::Arc<gpui::Image>)>,
+    /// The app in Home's left column while two players show: the columns
+    /// keep their sides as the lead passes from one to the other.
+    duo_left: Option<String>,
+    /// Each command with the app it is for.
+    media_commands: Option<std::sync::mpsc::Sender<(String, platform::MediaCommand)>>,
     media_task: Option<Task<()>>,
     /// Repaints the line and the progress while something plays.
     media_tick: Option<Task<()>>,
@@ -487,6 +500,11 @@ impl Notch {
             level_sender: None,
             keys_task: None,
             media: None,
+            players: Vec::new(),
+            lineup: Default::default(),
+            beside: None,
+            beside_art: None,
+            duo_left: None,
             media_commands: None,
             media_task: None,
             media_tick: None,

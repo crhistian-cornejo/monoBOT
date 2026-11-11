@@ -172,6 +172,12 @@ pub(crate) struct Accounts {
     pub root: PathBuf,
     pub usage: HashMap<Key, Cached>,
     pub reset_actions: HashMap<Key, resets::ResetAction>,
+    /// The user's answer to a reset offered near a limit, by account: the
+    /// limit and the reset it was for, and whether they said yes.
+    pub reset_answers: HashMap<Key, resets::ResetAnswer>,
+    /// What a provider answers to a reset in tests.
+    #[cfg(test)]
+    pub reset_stub: Option<Result<String, String>>,
     pub identities: HashMap<(Kind, String), accounts::Identity>,
     identity_loading: std::collections::HashSet<(Kind, String)>,
     identity_generation: HashMap<(Kind, String), u64>,
@@ -218,6 +224,9 @@ impl Accounts {
             store,
             usage: HashMap::new(),
             reset_actions: HashMap::new(),
+            reset_answers: HashMap::new(),
+            #[cfg(test)]
+            reset_stub: None,
             identities: HashMap::new(),
             identity_loading: Default::default(),
             identity_generation: Default::default(),

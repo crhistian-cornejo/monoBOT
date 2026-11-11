@@ -84,7 +84,57 @@ monoBOT runs its own loop instead. It works the same with every provider, and
 it fits its one-turn-per-message runtime, which Codex's self-started turns do
 not.
 
+## Limit resets
+
+A subscription can hold resets for its limits. monoBOT reads them, offers one
+before the limit, and uses it at the limit so the agent keeps going. The rules
+live in `monocode_core::usage::resets`; the accounts center
+(`accounts/resets.rs`) and the conversation (`conversation/accounts.rs`) apply
+them.
+
+- **What is read.**
+  - **Codex:** its banked resets (`account/rateLimits/read`), spent with
+    `account/rateLimitResetCredit/consume`.
+  - **Claude Code:** its reset grants, the same ones `/limit-reset` uses. They
+    come from `GET /api/oauth/usage?cedar_ember=1&skip_spend=1`. Each grant says
+    how many uses it has left, which limits it refills (`five_hour`, `seven_day`,
+    `seven_day_overage_included`…) and until when. A grant that gives back what
+    Fable used of the weekly limit is the Fable reset; the others are 5-hour,
+    weekly and full resets.
+  - **At a limit:** also the weekly 5-hour reset (`?at_wall=1`, `juniper_tide`).
+  - **How it is spent:** `POST /api/organizations/{org}/reset_rate_limits`, with
+    a fresh `request_id`, so a retry never counts twice. The organization comes
+    from `oauthAccount.organizationUuid` in Claude Code's `.claude.json`. The
+    CLI's token is only read, never refreshed.
+- **When.** At 98% of a limit, if a reset refills that limit, the chat offers it
+  above the composer: "Claude Code is at 98% of its 5-hour limit. Use your
+  5-hour reset (2 left) when you reach it?" The offer has **Use at the limit**
+  and **Not now**. The reset is never spent below the limit: the last few
+  percent are still the user's, and Claude's grants refuse a use before the
+  limit anyway. At the limit, after a yes, the reset is used and the
+  conversation goes on by itself. Without a yes, the limit notice has a **Use
+  5-hour reset** button. A use that fails is said in the notice and not tried
+  again by itself.
+- **Which one.**
+  1. The reset made for the limit you hit: 5-hour for the 5-hour limit, weekly
+     for the weekly one, Fable for Fable's weekly limit.
+  2. Then the narrowest: 5-hour, weekly, Fable, full.
+  3. Then the one that expires first.
+
+  The Fable reset is the last choice for the general weekly limit, because it
+  only gives back what Fable used.
+- **Setting.** Settings › Providers › Limit resets:
+  - **Ask** (default): offers at 98% and uses at the limit after a yes.
+  - **Automatic:** uses it at the limit without asking.
+  - **Off.**
+- **Usage footer.** The usage details list Claude's resets under "Limit
+  resets", like Codex's banked resets, each with its uses left and its expiry.
+
 ## Not done yet
+
+- Limit resets: Claude's reset endpoints are the CLI's own and undocumented.
+  Reading and spending them is covered by tests against their recorded shape
+  (from Claude Code 2.1.322), not against the live service.
 
 - Project actions that run tests after edits. See item 5 in
   [ivy-review.md](../in-progress/ivy-review.md).

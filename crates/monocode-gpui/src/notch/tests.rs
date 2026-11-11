@@ -1616,6 +1616,103 @@ fn a_copied_row_says_so_and_each_kind_wears_its_mark(cx: &mut TestAppContext) {
 }
 
 #[gpui::test]
+fn two_players_share_home_in_two_columns(cx: &mut TestAppContext) {
+    use monocode_core::notch::media::{Playing, Track};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let player = |app: &str, title: &str, playing| Playing {
+        track: Track {
+            app: app.into(),
+            title: title.into(),
+            artist: "Someone".into(),
+            album: "Album".into(),
+            duration: Some(Duration::from_secs(200)),
+        },
+        playing,
+        position: Duration::from_secs(20),
+        at: Instant::now(),
+        art: None,
+        shuffle: None,
+    };
+    let lead = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| {
+                notch.media.as_ref().map(|media| media.track.app.clone())
+            })
+            .unwrap()
+    };
+    // One player: the large player as ever.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_players(vec![player("browser", "Video", false)], cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-media-play").is_some());
+    assert!(visual.debug_bounds("notch-duo-lead").is_none());
+    // A paused video and Spotify playing: two columns, Spotify leads (the
+    // closed notch and the lyrics follow it), on the left.
+    let both = vec![
+        player("browser", "Video", false),
+        player("spotify", "Song", true),
+    ];
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_players(both.clone(), cx))
+        .unwrap();
+    visual.run_until_parked();
+    assert_eq!(lead(visual).as_deref(), Some("spotify"));
+    assert!(visual.debug_bounds("notch-media-play").is_none());
+    let left = visual.debug_bounds("notch-duo-lead").unwrap();
+    let right = visual.debug_bounds("notch-duo-beside").unwrap();
+    assert!(left.left() < right.left());
+    assert_eq!(left.size.height, right.size.height);
+    assert!(
+        right.bottom() - left.top() <= px(media::PLAYER_HEIGHT + 0.5),
+        "as tall as the single player"
+    );
+    // Each column's buttons go to its own app, and pressing one never
+    // moves the lead.
+    let (commands, sent) = std::sync::mpsc::channel();
+    opened
+        .window
+        .update(visual, |notch, _, _| notch.media_commands = Some(commands))
+        .unwrap();
+    click(visual, "notch-duo-beside-next");
+    click(visual, "notch-duo-lead-play");
+    assert_eq!(
+        sent.try_iter().collect::<Vec<_>>(),
+        [
+            ("browser".to_owned(), platform::MediaCommand::Next),
+            ("spotify".to_owned(), platform::MediaCommand::TogglePlay)
+        ]
+    );
+    assert_eq!(lead(visual).as_deref(), Some("spotify"));
+    // A click on the other column puts it first; the columns keep their
+    // sides, only the lit one moves.
+    click(visual, "notch-duo-beside");
+    assert_eq!(lead(visual).as_deref(), Some("browser"));
+    let lit = visual.debug_bounds("notch-duo-lead").unwrap();
+    let other = visual.debug_bounds("notch-duo-beside").unwrap();
+    assert!(lit.left() > other.left(), "the video stays on the right");
+    // The video goes away: the large player again.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.media_commands = None;
+            notch.set_players(vec![player("spotify", "Song", true)], cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert_eq!(lead(visual).as_deref(), Some("spotify"));
+    assert!(visual.debug_bounds("notch-duo-lead").is_none());
+    assert!(visual.debug_bounds("notch-media-play").is_some());
+}
+
+#[gpui::test]
 fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
     use monocode_core::notch::media::{Playing, Track};
     use monocode_core::notch::spotify::Next;
@@ -1695,7 +1792,10 @@ fn playing_next_lists_spotifys_queue_under_the_player(cx: &mut TestAppContext) {
     assert_eq!(listed, ["Three"]);
     assert_eq!(
         sent.try_iter().collect::<Vec<_>>(),
-        [platform::MediaCommand::Next, platform::MediaCommand::Next]
+        [
+            ("Spotify.exe".to_owned(), platform::MediaCommand::Next),
+            ("Spotify.exe".to_owned(), platform::MediaCommand::Next)
+        ]
     );
     assert!(visual.debug_bounds("notch-next-0").is_some());
     assert!(visual.debug_bounds("notch-next-1").is_none());

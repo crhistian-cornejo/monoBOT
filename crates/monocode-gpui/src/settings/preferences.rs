@@ -86,6 +86,11 @@ pub(crate) struct Preferences {
     // Providers
     pub show_remaining_usage: bool,
     pub mask_emails: bool,
+    /// What to do with a provider's limit resets (Claude Code's 5-hour,
+    /// weekly, Fable and full resets, Codex's banked ones) when a limit
+    /// comes near: ask at 98% and use it at the limit after a yes, use it
+    /// at the limit without asking, or neither.
+    pub limit_resets: monocode_core::usage::resets::Mode,
     pub idle_agents: u32,
     /// How a call talks: "local" (Parakeet and Supertonic on this machine),
     /// "gemini" (Gemini Live) or "phonic", with the key in the keychain.
@@ -187,6 +192,7 @@ impl Default for Preferences {
             empty_session: "ink".into(),
             show_remaining_usage: false,
             mask_emails: true,
+            limit_resets: Default::default(),
             idle_agents: 3,
             voice_live: "local".into(),
             voice_pace: "normal".into(),

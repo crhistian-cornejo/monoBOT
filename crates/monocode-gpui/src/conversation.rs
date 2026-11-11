@@ -147,6 +147,8 @@ pub(crate) struct Conversation {
     editing_last_turn: edit_last_turn::State,
     /// A transient provider failure waiting to be sent again.
     provider_retry: provider_retry::RetryState,
+    /// A limit reset offered or under way for this conversation's account.
+    limit_reset: accounts::LimitReset,
     /// The clock beside Send and the messages it scheduled.
     send_later: send_later::SendLater,
     btw: Option<Entity<btw::Btw>>,
@@ -623,12 +625,15 @@ impl Conversation {
             cx.observe(&center, |this, _, cx| {
                 if this.settings.usage_limit.is_some() {
                     this.tick_usage(cx);
+                } else {
+                    this.watch_reset_offer(cx);
                 }
             })
         });
         perf_prompt(cx);
         Self {
             provider_retry: Default::default(),
+            limit_reset: Default::default(),
             send_later: Default::default(),
             editing_last_turn: Default::default(),
             btw: None,
@@ -2956,6 +2961,7 @@ impl Conversation {
             .children(self.model_list_popover(cx))
             .children(self.orchestration_card(cx))
             .children(if self.is_remote() { None } else { self.usage_notice(false, cx) })
+            .children(self.reset_offer_notice(cx))
             .children(self.provider_retry_notice(cx))
             .child(self.changes_shelf(window, cx))
             .child(self.background_shelf(window, cx))

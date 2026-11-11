@@ -412,6 +412,7 @@ fn parse_kimi_usage(
         reset_credits: None,
         extra_usage_balance,
         identity,
+        models: Vec::new(),
     })
 }
 

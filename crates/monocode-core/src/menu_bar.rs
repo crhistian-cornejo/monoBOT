@@ -100,13 +100,31 @@ impl Usage {
             .is_some()
             .then(|| fullest.reset_label(now));
         running.sort_by_key(|w| w.minutes);
+        let mut windows: Vec<(String, f64)> = running
+            .iter()
+            .take(2)
+            .map(|w| (w.label(), w.used_percent.clamp(0., 100.)))
+            .collect();
+        // A model's own weekly limit (Fable) shows by its name. With three to
+        // say and two rows, the shortest window stays and the fuller of the
+        // other two takes the second row.
+        windows.extend(
+            snapshot
+                .models
+                .iter()
+                .filter(|m| m.window.resets_at.is_none_or(|at| at > now))
+                .map(|m| (m.model.clone(), m.window.used_percent.clamp(0., 100.))),
+        );
+        if windows.len() > 2 {
+            let first = windows.remove(0);
+            let fuller = windows
+                .into_iter()
+                .reduce(|a, b| if b.1 > a.1 { b } else { a })?;
+            windows = vec![first, fuller];
+        }
         Some(Self {
             kind,
-            windows: running
-                .iter()
-                .take(2)
-                .map(|w| (w.label(), w.used_percent.clamp(0., 100.)))
-                .collect(),
+            windows,
             resets,
         })
     }
@@ -410,6 +428,50 @@ mod tests {
         for choice in CHOICES {
             assert!(item(choice, &now).is_none(), "{choice}");
         }
+    }
+
+    #[test]
+    fn a_models_own_limit_shows_by_its_name() {
+        let window = |used_percent, minutes| Window {
+            used_percent,
+            minutes,
+            resets_at: Some(1_000_000),
+        };
+        let fable = |used| crate::usage::ModelWindow {
+            model: "Fable".into(),
+            window: window(used, 10_080),
+        };
+        // The weekly limit and Fable's: "wk 52%" over "Fable 36%".
+        let snapshot = Snapshot {
+            windows: vec![window(52., 10_080)],
+            models: vec![fable(36.)],
+            ..Default::default()
+        };
+        let usage = Usage::of(Kind::Claude, &snapshot, 1_000).unwrap();
+        assert_eq!(
+            usage.windows,
+            [("wk".to_string(), 52.), ("Fable".to_string(), 36.)]
+        );
+        let now = Now {
+            usage: vec![usage],
+            ..Default::default()
+        };
+        let item = item("usage:claude", &now).unwrap();
+        assert_eq!(item.rows, ["wk 52%", "Fable 36%"]);
+        assert!(item
+            .tooltip
+            .starts_with("Claude Code: wk 52% used, Fable 36% used"));
+        // Three to say: the 5-hour window stays, the fuller of the rest follows.
+        let three = Snapshot {
+            windows: vec![window(20., 300), window(52., 10_080)],
+            models: vec![fable(90.)],
+            ..Default::default()
+        };
+        let usage = Usage::of(Kind::Claude, &three, 1_000).unwrap();
+        assert_eq!(
+            usage.windows,
+            [("5h".to_string(), 20.), ("Fable".to_string(), 90.)]
+        );
     }
 
     #[test]

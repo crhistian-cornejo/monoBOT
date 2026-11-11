@@ -645,16 +645,24 @@ mod mac {
         }
     }
 
-    /// What plays, from macOS's now playing service (MediaRemote): the
-    /// track Control Center shows (Spotify, Music, a browser's video).
-    /// Since macOS 15.4 the service answers only Apple's own programs, so
-    /// the reading runs in `osascript`, which loads the framework and prints
-    /// one JSON line each time what plays changes, and ends by itself when
-    /// MonoBOT does. Each command is one short `osascript` of its own. The
-    /// service keeps the cover to itself, so it comes from Apple's catalog.
+    /// What plays, from macOS's now playing service (MediaRemote), the track
+    /// Control Center shows (Spotify, Music, a browser's video), and beside
+    /// it from Spotify's own scripting while Spotify is open: the service
+    /// names one app at a time, so a song and a paused video would otherwise
+    /// hide each other. Since macOS 15.4 the service answers only Apple's own
+    /// programs, so the reading runs in `osascript`, which loads the
+    /// framework and prints one JSON list each time what plays changes, and
+    /// ends by itself when MonoBOT does. Spotify is asked by its process id,
+    /// never by name, so one that just quit is never opened again; the first
+    /// time, macOS asks whether monoBOT may control Spotify, and a no leaves
+    /// the service alone. Each command is one short `osascript` of its own.
+    /// The service keeps the cover to itself, so it comes from Apple's
+    /// catalog; Spotify hands over its own.
     pub(crate) mod media {
         use super::super::MediaCommand;
         use monocode_core::notch::media::{self, Playhead, Playing, Report, Track};
+        use monocode_core::notch::spotify;
+        use std::collections::HashMap;
         use std::io::BufRead;
         use std::process::{Child, Command, Stdio};
         use std::sync::Arc;
@@ -664,40 +672,74 @@ mod mac {
         const FRAMEWORK: &str = "ObjC.import('Foundation');\
             $.NSBundle.bundleWithPath('/System/Library/PrivateFrameworks/MediaRemote.framework/').load;";
 
-        /// Prints what plays as one JSON line whenever it changes (`{}` for
-        /// nothing), until its parent goes away. It looks twice a second
-        /// while something plays and less often at rest, where only a press
-        /// of play is news.
+        /// Prints what plays as one JSON list whenever it changes (`[]` for
+        /// nothing), until its parent goes away: the service's track, then
+        /// Spotify's own (`own`), which asks Spotify again only for a new
+        /// track's details. It looks twice a second while something plays
+        /// and less often at rest, where only a press of play is news.
         const WATCH: &str = r#"
+ObjC.import('AppKit');
 ObjC.bindFunction('getppid', ['int', []]);
 const R = $.NSClassFromString('MRNowPlayingRequest');
 const out = $.NSFileHandle.fileHandleWithStandardOutput;
 const parent = $.getppid();
 const text = v => (v === undefined || v.isNil()) ? '' : ObjC.unwrap(v);
 const num = v => (v === undefined || v.isNil()) ? null : v.doubleValue;
+const SPOTIFY = 'com.spotify.client';
+let denied = false;
+let known = null;
+const spotify = () => {
+  if (denied) return null;
+  const running = $.NSRunningApplication.runningApplicationsWithBundleIdentifier(SPOTIFY);
+  // `count` comes back as a string.
+  if (Number(running.count) < 1 || running.objectAtIndex(0).terminated) { known = null; return null; }
+  const pid = running.objectAtIndex(0).processIdentifier;
+  try {
+    const app = Application(pid);
+    const state = app.playerState();
+    if (state !== 'playing' && state !== 'paused') return null;
+    const track = app.currentTrack;
+    const id = track.id();
+    if (known === null || known.pid !== pid || known.id !== id) {
+      known = { pid, id, title: track.name(), artist: track.artist(), album: track.album(),
+        duration: track.duration() / 1000, art: track.artworkUrl() };
+    }
+    return { app: SPOTIFY, own: true, title: known.title, artist: known.artist,
+      album: known.album, duration: known.duration, elapsed: app.playerPosition(),
+      stamp: Date.now() / 1000, playing: state === 'playing', art: known.art,
+      shuffle: app.shuffling() };
+  } catch (error) {
+    // -1743: the user said no to monoBOT controlling Spotify.
+    if (error.errorNumber === -1743) denied = true;
+    known = null;
+    return null;
+  }
+};
 let last = null;
 while (!R.isNil() && $.getppid() === parent) {
-  let line = '{}';
-  const playing = R.localIsPlaying;
+  const players = [];
   const item = R.localNowPlayingItem;
   if (!item.isNil() && !item.nowPlayingInfo.isNil()) {
     const info = item.nowPlayingInfo;
     const get = k => info.objectForKey('kMRMediaRemoteNowPlayingInfo' + k);
     const stamp = get('Timestamp');
     const path = R.localNowPlayingPlayerPath;
-    line = JSON.stringify({
+    players.push({
       app: path.isNil() ? '' : text(path.client.bundleIdentifier),
       title: text(get('Title')), artist: text(get('Artist')), album: text(get('Album')),
       duration: num(get('Duration')), elapsed: num(get('ElapsedTime')),
       stamp: stamp.isNil() ? null : stamp.timeIntervalSince1970,
-      playing: playing,
+      playing: R.localIsPlaying,
     });
   }
+  const own = spotify();
+  if (own !== null) players.push(own);
+  const line = JSON.stringify(players);
   if (line !== last) {
     out.writeData($(line + '\n').dataUsingEncoding($.NSUTF8StringEncoding));
     last = line;
   }
-  $.NSThread.sleepForTimeInterval(playing ? 0.5 : 1.5);
+  $.NSThread.sleepForTimeInterval(players.some(p => p.playing) ? 0.5 : 1.5);
 }
 "#;
 
@@ -710,7 +752,7 @@ while (!R.isNil() && $.getppid() === parent) {
         const TRIES: u32 = 5;
 
         enum Event {
-            Report(Option<Report>),
+            Reports(Vec<Report>),
             Cover(Track, Option<Arc<[u8]>>),
             Ended,
         }
@@ -739,7 +781,7 @@ while (!R.isNil() && $.getppid() === parent) {
                             break;
                         };
                         if events
-                            .send(Event::Report(media::parse_report(&line)))
+                            .send(Event::Reports(media::parse_reports(&line)))
                             .is_err()
                         {
                             return;
@@ -755,27 +797,54 @@ while (!R.isNil() && $.getppid() === parent) {
             Some(child)
         }
 
-        fn send(command: MediaCommand) {
-            const SEND: &str =
-                "ObjC.bindFunction('MRMediaRemoteSendCommand', ['bool', ['int', 'id']]);";
-            let call = match command {
-                MediaCommand::TogglePlay => format!("{SEND}$.MRMediaRemoteSendCommand(2, $());"),
-                MediaCommand::Next => format!("{SEND}$.MRMediaRemoteSendCommand(4, $());"),
-                MediaCommand::Previous => format!("{SEND}$.MRMediaRemoteSendCommand(5, $());"),
-                MediaCommand::Seek(to) => format!(
-                    "ObjC.bindFunction('MRMediaRemoteSetElapsedTime', ['void', ['double']]);\
-                     $.MRMediaRemoteSetElapsedTime({:.3});",
-                    to.as_secs_f64()
-                ),
-                // Never sent here: this reader reports no shuffle to change.
-                MediaCommand::Shuffle(_) => return,
+        /// Sends `command` to `app`: through Spotify's own scripting when
+        /// that is how Spotify was read (`own`), else through the now
+        /// playing service, which only ever reaches the app it names.
+        fn send(command: MediaCommand, own: bool) {
+            let script = if own {
+                let call = match command {
+                    MediaCommand::TogglePlay => "app.playpause();".to_owned(),
+                    MediaCommand::Next => "app.nextTrack();".to_owned(),
+                    MediaCommand::Previous => "app.previousTrack();".to_owned(),
+                    MediaCommand::Seek(to) => {
+                        format!("app.playerPosition = {:.3};", to.as_secs_f64())
+                    }
+                    MediaCommand::Shuffle(on) => format!("app.shuffling = {on};"),
+                };
+                format!(
+                    "ObjC.import('AppKit');\
+                     const running = $.NSRunningApplication\
+                         .runningApplicationsWithBundleIdentifier('com.spotify.client');\
+                     if (Number(running.count) > 0) {{\
+                       const app = Application(running.objectAtIndex(0).processIdentifier);\
+                       {call}\
+                     }}"
+                )
+            } else {
+                const SEND: &str =
+                    "ObjC.bindFunction('MRMediaRemoteSendCommand', ['bool', ['int', 'id']]);";
+                let call = match command {
+                    MediaCommand::TogglePlay => {
+                        format!("{SEND}$.MRMediaRemoteSendCommand(2, $());")
+                    }
+                    MediaCommand::Next => format!("{SEND}$.MRMediaRemoteSendCommand(4, $());"),
+                    MediaCommand::Previous => {
+                        format!("{SEND}$.MRMediaRemoteSendCommand(5, $());")
+                    }
+                    MediaCommand::Seek(to) => format!(
+                        "ObjC.bindFunction('MRMediaRemoteSetElapsedTime', ['void', ['double']]);\
+                         $.MRMediaRemoteSetElapsedTime({:.3});",
+                        to.as_secs_f64()
+                    ),
+                    // Never sent here: the service reports no shuffle to change.
+                    MediaCommand::Shuffle(_) => return,
+                };
+                format!("{FRAMEWORK}{call}")
             };
-            let _ = osascript(&format!("{FRAMEWORK}{call}"))
-                .stdout(Stdio::null())
-                .status();
+            let _ = osascript(&script).stdout(Stdio::null()).status();
         }
 
-        /// What is kept about the track that plays: its cover and the
+        /// What is kept about the track an app plays: its cover and the
         /// playhead's clock.
         #[derive(Default)]
         struct Cover {
@@ -791,12 +860,20 @@ while (!R.isNil() && $.getppid() === parent) {
                     ..Cover::default()
                 };
                 let (track, events) = (report.track.clone(), events.clone());
+                let own = report
+                    .art_url
+                    .clone()
+                    .filter(|address| spotify::is_art(address));
                 let _ = std::thread::Builder::new()
                     .name("notch-cover".into())
                     .spawn(move || {
-                        // Offline or not in the catalog: the track goes without.
-                        let art = media::fetch_cover(&track).ok().flatten().map(Arc::from);
-                        let _ = events.send(Event::Cover(track, art));
+                        // Spotify's own cover, else Apple's catalog. Offline
+                        // or not in the catalog: the track goes without.
+                        let art = match own {
+                            Some(address) => spotify::fetch_art(&address).ok(),
+                            None => media::fetch_cover(&track).ok().flatten(),
+                        };
+                        let _ = events.send(Event::Cover(track, art.map(Arc::from)));
                     });
             }
             let age = report.stamped.and_then(|stamp| {
@@ -815,16 +892,16 @@ while (!R.isNil() && $.getppid() === parent) {
                 position,
                 at: now,
                 art: cover.art.clone(),
-                // The now playing service does not say; Spotify's own
-                // answer does, once signed in (`notch/queue.rs`).
-                shuffle: None,
+                // Spotify's scripting says; the service does not, and
+                // Spotify's Web API does once signed in (`notch/queue.rs`).
+                shuffle: report.shuffle,
             }
         }
 
         pub(crate) fn watch(
-            on_change: impl Fn(Option<Playing>) + Send + 'static,
-        ) -> Option<mpsc::Sender<MediaCommand>> {
-            let (commands, received) = mpsc::channel();
+            on_change: impl Fn(Vec<Playing>) + Send + 'static,
+        ) -> Option<mpsc::Sender<(String, MediaCommand)>> {
+            let (commands, received) = mpsc::channel::<(String, MediaCommand)>();
             std::thread::Builder::new()
                 .name("notch-media".into())
                 .spawn(move || {
@@ -832,23 +909,30 @@ while (!R.isNil() && $.getppid() === parent) {
                     let mut reader = start_reader(&events);
                     let mut down_since = reader.is_none().then(Instant::now);
                     let mut tries = 0;
-                    let mut report: Option<Report> = None;
-                    let mut cover = Cover::default();
-                    let mut shown: Option<Playing> = None;
+                    let mut reports: Vec<Report> = Vec::new();
+                    let mut covers: HashMap<String, Cover> = HashMap::new();
+                    let mut shown: Vec<Playing> = Vec::new();
                     loop {
                         match received.recv_timeout(POLL) {
-                            Ok(command) => send(command),
+                            Ok((app, command)) => {
+                                let own = reports
+                                    .iter()
+                                    .any(|report| report.track.app == app && report.own);
+                                send(command, own);
+                            }
                             Err(RecvTimeoutError::Timeout) => {}
                             Err(RecvTimeoutError::Disconnected) => break,
                         }
                         while let Ok(event) = heard.try_recv() {
                             match event {
-                                Event::Report(now) => {
+                                Event::Reports(now) => {
                                     tries = 0;
-                                    report = now;
+                                    reports = now;
                                 }
                                 Event::Cover(track, art) => {
-                                    if cover.track.as_ref() == Some(&track) {
+                                    if let Some(cover) = covers.get_mut(&track.app)
+                                        && cover.track.as_ref() == Some(&track)
+                                    {
                                         cover.art = art;
                                     }
                                 }
@@ -857,7 +941,7 @@ while (!R.isNil() && $.getppid() === parent) {
                                         let _ = child.wait();
                                     }
                                     down_since = Some(Instant::now());
-                                    report = None;
+                                    reports.clear();
                                 }
                             }
                         }
@@ -869,10 +953,15 @@ while (!R.isNil() && $.getppid() === parent) {
                             reader = start_reader(&events);
                             down_since = reader.is_none().then(Instant::now);
                         }
-                        let now = report
-                            .as_ref()
-                            .map(|report| playing(report, &mut cover, &events));
-                        if media::is_news(&shown, &now) {
+                        covers.retain(|app, _| reports.iter().any(|r| &r.track.app == app));
+                        let now: Vec<Playing> = reports
+                            .iter()
+                            .map(|report| {
+                                let cover = covers.entry(report.track.app.clone()).or_default();
+                                playing(report, cover, &events)
+                            })
+                            .collect();
+                        if media::is_news_among(&shown, &now) {
                             on_change(now.clone());
                             shown = now;
                         }
@@ -1258,13 +1347,15 @@ mod win {
         }
     }
 
-    /// What plays, from the system's media controls: the same session the
+    /// What plays, from the system's media controls: every session the
     /// Windows media flyout shows (Spotify, a browser's video, the media
-    /// player). Read on a thread of its own every half second; WinRT's calls
-    /// block there, never on the interface thread.
+    /// player), so a song and a video show side by side. Read on a thread of
+    /// its own every half second; WinRT's calls block there, never on the
+    /// interface thread. Each command goes to its own app's session.
     pub(crate) mod media {
         use super::super::MediaCommand;
         use monocode_core::notch::media::{Playhead, Playing, Track};
+        use std::collections::HashMap;
         use std::sync::Arc;
         use std::sync::mpsc::{self, RecvTimeoutError};
         use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -1411,10 +1502,30 @@ mod win {
             }
         }
 
+        /// The sessions there are, the one the system calls current first,
+        /// one per app (two tabs of one browser share it), a few at most.
+        fn sessions(manager: &Manager) -> Vec<(String, Session)> {
+            let mut found: Vec<(String, Session)> = Vec::new();
+            let current = manager.GetCurrentSession().ok();
+            let rest = manager.GetSessions().ok().into_iter().flatten();
+            for session in current.into_iter().chain(rest) {
+                let Ok(app) = session.SourceAppUserModelId().map(|app| app.to_string()) else {
+                    continue;
+                };
+                if found.len() < SESSIONS && !found.iter().any(|(kept, _)| *kept == app) {
+                    found.push((app, session));
+                }
+            }
+            found
+        }
+
+        /// How many players are read at once.
+        const SESSIONS: usize = 4;
+
         pub(crate) fn watch(
-            on_change: impl Fn(Option<Playing>) + Send + 'static,
-        ) -> Option<mpsc::Sender<MediaCommand>> {
-            let (commands, received) = mpsc::channel();
+            on_change: impl Fn(Vec<Playing>) + Send + 'static,
+        ) -> Option<mpsc::Sender<(String, MediaCommand)>> {
+            let (commands, received) = mpsc::channel::<(String, MediaCommand)>();
             std::thread::Builder::new()
                 .name("notch-media".into())
                 .spawn(move || {
@@ -1423,23 +1534,31 @@ mod win {
                     let Ok(manager) = Manager::RequestAsync().and_then(|op| op.join()) else {
                         return;
                     };
-                    let mut shown: Option<Playing> = None;
-                    let mut cover = Cover::default();
+                    let mut shown: Vec<Playing> = Vec::new();
+                    let mut covers: HashMap<String, Cover> = HashMap::new();
                     loop {
                         match received.recv_timeout(POLL) {
-                            Ok(command) => {
-                                if let Ok(session) = manager.GetCurrentSession() {
+                            Ok((app, command)) => {
+                                if let Some((_, session)) = sessions(&manager)
+                                    .into_iter()
+                                    .find(|(kept, _)| *kept == app)
+                                {
                                     let _ = send(&session, command);
                                 }
                             }
                             Err(RecvTimeoutError::Timeout) => {}
                             Err(RecvTimeoutError::Disconnected) => return,
                         }
-                        let now = manager
-                            .GetCurrentSession()
-                            .ok()
-                            .and_then(|session| read(&session, &mut cover).ok().flatten());
-                        if monocode_core::notch::media::is_news(&shown, &now) {
+                        let found = sessions(&manager);
+                        covers.retain(|app, _| found.iter().any(|(kept, _)| kept == app));
+                        let now: Vec<Playing> = found
+                            .iter()
+                            .filter_map(|(app, session)| {
+                                let cover = covers.entry(app.clone()).or_default();
+                                read(session, cover).ok().flatten()
+                            })
+                            .collect();
+                        if monocode_core::notch::media::is_news_among(&shown, &now) {
                             on_change(now.clone());
                             shown = now;
                         }
@@ -1886,11 +2005,12 @@ pub(crate) fn pointer_x() -> Option<f32> {
     None
 }
 
-/// Watches what plays and reports each change (another track, play or
-/// pause, a seek); the sender carries the notch's commands to the player.
+/// Watches what plays, every player at once, and reports each change
+/// (another track, play or pause, a seek, a player coming or going); the
+/// sender carries the notch's commands, each to the app it names.
 pub(crate) fn watch_media(
-    on_change: impl Fn(Option<monocode_core::notch::media::Playing>) + Send + 'static,
-) -> Option<std::sync::mpsc::Sender<MediaCommand>> {
+    on_change: impl Fn(Vec<monocode_core::notch::media::Playing>) + Send + 'static,
+) -> Option<std::sync::mpsc::Sender<(String, MediaCommand)>> {
     #[cfg(all(target_os = "windows", not(test)))]
     return win::media::watch(on_change);
     #[cfg(all(target_os = "macos", not(test)))]

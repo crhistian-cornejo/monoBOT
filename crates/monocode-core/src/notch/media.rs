@@ -150,6 +150,13 @@ pub struct Report {
     pub elapsed: Duration,
     /// When the app stamped `elapsed`, in seconds since 1970.
     pub stamped: Option<f64>,
+    /// Read from the app itself (Spotify's scripting) rather than the now
+    /// playing service: its commands go to the app the same way.
+    pub own: bool,
+    /// Where the app keeps the cover, when it says.
+    pub art_url: Option<String>,
+    /// Whether it shuffles, when the app says.
+    pub shuffle: Option<bool>,
 }
 
 fn seconds(value: &serde_json::Value) -> Option<Duration> {
@@ -171,12 +178,134 @@ pub fn parse_report(line: &str) -> Option<Report> {
     if !track.is_known() {
         return None;
     }
+    report_of(&value, track)
+}
+
+fn report_of(value: &serde_json::Value, track: Track) -> Option<Report> {
     Some(Report {
         track,
         playing: value["playing"].as_bool().unwrap_or(false),
         elapsed: seconds(&value["elapsed"]).unwrap_or_default(),
         stamped: value["stamp"].as_f64().filter(|stamp| stamp.is_finite()),
+        own: value["own"].as_bool().unwrap_or(false),
+        art_url: value["art"]
+            .as_str()
+            .map(str::trim)
+            .filter(|url| url.starts_with("https://"))
+            .map(str::to_owned),
+        shuffle: value["shuffle"].as_bool(),
     })
+}
+
+/// One line of the reader when it reads several players at once: a JSON
+/// list of what each reports (`[]` while nothing plays), or a single report
+/// as before. An app read twice (by the now playing service and by its own
+/// scripting) counts once, as its own word on it, which comes last.
+pub fn parse_reports(line: &str) -> Vec<Report> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+        return Vec::new();
+    };
+    let items = match value {
+        serde_json::Value::Array(items) => items,
+        single => vec![single],
+    };
+    let mut reports: Vec<Report> = Vec::new();
+    for item in items {
+        let Some(report) = parse_report(&item.to_string()) else {
+            continue;
+        };
+        match reports
+            .iter_mut()
+            .find(|kept| kept.track.app == report.track.app)
+        {
+            Some(kept) => *kept = report,
+            None => reports.push(report),
+        }
+    }
+    reports
+}
+
+/// Whether the players `now` say something the `shown` ones did not: one
+/// more or one less, or news from any of them (see `is_news`).
+pub fn is_news_among(shown: &[Playing], now: &[Playing]) -> bool {
+    shown.len() != now.len()
+        || now.iter().any(|playing| {
+            let before = shown
+                .iter()
+                .find(|kept| kept.track.app == playing.track.app)
+                .cloned();
+            is_news(&before, &Some(playing.clone()))
+        })
+}
+
+/// Which player leads when several play at once (Spotify and a video in
+/// the browser): the one the user picked, until another one starts; else
+/// the one playing that started last; else the one that played last. The
+/// lead is what the closed notch, the lyrics and the queue follow.
+#[derive(Clone, Debug, Default)]
+pub struct Lineup {
+    /// When each app last started playing, as far as seen.
+    started: Vec<(String, Instant)>,
+    /// The apps playing at the last look.
+    playing: Vec<String>,
+    /// The app the user put first.
+    chosen: Option<String>,
+}
+
+impl Lineup {
+    /// The players in order, the lead first; each app once.
+    pub fn arrange(&mut self, players: &[Playing], now: Instant) -> Vec<Playing> {
+        let mut seen: Vec<Playing> = Vec::new();
+        for player in players {
+            if !seen.iter().any(|kept| kept.track.app == player.track.app) {
+                seen.push(player.clone());
+            }
+        }
+        for player in seen.iter().filter(|player| player.playing) {
+            let app = &player.track.app;
+            if self.playing.contains(app) {
+                continue;
+            }
+            self.started.retain(|(kept, _)| kept != app);
+            self.started.push((app.clone(), now));
+            // Another player starting takes the lead back from the pick.
+            if self.chosen.as_ref().is_some_and(|chosen| chosen != app) {
+                self.chosen = None;
+            }
+        }
+        self.playing = seen
+            .iter()
+            .filter(|player| player.playing)
+            .map(|player| player.track.app.clone())
+            .collect();
+        self.started
+            .retain(|(app, _)| seen.iter().any(|player| &player.track.app == app));
+        let gone = |chosen: &String| !seen.iter().any(|player| &player.track.app == chosen);
+        if self.chosen.as_ref().is_some_and(gone) {
+            self.chosen = None;
+        }
+        let started = |app: &str| {
+            self.started
+                .iter()
+                .find(|(kept, _)| kept == app)
+                .map(|(_, at)| *at)
+        };
+        // Stable: equals keep the order the system gave.
+        seen.sort_by_key(|player| {
+            let app = player.track.app.as_str();
+            (
+                self.chosen.as_deref() != Some(app),
+                !player.playing,
+                std::cmp::Reverse(started(app)),
+            )
+        });
+        seen
+    }
+
+    /// Puts `app` first until another player starts.
+    pub fn choose(&mut self, app: &str) {
+        self.chosen = Some(app.to_owned());
+    }
 }
 /// One timed line of synced lyrics.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -779,6 +908,127 @@ mod tests {
         // Odd numbers are no position, never a panic.
         let odd = parse_report(r#"{"title":"t","elapsed":-4,"duration":null}"#).unwrap();
         assert_eq!((odd.elapsed, odd.track.duration), (Duration::ZERO, None));
+    }
+
+    #[test]
+    fn a_line_of_several_players_counts_each_app_once() {
+        let line = r#"[
+            {"app":"com.apple.WebKit.GPU","title":"RustGIS","artist":"Open Geospatial","elapsed":1382,"playing":false},
+            {"app":"com.spotify.client","title":"Happiness Is So Sad","artist":"SHM","playing":true},
+            {"app":"com.spotify.client","title":"Happiness Is So Sad","artist":"SHM","playing":true,"own":true,
+             "art":"https://i.scdn.co/image/ab67","shuffle":true},
+            {"app":"x","title":""}
+        ]"#;
+        let reports = parse_reports(line);
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].track.app, "com.apple.WebKit.GPU");
+        assert!(!reports[0].own && reports[0].art_url.is_none());
+        // Spotify's own word replaces the service's.
+        assert!(reports[1].own);
+        assert_eq!(
+            reports[1].art_url.as_deref(),
+            Some("https://i.scdn.co/image/ab67")
+        );
+        assert_eq!(reports[1].shuffle, Some(true));
+        // One report alone, nothing, or a broken line.
+        assert_eq!(parse_reports(r#"{"app":"a","title":"t"}"#).len(), 1);
+        assert!(parse_reports("[]").is_empty());
+        assert!(parse_reports("{}").is_empty());
+        assert!(parse_reports("not json").is_empty());
+        // Only an https cover is kept.
+        let plain = parse_reports(r#"[{"app":"a","title":"t","art":"file:///etc/x"}]"#);
+        assert_eq!(plain[0].art_url, None);
+    }
+
+    fn player(app: &str, playing: bool, at: Instant) -> Playing {
+        Playing {
+            track: Track {
+                app: app.into(),
+                ..track()
+            },
+            playing,
+            position: Duration::ZERO,
+            at,
+            art: None,
+            shuffle: None,
+        }
+    }
+
+    fn order(players: &[Playing]) -> Vec<&str> {
+        players
+            .iter()
+            .map(|player| player.track.app.as_str())
+            .collect()
+    }
+
+    #[test]
+    fn the_lead_is_the_pick_else_the_last_to_start_playing() {
+        let at = Instant::now();
+        let later = |seconds: u64| at + Duration::from_secs(seconds);
+        let mut lineup = Lineup::default();
+        // The video paused, Spotify playing: Spotify leads.
+        let both = [player("browser", false, at), player("spotify", true, at)];
+        assert_eq!(order(&lineup.arrange(&both, at)), ["spotify", "browser"]);
+        // The video starts too: the last to start leads.
+        let both = [player("browser", true, at), player("spotify", true, at)];
+        assert_eq!(
+            order(&lineup.arrange(&both, later(1))),
+            ["browser", "spotify"]
+        );
+        // Still both playing: nothing moves.
+        assert_eq!(
+            order(&lineup.arrange(&both, later(2))),
+            ["browser", "spotify"]
+        );
+        // Picking Spotify puts it first while the video plays on.
+        lineup.choose("spotify");
+        assert_eq!(
+            order(&lineup.arrange(&both, later(3))),
+            ["spotify", "browser"]
+        );
+        // Nothing plays: the one that started last leads, the pick holds.
+        let paused = [player("browser", false, at), player("spotify", false, at)];
+        assert_eq!(
+            order(&lineup.arrange(&paused, later(4))),
+            ["spotify", "browser"]
+        );
+        // The video starting again takes the lead back from the pick.
+        let video = [player("browser", true, at), player("spotify", false, at)];
+        assert_eq!(
+            order(&lineup.arrange(&video, later(5))),
+            ["browser", "spotify"]
+        );
+        // A player that goes away is forgotten; an app counts once.
+        let again = [
+            player("spotify", false, at),
+            player("spotify", true, at),
+            player("other", false, at),
+        ];
+        assert_eq!(
+            order(&lineup.arrange(&again, later(6))),
+            ["spotify", "other"]
+        );
+        // Picking an app that is gone does nothing.
+        lineup.choose("browser");
+        assert_eq!(
+            order(&lineup.arrange(&again, later(7))),
+            ["spotify", "other"]
+        );
+    }
+
+    #[test]
+    fn news_among_players_is_one_more_one_less_or_news_from_one() {
+        let at = Instant::now();
+        let two = [player("a", true, at), player("b", false, at)];
+        assert!(!is_news_among(&two, &two));
+        // The same players in another order are no news.
+        let swapped = [two[1].clone(), two[0].clone()];
+        assert!(!is_news_among(&two, &swapped));
+        assert!(is_news_among(&two, &two[..1]));
+        assert!(is_news_among(&[], &two));
+        let paused = [player("a", false, at), player("b", false, at)];
+        assert!(is_news_among(&two, &paused));
+        assert!(!is_news_among(&[], &[]));
     }
 
     #[test]

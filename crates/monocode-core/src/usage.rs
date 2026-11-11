@@ -5,6 +5,7 @@ mod devin;
 pub(crate) mod kimi;
 mod opencode;
 mod pi;
+pub mod resets;
 
 use crate::{catalog, provider::Kind};
 use serde_json::Value;
@@ -51,13 +52,35 @@ pub struct Snapshot {
     pub extra_usage_balance: Option<f64>,
     #[serde(default)]
     pub identity: Option<crate::accounts::Identity>,
+    /// Limits of one model's own, such as Claude's weekly limit for Fable.
+    /// Kept apart from `windows`: reaching one stops only that model, so it
+    /// never counts toward the account's headroom.
+    #[serde(default)]
+    pub models: Vec<ModelWindow>,
 }
+/// A limit that applies to one model only.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ModelWindow {
+    /// The model's name as the provider shows it ("Fable").
+    pub model: String,
+    pub window: Window,
+}
+/// The limit resets an account holds: Codex's banked resets, Claude's reset
+/// grants (5-hour, weekly, Fable, full) and Claude's weekly 5-hour reset.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct ResetCredits {
     pub available_count: u64,
     pub credits: Vec<ResetCredit>,
+    /// How much of each limit is used, by the provider's key for it
+    /// (`five_hour`, `seven_day`, `seven_day_overage_included`…), where the
+    /// provider says (Claude); the windows say the rest.
+    #[serde(default)]
+    pub used: std::collections::BTreeMap<String, f64>,
+    /// The limits reached, by key.
+    #[serde(default)]
+    pub exhausted: Vec<String>,
 }
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ResetCredit {
     pub id: String,
     pub status: String,
@@ -66,6 +89,15 @@ pub struct ResetCredit {
     pub expires_at: Option<i64>,
     pub title: Option<String>,
     pub description: Option<String>,
+    /// The limits it refills, by key; empty for all of them (Codex).
+    #[serde(default)]
+    pub clears: Vec<String>,
+    /// How many uses it has left, where one credit holds several (Claude).
+    #[serde(default)]
+    pub left: Option<u64>,
+    /// Whether it can only be used once a limit is reached.
+    #[serde(default)]
+    pub needs_limit: bool,
 }
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -302,6 +334,29 @@ fn fetch_pi(model: Option<&str>) -> Result<Snapshot, FetchError> {
         pi::PiUsageResult::Error { message } => Err(FetchError::failed(message)),
     }
 }
+/// Uses `credit` on the account's provider: Codex's banked reset through
+/// its app server, Claude's through its own reset endpoint. The result is
+/// the outcome Codex names (`reset`, `nothingToReset`, `noCredit`,
+/// `alreadyRedeemed`), which Claude's answers map onto.
+pub fn use_reset(
+    kind: Kind,
+    profile: &crate::accounts::Profile,
+    credit: Option<&ResetCredit>,
+) -> Result<String, String> {
+    match kind {
+        Kind::Claude => {
+            let credit = credit.ok_or("Choose which Claude reset to use.")?;
+            claude::claim(profile, credit)
+        }
+        Kind::Codex => consume_reset(
+            profile,
+            credit
+                .map(|credit| credit.id.as_str())
+                .filter(|id| !id.is_empty()),
+        ),
+        _ => Err(format!("{} has no limit resets.", kind.label())),
+    }
+}
 pub fn consume_reset(
     profile: &crate::accounts::Profile,
     credit: Option<&str>,
@@ -448,8 +503,32 @@ fn parse_claude(value: &Value) -> Result<Snapshot, FetchError> {
             )
         })
         .collect::<Vec<_>>();
+    let mut models: Vec<ModelWindow> = Vec::new();
     if let Some(limits) = value["limits"].as_array() {
         for item in limits {
+            // A weekly limit of one model's own ("Fable"). Claude Code shows
+            // it as "Current week (Fable)" whether or not it binds yet.
+            let model = item["scope"]["model"]["display_name"]
+                .as_str()
+                .map(str::trim)
+                .filter(|name| !name.is_empty() && name.chars().count() <= 40);
+            if let Some(model) = model {
+                let weekly = matches!(item["kind"].as_str(), Some("weekly_scoped" | "seven_day"))
+                    || item["group"] == "weekly";
+                if weekly && !models.iter().any(|m| m.model == model) {
+                    if let Some(window) = window(
+                        item,
+                        10_080,
+                        &["percent", "utilization", "used_percentage", "usedPercent"],
+                    ) {
+                        models.push(ModelWindow {
+                            model: model.to_owned(),
+                            window,
+                        });
+                    }
+                }
+                continue;
+            }
             if item["is_active"].as_bool() == Some(false) {
                 continue;
             }
@@ -484,6 +563,7 @@ fn parse_claude(value: &Value) -> Result<Snapshot, FetchError> {
     Ok(Snapshot {
         windows,
         updated_at: now_ms(),
+        models,
         ..Default::default()
     })
 }
@@ -524,12 +604,14 @@ fn parse_reset_credits(value: &Value) -> Option<ResetCredits> {
                 ),
                 title: row["title"].as_str().map(str::to_owned),
                 description: row["description"].as_str().map(str::to_owned),
+                ..Default::default()
             })
         })
         .collect();
     Some(ResetCredits {
         available_count: count.max(0.).floor() as u64,
         credits,
+        ..Default::default()
     })
 }
 
@@ -632,6 +714,36 @@ mod tests {
             .windows
             .is_empty());
     }
+    #[test]
+    fn claude_reads_fables_weekly_limit_apart_from_the_accounts() {
+        // The shape Claude answered on Nov 11, 2026, ids left out.
+        let value = json!({
+            "five_hour": null,
+            "seven_day": {"utilization": 52.0, "resets_at": "2026-11-15T05:59:59.821315+00:00"},
+            "limits": [
+                {"group": "weekly", "is_active": true, "kind": "weekly_all", "percent": 52,
+                 "resets_at": "2026-11-15T05:59:59.821315+00:00", "scope": null},
+                {"group": "weekly", "is_active": false, "kind": "weekly_scoped", "percent": 36,
+                 "resets_at": "2026-11-15T05:59:59.821538+00:00",
+                 "scope": {"model": {"display_name": "Fable"}, "surface": null}}
+            ]
+        });
+        let snapshot = parse_claude(&value).unwrap();
+        assert_eq!(snapshot.windows.len(), 1);
+        assert_eq!(snapshot.windows[0].used_percent, 52.);
+        assert_eq!(snapshot.models.len(), 1);
+        assert_eq!(snapshot.models[0].model, "Fable");
+        assert_eq!(snapshot.models[0].window.used_percent, 36.);
+        assert_eq!(snapshot.models[0].window.minutes, 10_080);
+        // Fable at its limit does not stop the account.
+        let mut full = snapshot.clone();
+        full.models[0].window.used_percent = 100.;
+        assert_eq!(full.headroom(0), snapshot.headroom(0));
+        // Older snapshots without models still read.
+        let old: Snapshot = serde_json::from_str(r#"{"windows":[],"updated_at":1}"#).unwrap();
+        assert!(old.models.is_empty());
+    }
+
     #[test]
     fn claude_parses_iso_resets_and_rejects_empty_responses() {
         let snapshot = parse_claude(&json!({

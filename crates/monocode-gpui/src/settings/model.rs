@@ -496,6 +496,12 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         "usage limit meter bar left used quota percent",
     ),
     (
+        "limit-resets",
+        Section::Providers,
+        "Limit resets",
+        "reset limit 5-hour weekly fable full banked codex claude 98% automatic ask usage quota",
+    ),
+    (
         "mask-emails",
         Section::Providers,
         "Mask account emails",

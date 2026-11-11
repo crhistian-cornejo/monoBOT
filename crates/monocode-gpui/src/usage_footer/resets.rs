@@ -13,7 +13,7 @@ enum Command {
 
 impl UsageFooter {
     pub(super) fn has_banked_resets(&self) -> bool {
-        self.details_kind == Kind::Codex
+        matches!(self.details_kind, Kind::Codex | Kind::Claude)
             && self.cache[index(self.details_kind)]
                 .snapshot
                 .as_ref()
@@ -22,13 +22,14 @@ impl UsageFooter {
     }
 
     pub(super) fn banked_resets(&self, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
-        if self.details_kind != Kind::Codex {
+        let kind = self.details_kind;
+        if !matches!(kind, Kind::Codex | Kind::Claude) {
             return None;
         }
-        let snapshot = self.cache[index(self.details_kind)].snapshot.as_ref();
+        let snapshot = self.cache[index(kind)].snapshot.as_ref();
         let rows = rows(snapshot);
         let center = crate::accounts::get(cx);
-        let key = self.key_for(Kind::Codex, cx);
+        let key = self.key_for(kind, cx);
         let action = center
             .as_ref()
             .and_then(|c| c.read(cx).reset_actions.get(&key))
@@ -55,7 +56,11 @@ impl UsageFooter {
                         .items_center()
                         .justify_between()
                         .font_weight(FontWeight::MEDIUM)
-                        .child("Banked resets")
+                        .child(if kind == Kind::Codex {
+                            "Banked resets"
+                        } else {
+                            "Limit resets"
+                        })
                         .child(
                             div()
                                 .text_size(px(10.))
@@ -119,6 +124,11 @@ impl UsageFooter {
             None => "Expiry not provided".into(),
             Some(at) if at <= now => "Expires now".into(),
             Some(at) => format!("Expires in {}", usage::duration(at - now)),
+        };
+        // A Claude grant holds several uses; say how many are left.
+        let expiry = match row.credit.as_ref().and_then(|c| c.left).filter(|n| *n > 1) {
+            Some(left) => format!("{left} left · {expiry}"),
+            None => expiry,
         };
         div()
             .id(gpui::SharedString::from(format!(
@@ -268,8 +278,9 @@ impl UsageFooter {
         let Some(center) = crate::accounts::get(cx) else {
             return;
         };
-        let key = self.key_for(Kind::Codex, cx);
-        if self.details_kind != Kind::Codex
+        let kind = self.details_kind;
+        let key = self.key_for(kind, cx);
+        if !matches!(kind, Kind::Codex | Kind::Claude)
             || center
                 .read(cx)
                 .reset_actions
@@ -329,7 +340,9 @@ mod tests {
                             expires_at: Some(usage::now_ms() + 3_600_000),
                             title: Some("A bonus reset".into()),
                             description: Some("One Codex usage reset".into()),
+                            ..Default::default()
                         }],
+                        ..Default::default()
                     }),
                     ..Default::default()
                 }));

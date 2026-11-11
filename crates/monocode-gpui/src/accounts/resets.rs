@@ -1,5 +1,10 @@
-//! Banked Codex resets are shared across footers so only one claim runs per account.
+//! Limit resets (Codex's banked resets, Claude Code's 5-hour, weekly,
+//! Fable and full resets) are shared across footers and conversations, so
+//! only one use runs per account. Near a limit a reset is offered once; at
+//! the limit it is used after a yes, or by itself when Settings › Providers
+//! says Automatic (`monocode_core::usage::resets`).
 use super::*;
+use monocode_core::usage::resets::{self as reset_rules, Mode, Plan};
 
 #[derive(Clone)]
 pub(crate) struct ResetRow {
@@ -18,7 +23,7 @@ pub(crate) fn rows(snapshot: Option<&Snapshot>) -> Vec<ResetRow> {
     let mut rows: Vec<_> = credits
         .credits
         .iter()
-        .filter(|c| matches!(c.status.as_str(), "available" | "unknown"))
+        .filter(|c| matches!(c.status.as_str(), "available" | "unknown") && c.left != Some(0))
         .enumerate()
         .map(|(i, credit)| ResetRow {
             key: format!("credit:{}", credit.id),
@@ -27,10 +32,27 @@ pub(crate) fn rows(snapshot: Option<&Snapshot>) -> Vec<ResetRow> {
                 .title
                 .clone()
                 .filter(|s| !s.trim().is_empty())
-                .unwrap_or_else(|| format!("Banked reset {}", i + 1)),
+                .unwrap_or_else(|| {
+                    if credit.reset_type.starts_with("claude:") {
+                        let label = reset_rules::reset_label(credit);
+                        let mut chars = label.chars();
+                        chars
+                            .next()
+                            .map(|first| first.to_uppercase().chain(chars).collect())
+                            .unwrap_or(label)
+                    } else {
+                        format!("Banked reset {}", i + 1)
+                    }
+                }),
         })
         .collect();
-    for i in rows.len()..credits.available_count as usize {
+    // A credit may hold several uses (Claude's grants): only the uses no
+    // credit lists are rows of their own.
+    let listed: usize = rows
+        .iter()
+        .map(|row| row.credit.as_ref().and_then(|c| c.left).unwrap_or(1) as usize)
+        .sum();
+    for i in listed..credits.available_count as usize {
         rows.push(ResetRow {
             key: format!("unlisted:{i}"),
             credit: None,
@@ -53,30 +75,142 @@ impl ResetAction {
     pub(crate) fn message(&self) -> Option<&str> {
         Some(match self.result.as_ref()? {
             Ok(outcome) => match outcome.as_str() {
-                "reset" => "Codex usage was reset.",
+                "reset" => "Usage was reset.",
                 "nothingToReset" => "There’s no active usage to reset.",
-                "noCredit" => "No banked resets are available.",
+                "noCredit" => "No resets are available.",
                 "alreadyRedeemed" => "That reset was already used.",
-                _ => "Codex returned an unknown reset result.",
+                _ => "The provider returned an unknown reset result.",
             },
             Err(error) => error,
         })
     }
 }
 
+/// The user's answer to a reset offered near a limit.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct ResetAnswer {
+    pub limit: String,
+    pub credit: String,
+    pub yes: bool,
+}
+
+/// What Settings › Providers says to do with resets.
+pub(crate) fn mode(cx: &App) -> Mode {
+    cx.try_global::<crate::settings::Preferences>()
+        .map(|prefs| prefs.limit_resets)
+        .unwrap_or_default()
+}
+
 impl Accounts {
     pub(crate) fn consume_reset(&mut self, key: Key, row: &str, cx: &mut Context<Self>) {
+        let kind = key.kind;
+        // Tests never reach a provider: they say what it answers.
+        #[cfg(test)]
+        if let Some(answer) = self.reset_stub.clone() {
+            self.consume_reset_with(
+                key,
+                row,
+                move |_, _| {
+                    let refreshed = Err(FetchError {
+                        message: "not read in tests".into(),
+                        unavailable: false,
+                    });
+                    (answer, refreshed)
+                },
+                cx,
+            );
+            return;
+        }
         self.consume_reset_with(
             key,
             row,
-            |profile, credit| {
-                let result = usage::consume_reset(profile, credit);
+            move |profile, credit| {
+                let result = usage::use_reset(kind, profile, credit);
                 // Read even after errors: the server may have applied the claim.
-                let refreshed = usage::fetch_for(Kind::Codex, profile, None);
+                let refreshed = usage::fetch_for(kind, profile, None);
                 (result, refreshed)
             },
             cx,
         );
+    }
+
+    /// The reset worth offering or using for `key`'s account now, unless
+    /// resets are off.
+    pub(crate) fn reset_plan(&self, key: &Key, cx: &App) -> Option<Plan> {
+        if mode(cx) == Mode::Off {
+            return None;
+        }
+        let snapshot = self.usage.get(key)?.snapshot.as_ref()?;
+        reset_rules::plan(snapshot, reset_rules::THRESHOLD, usage::now_ms())
+    }
+
+    /// The reset to offer near a limit: one the user has not answered yet,
+    /// while asking is the setting.
+    pub(crate) fn reset_offer(&self, key: &Key, cx: &App) -> Option<Plan> {
+        if mode(cx) != Mode::Ask {
+            return None;
+        }
+        let plan = self.reset_plan(key, cx)?;
+        let answered = self
+            .reset_answers
+            .get(key)
+            .is_some_and(|a| a.limit == plan.limit && a.credit == plan.credit.id);
+        (!plan.reached() && !answered).then_some(plan)
+    }
+
+    /// Records the answer to the reset offered for `key`.
+    pub(crate) fn answer_reset(
+        &mut self,
+        key: Key,
+        plan: &Plan,
+        yes: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.reset_answers.insert(
+            key,
+            ResetAnswer {
+                limit: plan.limit.clone(),
+                credit: plan.credit.id.clone(),
+                yes,
+            },
+        );
+        cx.notify();
+    }
+
+    /// Whether the user said yes, near the limit, to a reset for this limit.
+    pub(crate) fn reset_approved(&self, key: &Key, plan: &Plan) -> bool {
+        self.reset_answers
+            .get(key)
+            .is_some_and(|a| a.yes && a.limit == plan.limit)
+    }
+
+    /// Uses the planned reset now. False when there is none to use, or one
+    /// is already being used for this account.
+    pub(crate) fn use_planned_reset(
+        &mut self,
+        key: Key,
+        plan: &Plan,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self
+            .reset_actions
+            .get(&key)
+            .is_some_and(ResetAction::applying)
+        {
+            return false;
+        }
+        let row = format!("credit:{}", plan.credit.id);
+        let listed = rows(self.usage.get(&key).and_then(|s| s.snapshot.as_ref()))
+            .iter()
+            .any(|r| r.key == row);
+        if !listed {
+            return false;
+        }
+        self.reset_actions.remove(&key);
+        self.consume_reset(key.clone(), &row, cx);
+        self.reset_actions
+            .get(&key)
+            .is_some_and(ResetAction::applying)
     }
 
     fn consume_reset_with(
@@ -85,13 +219,13 @@ impl Accounts {
         row: &str,
         consume: impl FnOnce(
             &Profile,
-            Option<&str>,
+            Option<&usage::ResetCredit>,
         ) -> (Result<String, String>, Result<Snapshot, FetchError>)
         + Send
         + 'static,
         cx: &mut Context<Self>,
     ) {
-        if key.kind != Kind::Codex
+        if !matches!(key.kind, Kind::Codex | Kind::Claude)
             || (key.profile.id != accounts::DEFAULT && !self.book.exists(key.kind, &key.profile.id))
             || self.reset_actions.get(&key).is_some_and(|a| {
                 a.applying()
@@ -122,7 +256,7 @@ impl Accounts {
         let profile = key.profile.clone();
         let work = cx
             .background_executor()
-            .spawn(async move { consume(&profile, row.credit.as_ref().map(|c| c.id.as_str())) });
+            .spawn(async move { consume(&profile, row.credit.as_ref()) });
         cx.spawn(async move |this, cx| {
             let (result, refreshed) = work.await;
             let _ = this.update(cx, |this, cx| {
@@ -167,6 +301,7 @@ mod tests {
             reset_credits: Some(usage::ResetCredits {
                 available_count: count,
                 credits: Vec::new(),
+                ..Default::default()
             }),
             ..Default::default()
         }
@@ -187,6 +322,7 @@ mod tests {
                     expires_at: Some(2_000_000),
                     title: Some("A reward".into()),
                     description: Some("One Codex reset".into()),
+                    ..Default::default()
                 })
                 .collect();
         let cards = rows(Some(&data));
@@ -246,6 +382,7 @@ mod tests {
                     expires_at: None,
                     title: None,
                     description: None,
+                    ..Default::default()
                 });
             accounts
                 .usage
@@ -271,7 +408,7 @@ mod tests {
                 "credit:specific-credit",
                 |profile, credit| {
                     assert_eq!(profile.id, "other");
-                    assert_eq!(credit, Some("specific-credit"));
+                    assert_eq!(credit.map(|c| c.id.as_str()), Some("specific-credit"));
                     (Ok("nothingToReset".into()), Ok(snapshot(3)))
                 },
                 cx,
@@ -295,7 +432,7 @@ mod tests {
             );
             assert_eq!(
                 accounts.reset_actions[&key].message(),
-                Some("Codex usage was reset.")
+                Some("Usage was reset.")
             );
             assert!(accounts.reset_actions[&key].row.is_none());
             let other = Key::new(Kind::Codex, accounts.profile("other"), None);

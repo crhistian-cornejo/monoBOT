@@ -18,6 +18,11 @@ use std::sync::{Arc, OnceLock};
 pub(super) const MEDIA_WING: u32 = 160;
 /// The player at the top of Home.
 pub(super) const PLAYER_HEIGHT: f32 = 112.;
+/// Two players side by side: the room between the columns, inside each
+/// column, and each cover's side.
+const DUO_GAP: f32 = 8.;
+const DUO_PAD: f32 = 8.;
+const DUO_COVER: f32 = 48.;
 /// How often the open player's line and progress catch up.
 const TICK: Duration = Duration::from_millis(250);
 /// The title's glide: points a second, the pause at its start, the gap
@@ -96,22 +101,84 @@ impl Notch {
             return;
         }
         let (sender, changes) = async_channel::unbounded();
-        let Some(commands) = platform::watch_media(move |playing| {
-            let _ = sender.try_send(playing);
+        let Some(commands) = platform::watch_media(move |players| {
+            let _ = sender.try_send(players);
         }) else {
             return;
         };
         self.media_commands = Some(commands);
         self.media_task = Some(cx.spawn(async move |this, cx| {
-            while let Ok(playing) = changes.recv().await {
+            while let Ok(players) = changes.recv().await {
                 if this
-                    .update(cx, |this, cx| this.set_media(playing, cx))
+                    .update(cx, |this, cx| this.set_players(players, cx))
                     .is_err()
                 {
                     break;
                 }
             }
         }));
+    }
+
+    /// Every player there is now (Spotify and a video in the browser, say):
+    /// the lead becomes what plays, the next one sits beside it in Home.
+    pub(crate) fn set_players(&mut self, players: Vec<Playing>, cx: &mut Context<Self>) {
+        self.players = players;
+        self.arrange_players(cx);
+    }
+
+    /// Puts the player of `app` first, until another one starts playing.
+    pub(super) fn choose_player(&mut self, app: &str, cx: &mut Context<Self>) {
+        self.lineup.choose(app);
+        self.arrange_players(cx);
+    }
+
+    fn arrange_players(&mut self, cx: &mut Context<Self>) {
+        let mut ordered = self
+            .lineup
+            .arrange(&self.players, Instant::now())
+            .into_iter()
+            .filter(|player| player.track.is_known());
+        let lead = ordered.next();
+        let beside = ordered.next();
+        let app = |player: &Option<Playing>| player.as_ref().map(|player| player.track.app.clone());
+        self.duo_left = match (app(&lead), app(&beside)) {
+            (Some(lead), Some(beside)) => match self.duo_left.take() {
+                Some(left) if left == lead || left == beside => Some(left),
+                _ => Some(lead),
+            },
+            _ => None,
+        };
+        self.set_beside(beside, cx);
+        self.set_media(lead, cx);
+    }
+
+    fn set_beside(&mut self, beside: Option<Playing>, cx: &mut Context<Self>) {
+        match beside.as_ref().and_then(|beside| beside.art.clone()) {
+            Some(bytes)
+                if !self
+                    .beside_art
+                    .as_ref()
+                    .is_some_and(|(kept, _)| Arc::ptr_eq(kept, &bytes)) =>
+            {
+                let image = picture(&bytes);
+                let before = self.beside_art.replace((bytes, image));
+                Self::forget_cover(before, cx);
+            }
+            Some(_) => {}
+            None => {
+                let before = self.beside_art.take();
+                Self::forget_cover(before, cx);
+            }
+        }
+        self.beside = beside;
+    }
+
+    /// Whether any player plays, the lead or the one beside it.
+    fn anything_plays(&self) -> bool {
+        self.media
+            .iter()
+            .chain(&self.beside)
+            .any(|media| media.playing)
     }
 
     pub(crate) fn set_media(&mut self, playing: Option<Playing>, cx: &mut Context<Self>) {
@@ -150,7 +217,7 @@ impl Notch {
         self.read_queue(false, cx);
         // The open player's line and progress move a few times a second,
         // only while something plays.
-        if self.media.as_ref().is_some_and(|media| media.playing) {
+        if self.anything_plays() {
             if self.media_tick.is_none() {
                 self.media_tick = Some(cx.spawn(async move |this, cx| {
                     loop {
@@ -159,7 +226,7 @@ impl Notch {
                             if this.open {
                                 cx.notify();
                             }
-                            this.media.as_ref().is_some_and(|media| media.playing)
+                            this.anything_plays()
                         }) else {
                             break;
                         };
@@ -229,27 +296,25 @@ impl Notch {
         }));
     }
 
-    /// Sends `command` to the player and shows its effect at once; the next
-    /// read confirms it.
+    /// Sends `command` to the lead player and shows its effect at once; the
+    /// next read confirms it.
     pub(super) fn send_media(&mut self, command: platform::MediaCommand, cx: &mut Context<Self>) {
-        if let Some(commands) = &self.media_commands {
-            let _ = commands.send(command);
-        }
-        let now = Instant::now();
         if let Some(media) = self.media.as_mut() {
-            match command {
-                platform::MediaCommand::TogglePlay => {
-                    media.position = media.position_at(now);
-                    media.at = now;
-                    media.playing = !media.playing;
-                }
-                platform::MediaCommand::Seek(to) => {
-                    media.position = to;
-                    media.at = now;
-                }
-                platform::MediaCommand::Shuffle(on) => media.shuffle = Some(on),
-                _ => {}
+            if let Some(commands) = &self.media_commands {
+                let _ = commands.send((media.track.app.clone(), command));
             }
+            foresee(media, command);
+        }
+        cx.notify();
+    }
+
+    /// Sends `command` to the player beside the lead, likewise.
+    pub(super) fn send_beside(&mut self, command: platform::MediaCommand, cx: &mut Context<Self>) {
+        if let Some(beside) = self.beside.as_mut() {
+            if let Some(commands) = &self.media_commands {
+                let _ = commands.send((beside.track.app.clone(), command));
+            }
+            foresee(beside, command);
         }
         cx.notify();
     }
@@ -380,14 +445,24 @@ impl Notch {
         let along = ((island.height - from.height) / span).clamp(0., 1.2);
         let lerp = |start: f32, end: f32| start + (end - start) * along;
         const WING_COVER: f32 = 20.;
-        let side = lerp(WING_COVER, PLAYER_HEIGHT);
+        // It lands on the player's cover: the large one, or the lead
+        // column's when two players show.
+        let (end_side, end_left, end_top) = match self.lead_on_right() {
+            None => (PLAYER_HEIGHT, 0., 0.),
+            Some(right) => {
+                let column = (rest.width - 2. * model::PANEL_PAD - DUO_GAP) / 2.;
+                let left = if right { column + DUO_GAP } else { 0. };
+                (DUO_COVER, left + DUO_PAD, DUO_PAD)
+            }
+        };
+        let side = lerp(WING_COVER, end_side);
         let left = lerp(
             if camera.is_some() { 12. } else { 6. },
-            (island.width - rest.width) / 2. + model::PANEL_PAD,
+            (island.width - rest.width) / 2. + model::PANEL_PAD + end_left,
         );
         let top = lerp(
             (from.height - WING_COVER) / 2.,
-            camera.map_or(0., |camera| camera.height) + model::PANEL_HEADER,
+            camera.map_or(0., |camera| camera.height) + model::PANEL_HEADER + end_top,
         );
         Some(
             div()
@@ -534,38 +609,58 @@ impl Notch {
             .media
             .as_ref()
             .map_or(Source::Other, |media| Source::of(&media.track));
-        div()
-            .relative()
-            .size(px(side))
-            .flex_shrink_0()
-            .overflow_hidden()
-            .rounded(px(if side > 40. { 4. } else { 2. }))
-            .bg(ink(0.1))
-            .child(match &self.art {
-                Some((_, image)) => gpui::img(image.clone())
-                    .size(px(side))
-                    .object_fit(gpui::ObjectFit::Cover)
-                    .into_any_element(),
-                None => div()
-                    .size_full()
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(icon("media-note", side * 0.36).text_color(ink(0.45)))
-                    .into_any_element(),
-            })
-            .when(badge, |cover| {
-                cover.child(
-                    div()
-                        .absolute()
-                        .right(px(4.))
-                        .bottom(px(4.))
-                        .child(source_mark(source, 20.)),
-                )
-            })
-            .into_any_element()
+        cover_of(
+            self.art.as_ref().map(|(_, image)| image),
+            source,
+            side,
+            badge,
+        )
     }
+}
 
+/// A cover of `side`: the picture, or a note while there is none, with the
+/// app's mark in its corner where `badge`.
+fn cover_of(
+    image: Option<&Arc<gpui::Image>>,
+    source: Source,
+    side: f32,
+    badge: bool,
+) -> AnyElement {
+    let mark = (side * 0.18).clamp(12., 20.);
+    let inset = (side * 0.036).clamp(2., 4.);
+    div()
+        .relative()
+        .size(px(side))
+        .flex_shrink_0()
+        .overflow_hidden()
+        .rounded(px(if side > 40. { 4. } else { 2. }))
+        .bg(ink(0.1))
+        .child(match image {
+            Some(image) => gpui::img(image.clone())
+                .size(px(side))
+                .object_fit(gpui::ObjectFit::Cover)
+                .into_any_element(),
+            None => div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(icon("media-note", side * 0.36).text_color(ink(0.45)))
+                .into_any_element(),
+        })
+        .when(badge, |cover| {
+            cover.child(
+                div()
+                    .absolute()
+                    .right(px(inset))
+                    .bottom(px(inset))
+                    .child(source_mark(source, mark)),
+            )
+        })
+        .into_any_element()
+}
+
+impl Notch {
     /// What plays in one line: the lyric being sung, or the title gliding
     /// past.
     fn media_line(&self) -> AnyElement {
@@ -663,7 +758,17 @@ impl Notch {
     }
 
     /// The player at the top of Home.
+    /// Which side the lead sits on while two players show; none with one.
+    fn lead_on_right(&self) -> Option<bool> {
+        self.media.as_ref()?;
+        let beside = self.beside.as_ref()?;
+        Some(self.duo_left.as_deref() == Some(beside.track.app.as_str()))
+    }
+
     pub(super) fn player_view(&self, cx: &mut Context<Self>) -> AnyElement {
+        if let Some(right) = self.lead_on_right() {
+            return self.duo_view(right, cx);
+        }
         let Some(media) = self.media.clone() else {
             return div().into_any_element();
         };
@@ -688,29 +793,8 @@ impl Notch {
             Source::Spotify => gpui::rgb(0x1db954).into(),
             _ => accent_color(),
         };
-        let control = |id: &'static str, label: &'static str, glyph: &'static str, big: bool| {
-            let side = if big { 30. } else { 26. };
-            div()
-                .id(id)
-                .group(id)
-                .debug_selector(move || id.into())
-                .role(Role::Button)
-                .aria_label(label)
-                .size(px(side))
-                .flex()
-                .items_center()
-                .justify_center()
-                .cursor_pointer()
-                .rounded(px(2.))
-                .when(big, |button| button.bg(ink(0.12)))
-                .hover(|style| style.bg(ink(0.18)))
-                .active(|style| style.bg(ink(0.24)))
-                .child(
-                    icon(glyph, if big { 15. } else { 12. })
-                        .text_color(ink(0.92))
-                        .group_hover(id, |style| style.text_color(ink(1.))),
-                )
-        };
+        let control =
+            |id, label, glyph, big| control(id, label, glyph, if big { 30. } else { 26. }, big);
         // A control at the row's end that is on, off or out of reach: on
         // wears the accent and a dot under it, as Spotify marks shuffle;
         // out of reach is dimmed and takes no click. Its name is its tip.
@@ -1051,6 +1135,277 @@ impl Notch {
     }
 }
 
+impl Notch {
+    /// Two players side by side (Spotify and a video in the browser, say),
+    /// each a compact column as tall as the single player. The lead's column
+    /// is lit and has the bar to drag through; the other one leads at a
+    /// click. The columns keep their sides as the lead passes between them.
+    fn duo_view(&self, lead_on_right: bool, cx: &mut Context<Self>) -> AnyElement {
+        let lead = self.duo_column(true, cx);
+        let beside = self.duo_column(false, cx);
+        let (left, right) = if lead_on_right {
+            (beside, lead)
+        } else {
+            (lead, beside)
+        };
+        div()
+            .debug_selector(|| "notch-player".into())
+            .h(px(PLAYER_HEIGHT))
+            .flex()
+            .gap(px(DUO_GAP))
+            .child(left)
+            .child(right)
+            .into_any_element()
+    }
+
+    fn duo_column(&self, lead: bool, cx: &mut Context<Self>) -> AnyElement {
+        let player = if lead { &self.media } else { &self.beside };
+        let Some(player) = player.clone() else {
+            return div().into_any_element();
+        };
+        let name = |lead_name: &'static str, beside_name: &'static str| {
+            if lead { lead_name } else { beside_name }
+        };
+        let now = Instant::now();
+        let source = Source::of(&player.track);
+        let accent: gpui::Hsla = match source {
+            Source::Spotify => gpui::rgb(0x1db954).into(),
+            _ => accent_color(),
+        };
+        let art = if lead { &self.art } else { &self.beside_art };
+        let scrubbing = self.scrub.get().filter(|_| lead);
+        let progress = scrubbing.or_else(|| player.progress_at(now)).unwrap_or(0.);
+        let position = match (scrubbing, player.track.duration) {
+            (Some(share), Some(duration)) => duration.mul_f32(share),
+            _ => player.position_at(now),
+        };
+        let subtitle = if player.track.artist.trim().is_empty() {
+            player.track.album.clone()
+        } else {
+            player.track.artist.clone()
+        };
+        let state = if player.playing {
+            player.track.album.clone()
+        } else {
+            "Paused".to_owned()
+        };
+        let column = name("notch-duo-lead", "notch-duo-beside");
+        div()
+            .id(column)
+            .debug_selector(move || column.into())
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .p(px(DUO_PAD))
+            .rounded(px(4.))
+            .flex()
+            .flex_col()
+            .when(lead, |column| column.bg(ink(0.07)))
+            .when(!lead, |column| {
+                let app = player.track.app.clone();
+                column
+                    .role(Role::Button)
+                    .aria_label("Show this player first")
+                    .cursor_pointer()
+                    .hover(|style| style.bg(ink(0.04)))
+                    .tooltip(chrome_tip("Show this player first", None))
+                    .on_click(cx.listener(move |this, _, _, cx| this.choose_player(&app, cx)))
+            })
+            .child(
+                div()
+                    .flex()
+                    .gap(px(10.))
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .when(lead && self.cover_flight.is_some(), |cover| {
+                                cover.opacity(0.)
+                            })
+                            .child(cover_of(
+                                art.as_ref().map(|(_, image)| image),
+                                source,
+                                DUO_COVER,
+                                true,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(glide(
+                                name("notch-duo-lead-title", "notch-duo-beside-title"),
+                                player.track.title.clone(),
+                                12.5,
+                                gpui::FontWeight::SEMIBOLD,
+                                ink(if lead { 0.96 } else { 0.82 }),
+                            ))
+                            .child(
+                                div()
+                                    .h(px(15.))
+                                    .line_height(px(15.))
+                                    .truncate()
+                                    .text_size(px(11.))
+                                    .text_color(accent)
+                                    .child(subtitle),
+                            )
+                            .child(
+                                div()
+                                    .h(px(14.))
+                                    .line_height(px(14.))
+                                    .truncate()
+                                    .text_size(px(10.5))
+                                    .text_color(ink(0.4))
+                                    .child(state),
+                            ),
+                    ),
+            )
+            .child(div().flex_1())
+            .child(if lead {
+                div()
+                    .flex()
+                    .child(self.scrubber(progress, player.track.duration, accent, cx))
+                    .into_any_element()
+            } else {
+                div()
+                    .h(px(14.))
+                    .flex()
+                    .items_center()
+                    .child(
+                        div()
+                            .flex_1()
+                            .h(px(3.))
+                            .rounded(px(1.5))
+                            .bg(ink(0.18))
+                            .child(
+                                div()
+                                    .h_full()
+                                    .w(gpui::relative(progress))
+                                    .rounded(px(1.5))
+                                    .bg(ink(0.5)),
+                            ),
+                    )
+                    .into_any_element()
+            })
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .child(time_label(position))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .child(
+                                control(
+                                    name("notch-duo-lead-previous", "notch-duo-beside-previous"),
+                                    "Previous",
+                                    "media-previous",
+                                    22.,
+                                    false,
+                                )
+                                .on_click(duo_send(
+                                    lead,
+                                    platform::MediaCommand::Previous,
+                                    cx,
+                                )),
+                            )
+                            .child(
+                                control(
+                                    name("notch-duo-lead-play", "notch-duo-beside-play"),
+                                    if player.playing { "Pause" } else { "Play" },
+                                    if player.playing {
+                                        "media-pause"
+                                    } else {
+                                        "media-play"
+                                    },
+                                    26.,
+                                    true,
+                                )
+                                .on_click(duo_send(
+                                    lead,
+                                    platform::MediaCommand::TogglePlay,
+                                    cx,
+                                )),
+                            )
+                            .child(
+                                control(
+                                    name("notch-duo-lead-next", "notch-duo-beside-next"),
+                                    "Next",
+                                    "media-next",
+                                    22.,
+                                    false,
+                                )
+                                .on_click(duo_send(
+                                    lead,
+                                    platform::MediaCommand::Next,
+                                    cx,
+                                )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .child(time_label(player.track.duration.unwrap_or_default())),
+                    ),
+            )
+            .into_any_element()
+    }
+}
+
+/// A column's button: `command` to its own player, never a click on the
+/// column under it.
+fn duo_send(
+    lead: bool,
+    command: platform::MediaCommand,
+    cx: &mut Context<Notch>,
+) -> impl Fn(&gpui::ClickEvent, &mut Window, &mut App) + 'static {
+    cx.listener(move |this, _, _, cx| {
+        cx.stop_propagation();
+        if lead {
+            this.send_media(command, cx);
+        } else {
+            this.send_beside(command, cx);
+        }
+    })
+}
+
+/// One of the player's buttons, `side` across; the `big` one (play) sits on
+/// a fill of its own.
+fn control(
+    id: &'static str,
+    label: &'static str,
+    glyph: &'static str,
+    side: f32,
+    big: bool,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .group(id)
+        .debug_selector(move || id.into())
+        .role(Role::Button)
+        .aria_label(label)
+        .size(px(side))
+        .flex()
+        .items_center()
+        .justify_center()
+        .cursor_pointer()
+        .rounded(px(2.))
+        .when(big, |button| button.bg(ink(0.12)))
+        .hover(|style| style.bg(ink(0.18)))
+        .active(|style| style.bg(ink(0.24)))
+        .child(
+            icon(glyph, (side * if big { 0.5 } else { 0.46 }).round())
+                .text_color(ink(0.92))
+                .group_hover(id, |style| style.text_color(ink(1.))),
+        )
+}
+
 /// A cover's bytes as one picture to draw: JPEG, WebP or PNG, told apart by
 /// how the file starts. GPUI keys its texture by the picture, so the same
 /// `Arc` draws every frame for free.
@@ -1063,6 +1418,24 @@ pub(super) fn picture(bytes: &[u8]) -> Arc<gpui::Image> {
         gpui::ImageFormat::Png
     };
     Arc::new(gpui::Image::from_bytes(format, bytes.to_vec()))
+}
+
+/// What `command` does to `player`, shown before the player confirms it.
+fn foresee(player: &mut Playing, command: platform::MediaCommand) {
+    let now = Instant::now();
+    match command {
+        platform::MediaCommand::TogglePlay => {
+            player.position = player.position_at(now);
+            player.at = now;
+            player.playing = !player.playing;
+        }
+        platform::MediaCommand::Seek(to) => {
+            player.position = to;
+            player.at = now;
+        }
+        platform::MediaCommand::Shuffle(on) => player.shuffle = Some(on),
+        _ => {}
+    }
 }
 
 fn redraw(notch: &WeakEntity<Notch>, cx: &mut App) {

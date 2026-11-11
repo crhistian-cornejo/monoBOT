@@ -955,6 +955,7 @@ impl Conversation {
                         d.child(div().text_size(px(11.)).text_color(content(0.5)).child("Scroll for completion updates"))
                     })
                     .children(self.usage_notice(true, cx))
+                    .children(self.reset_offer_notice(cx))
                     .children(self.auth_notice(cx))
                     .children(self.group_access_prompt(cx))
                     .child(self.approval_shelf(window, cx))

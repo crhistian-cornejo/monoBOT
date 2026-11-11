@@ -6,7 +6,184 @@ use monocode_core::{
 };
 pub(crate) struct UsageResumed;
 impl EventEmitter<UsageResumed> for Conversation {}
+
+/// A limit reset for this conversation's account: whether one is being
+/// used, the one last tried by itself (never tried again by itself), and
+/// whether an offer shows.
+#[derive(Default)]
+pub(crate) struct LimitReset {
+    pending: bool,
+    tried: Option<String>,
+    offering: bool,
+}
+
 impl Conversation {
+    fn usage_key(&self) -> crate::accounts::Key {
+        crate::accounts::Key::new(
+            Kind::from_id(&self.summary.provider),
+            self.settings.account.clone(),
+            self.account_model(),
+        )
+    }
+
+    /// Repaints when a reset starts or stops being offered near a limit.
+    pub(super) fn watch_reset_offer(&mut self, cx: &mut Context<Self>) {
+        let offering = !self.is_remote()
+            && crate::accounts::get(cx)
+                .is_some_and(|center| center.read(cx).reset_offer(&self.usage_key(), cx).is_some());
+        if offering != self.limit_reset.offering {
+            self.limit_reset.offering = offering;
+            cx.notify();
+        }
+    }
+
+    /// At a limit: uses the planned reset when the user said yes to it near
+    /// the limit or chose Automatic, and goes on once it went through.
+    fn try_limit_reset(&mut self, cx: &mut Context<Self>) {
+        let Some(center) = crate::accounts::get(cx) else {
+            return;
+        };
+        let key = self.usage_key();
+        if self.limit_reset.pending {
+            let result = center
+                .read(cx)
+                .reset_actions
+                .get(&key)
+                .and_then(|action| action.result.clone());
+            match result {
+                None => {}
+                Some(Ok(outcome)) if outcome == "reset" || outcome == "nothingToReset" => {
+                    self.limit_reset.pending = false;
+                    self.resume_usage(cx);
+                }
+                Some(_) => {
+                    self.limit_reset.pending = false;
+                    cx.notify();
+                }
+            }
+            return;
+        }
+        if self.busy || self.is_remote() {
+            return;
+        }
+        let mode = crate::accounts::resets::mode(cx);
+        let Some(plan) = center.read(cx).reset_plan(&key, cx) else {
+            return;
+        };
+        let approved = center.read(cx).reset_approved(&key, &plan);
+        if !monocode_core::usage::resets::use_now(mode, &plan, approved)
+            || self.limit_reset.tried.as_deref() == Some(plan.credit.id.as_str())
+        {
+            return;
+        }
+        self.use_limit_reset(plan, cx);
+    }
+
+    fn use_limit_reset(
+        &mut self,
+        plan: monocode_core::usage::resets::Plan,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(center) = crate::accounts::get(cx) else {
+            return;
+        };
+        let key = self.usage_key();
+        self.limit_reset.tried = Some(plan.credit.id.clone());
+        let started = center.update(cx, |center, cx| center.use_planned_reset(key, &plan, cx));
+        if started {
+            self.limit_reset.pending = true;
+        }
+        cx.notify();
+    }
+
+    /// Near a limit, with a reset for it and Ask as the setting: one line
+    /// above the composer offering to use it when the limit is reached.
+    pub(super) fn reset_offer_notice(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.is_remote() || self.settings.usage_limit.is_some() {
+            return None;
+        }
+        let center = crate::accounts::get(cx)?;
+        let key = self.usage_key();
+        let plan = center.read(cx).reset_offer(&key, cx)?;
+        let left = center
+            .read(cx)
+            .usage
+            .get(&key)
+            .and_then(|state| state.snapshot.as_ref())
+            .and_then(|snapshot| snapshot.reset_credits.as_ref())
+            .map_or(1, |resets| {
+                monocode_core::usage::resets::left_of_kind(resets, &plan.credit)
+            });
+        let kind = Kind::from_id(&self.summary.provider);
+        let text = format!(
+            "{} is at {:.0}% of its {}. Use your {} ({left} left) when you reach it?",
+            kind.label(),
+            plan.percent.floor(),
+            monocode_core::usage::resets::limit_label(&plan.limit),
+            monocode_core::usage::resets::reset_label(&plan.credit),
+        );
+        let answer = move |yes: bool| {
+            let key = key.clone();
+            let plan = plan.clone();
+            move |this: &mut Self, _: &gpui::ClickEvent, _: &mut Window, cx: &mut Context<Self>| {
+                if let Some(center) = crate::accounts::get(cx) {
+                    center.update(cx, |center, cx| {
+                        center.answer_reset(key.clone(), &plan, yes, cx)
+                    });
+                }
+                this.watch_reset_offer(cx);
+            }
+        };
+        Some(
+            div()
+                .id("limit-reset-offer")
+                .debug_selector(|| "limit-reset-offer".into())
+                .role(Role::Status)
+                .px(px(8.))
+                .child(
+                    div()
+                        .min_h(px(32.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .rounded_t(px(10.))
+                        .border_1()
+                        .border_b_0()
+                        .border_color(content(0.1))
+                        .bg(content(0.04))
+                        .px(px(8.))
+                        .py(px(4.))
+                        .child(icon("gauge", 14.).text_color(gpui::rgb(AMBER_400)))
+                        .child(
+                            div()
+                                .min_w_0()
+                                .flex_1()
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .text_color(content(0.7))
+                                .child(text),
+                        )
+                        .child(
+                            usage_button(
+                                "limit-reset-yes",
+                                "Use the reset at the limit",
+                                true,
+                                false,
+                                false,
+                            )
+                            .child("Use at the limit")
+                            .on_click(cx.listener(answer(true))),
+                        )
+                        .child(
+                            usage_button("limit-reset-no", "Not now", false, false, false)
+                                .child("Not now")
+                                .on_click(cx.listener(answer(false))),
+                        ),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// Update notifications refresh the account-specific picker after a CLI update.
     pub(crate) fn refresh_models_after_harness_update(&mut self, cx: &mut Context<Self>) {
         monocode_core::catalog::invalidate(
@@ -150,6 +327,10 @@ impl Conversation {
         let Some(limit) = self.settings.usage_limit.clone() else {
             return;
         };
+        self.try_limit_reset(cx);
+        if self.settings.usage_limit.is_none() {
+            return;
+        }
         if limit.resets_at.is_none() {
             let kind = Kind::from_id(&self.summary.provider);
             let key = crate::accounts::Key::new(
@@ -428,6 +609,58 @@ impl Conversation {
                 }),
             );
         }
+        // A reset for the limit reached: one click uses it and goes on.
+        let reset_plan = crate::accounts::get(cx).and_then(|center| {
+            center
+                .read(cx)
+                .reset_plan(&self.usage_key(), cx)
+                .filter(|plan| plan.reached())
+        });
+        let reset_failed = crate::accounts::get(cx).and_then(|center| {
+            center
+                .read(cx)
+                .reset_actions
+                .get(&self.usage_key())
+                .filter(|action| action.result.as_ref().is_some_and(Result::is_err))
+                .and_then(|action| action.message().map(str::to_owned))
+        });
+        if let Some(plan) = reset_plan.filter(|_| !self.is_remote()) {
+            let pending = self.limit_reset.pending;
+            let label = if pending {
+                "Using reset…".to_owned()
+            } else {
+                let name = monocode_core::usage::resets::reset_label(&plan.credit);
+                let mut chars = name.chars();
+                let name: String = chars
+                    .next()
+                    .map(|first| first.to_uppercase().chain(chars).collect())
+                    .unwrap_or_default();
+                format!("Use {name}")
+            };
+            controls = controls.child(
+                usage_button(
+                    "use-limit-reset",
+                    "Use a limit reset and continue",
+                    true,
+                    pending || switching,
+                    mono,
+                )
+                .when(mono, |d| d.h(px(26.)).text_size(px(11.)).bg(content(0.1)))
+                .child(icon("refresh", 13.).text_color(gpui::rgb(AMBER_400)))
+                .child(label)
+                .when(!pending && !switching, |d| {
+                    d.on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(center) = crate::accounts::get(cx) {
+                            let key = this.usage_key();
+                            center
+                                .update(cx, |center, cx| center.answer_reset(key, &plan, true, cx));
+                        }
+                        this.use_limit_reset(plan.clone(), cx);
+                    }))
+                }),
+            );
+        }
+        let reset = reset_failed.or(reset);
         let resume = if waiting {
             if armed {
                 "Resuming at reset"
@@ -872,5 +1105,209 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(resumed.get(), 1);
+    }
+
+    fn near_limit(percent: f64) -> usage::Snapshot {
+        usage::Snapshot {
+            windows: vec![usage::Window {
+                used_percent: percent,
+                minutes: 300,
+                resets_at: Some(usage::now_ms() + 3_600_000),
+            }],
+            reset_credits: Some(usage::ResetCredits {
+                available_count: 2,
+                credits: vec![usage::ResetCredit {
+                    id: "g-session".into(),
+                    status: "available".into(),
+                    reset_type: "claude:session".into(),
+                    clears: vec!["five_hour".into()],
+                    left: Some(2),
+                    needs_limit: true,
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn limited_window(
+        mode: monocode_core::usage::resets::Mode,
+        cx: &mut gpui::TestAppContext,
+    ) -> gpui::WindowHandle<Conversation> {
+        let store = Arc::new(std::sync::Mutex::new(
+            monocode_core::store::Store::open(Path::new(":memory:")).unwrap(),
+        ));
+        let mut summary = locked(&store)
+            .unwrap()
+            .create("claude", "/fixture")
+            .unwrap();
+        summary.has_messages = true;
+        cx.update(|cx| {
+            cx.set_global(crate::settings::Preferences {
+                limit_resets: mode,
+                ..Default::default()
+            });
+            crate::accounts::install(store.clone(), cx);
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|cx| {
+                    let mut view = Conversation::new(summary, store, cx);
+                    view.loaded = true;
+                    // A bot's conversation goes on by an event, never a new run.
+                    view.settings.mono = Some(monocode_core::agent::MonoContext {
+                        mono: Default::default(),
+                        root: "/fixture".into(),
+                        executable: "/fixture/binary".into(),
+                        ..Default::default()
+                    });
+                    view
+                })
+            })
+            .unwrap()
+        })
+    }
+
+    fn report_usage(
+        window: gpui::WindowHandle<Conversation>,
+        visual: &mut gpui::VisualTestContext,
+        snapshot: usage::Snapshot,
+    ) {
+        window
+            .update(visual, |view, _, cx| {
+                let key = view.usage_key();
+                crate::accounts::get(cx).unwrap().update(cx, |center, cx| {
+                    center.usage.entry(key).or_default().complete(Ok(snapshot));
+                    cx.notify();
+                });
+            })
+            .unwrap();
+        visual.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn a_reset_is_offered_near_the_limit_and_used_at_it_after_a_yes(cx: &mut gpui::TestAppContext) {
+        let window = limited_window(Default::default(), cx);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        // 60%: nothing to say.
+        report_usage(window, visual, near_limit(60.));
+        assert!(visual.debug_bounds("limit-reset-offer").is_none());
+        // 98%: the offer.
+        report_usage(window, visual, near_limit(98.));
+        assert!(visual.debug_bounds("limit-reset-offer").is_some());
+        let yes = visual.debug_bounds("limit-reset-yes").unwrap();
+        visual.simulate_click(yes.center(), Default::default());
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("limit-reset-offer").is_none());
+        let resumed = std::rc::Rc::new(std::cell::Cell::new(0));
+        let count = resumed.clone();
+        window
+            .update(visual, |_, _, cx| {
+                cx.subscribe(&cx.entity(), move |_, _, _: &UsageResumed, _| {
+                    count.set(count.get() + 1)
+                })
+                .detach();
+            })
+            .unwrap();
+        // At the limit the yes is acted on: the reset is used and the
+        // conversation goes on by itself.
+        window
+            .update(visual, |view, _, cx| {
+                crate::accounts::get(cx).unwrap().update(cx, |center, _| {
+                    center.reset_stub = Some(Ok("reset".into()));
+                });
+                view.settings.usage_limit = Some(Limit::default());
+            })
+            .unwrap();
+        report_usage(window, visual, near_limit(100.));
+        window
+            .update(visual, |view, _, cx| view.tick_usage(cx))
+            .unwrap();
+        visual.run_until_parked();
+        let left = window
+            .update(visual, |view, _, _| view.settings.usage_limit.clone())
+            .unwrap();
+        assert_eq!(left, None);
+        assert_eq!(resumed.get(), 1);
+    }
+
+    #[gpui::test]
+    fn at_the_limit_ask_waits_for_a_click_automatic_does_not_and_off_offers_nothing(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use monocode_core::usage::resets::Mode;
+        // Ask, never answered: the limit notice holds the reset, nothing is used.
+        let window = limited_window(Mode::Ask, cx);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        window
+            .update(visual, |view, _, _| {
+                view.settings.usage_limit = Some(Limit::default())
+            })
+            .unwrap();
+        report_usage(window, visual, near_limit(100.));
+        window
+            .update(visual, |view, _, cx| view.tick_usage(cx))
+            .unwrap();
+        visual.run_until_parked();
+        assert!(visual.debug_bounds("use-limit-reset").is_some());
+        assert!(visual.debug_bounds("limit-reset-offer").is_none());
+        let used = window
+            .update(visual, |view, _, cx| {
+                let key = view.usage_key();
+                crate::accounts::get(cx)
+                    .unwrap()
+                    .read(cx)
+                    .reset_actions
+                    .contains_key(&key)
+            })
+            .unwrap();
+        assert!(!used, "Ask never uses a reset without a yes");
+
+        // Automatic: used at the limit without asking; a failure is said
+        // and not tried again by itself.
+        let window = limited_window(Mode::Automatic, cx);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        window
+            .update(visual, |view, _, cx| {
+                view.settings.usage_limit = Some(Limit::default());
+                crate::accounts::get(cx).unwrap().update(cx, |center, _| {
+                    center.reset_stub = Some(Err(
+                        "Claude couldn't reset your limits right now. Nothing was used.".into(),
+                    ));
+                });
+            })
+            .unwrap();
+        report_usage(window, visual, near_limit(100.));
+        window
+            .update(visual, |view, _, cx| view.tick_usage(cx))
+            .unwrap();
+        visual.run_until_parked();
+        let (limited, tried) = window
+            .update(visual, |view, _, cx| {
+                view.tick_usage(cx);
+                (
+                    view.settings.usage_limit.is_some(),
+                    view.limit_reset.tried.clone(),
+                )
+            })
+            .unwrap();
+        assert!(limited);
+        assert_eq!(tried.as_deref(), Some("g-session"));
+        let pending = window
+            .update(visual, |view, _, _| view.limit_reset.pending)
+            .unwrap();
+        assert!(!pending, "a failed reset is not tried again by itself");
+
+        // Off: no offer near the limit and no reset at it.
+        let window = limited_window(Mode::Off, cx);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        report_usage(window, visual, near_limit(99.));
+        assert!(visual.debug_bounds("limit-reset-offer").is_none());
+        window
+            .update(visual, |view, _, _| {
+                view.settings.usage_limit = Some(Limit::default())
+            })
+            .unwrap();
+        report_usage(window, visual, near_limit(100.));
+        assert!(visual.debug_bounds("use-limit-reset").is_none());
     }
 }
