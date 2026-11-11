@@ -81,6 +81,7 @@ const DROPPED: &[&str] = &[
 const ATTRIBUTES: &[&str] = &[
     "align",
     "alt",
+    "background",
     "bgcolor",
     "border",
     "cellpadding",
@@ -100,16 +101,9 @@ const ATTRIBUTES: &[&str] = &[
 ];
 /// Properties a message may not set: they place its content over the page, or run code.
 const CSS_BANNED: &[&str] = &["position", "behavior", "-moz-binding"];
-/// Parts of a style that reach out (`url(`, `image-set(`), run (`expression(`, `javascript:`) or import; a backslash
-/// could hide any of them, so it is refused too.
-const CSS_REFUSED: &[&str] = &[
-    "url(",
-    "image-set(",
-    "expression(",
-    "@import",
-    "javascript:",
-    "\\",
-];
+/// Parts of a style that reach out (`image-set(`), run (`expression(`, `javascript:`) or import; a backslash
+/// could hide any of them, so it is refused too. A `url(` is not here: it is resolved like a picture's address.
+const CSS_REFUSED: &[&str] = &["image-set(", "expression(", "@import", "javascript:", "\\"];
 
 /// The message's pictures: `Content-ID` → (media type, bytes).
 pub type Pictures = HashMap<String, (String, Vec<u8>)>;
@@ -162,9 +156,9 @@ fn filter<'a>(
     remote: &Mutex<Vec<String>>,
 ) -> Option<Cow<'a, str>> {
     let kept = match (element, attribute) {
-        ("img", "src") => picture(value, pictures, remote)?,
+        ("img", "src") | (_, "background") => picture(value, pictures, remote)?,
         ("a", "href") => link(value)?,
-        (_, "style") => style(value)?,
+        (_, "style") => style(value, pictures, remote)?,
         _ => value.to_string(),
     };
     Some(Cow::Owned(kept))
@@ -175,8 +169,11 @@ fn filter<'a>(
 /// only way the app fetches. A `data:` picture of a known type stays; anything else goes.
 fn picture(value: &str, pictures: &Pictures, remote: &Mutex<Vec<String>>) -> Option<String> {
     let value = value.trim();
-    if let Some(id) = value.strip_prefix("cid:") {
-        let (kind, bytes) = pictures.get(id)?;
+    if value
+        .get(..4)
+        .is_some_and(|head| head.eq_ignore_ascii_case("cid:"))
+    {
+        let (kind, bytes) = cid_lookup(pictures, &value[4..])?;
         return PICTURE_TYPES.contains(&kind.as_str()).then(|| {
             format!(
                 "data:{kind};base64,{}",
@@ -210,6 +207,50 @@ fn picture(value: &str, pictures: &Pictures, remote: &Mutex<Vec<String>>) -> Opt
     None
 }
 
+/// The picture a `cid:` address names, however the sender wrote it: percent-encoded, in another
+/// case, or padded with the angle brackets or space the `Content-ID` header lost.
+fn cid_lookup<'a>(pictures: &'a Pictures, id: &str) -> Option<&'a (String, Vec<u8>)> {
+    if let Some(hit) = pictures.get(id) {
+        return Some(hit);
+    }
+    let decoded = percent_decode(id);
+    if let Some(hit) = pictures.get(decoded.as_str()) {
+        return Some(hit);
+    }
+    let wanted = decoded.trim_matches(|c: char| c == '<' || c == '>' || c.is_whitespace());
+    pictures
+        .iter()
+        .find(|(id, _)| id.eq_ignore_ascii_case(wanted))
+        .map(|(_, picture)| picture)
+}
+
+/// `%40` → `@`, and so on: some senders encode the `cid:` address.
+fn percent_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let decoded = (bytes[i] == b'%')
+            .then(|| {
+                std::str::from_utf8(bytes.get(i + 1..i + 3)?)
+                    .ok()
+                    .and_then(|hex| u8::from_str_radix(hex, 16).ok())
+            })
+            .flatten();
+        match decoded {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// A link goes to the web or to a mail address, never to a page of its own (a `data:` address could be one).
 fn link(value: &str) -> Option<String> {
     let value = value.trim();
@@ -220,21 +261,110 @@ fn link(value: &str) -> Option<String> {
     .then(|| value.to_string())
 }
 
-/// The CSS a message sets on its own elements, without what reaches out, runs or covers the page.
-fn style(value: &str) -> Option<String> {
-    let kept: Vec<&str> = value
-        .split(';')
-        .map(str::trim)
-        .filter(|declaration| {
-            let Some((property, _)) = declaration.split_once(':') else {
-                return false;
-            };
-            let lower = declaration.to_ascii_lowercase();
-            !CSS_BANNED.contains(&property.trim().to_ascii_lowercase().as_str())
-                && !CSS_REFUSED.iter().any(|bad| lower.contains(bad))
-        })
-        .collect();
+/// The CSS a message sets on its own elements, without what runs or covers the page. A `url()` is
+/// resolved like a picture's address: what the message carries shows at once, what lives on the web
+/// waits for the owner, and anything else drops the whole declaration.
+fn style(value: &str, pictures: &Pictures, remote: &Mutex<Vec<String>>) -> Option<String> {
+    let mut kept: Vec<String> = Vec::new();
+    for declaration in declarations(value) {
+        let declaration = declaration.trim();
+        let Some((property, _)) = declaration.split_once(':') else {
+            continue;
+        };
+        let lower = declaration.to_ascii_lowercase();
+        if CSS_BANNED.contains(&property.trim().to_ascii_lowercase().as_str())
+            || CSS_REFUSED.iter().any(|bad| lower.contains(bad))
+        {
+            continue;
+        }
+        if lower.contains("url(") {
+            match style_urls(declaration, pictures, remote) {
+                Some(resolved) => kept.push(resolved),
+                None => continue,
+            }
+        } else {
+            kept.push(declaration.to_string());
+        }
+    }
     (!kept.is_empty()).then(|| kept.join("; "))
+}
+
+/// A `url(...)` address the declaration is allowed to keep (`cid:`, `https`, `data:` of a known
+/// picture type), replaced by what it resolves to. Any address that is none of those refuses the
+/// whole declaration, like before.
+fn style_urls(
+    declaration: &str,
+    pictures: &Pictures,
+    remote: &Mutex<Vec<String>>,
+) -> Option<String> {
+    let mut out = String::with_capacity(declaration.len());
+    let mut rest = declaration;
+    while let Some(at) = rest.to_ascii_lowercase().find("url(") {
+        out.push_str(&rest[..at]);
+        let after = &rest[at + 4..];
+        let close = url_end(after)?;
+        let target = after[..close]
+            .trim()
+            .trim_matches(|c| c == '"' || c == '\'')
+            .trim();
+        let resolved = picture(target, pictures, remote)?;
+        // It is written inside quotes: nothing may break out of them.
+        if resolved.contains(['"', '\'']) || resolved.chars().any(char::is_whitespace) {
+            return None;
+        }
+        out.push_str("url(\"");
+        out.push_str(&resolved);
+        out.push_str("\")");
+        rest = &after[close + 1..];
+    }
+    out.push_str(rest);
+    Some(out)
+}
+
+/// The `)` that closes a `url(`, skipping over a quoted interior; `None` if it never ends.
+fn url_end(after: &str) -> Option<usize> {
+    let mut quote = None;
+    for (i, c) in after.char_indices() {
+        match c {
+            '"' | '\'' => {
+                if quote == Some(c) {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(c);
+                }
+            }
+            ')' if quote.is_none() => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The `;` that ends a declaration, never one inside `url(...)` (a data picture carries `;base64`)
+/// or inside quotes.
+fn declarations(value: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let (mut depth, mut quote, mut start) = (0usize, None, 0usize);
+    for (i, c) in value.char_indices() {
+        match c {
+            '(' if quote.is_none() => depth += 1,
+            ')' if quote.is_none() => depth = depth.saturating_sub(1),
+            '"' | '\'' => {
+                if quote == Some(c) {
+                    quote = None;
+                } else if quote.is_none() {
+                    quote = Some(c);
+                }
+            }
+            ';' if depth == 0 && quote.is_none() => {
+                out.push(&value[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&value[start..]);
+    out
 }
 
 fn is_https(value: &str) -> bool {
@@ -365,12 +495,63 @@ mod tests {
             "{}",
             cleaned.html
         );
+        // A picture on the web is kept for the owner to allow, like an `img` address.
         assert!(
-            !cleaned.html.contains("url(") && !cleaned.html.contains("position"),
+            cleaned
+                .html
+                .contains(r##"background: url(&quot;https://ejemplo.test/fondo.png&quot;)"##),
             "{}",
             cleaned.html
         );
-        assert!(cleaned.remote.is_empty());
+        assert_eq!(cleaned.remote, ["https://ejemplo.test/fondo.png"]);
+        assert!(!cleaned.html.contains("position"), "{}", cleaned.html);
+    }
+
+    #[test]
+    fn a_style_picture_the_message_carries_or_a_bad_one() {
+        let cleaned = clean(
+            r##"<div style="background: url( 'cid:logo@echo.test' ); color: #fff">a</div><div style="background: url(data:image/png;base64,AAAA); background-image: url('https://ejemplo.test/b.png')">b</div><div style="background: url(javascript:alert(1))">c</div><div style="background: url(https://ejemplo.test/x.png">d</div>"##,
+            pictures(),
+        );
+        assert!(
+            cleaned
+                .html
+                .contains(r##"url(&quot;data:image/png;base64,AQID&quot;)"##),
+            "{}",
+            cleaned.html
+        );
+        // A data picture's `;base64` inside `url()` does not split the declaration.
+        assert!(
+            cleaned
+                .html
+                .contains(r##"url(&quot;data:image/png;base64,AAAA&quot;)"##),
+            "{}",
+            cleaned.html
+        );
+        assert_eq!(cleaned.remote, ["https://ejemplo.test/b.png"]);
+        assert!(
+            !cleaned.html.contains("javascript:") && !cleaned.html.contains("x.png"),
+            "{}",
+            cleaned.html
+        );
+    }
+
+    #[test]
+    fn the_pictures_a_cid_names_are_found_however_the_sender_wrote_them() {
+        let mut pictures = pictures();
+        pictures.insert(
+            "qr@banco.test".to_string(),
+            ("image/png".to_string(), vec![4, 5, 6]),
+        );
+        let cleaned = clean(
+            r##"<img src="CID:logo@echo.test"><img src="cid:qr%40banco.test"><table background="cid:logo@echo.test"><tr><td>x</td></tr></table>"##,
+            pictures,
+        );
+        assert_eq!(
+            cleaned.html.matches("data:image/png;base64,AQID").count(),
+            2
+        );
+        assert!(cleaned.html.contains("data:image/png;base64,BAUG"));
     }
 
     #[test]

@@ -324,10 +324,7 @@ pub fn parse_whole(message: &[u8]) -> Whole {
             "text/plain" if plain.is_none() && !leaf.attachment => {
                 plain = Some(to_text(&leaf.charset, &leaf.bytes))
             }
-            kind if kind.starts_with("image/")
-                && !leaf.content_id.is_empty()
-                && !leaf.attachment =>
-            {
+            kind if kind.starts_with("image/") && !leaf.content_id.is_empty() => {
                 whole
                     .pictures
                     .entry(leaf.content_id)
@@ -925,6 +922,17 @@ From: a@b.test
             "{}",
             whole.text
         );
+    }
+
+    #[test]
+    fn a_picture_marked_attachment_can_still_be_shown_in_place_by_its_content_id() {
+        let message = b"Content-Type: multipart/mixed; boundary=\"m\"\r\n\r\n--m\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<img src=\"cid:qr@echo.test\">\r\n--m\r\nContent-Type: image/png; name=\"qr.png\"\r\nContent-Disposition: attachment; filename=\"qr.png\"\r\nContent-ID: <qr@echo.test>\r\nContent-Transfer-Encoding: base64\r\n\r\nAQID\r\n--m--\r\n";
+        let whole = parse_whole(message);
+        assert_eq!(
+            whole.pictures.get("qr@echo.test"),
+            Some(&("image/png".to_string(), vec![1, 2, 3]))
+        );
+        assert_eq!(whole.attachments.len(), 1);
     }
 
     #[test]

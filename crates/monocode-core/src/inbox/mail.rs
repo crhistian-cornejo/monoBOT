@@ -1715,11 +1715,13 @@ pub struct Colors {
 
 /// A document for the reader: the sanitized HTML (Rust removed scripts and handlers), with a
 /// policy that loads nothing but inline pictures, so a tracking pixel or a script never
-/// reaches the web. `images` swaps in the pictures on the web the user allowed.
+/// reaches the web. `images` swaps in the pictures on the web the user allowed. The
+/// `i.monocode.invalid` name is the desktop's in-memory picture server on Windows
+/// (`monos/html_windows.rs`): it never resolves, the app answers it.
 pub fn mail_document(html: &str, colors: &Colors, images: &HashMap<String, String>) -> String {
     let body = swap_images(html, images);
     format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data:; style-src 'unsafe-inline'\"><base target=\"_blank\"><style>html,body{{margin:0;padding:0;background:{background};color:{text};font:13px/1.55 system-ui,-apple-system,\"Segoe UI\",sans-serif;word-wrap:break-word}}body{{padding:4px 2px}}a{{color:{link}}}img{{max-width:100%;height:auto}}table{{max-width:100%}}pre{{white-space:pre-wrap}}</style></head><body>{body}</body></html>",
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; img-src data: https://i.monocode.invalid; style-src 'unsafe-inline'\"><base target=\"_blank\"><style>html,body{{margin:0;padding:0;background:{background};color:{text};font:13px/1.55 system-ui,-apple-system,\"Segoe UI\",sans-serif;word-wrap:break-word}}body{{padding:4px 2px}}a{{color:{link}}}img{{max-width:100%;height:auto}}table{{max-width:100%}}pre{{white-space:pre-wrap}}</style></head><body>{body}</body></html>",
         background = colors.background,
         text = colors.text,
         link = colors.link,
@@ -2227,7 +2229,7 @@ mod tests {
             &colors,
             &images,
         );
-        assert!(doc.contains("default-src 'none'; img-src data:"));
+        assert!(doc.contains("default-src 'none'; img-src data: https://i.monocode.invalid"));
         assert!(doc.contains("<img src=\"data:image/png;base64,AAA\">"));
         assert!(!doc.contains("https://x.org/a.png"));
         let url = "https://img.test/a.png?w=1&h=2".to_string();

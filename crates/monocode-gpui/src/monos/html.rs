@@ -1,6 +1,6 @@
 //! Generated HTML lives in an opaque sandbox with no app bridge or network.
 #[cfg(target_os = "windows")]
-use super::html_windows::{Frame, Hosted};
+use super::html_windows::{self, Frame, Hosted};
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use gpui::canvas;
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
@@ -112,6 +112,11 @@ pub(crate) struct Html {
     markup: Option<Markup>,
     #[cfg(any(target_os = "macos", target_os = "windows"))]
     view: Rc<RefCell<Option<Hosted>>>,
+    /// The pictures the page asks for under `i.monocode.invalid`, answered from memory.
+    /// `NavigateToString` refuses a document over ~2 MB, so on Windows a picture never
+    /// travels inside the markup (`html_windows::host_images`).
+    #[cfg(target_os = "windows")]
+    images: html_windows::HostedImages,
 }
 fn escape(text: &str) -> String {
     text.replace('&', "&amp;")
@@ -196,6 +201,8 @@ impl Html {
             markup: None,
             #[cfg(any(target_os = "macos", target_os = "windows"))]
             view: Rc::new(RefCell::new(None)),
+            #[cfg(target_os = "windows")]
+            images: Default::default(),
         }
     }
     #[cfg(any(target_os = "macos", target_os = "windows"))]
@@ -207,15 +214,21 @@ impl Html {
             .as_ref()
             .is_none_or(|m| m.ink != ink || m.accent != accent)
         {
+            let document = if self.mail {
+                mail_page(&self.body)
+            } else {
+                sandbox(&self.body)
+            };
+            #[cfg(target_os = "windows")]
+            let document = {
+                let (document, images) = html_windows::host_images(&document);
+                *self.images.borrow_mut() = images;
+                document
+            };
             self.markup = Some(Markup {
                 ink,
                 accent,
-                html: if self.mail {
-                    mail_page(&self.body)
-                } else {
-                    sandbox(&self.body)
-                }
-                .into(),
+                html: document.into(),
             });
         }
         self.markup.as_ref().unwrap().html.clone()
@@ -369,6 +382,7 @@ impl gpui::Render for Html {
         {
             let _ = cx;
             let view = self.view.clone();
+            let images = self.images.clone();
             let html = self.markup();
             let interactive = self.interactive;
             canvas(
@@ -418,7 +432,7 @@ impl gpui::Render for Html {
                         zoom: f64::from(zoom),
                     };
                     if view.is_none() {
-                        *view = Hosted::new(parent);
+                        *view = Hosted::new(parent, images.clone());
                     }
                     if let Some(view) = view.as_ref() {
                         view.show(&html, frame, interactive);
