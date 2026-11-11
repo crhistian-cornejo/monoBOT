@@ -320,6 +320,7 @@ pub(crate) fn status_menu(monos: &[(String, String)], beside: &str, open_app: bo
     });
     entries.push(Entry::Separator);
     entries.push(Entry::action("Quick Composer", "composer"));
+    entries.push(Entry::action("Paste Last Dictation", "paste-last"));
     if open_app {
         entries.push(Entry::action("Open Notch", "notch"));
         entries.push(Entry::action("Open monoBOT", "open"));
@@ -368,7 +369,10 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(ids, ["m1", "composer", "notch", "open", "quit"]);
+        assert_eq!(
+            ids,
+            ["m1", "composer", "paste-last", "notch", "open", "quit"]
+        );
         let Some(Entry::Submenu {
             entries: choices, ..
         }) = entries

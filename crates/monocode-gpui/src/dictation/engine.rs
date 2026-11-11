@@ -2,7 +2,7 @@
 //! over the `monobot-dictation` crate. The model lives in Tauri's data
 //! folder, so either app reuses what the other downloaded; one dictation
 //! runs at a time.
-use monobot_dictation::{Dictation, Event, Session};
+use monobot_dictation::{Dictation, Event, Options, Session};
 use std::sync::{
     Arc, Mutex, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -47,6 +47,16 @@ pub(crate) trait Engine: Send + Sync {
     /// `dictation_start`: opens the microphone, ending any other dictation.
     /// The ticket names this one for stop and cancel.
     fn start(&self, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String>;
+    /// As `start`, with the user's vocabulary put in the transcript. Engines
+    /// that cannot dictate as usual.
+    fn start_with(
+        &self,
+        options: Options,
+        on_event: Box<dyn Fn(Event) + Send>,
+    ) -> Result<u64, String> {
+        let _ = options;
+        self.start(on_event)
+    }
     /// A call's dictation: the session ends each turn at `pace`. Engines
     /// that cannot tell dictate as usual, and the call times the pauses.
     fn start_call(&self, _pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
@@ -83,7 +93,12 @@ struct Local {
 }
 
 impl Local {
-    fn open(&self, pace: Option<&str>, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
+    fn open(
+        &self,
+        pace: Option<&str>,
+        options: Options,
+        on_event: Box<dyn Fn(Event) + Send>,
+    ) -> Result<u64, String> {
         let previous = self
             .session
             .lock()
@@ -105,7 +120,7 @@ impl Local {
             super::permission::microphone()?;
             match pace {
                 Some(pace) => self.engine.start_call(pace, on_event),
-                None => self.engine.start(on_event),
+                None => self.engine.start_with(options, on_event),
             }
             .map_err(|e| e.to_string())
         })();
@@ -213,11 +228,19 @@ impl Engine for Local {
     }
 
     fn start(&self, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
-        self.open(None, on_event)
+        self.open(None, Options::default(), on_event)
+    }
+
+    fn start_with(
+        &self,
+        options: Options,
+        on_event: Box<dyn Fn(Event) + Send>,
+    ) -> Result<u64, String> {
+        self.open(None, options, on_event)
     }
 
     fn start_call(&self, pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
-        self.open(Some(pace), on_event)
+        self.open(Some(pace), Options::default(), on_event)
     }
 
     fn stop(&self, ticket: u64) -> String {

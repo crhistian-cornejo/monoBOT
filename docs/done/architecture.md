@@ -82,6 +82,13 @@ counts as on screen whenever it is ordered in (`on_screen` in
 transparent panel occluded, which stopped its display link: frames paused for
 up to a second after a resize, or for good in a large fixed panel.
 
+Two patches let the workspace window close to the background and come back:
+on Windows, activating a hidden window shows it first (`activate` in
+`vendor/gpui-pre-windows/src/window.rs`), as AppKit's `makeKeyAndOrderFront`
+does; on macOS, the reopen callback runs on every Dock click, not only with
+no visible window, because the notch's panel counts as one
+(`should_handle_reopen` in `vendor/gpui-pre-macos/src/platform.rs`).
+
 The vendored framework/platform crates remove the unused `zed-scap` dependency.
 The native build rejects lockfiles that reintroduce it, and the `screen-capture`
 feature remains disabled. Preserve these guards and the licenses in [NOTICE](../../NOTICE).

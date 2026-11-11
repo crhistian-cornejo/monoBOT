@@ -22,7 +22,8 @@ fn window(fake: Arc<Fake>, cx: &mut TestAppContext) -> WindowHandle<SettingsView
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::new(
                     point(px(0.), px(0.)),
-                    size(px(1200.), px(900.)),
+                    // Tall enough for every group, so clicks land.
+                    size(px(1200.), px(1600.)),
                 ))),
                 ..Default::default()
             },
@@ -224,4 +225,93 @@ fn picking_how_calls_talk_is_saved(cx: &mut TestAppContext) {
             .unwrap(),
         "gemini"
     );
+}
+
+#[gpui::test]
+fn picking_what_happens_while_dictating_is_saved(cx: &mut TestAppContext) {
+    use monocode_core::dictation::quiet::WhileDictating;
+    let window = window(Fake::installed(""), cx);
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    let chosen = |visual: &mut VisualTestContext| {
+        window
+            .read_with(visual, |view, _| view.prefs.while_dictating)
+            .unwrap()
+    };
+    assert_eq!(chosen(visual), WhileDictating::Nothing);
+    click(visual, "settings-while-dictating-pause-media");
+    assert_eq!(chosen(visual), WhileDictating::PauseMedia);
+    click(visual, "settings-while-dictating-lower-volume");
+    assert_eq!(chosen(visual), WhileDictating::LowerVolume);
+}
+
+#[gpui::test]
+fn the_vocabulary_adds_replaces_and_removes_words(cx: &mut TestAppContext) {
+    use monobot_dictation::Replacement;
+    let window = window(Fake::installed(""), cx);
+    let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    let listed = |visual: &mut VisualTestContext| {
+        window
+            .read_with(visual, |view, _| view.prefs.dictation_vocabulary.clone())
+            .unwrap()
+    };
+    let entry = |heard: &str, write: &str| Replacement {
+        heard: heard.into(),
+        write: write.into(),
+    };
+    assert!(
+        visual
+            .debug_bounds("settings-row-voice-vocabulary")
+            .is_some()
+    );
+    assert!(listed(visual).is_empty());
+
+    // Typed, then Add: listed, and the fields are empty for the next one.
+    window
+        .update(visual, |view, _, cx| {
+            view.vocabulary_type(" mono  bot ", "monoBOT", cx)
+        })
+        .unwrap();
+    visual.run_until_parked();
+    click(visual, "settings-voice-vocabulary-add");
+    assert_eq!(listed(visual), [entry("mono bot", "monoBOT")]);
+    let fields = window
+        .update(visual, |view, _, cx| view.vocabulary_fields(cx))
+        .unwrap();
+    assert_eq!(fields, ["", ""]);
+    assert!(visual.debug_bounds("settings-voice-vocabulary-0").is_some());
+
+    // The same words again take the new spelling; a second word follows.
+    window
+        .update(visual, |view, _, cx| {
+            view.vocabulary_type("Mono bot", "MonoBot", cx);
+            view.vocabulary_add(cx);
+            view.vocabulary_type("jason", "JSON", cx);
+            view.vocabulary_add(cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert_eq!(
+        listed(visual),
+        [entry("Mono bot", "MonoBot"), entry("jason", "JSON")]
+    );
+
+    // Nothing to write instead: refused, with the reason, and kept typed.
+    window
+        .update(visual, |view, _, cx| {
+            view.vocabulary_type("github", " ", cx);
+            view.vocabulary_add(cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    assert_eq!(listed(visual).len(), 2);
+    let message = window
+        .read_with(visual, |view, _| {
+            view.voice.messages.get("vocabulary").cloned()
+        })
+        .unwrap();
+    assert_eq!(message.as_deref(), Some("Type how they should be written."));
+
+    // The bin removes that word only.
+    click(visual, "settings-voice-vocabulary-remove-0");
+    assert_eq!(listed(visual), [entry("jason", "JSON")]);
 }

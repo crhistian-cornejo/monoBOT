@@ -3,6 +3,12 @@
 //! at once; Parakeet loads and transcribes on a thread of its own
 //! (`Decoder`), so the first words are kept while it loads and listening
 //! never waits on a phrase being transcribed.
+//!
+//! Stopping keeps listening a moment (the release tail), so the last
+//! syllable said as the key comes up is heard. A dictation short enough for
+//! one pass of the recognizer is then heard again whole, which reads better
+//! than its phrases transcribed apart.
+use std::ops::Range;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, TryRecvError};
@@ -24,6 +30,10 @@ const MAX_HISTORY: usize = 16_000 * 600;
 /// How far past that the history grows before its oldest audio is cut, so a
 /// long dictation moves the buffer twice a minute, not on every chunk.
 const HISTORY_SLACK: usize = 16_000 * 30;
+/// How long listening goes on once stop is asked.
+const TAIL: Duration = Duration::from_millis(200);
+/// How long it may go on while the voice detector still hears speech.
+const LONGEST_TAIL: Duration = Duration::from_millis(600);
 
 /// What was said in a phrase (mono, 16 kHz).
 pub(crate) type Hear = Box<dyn Fn(&[f32]) -> String + Send>;
@@ -57,6 +67,13 @@ pub struct CallMode {
     pub smart_turn: Option<Arc<crate::smart_turn::Model>>,
 }
 
+/// What a dictation can be told when it starts.
+#[derive(Clone, Debug, Default)]
+pub struct Options {
+    /// The user's own words, put in the transcript as they write them.
+    pub vocabulary: Vec<text::Replacement>,
+}
+
 /// How long the voice detector waits before it reports quiet.
 const MIN_SILENCE_MS: u32 = 450;
 
@@ -74,6 +91,7 @@ impl Session {
         load: Loader,
         longest_phrase: f32,
         call: Option<CallMode>,
+        options: Options,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Self, Error> {
         let vad = VoiceActivityDetector::create(
@@ -111,6 +129,9 @@ impl Session {
                         }),
                         turn_audio_from: 0,
                         clock: 0,
+                        first_heard: None,
+                        longest: (longest_phrase * RATE as f32) as usize,
+                        vocabulary: options.vocabulary,
                     };
                     if run.turn.is_some() {
                         on_event(Event::DecidesTurns);
@@ -256,39 +277,34 @@ struct Run {
     turn_audio_from: usize,
     /// Milliseconds of audio heard at the last turn check.
     clock: u64,
+    /// Where the first phrase started, in heard samples.
+    first_heard: Option<usize>,
+    /// The most samples the recognizer takes at once.
+    longest: usize,
+    vocabulary: Vec<text::Replacement>,
 }
 
 impl Run {
     fn go(
         &mut self,
-        mut mic: Microphone,
+        mic: Microphone,
         stop: &AtomicBool,
         cancel: &AtomicBool,
         on_event: &impl Fn(Event),
     ) -> String {
         let mut last_level = Instant::now();
+        // When stop was asked; the microphone is read a while longer.
+        let mut stopping: Option<Instant> = None;
+        let mut mic_gone = false;
         loop {
             if cancel.load(Ordering::Acquire) {
                 return String::new();
             }
             if stop.load(Ordering::Acquire) {
-                mic.close();
-                while let Ok(chunk) = mic.chunks.try_recv() {
-                    self.feed(&chunk, false);
+                let since = *stopping.get_or_insert_with(Instant::now);
+                if mic_gone || tail_over(since.elapsed(), self.vad.detected()) {
+                    return self.finish(mic, stop, cancel, on_event);
                 }
-                self.feed(&[], true);
-                self.vad.flush();
-                self.hand_over();
-                self.decoder.close();
-                // The last phrases, and Parakeet itself when the dictation
-                // was shorter than its load.
-                while self.decoder.busy() {
-                    if cancel.load(Ordering::Acquire) {
-                        return String::new();
-                    }
-                    self.collect(Duration::from_millis(40), stop, on_event);
-                }
-                return text::join(&self.phrases);
             }
             match mic.chunks.recv_timeout(Duration::from_millis(40)) {
                 Ok(chunk) => self.feed(&chunk, false),
@@ -297,6 +313,7 @@ impl Run {
                     if let Some(reason) = mic.failure() {
                         on_event(Event::Lost(reason));
                     }
+                    mic_gone = true;
                     stop.store(true, Ordering::Release);
                     continue;
                 }
@@ -312,8 +329,71 @@ impl Run {
             }
             self.hand_over();
             self.collect(Duration::ZERO, stop, on_event);
-            self.follow_turn(on_event);
+            // Once the user stopped, the turn ends with the session.
+            if stopping.is_none() {
+                self.follow_turn(on_event);
+            }
         }
+    }
+
+    /// The end of the dictation: the last phrases, Parakeet itself when the
+    /// dictation was shorter than its load, and the whole clip heard again
+    /// when it fits in one pass.
+    fn finish(
+        &mut self,
+        mut mic: Microphone,
+        stop: &AtomicBool,
+        cancel: &AtomicBool,
+        on_event: &impl Fn(Event),
+    ) -> String {
+        mic.close();
+        while let Ok(chunk) = mic.chunks.try_recv() {
+            self.feed(&chunk, false);
+        }
+        self.feed(&[], true);
+        self.vad.flush();
+        self.hand_over();
+        let clip = self.whole_clip();
+        while self.decoder.busy() {
+            if cancel.load(Ordering::Acquire) {
+                return String::new();
+            }
+            self.collect(Duration::from_millis(40), stop, on_event);
+        }
+        let whole = clip.and_then(|clip| second_pass(&mut self.decoder, clip, cancel));
+        self.decoder.close();
+        if cancel.load(Ordering::Acquire) {
+            return String::new();
+        }
+        match whole {
+            Some(whole) => final_text(&text::sentences(&whole), &self.vocabulary),
+            None => self.joined(),
+        }
+    }
+
+    /// Everything heard so far, as the user reads it.
+    fn joined(&self) -> String {
+        if self.turn.is_some() {
+            text::apply_vocabulary(&text::join_call(&self.phrases), &self.vocabulary)
+        } else {
+            final_text(&self.phrases, &self.vocabulary)
+        }
+    }
+
+    /// The whole dictation's audio, from just before its first phrase, when
+    /// all of it is still kept and the recognizer takes it at once. Not for
+    /// calls, whose turns are heard as they end.
+    fn whole_clip(&self) -> Option<Vec<f32>> {
+        if self.turn.is_some() {
+            return None;
+        }
+        let range = clip_range(
+            self.first_heard?,
+            self.seen,
+            self.history.len(),
+            self.longest,
+        )?;
+        Some(self.history[range].to_vec())
     }
 
     /// A call's turn: ends it after its pause, asking Smart Turn first.
@@ -345,7 +425,7 @@ impl Run {
         if self.decoder.busy() {
             return;
         }
-        let partial = text::join(&self.phrases);
+        let partial = text::apply_vocabulary(&text::join_call(&self.phrases), &self.vocabulary);
         if !tracker.done(now, &partial) {
             return;
         }
@@ -379,6 +459,7 @@ impl Run {
     fn hand_over(&mut self) {
         while let Some(segment) = self.vad.front() {
             let start = segment.start().max(0) as usize;
+            self.first_heard.get_or_insert(start);
             let mut audio = self.pre_roll(start);
             audio.extend_from_slice(segment.samples());
             self.delivered = start + segment.samples().len();
@@ -407,7 +488,7 @@ impl Run {
             }
         }
         if changed {
-            on_event(Event::Partial(text::join(&self.phrases)));
+            on_event(Event::Partial(self.joined()));
         }
     }
 
@@ -421,6 +502,43 @@ impl Run {
             .min(end);
         self.history[begin - oldest..end - oldest].to_vec()
     }
+}
+
+/// Whether the release tail is over: `TAIL` after stop, or up to
+/// `LONGEST_TAIL` while the voice detector still hears speech.
+fn tail_over(since_stop: Duration, speaking: bool) -> bool {
+    since_stop >= LONGEST_TAIL || (since_stop >= TAIL && !speaking)
+}
+
+/// Where in the history (which holds the last `kept` of `seen` samples) the
+/// dictation's audio lies, from the pre-roll before its first phrase at
+/// `first`; none when part of it was cut or it is longer than `longest`.
+fn clip_range(first: usize, seen: usize, kept: usize, longest: usize) -> Option<Range<usize>> {
+    let oldest = seen.saturating_sub(kept);
+    let begin = first.saturating_sub(PRE_ROLL);
+    (begin >= oldest && begin <= seen && seen - begin <= longest).then(|| begin - oldest..kept)
+}
+
+/// The whole clip through the recognizer, after the phrases already queued;
+/// none when it heard nothing, failed or the dictation was cancelled.
+fn second_pass(decoder: &mut Decoder, clip: Vec<f32>, cancel: &AtomicBool) -> Option<String> {
+    decoder.hear(clip);
+    while decoder.busy() {
+        if cancel.load(Ordering::Acquire) {
+            return None;
+        }
+        match decoder.next(Duration::from_millis(40)) {
+            Some(Ok(heard)) => return Some(heard).filter(|heard| !heard.trim().is_empty()),
+            Some(Err(_)) => return None,
+            None => {}
+        }
+    }
+    None
+}
+
+/// A dictation's text: phrases joined, then the user's vocabulary.
+fn final_text(phrases: &[String], vocabulary: &[text::Replacement]) -> String {
+    text::apply_vocabulary(&text::join(phrases), vocabulary)
 }
 
 fn silero(model: String, longest_phrase: f32) -> VadModelConfig {
@@ -511,5 +629,97 @@ mod tests {
         loaded.send(()).unwrap();
         assert!(decoder.next(LONG).is_none());
         assert!(!decoder.busy());
+    }
+
+    #[test]
+    fn listening_goes_on_a_moment_after_stop_and_longer_while_speech_goes_on() {
+        let ms = Duration::from_millis;
+        assert!(!tail_over(ms(0), false));
+        assert!(!tail_over(ms(150), false));
+        assert!(tail_over(ms(200), false));
+        // Still talking: up to 600 ms, never longer.
+        assert!(!tail_over(ms(200), true));
+        assert!(!tail_over(ms(550), true));
+        assert!(tail_over(ms(600), true));
+        assert!(tail_over(ms(2_000), true));
+    }
+
+    #[test]
+    fn the_whole_clip_is_heard_again_only_when_it_fits_and_is_all_kept() {
+        let second = RATE as usize;
+        let longest = 20 * second;
+        // Speech from 1 s on, 5 s heard, all kept: from the pre-roll to now.
+        assert_eq!(
+            clip_range(second, 5 * second, 5 * second, longest),
+            Some(second - PRE_ROLL..5 * second)
+        );
+        // The pre-roll never reaches before the start.
+        assert_eq!(
+            clip_range(100, 3 * second, 3 * second, longest),
+            Some(0..3 * second)
+        );
+        // Longer than the recognizer's window: the phrases stand.
+        assert_eq!(clip_range(second, 25 * second, 25 * second, longest), None);
+        // Its start was cut from the history.
+        assert_eq!(clip_range(second, 15 * second, 10 * second, longest), None);
+        // A history that was cut, with the dictation inside what is kept.
+        assert_eq!(
+            clip_range(12 * second, 15 * second, 10 * second, longest),
+            Some(7 * second - PRE_ROLL..10 * second)
+        );
+    }
+
+    #[test]
+    fn the_second_pass_hears_the_clip_after_the_phrases_queued() {
+        let mut decoder = Decoder::start(Box::new(|| Ok(counting())), Arc::default()).unwrap();
+        decoder.hear(vec![0.; 3]);
+        assert_eq!(decoder.next(LONG).unwrap().unwrap(), "3");
+        let whole = second_pass(&mut decoder, vec![0.; 11], &AtomicBool::new(false));
+        assert_eq!(whole.as_deref(), Some("11"));
+        assert!(!decoder.busy());
+    }
+
+    #[test]
+    fn a_second_pass_that_hears_nothing_leaves_the_phrases() {
+        let silent: Loader = Box::new(|| Ok(Box::new(|_: &[f32]| " ".to_owned()) as Hear));
+        let mut decoder = Decoder::start(silent, Arc::default()).unwrap();
+        assert_eq!(
+            second_pass(&mut decoder, vec![0.; 8], &AtomicBool::new(false)),
+            None
+        );
+        // A recognizer that did not load leaves them too.
+        let mut broken = Decoder::start(Box::new(|| Err(Error::Load)), Arc::default()).unwrap();
+        assert_eq!(
+            second_pass(&mut broken, vec![0.; 8], &AtomicBool::new(false)),
+            None
+        );
+        // A cancelled dictation does not wait for it.
+        let (_loaded, wait) = mpsc::channel::<()>();
+        let stuck: Loader = Box::new(move || {
+            let _ = wait.recv();
+            Ok(counting())
+        });
+        let mut decoder = Decoder::start(stuck, Arc::default()).unwrap();
+        assert_eq!(
+            second_pass(&mut decoder, vec![0.; 8], &AtomicBool::new(true)),
+            None
+        );
+    }
+
+    #[test]
+    fn the_final_text_is_tidied_and_takes_the_users_words() {
+        let vocabulary = [text::Replacement {
+            heard: "mono bot".into(),
+            write: "monoBOT".into(),
+        }];
+        // The whole clip, one transcript, is read sentence by sentence.
+        let whole = "hola, abre mono bot. Can you check the build?";
+        assert_eq!(
+            final_text(&text::sentences(whole), &vocabulary),
+            "Hola, abre monoBOT. Can you check the build?"
+        );
+        let phrases = ["el el informe de mono bot.".to_owned()];
+        assert_eq!(final_text(&phrases, &vocabulary), "El informe de monoBOT.");
+        assert_eq!(final_text(&phrases, &[]), "El informe de mono bot.");
     }
 }

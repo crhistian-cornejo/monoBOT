@@ -4,6 +4,8 @@
 //! they stop. On Apple silicon Parakeet runs on the Neural Engine
 //! (`neural`), elsewhere on the CPU. Everything runs on this machine; nothing
 //! is sent anywhere.
+#[cfg(test)]
+mod bench_tests;
 mod capture;
 pub mod devices;
 pub mod model;
@@ -11,7 +13,8 @@ pub mod model;
 mod neural;
 mod session;
 pub mod smart_turn;
-mod text;
+mod spoken;
+pub mod text;
 pub mod turn;
 
 use std::path::PathBuf;
@@ -19,7 +22,8 @@ use std::sync::{Arc, Mutex};
 
 pub use capture::Microphone;
 pub use model::Engine;
-pub use session::{CallMode, Event, Session};
+pub use session::{CallMode, Event, Options, Session};
+pub use text::{add_replacement, apply_vocabulary, Replacement, VocabularyError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -192,8 +196,18 @@ impl Dictation {
         self: &Arc<Self>,
         on_event: impl Fn(Event) + Send + 'static,
     ) -> Result<Session, Error> {
+        self.start_with(Options::default(), on_event)
+    }
+
+    /// As `start`, with the user's own words (`Options::vocabulary`) put in
+    /// the transcript.
+    pub fn start_with(
+        self: &Arc<Self>,
+        options: Options,
+        on_event: impl Fn(Event) + Send + 'static,
+    ) -> Result<Session, Error> {
         let (load, longest) = self.loader()?;
-        Session::start(&self.dir, load, longest, None, on_event)
+        Session::start(&self.dir, load, longest, None, options, on_event)
     }
 
     /// How a session brings the recognizer, and the longest phrase it takes.
@@ -232,7 +246,14 @@ impl Dictation {
             pace: pace.to_owned(),
             smart_turn: self.smart_turn(),
         };
-        Session::start(&self.dir, load, longest, Some(call), on_event)
+        Session::start(
+            &self.dir,
+            load,
+            longest,
+            Some(call),
+            Options::default(),
+            on_event,
+        )
     }
 
     /// Downloads Smart Turn when it is missing (32 MB).

@@ -101,6 +101,15 @@ pub(crate) struct Preferences {
     pub voice_live: String,
     /// How long a call waits before it answers: "patient", "normal" or "quick".
     pub voice_pace: String,
+    /// The global dictation shortcut works in other apps too: the notch
+    /// shows it and the text is pasted where the caret was. The shortcut is
+    /// the Keybindings command "App: Dictate Anywhere".
+    pub dictate_anywhere: bool,
+    /// The user's own words, put in every dictation's transcript.
+    pub dictation_vocabulary: Vec<monobot_dictation::Replacement>,
+    /// What happens to what plays while the composer or the system
+    /// dictation listens: nothing, pause it, or lower the volume.
+    pub while_dictating: monocode_core::dictation::quiet::WhileDictating,
     pub claude_hooks: bool,
     /// Experimental: report monoBOT instead of `sdk-cli` as Claude's entrypoint.
     pub claude_entrypoint: bool,
@@ -201,6 +210,9 @@ impl Default for Preferences {
             idle_agents: 3,
             voice_live: "local".into(),
             voice_pace: "normal".into(),
+            dictate_anywhere: true,
+            dictation_vocabulary: Vec::new(),
+            while_dictating: Default::default(),
             claude_hooks: true,
             claude_entrypoint: false,
             binary_paths: HashMap::new(),

@@ -8,6 +8,8 @@ mod classic_sidebar;
 #[cfg(test)]
 mod classic_surface_tests;
 mod classic_surfaces;
+#[cfg(test)]
+mod close_tests;
 mod file_panes;
 mod github_star;
 mod idle_agents;
@@ -2127,7 +2129,7 @@ impl Shell {
         })
         .detach();
     }
-    fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn request_quit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !self.unsaved_files(cx) {
             crate::quit(cx);
             return;
@@ -9107,23 +9109,23 @@ impl Render for Shell {
                 shell
                     .update(cx, |shell, cx| {
                         shell.save_window_state(window, cx);
-                        #[cfg(all(target_os = "macos", not(test)))]
-                        if shell.workspace.preferences.close_to_tray
-                            && shell.workspace.preferences.mono_menu_bar_icon
-                            && shell
-                                .monos
-                                .as_ref()
-                                .is_some_and(|m| !m.read(cx).roster.monos.is_empty())
-                            && !shell.unsaved_files(cx)
-                        {
-                            crate::traffic_lights::hide(window);
-                            return false;
-                        }
-                        if shell.unsaved_files(cx) {
-                            shell.request_quit(window, cx);
-                            false
-                        } else {
-                            true
+                        // Kept running, the window hides and the notch, the
+                        // tray and the agents stay; see `app_window`.
+                        use monocode_core::app_window::{OnClose, on_close};
+                        match on_close(
+                            shell.workspace.preferences.close_to_tray,
+                            shell.unsaved_files(cx),
+                            crate::app_window::CAN_HIDE,
+                        ) {
+                            OnClose::Hide => {
+                                crate::app_window::hide(window);
+                                false
+                            }
+                            OnClose::AskAboutUnsaved => {
+                                shell.request_quit(window, cx);
+                                false
+                            }
+                            OnClose::Close => true,
                         }
                     })
                     .unwrap_or(true)

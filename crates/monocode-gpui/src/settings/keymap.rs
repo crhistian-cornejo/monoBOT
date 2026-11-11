@@ -88,6 +88,11 @@ fn command(binding: &KeyBinding) -> Option<&'static str> {
         "workspace::NewTerminal" => "Terminal: New",
         "workspace::ToggleTerminal" => "Terminal: Toggle Dock",
         "file_editor::Find" => "Editor: Find",
+        // The global dictation shortcut, bound in composers as well so the
+        // app's own windows dictate with it when the system hook is off.
+        "dictation::Dictate" if keys == crate::dictation::system::DEFAULT_KEYSTROKE => {
+            crate::dictation::system::COMMAND
+        }
         "dictation::Dictate" => "Composer: Dictate",
         "file_editor::Replace" => "Editor: Replace",
         "workspace::ZoomIn" | "image_lightbox::ZoomIn" => "View: Zoom In",

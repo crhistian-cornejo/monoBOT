@@ -1616,15 +1616,30 @@ mod win {
             })
         }
 
-        pub(crate) fn read() -> Levels {
+        /// The output's volume and whether it is muted.
+        pub(crate) fn volume() -> Option<(f32, bool)> {
             // SAFETY: plain reads on a live endpoint.
-            let volume = with(|endpoint| unsafe {
+            with(|endpoint| unsafe {
                 let volume = endpoint.GetMasterVolumeLevelScalar().ok()?;
                 let muted = endpoint.GetMute().ok()?.as_bool();
                 Some((volume.clamp(0., 1.), muted))
-            });
+            })
+        }
+
+        /// Sets the output's volume, leaving its mute as it is.
+        pub(crate) fn set_volume(volume: f32) -> bool {
+            // SAFETY: a plain write on a live endpoint.
+            with(|endpoint| unsafe {
+                endpoint
+                    .SetMasterVolumeLevelScalar(volume.clamp(0., 1.), std::ptr::null())
+                    .ok()
+            })
+            .is_some()
+        }
+
+        pub(crate) fn read() -> Levels {
             Levels {
-                volume,
+                volume: volume(),
                 brightness: None,
                 power: super::battery(),
             }
@@ -2019,6 +2034,31 @@ pub(crate) fn watch_media(
     {
         let _ = on_change;
         None
+    }
+}
+
+/// The default output's volume (0 to 1) and whether it is muted, where the
+/// app can read it. A property read: call it off the interface thread.
+pub(crate) fn output_volume() -> Option<(f32, bool)> {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::audio::volume();
+    #[cfg(all(target_os = "macos", not(test)))]
+    return monocode_core::notch::system::output_volume();
+    #[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+    None
+}
+
+/// Sets the default output's volume, leaving its mute alone; false where
+/// it cannot. Call it off the interface thread.
+pub(crate) fn set_output_volume(volume: f32) -> bool {
+    #[cfg(all(target_os = "windows", not(test)))]
+    return win::audio::set_volume(volume);
+    #[cfg(all(target_os = "macos", not(test)))]
+    return monocode_core::notch::system::set_output_volume(volume);
+    #[cfg(any(test, not(any(target_os = "macos", target_os = "windows"))))]
+    {
+        let _ = volume;
+        false
     }
 }
 

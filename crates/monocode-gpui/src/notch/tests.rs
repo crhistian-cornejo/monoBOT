@@ -2332,3 +2332,298 @@ fn an_agents_chat_is_written_in_at_once_and_shows_what_came_with_what_was_said(
     visual.run_until_parked();
     assert_eq!(photos(visual), 1);
 }
+
+#[gpui::test]
+fn dictating_grows_its_wings_over_the_agents_and_folds_after_pasting(cx: &mut TestAppContext) {
+    use monocode_core::dictation::{BARS, system::Phase};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    leave(visual);
+    let show = |phase: Phase, visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, cx| {
+                notch.show_dictation(phase, [0.4; BARS], cx)
+            })
+            .unwrap();
+        leave(visual);
+    };
+    // Agents at work have the wings first.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.update_feed(
+                Feed {
+                    activities: vec![working(1), working(2)],
+                    ..Feed::default()
+                },
+                cx,
+            )
+        })
+        .unwrap();
+    leave(visual);
+    let agents = (186. + busy_wings() + 2. * SHOULDER, 37.);
+    assert_eq!(size(opened.window, visual), agents);
+
+    // The microphone opens: the dictation takes the wings.
+    show(Phase::Starting, visual);
+    assert!(visual.debug_bounds("notch-dictation").is_some());
+    assert!(visual.debug_bounds("notch-dictation-status").is_some());
+    assert_eq!(
+        size(opened.window, visual),
+        (
+            186. + (dictating::EMPTY_WING + dictating::LISTEN_WING) as f32 + 2. * SHOULDER,
+            37.
+        )
+    );
+
+    // Words come in on the left, and the wing grows for them.
+    show(
+        Phase::Listening {
+            level: 0.4,
+            words: "hola mundo".into(),
+        },
+        visual,
+    );
+    let words = opened
+        .window
+        .update(visual, |notch, _, _| notch.dictation_words())
+        .unwrap();
+    assert_eq!(words, ["hola", "mundo"]);
+    assert!(visual.debug_bounds("notch-dictation-words").is_some());
+    assert!(visual.debug_bounds("notch-dictation-word-0").is_some());
+    assert!(visual.debug_bounds("notch-dictation-word-1").is_some());
+    let wing = dictating::words_wing("hola mundo".chars().count());
+    assert!(wing > dictating::EMPTY_WING);
+    assert_eq!(
+        size(opened.window, visual),
+        (
+            186. + (wing + dictating::LISTEN_WING) as f32 + 2. * SHOULDER,
+            37.
+        )
+    );
+    // Passing over the notch does not open the panel on the dictation.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.hover_changed(true, cx))
+        .unwrap();
+    visual.executor().advance_clock(OPEN_DELAY * 3);
+    visual.run_until_parked();
+    assert!(
+        !opened
+            .window
+            .update(visual, |notch, _, _| notch.open)
+            .unwrap()
+    );
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.hover_changed(false, cx))
+        .unwrap();
+
+    // Pasted: a check and its word, then it folds and the agents return.
+    show(Phase::Finishing, visual);
+    assert!(visual.debug_bounds("notch-dictation-word-1").is_some());
+    show(Phase::Pasted, visual);
+    assert!(visual.debug_bounds("notch-dictation-done").is_some());
+    assert!(visual.debug_bounds("notch-dictation-words").is_none());
+    assert_eq!(
+        size(opened.window, visual),
+        (
+            186. + (dictating::MARK_WING + dictating::PASTED_WING) as f32 + 2. * SHOULDER,
+            37.
+        )
+    );
+    show(Phase::Idle, visual);
+    assert!(visual.debug_bounds("notch-dictation").is_none());
+    assert_eq!(size(opened.window, visual), agents);
+}
+
+#[gpui::test]
+fn the_pill_shows_the_words_and_the_mic_in_one_row(cx: &mut TestAppContext) {
+    use monocode_core::dictation::{BARS, system::Phase};
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    // A screen with no camera: Windows' pill under the top edge.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.screen_override = Some(Screen {
+                safe_top: 0.,
+                left_area: 0.,
+                right_area: 0.,
+                ..macbook()
+            });
+            notch.show_dictation(
+                Phase::Listening {
+                    level: 0.7,
+                    words: "uno dos tres".into(),
+                },
+                [0.7; BARS],
+                cx,
+            )
+        })
+        .unwrap();
+    leave(visual);
+    assert!(visual.debug_bounds("notch-dictation").is_some());
+    assert!(visual.debug_bounds("notch-dictation-word-2").is_some());
+    assert!(visual.debug_bounds("notch-dictation-status").is_some());
+    let wing = dictating::words_wing("uno dos tres".chars().count());
+    let (width, _) = size(opened.window, visual);
+    assert_eq!(
+        width,
+        (wing + dictating::LISTEN_WING) as f32 + 12. + 2. * SHOULDER
+    );
+}
+
+#[gpui::test]
+fn the_system_dictation_drives_the_wings_and_paste_last_waits_in_the_header(
+    cx: &mut TestAppContext,
+) {
+    use crate::dictation::{Engines, system::SystemDictation, tests::Fake};
+    use monocode_core::dictation::{hotkey::Action, system::Phase};
+    let fake = Fake::installed("hola mundo");
+    let controller = cx.update(|cx| {
+        cx.set_global(Engines(fake.clone()));
+        let (hits, _) = async_channel::unbounded();
+        cx.new(|cx| SystemDictation::new(hits, cx))
+    });
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.follow_dictation(controller.clone(), cx)
+        })
+        .unwrap();
+    leave(visual);
+    assert_eq!(size(opened.window, visual), (186. + 2. * SHOULDER, 37.));
+
+    controller.update(visual, |this, cx| this.act(Action::Start, cx));
+    visual.run_until_parked();
+    fake.hear(monobot_dictation::Event::Level(0.5));
+    fake.hear(monobot_dictation::Event::Partial("hola".into()));
+    visual.run_until_parked();
+    assert!(visual.debug_bounds("notch-dictation-word-0").is_some());
+    let words = opened
+        .window
+        .update(visual, |notch, _, _| notch.dictation_words())
+        .unwrap();
+    assert_eq!(words, ["hola"]);
+
+    // The test platform has nothing in front to paste into: copied.
+    controller.update(visual, |this, cx| this.act(Action::Stop, cx));
+    visual.run_until_parked();
+    assert_eq!(
+        controller.read_with(visual, |this, _| this.phase().clone()),
+        Phase::Copied
+    );
+    assert!(visual.debug_bounds("notch-dictation-done").is_some());
+
+    // Paste last waits in the open panel's header and folds it.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_open(true, cx))
+        .unwrap();
+    click(visual, "notch-paste-last");
+    assert!(
+        !opened
+            .window
+            .update(visual, |notch, _, _| notch.open)
+            .unwrap()
+    );
+    assert_eq!(
+        controller.read_with(visual, |this, _| this.phase().clone()),
+        Phase::Copied
+    );
+
+    // The ending lingers, then the notch is quiet again.
+    visual.executor().advance_clock(Duration::from_secs(5));
+    visual.run_until_parked();
+    leave(visual);
+    assert!(visual.debug_bounds("notch-dictation").is_none());
+    assert_eq!(size(opened.window, visual), (186. + 2. * SHOULDER, 37.));
+}
+
+#[gpui::test]
+fn pause_media_while_dictating_pauses_what_plays_and_plays_it_after(cx: &mut TestAppContext) {
+    use crate::dictation::{Engines, system::SystemDictation, tests::Fake};
+    use monocode_core::dictation::{hotkey::Action, quiet::WhileDictating, system::Phase};
+    use monocode_core::notch::media::{Playing, Track};
+    let player = |app: &str, playing| Playing {
+        track: Track {
+            app: app.into(),
+            title: "Song".into(),
+            artist: "Someone".into(),
+            album: "Album".into(),
+            duration: Some(Duration::from_secs(200)),
+        },
+        playing,
+        position: Duration::from_secs(20),
+        at: Instant::now(),
+        art: None,
+        shuffle: None,
+    };
+    let fake = Fake::installed("hola");
+    let controller = cx.update(|cx| {
+        cx.set_global(crate::settings::Preferences {
+            while_dictating: WhileDictating::PauseMedia,
+            ..Default::default()
+        });
+        cx.set_global(Engines(fake.clone()));
+        let (hits, _) = async_channel::unbounded();
+        cx.new(|cx| SystemDictation::new(hits, cx))
+    });
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let (commands, sent) = std::sync::mpsc::channel();
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.media_commands = Some(commands);
+            notch.set_players(vec![player("spotify", true), player("browser", false)], cx);
+        })
+        .unwrap();
+    visual.run_until_parked();
+    let toggles = |sent: &std::sync::mpsc::Receiver<(String, platform::MediaCommand)>| {
+        sent.try_iter().collect::<Vec<_>>()
+    };
+    let toggle = |app: &str| (app.to_owned(), platform::MediaCommand::TogglePlay);
+    let playing = |visual: &mut VisualTestContext| {
+        opened
+            .window
+            .update(visual, |notch, _, _| {
+                notch.media.as_ref().is_some_and(|media| media.playing)
+            })
+            .unwrap()
+    };
+
+    // Only Spotify plays: only Spotify is paused, and the notch shows it
+    // paused at once.
+    controller.update(visual, |this, cx| this.act(Action::Start, cx));
+    visual.run_until_parked();
+    assert_eq!(toggles(&sent), [toggle("spotify")]);
+    assert!(!playing(visual));
+    controller.update(visual, |this, cx| this.act(Action::Stop, cx));
+    visual.run_until_parked();
+    assert_eq!(
+        controller.read_with(visual, |this, _| this.phase().clone()),
+        Phase::Copied
+    );
+    assert_eq!(toggles(&sent), [toggle("spotify")], "played again");
+    assert!(playing(visual));
+
+    // Played again by hand while dictating: left playing.
+    controller.update(visual, |this, cx| this.act(Action::Start, cx));
+    visual.run_until_parked();
+    assert_eq!(toggles(&sent), [toggle("spotify")]);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.set_players(vec![player("spotify", true)], cx)
+        })
+        .unwrap();
+    controller.update(visual, |this, cx| this.act(Action::Cancel, cx));
+    visual.run_until_parked();
+    assert!(toggles(&sent).is_empty(), "a toggle would pause it");
+    assert!(playing(visual));
+}

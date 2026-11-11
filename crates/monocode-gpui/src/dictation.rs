@@ -3,7 +3,10 @@
 //! toolbar with the waveform and the words heard so far, the model download,
 //! or an error. Escape drops a dictation in progress.
 mod engine;
+mod keyboard;
 pub(crate) mod permission;
+pub(crate) mod quiet;
+pub(crate) mod system;
 
 use crate::{input::Input, right_panel::RED_400, theme::*};
 use gpui::{
@@ -22,22 +25,28 @@ pub(crate) use engine::{Engine, Status};
 gpui::actions!(dictation, [Dictate]);
 
 /// A press shorter than this toggles dictation; held longer, it is push to
-/// talk and letting go stops.
-const HOLD: Duration = Duration::from_millis(300);
+/// talk and letting go stops. The global shortcut follows the same rule.
+const HOLD: Duration = Duration::from_millis(monocode_core::dictation::hotkey::HOLD_MS);
 
-/// Ctrl+Shift+M (⌘⇧M on macOS) in a composer, rebindable in Settings.
+/// Ctrl+Shift+M (⌘⇧M on macOS) in a composer, and the global dictation
+/// shortcut (Ctrl+Space), each rebindable in Settings. With the system hook
+/// on, the global one never reaches a window: the hook sends it here.
 pub(crate) fn bind(cx: &mut App) {
     let modifier = if cfg!(target_os = "macos") {
         "cmd"
     } else {
         "ctrl"
     };
-    cx.bind_keys([gpui::KeyBinding::new(
-        &format!("{modifier}-shift-m"),
-        Dictate,
-        Some("Composer"),
-    )]);
+    cx.bind_keys([
+        gpui::KeyBinding::new(&format!("{modifier}-shift-m"), Dictate, Some("Composer")),
+        gpui::KeyBinding::new(system::DEFAULT_KEYSTROKE, Dictate, Some("Composer")),
+    ]);
 }
+
+/// The composer whose dictation shortcut went down last, so the global
+/// hook can hand that press's release to it.
+struct Pressed(WeakEntity<Dictation>);
+impl Global for Pressed {}
 
 /// The engine the composers dictate with; tests put a stand-in here.
 #[derive(Clone)]
@@ -57,6 +66,17 @@ pub(crate) fn init(cx: &mut App) {
     cx.background_executor()
         .spawn(async move { engine.prepare() })
         .detach();
+    system::init(cx);
+}
+
+/// The user's vocabulary from Settings, for a dictation that starts now.
+fn options(cx: &App) -> monobot_dictation::Options {
+    monobot_dictation::Options {
+        vocabulary: cx
+            .try_global::<crate::settings::Preferences>()
+            .map(|prefs| prefs.dictation_vocabulary.clone())
+            .unwrap_or_default(),
+    }
 }
 
 enum Install {
@@ -104,6 +124,10 @@ pub(crate) struct Dictation {
 
 impl Dictation {
     pub(crate) fn new(input: &Entity<Input>, cx: &mut Context<Self>) -> Self {
+        // A composer that closes while it listens puts the sound back.
+        let id = cx.entity_id();
+        cx.on_release(move |_, cx| quiet::follow(id, false, cx))
+            .detach();
         Self {
             input: input.downgrade(),
             engine: engine(cx),
@@ -197,6 +221,11 @@ impl Dictation {
 
     fn set_phase(&mut self, phase: Phase, cx: &mut Context<Self>) {
         self.phase = phase;
+        // Settings › Voice › While dictating; a call's mic leaves it alone.
+        if self.call_pace.is_none() {
+            let dictating = matches!(phase, Phase::Starting | Phase::Listening | Phase::Finishing);
+            quiet::follow(cx.entity_id(), dictating, cx);
+        }
         cx.notify();
     }
 
@@ -268,6 +297,7 @@ impl Dictation {
         self.decides_turns = false;
         self.turn_ended = false;
         let pace = self.call_pace.clone();
+        let options = options(cx);
         let started = cx.background_executor().spawn({
             let engine = engine.clone();
             async move {
@@ -276,7 +306,7 @@ impl Dictation {
                 });
                 match pace {
                     Some(pace) => engine.start_call(&pace, on_event),
-                    None => engine.start(on_event),
+                    None => engine.start_with(options, on_event),
                 }
             }
         });
@@ -524,6 +554,7 @@ pub(crate) fn on_shortcut(
 ) -> impl Fn(&Dictate, &mut Window, &mut App) + 'static {
     let dictation = dictation.downgrade();
     move |_, _, cx| {
+        cx.set_global(Pressed(dictation.clone()));
         let _ = dictation.update(cx, |dictation, cx| dictation.shortcut_down(cx));
         cx.stop_propagation();
     }

@@ -328,6 +328,7 @@ impl SettingsView {
                     | "working-agents"
                     | "action-opens-terminal"
                     | "close-to-tray"
+                    | "dictate-anywhere"
                     | "main-pane-glass"
                     | "show-excluded-files"
                     | "anchor-prompts"

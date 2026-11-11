@@ -411,6 +411,12 @@ impl Monos {
             if let Some(handle) = self.parent_window {
                 let _ = handle.update(cx, |_, window, _| window.activate_window());
             }
+        } else if id == "paste-last" {
+            // The newest dictation, pasted where the caret is (or copied
+            // when the menu left nothing in front to take it).
+            if let Some(system) = crate::dictation::system::get(cx) {
+                system.update(cx, |system, cx| system.paste_last(cx));
+            }
         } else if id == "composer" {
             // The composer is its own panel: the workspace window stays
             // where it is, as in the Tauri menu.

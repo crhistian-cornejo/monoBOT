@@ -821,6 +821,11 @@ impl PlatformWindow for WindowsWindow {
                 this.set_window_placement().log_err();
 
                 unsafe {
+                    // monoBOT: a window the app hid (closed to the background)
+                    // shows again, as AppKit's makeKeyAndOrderFront does.
+                    if !IsWindowVisible(hwnd).as_bool() {
+                        let _ = ShowWindow(hwnd, SW_SHOW);
+                    }
                     // If the window is minimized, restore it.
                     if IsIconic(hwnd).as_bool() {
                         ShowWindowAsync(hwnd, SW_RESTORE).ok().log_err();

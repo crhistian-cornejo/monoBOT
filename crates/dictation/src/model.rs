@@ -356,8 +356,10 @@ pub fn install_neural(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<
 /// later dictation offers the download again.
 pub fn remove(dir: &Path) -> Result<(), Error> {
     remove_cpu(dir);
-    let _ = fs::remove_file(dir.join(SMART_TURN.name));
-    let _ = fs::remove_file(dir.join(silero().name));
+    for name in [SMART_TURN.name, silero().name] {
+        let _ = fs::remove_file(dir.join(name));
+        let _ = fs::remove_file(partial_of(&dir.join(name)));
+    }
     match fs::remove_dir_all(dir.join(NEURAL_FOLDER)) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -382,7 +384,9 @@ pub fn disk_bytes(dir: &Path) -> u64 {
 pub fn remove_cpu(dir: &Path) {
     for file in FILES.iter().filter(|file| file.url.is_none()) {
         let _ = fs::remove_file(dir.join(file.name));
+        let _ = fs::remove_file(partial_of(&dir.join(file.name)));
     }
+    let _ = fs::remove_file(partial_of(&dir.join(ARCHIVE.name)));
 }
 
 /// Downloads what the CPU build is missing, reporting bytes done out of the
@@ -414,6 +418,10 @@ pub fn install_cpu(dir: &Path, mut progress: impl FnMut(u64, u64)) -> Result<(),
             // it in place.
             Err(Error::Download(_)) if file.url.is_none() => {
                 unpacked = from_archive(dir, before, total, &mut progress)?;
+                // What Hugging Face sent of them before it failed.
+                for name in &unpacked {
+                    let _ = fs::remove_file(partial_of(&dir.join(name)));
+                }
                 done = before
                     + FILES
                         .iter()
@@ -586,72 +594,153 @@ fn agent() -> ureq::Agent {
 /// instead of the file. Anything that is not the file (a web page, another
 /// length, a connection cut short) is a failed download, so Parakeet still
 /// has GitHub to try; the right length with other bytes is a checksum error.
+///
+/// A connection cut short leaves what arrived in `<target>.part`, and the
+/// next download asks only for the rest (an HTTP range). A server that
+/// ignores the range sends the whole file, which then starts over. The
+/// SHA-256 always covers the whole file. `on_chunk` hears the bytes already
+/// on disk first, so a bar ends full either way.
 pub fn download(
     file: &ModelFile,
     target: &Path,
     mut on_chunk: impl FnMut(u64),
 ) -> Result<(), Error> {
+    fetch(file, target, &mut on_chunk)
+}
+
+fn fetch(file: &ModelFile, target: &Path, on_chunk: &mut dyn FnMut(u64)) -> Result<(), Error> {
     let failed = |why: String| Error::Download(format!("{}: {why}", file.name));
-    let partial = target.with_extension("part");
-    let response = agent()
-        .get(&url_of(file))
-        .call()
-        .map_err(|error| failed(error.to_string()))?;
-    if let Some(why) = not_the_file(&response, file) {
+    let partial = partial_of(target);
+    let mut have = fs::metadata(&partial).map_or(0, |meta| meta.len());
+    if have > file.bytes {
+        let _ = fs::remove_file(&partial);
+        have = 0;
+    }
+    // All of it arrived before: only the checksum is left.
+    if have == file.bytes {
+        if hex(hash_of(&partial)?) == file.sha256 {
+            on_chunk(have);
+            fs::rename(&partial, target)?;
+            return Ok(());
+        }
+        let _ = fs::remove_file(&partial);
+        have = 0;
+    }
+    let ask = |from: u64| {
+        let request = agent().get(&url_of(file));
+        let answer = if from == 0 {
+            request.call()
+        } else {
+            request.set("Range", &format!("bytes={from}-")).call()
+        };
+        answer.map_err(Box::new)
+    };
+    let response = match ask(have) {
+        Ok(response) => response,
+        // The range is past the server's file: start over.
+        Err(error) if have > 0 && matches!(*error, ureq::Error::Status(416, _)) => {
+            let _ = fs::remove_file(&partial);
+            have = 0;
+            ask(0).map_err(|error| failed(error.to_string()))?
+        }
+        Err(error) => return Err(failed(error.to_string())),
+    };
+    let from = match (have, response.status()) {
+        (0, _) => 0,
+        (_, 206) if resumes_at(&response, file) == Some(have) => have,
+        (_, 206) => {
+            let _ = fs::remove_file(&partial);
+            return Err(failed("the server resumed from another place".into()));
+        }
+        // The range was ignored: the whole file comes.
+        _ => 0,
+    };
+    if let Some(why) = not_the_file(&response, file.bytes - from) {
         return Err(failed(why));
     }
     let mut reader = response.into_reader();
-    let mut out = File::create(&partial)?;
-    let streamed = (|| -> Result<Sha256, Error> {
-        let mut hasher = Sha256::new();
-        let mut written = 0u64;
+    let (mut out, mut hasher) = if from > 0 {
+        let hasher = hash_of(&partial)?;
+        let out = fs::OpenOptions::new().append(true).open(&partial)?;
+        on_chunk(from);
+        (out, hasher)
+    } else {
+        (File::create(&partial)?, Sha256::new())
+    };
+    // Whether what arrived is worth keeping for the next try: a cut is, too
+    // many bytes are not.
+    let streamed = (|| -> Result<(), (Error, bool)> {
+        let mut written = from;
         let mut buffer = vec![0u8; 1 << 16];
         loop {
             let read = reader
                 .read(&mut buffer)
-                .map_err(|error| failed(error.to_string()))?;
+                .map_err(|error| (failed(error.to_string()), true))?;
             if read == 0 {
                 break;
             }
             written += read as u64;
             if written > file.bytes {
-                return Err(failed(format!(
-                    "more than the {} bytes expected",
-                    file.bytes
-                )));
+                let why = format!("more than the {} bytes expected", file.bytes);
+                return Err((failed(why), false));
             }
             hasher.update(&buffer[..read]);
-            out.write_all(&buffer[..read])?;
+            out.write_all(&buffer[..read])
+                .map_err(|error| (error.into(), true))?;
             on_chunk(read as u64);
         }
+        out.flush().map_err(|error| (error.into(), true))?;
         if written != file.bytes {
-            return Err(failed(format!(
-                "{written} of the {} bytes expected",
-                file.bytes
-            )));
+            let why = format!("{written} of the {} bytes expected", file.bytes);
+            return Err((failed(why), true));
         }
-        out.flush()?;
-        Ok(hasher)
+        Ok(())
     })();
     drop(out);
-    let verified = streamed.and_then(|hasher| {
+    let verified = streamed.and_then(|()| {
         if hex(hasher) == file.sha256 {
             Ok(())
         } else {
-            Err(Error::Integrity(file.name.into()))
+            Err((Error::Integrity(file.name.into()), false))
         }
     });
-    if let Err(error) = verified {
-        let _ = fs::remove_file(&partial);
+    if let Err((error, keep)) = verified {
+        if !keep {
+            let _ = fs::remove_file(&partial);
+        }
         return Err(error);
     }
     fs::rename(&partial, target)?;
     Ok(())
 }
 
+/// Where a download in progress keeps what has arrived.
+fn partial_of(target: &Path) -> std::path::PathBuf {
+    target.with_extension("part")
+}
+
+fn hash_of(path: &Path) -> Result<Sha256, Error> {
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut File::open(path)?, &mut hasher)?;
+    Ok(hasher)
+}
+
+/// Where a 206 answer's bytes start («Content-Range: bytes 300-999/1000»),
+/// when it is a range of this file.
+fn resumes_at(response: &ureq::Response, file: &ModelFile) -> Option<u64> {
+    let range = response.header("content-range")?.trim();
+    let (span, total) = range.strip_prefix("bytes ")?.split_once('/')?;
+    if total.trim() != "*" && total.trim().parse::<u64>().ok()? != file.bytes {
+        return None;
+    }
+    let (start, end) = span.split_once('-')?;
+    let (start, end) = (start.trim().parse().ok()?, end.trim().parse::<u64>().ok()?);
+    (end + 1 == file.bytes).then_some(start)
+}
+
 /// Why a response cannot be the pinned file, from its headers alone: a web
-/// page, or a stated length other than the file's.
-fn not_the_file(response: &ureq::Response, file: &ModelFile) -> Option<String> {
+/// page, or a stated length other than the bytes `expected`.
+fn not_the_file(response: &ureq::Response, expected: u64) -> Option<String> {
     let kind = response.content_type().trim();
     if kind.eq_ignore_ascii_case("text/html") || kind.eq_ignore_ascii_case("application/xhtml+xml")
     {
@@ -660,9 +749,8 @@ fn not_the_file(response: &ureq::Response, file: &ModelFile) -> Option<String> {
         ));
     }
     match response.header("content-length").map(str::parse::<u64>) {
-        Some(Ok(length)) if length != file.bytes => Some(format!(
-            "the network offered {length} bytes, not the {} expected",
-            file.bytes
+        Some(Ok(length)) if length != expected => Some(format!(
+            "the network offered {length} bytes, not the {expected} expected"
         )),
         _ => None,
     }
@@ -801,44 +889,84 @@ mod tests {
 
     /// Answers one request on this machine with `reply`, as a site (or a
     /// proxy standing in for it) would, and returns the address to ask.
-    fn serve(reply: &[u8]) -> &'static str {
+    /// Also returns the Range header each request asked for (empty without
+    /// one); a server asked nothing sends nothing.
+    fn serve(reply: &[u8]) -> (&'static str, std::sync::mpsc::Receiver<String>) {
         use std::io::{BufRead, BufReader};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/tokens.txt", listener.local_addr().unwrap());
         let reply = reply.to_vec();
+        let (asked, ranges) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let (stream, _) = listener.accept().unwrap();
             let mut request = BufReader::new(stream);
             let mut line = String::new();
+            let mut range = String::new();
             // The request's headers end with an empty line.
             while request.read_line(&mut line).unwrap() > 2 {
+                if let Some((name, value)) = line.split_once(':') {
+                    if name.eq_ignore_ascii_case("range") {
+                        range = value.trim().to_owned();
+                    }
+                }
                 line.clear();
             }
+            let _ = asked.send(range);
             let mut stream = request.into_inner();
             stream.write_all(&reply).unwrap();
             let _ = stream.shutdown(std::net::Shutdown::Write);
         });
-        Box::leak(url.into_boxed_str())
+        (Box::leak(url.into_boxed_str()), ranges)
+    }
+
+    /// What one download left on disk.
+    struct Fetched {
+        result: Result<Vec<u8>, Error>,
+        /// The `.part` left for the next try, if any.
+        partial: Option<Vec<u8>>,
+        /// The Range the request asked for.
+        range: String,
+        /// Every byte count `on_chunk` heard, summed.
+        reported: u64,
     }
 
     /// Downloads SMALL's tokens.txt ("hello") from a server that answers
-    /// with `reply`; returns what landed in place.
-    fn fetch(tag: &str, reply: &[u8]) -> Result<Vec<u8>, Error> {
+    /// with `reply`, with `before` already in its `.part`.
+    fn fetch_after(tag: &str, before: Option<&[u8]>, reply: &[u8]) -> Fetched {
         let dir =
             std::env::temp_dir().join(format!("monobot-dictation-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
+        let (url, ranges) = serve(reply);
         let file = ModelFile {
-            url: Some(serve(reply)),
+            url: Some(url),
             ..SMALL[0]
         };
         let target = dir.join(file.name);
-        let result = download(&file, &target, |_| {}).map(|()| fs::read(&target).unwrap());
-        // Nothing half-written stays behind, and nothing wrong lands.
-        assert!(!target.with_extension("part").exists());
+        if let Some(before) = before {
+            fs::write(partial_of(&target), before).unwrap();
+        }
+        let mut reported = 0;
+        let result = download(&file, &target, |chunk| reported += chunk)
+            .map(|()| fs::read(&target).unwrap());
+        // Nothing wrong lands.
         assert_eq!(target.exists(), result.is_ok());
+        let partial = fs::read(partial_of(&target)).ok();
         fs::remove_dir_all(&dir).unwrap();
-        result
+        Fetched {
+            result,
+            partial,
+            range: ranges.try_recv().unwrap_or_default(),
+            reported,
+        }
+    }
+
+    /// As `fetch_after` with nothing on disk yet; nothing half-written stays
+    /// behind unless the connection was cut.
+    fn fetch(tag: &str, reply: &[u8]) -> Result<Vec<u8>, Error> {
+        let fetched = fetch_after(tag, None, reply);
+        assert!(fetched.partial.is_none(), "{tag} left a .part");
+        fetched.result
     }
 
     fn reply(kind: &str, length: Option<usize>, body: &str) -> Vec<u8> {
@@ -877,14 +1005,64 @@ mod tests {
     #[test]
     fn another_length_is_a_failed_download() {
         let kind = "application/octet-stream";
-        for (tag, length, body) in [
-            ("stated", Some(4), "hell"),
-            ("short", None, "hell"),
-            ("long", None, "hello, world"),
-        ] {
+        for (tag, length, body) in [("stated", Some(4), "hell"), ("long", None, "hello, world")] {
             let got = fetch(tag, &reply(kind, length, body));
             assert!(matches!(got, Err(Error::Download(_))), "{tag}: {got:?}");
         }
+        // Cut short: what arrived is kept for the next try.
+        let cut = fetch_after("short", None, &reply(kind, None, "hell"));
+        assert!(matches!(cut.result, Err(Error::Download(_))));
+        assert_eq!(cut.partial.as_deref(), Some(&b"hell"[..]));
+    }
+
+    fn partial_reply(from: usize, body: &str) -> Vec<u8> {
+        let to = from + body.len() - 1;
+        format!(
+            "HTTP/1.1 206 Partial Content\r\nContent-Type: application/octet-stream\r\n\
+             Content-Range: bytes {from}-{to}/5\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn a_cut_download_resumes_from_where_it_stopped() {
+        let resumed = fetch_after("resume", Some(b"hel"), &partial_reply(3, "lo"));
+        assert_eq!(resumed.range, "bytes=3-");
+        assert_eq!(resumed.result.unwrap(), b"hello");
+        assert!(resumed.partial.is_none());
+        // The bar heard the bytes already on disk, so it ends full.
+        assert_eq!(resumed.reported, 5);
+    }
+
+    #[test]
+    fn a_server_that_ignores_the_range_sends_the_whole_file_again() {
+        let kind = "application/octet-stream";
+        let fresh = fetch_after("norange", Some(b"hel"), &reply(kind, Some(5), "hello"));
+        assert_eq!(fresh.range, "bytes=3-");
+        assert_eq!(fresh.result.unwrap(), b"hello");
+        assert_eq!(fresh.reported, 5);
+    }
+
+    #[test]
+    fn a_resumed_file_still_has_to_match_its_checksum() {
+        // What was on disk was wrong: the whole file fails and starts over.
+        let bad = fetch_after("badresume", Some(b"HEL"), &partial_reply(3, "lo"));
+        assert!(
+            matches!(bad.result, Err(Error::Integrity(_))),
+            "{:?}",
+            bad.result
+        );
+        assert!(bad.partial.is_none());
+        // A range from another place is not this download's rest.
+        let elsewhere = fetch_after("elsewhere", Some(b"hel"), &partial_reply(2, "llo"));
+        assert!(matches!(elsewhere.result, Err(Error::Download(_))));
+        assert!(elsewhere.partial.is_none());
+        // A whole .part only needs its checksum: nothing is asked.
+        let whole = fetch_after("whole", Some(b"hello"), b"");
+        assert_eq!(whole.result.unwrap(), b"hello");
+        assert_eq!(whole.range, "");
+        assert_eq!(whole.reported, 5);
     }
 
     #[test]

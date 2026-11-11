@@ -9,6 +9,7 @@
 //! the interface thread once per track.
 use super::*;
 use gpui::{MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, WeakEntity};
+use monocode_core::dictation::quiet;
 use monocode_core::notch::media::{self as media_model, Lyrics, Playing, Track};
 use std::cell::Cell;
 use std::sync::{Arc, OnceLock};
@@ -317,6 +318,60 @@ impl Notch {
             foresee(beside, command);
         }
         cx.notify();
+    }
+
+    /// "While dictating: Pause media": pauses every player that plays and
+    /// returns the apps it paused, for [`Notch::resume_paused`]; `None`
+    /// when this notch does not follow the players.
+    pub(crate) fn pause_playing(&mut self, cx: &mut Context<Self>) -> Option<Vec<String>> {
+        let commands = self.media_commands.as_ref()?;
+        let apps = quiet::to_pause(
+            self.players
+                .iter()
+                .map(|player| (player.track.app.as_str(), player.playing)),
+        );
+        for app in &apps {
+            let _ = commands.send((app.clone(), platform::MediaCommand::TogglePlay));
+        }
+        self.foresee_toggles(&apps, true);
+        cx.notify();
+        Some(apps)
+    }
+
+    /// Plays again those of `apps` that are still there and still paused:
+    /// one the user played meanwhile keeps playing. False when this notch
+    /// does not follow the players.
+    pub(crate) fn resume_paused(&mut self, apps: &[String], cx: &mut Context<Self>) -> bool {
+        let Some(commands) = &self.media_commands else {
+            return false;
+        };
+        let apps = quiet::to_resume(
+            apps,
+            self.players
+                .iter()
+                .map(|player| (player.track.app.as_str(), player.playing)),
+        );
+        for app in &apps {
+            let _ = commands.send((app.clone(), platform::MediaCommand::TogglePlay));
+        }
+        self.foresee_toggles(&apps, false);
+        cx.notify();
+        true
+    }
+
+    /// Shows a toggle sent to `apps` at once, on every copy of their player
+    /// that is `playing` now; the next read confirms it.
+    fn foresee_toggles(&mut self, apps: &[String], playing: bool) {
+        let players = self
+            .players
+            .iter_mut()
+            .chain(self.media.as_mut())
+            .chain(self.beside.as_mut());
+        for player in players {
+            if player.playing == playing && apps.contains(&player.track.app) {
+                foresee(player, platform::MediaCommand::TogglePlay);
+            }
+        }
     }
 
     /// Whether the closed notch shows what plays: only while it plays.

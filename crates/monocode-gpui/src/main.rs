@@ -6,6 +6,7 @@
 mod accounts;
 mod activity;
 mod app_menu;
+mod app_window;
 mod arcade;
 mod assets;
 mod automations;
@@ -355,6 +356,19 @@ fn main() {
         );
         std::process::exit(2);
     }
+    // Windows: one running copy per data folder. A second launch shows the
+    // window the first one hid on close, and exits.
+    #[cfg(target_os = "windows")]
+    let instance = if check_data {
+        None
+    } else {
+        use monocode_core::app_window::{Claim, claim};
+        match claim(&database) {
+            Claim::First(instance) => Some(instance),
+            Claim::Running => return,
+            Claim::Unavailable => None,
+        }
+    };
     let mut db = if check_data {
         Store::read_monocode(&database)
     } else {
@@ -474,8 +488,8 @@ fn main() {
     let db = Arc::new(Mutex::new(db));
     let platform = gpui_platform::current_platform(false);
     let title_raster = particle_text::GlyphRaster(platform.text_system());
-    gpui::Application::with_platform(platform)
-        .with_assets(assets::Assets)
+    // The Dock icon brings back a window closed to the background.
+    app_window::on_reopen(gpui::Application::with_platform(platform).with_assets(assets::Assets))
         .run(move |cx: &mut App| {
             // Square corners everywhere, as Tauri's radius tokens (all 0).
             gpui::set_square_corners(true);
@@ -508,6 +522,7 @@ fn main() {
                 "ctrl"
             };
             cx.bind_keys([KeyBinding::new(&format!("{modifier}-q"), Quit, None)]);
+            app_window::bind_quit(cx);
             shell::bind_keys(cx);
             app_menu::bind(cx);
             usage_footer::bind(cx);
@@ -519,6 +534,10 @@ fn main() {
                 }
             })
             .detach();
+            #[cfg(target_os = "windows")]
+            if let Some(instance) = instance {
+                app_window::listen(instance, cx);
+            }
             let bounds = workspace.window.bounds(cx);
             cx.open_window(
                 WindowOptions {

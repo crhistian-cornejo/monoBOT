@@ -37,6 +37,7 @@ things were, move it to `old/`.
 | [performance-audit.md](in-progress/performance-audit.md) | Audit of Nov 9: measured cost at rest and at work, what was fixed in live calls, the notch and polling, what is left, and what macOS 27 adds |
 | [ios-simulator.md](in-progress/ios-simulator.md) | iOS Simulator inside monoBOT: how Claude's desktop app does it (helper, IOSurface panel, Indigo/DTUHID input, xcodebuild) and the plan for GPUI |
 | [notch.md](in-progress/notch.md) | The notch on macOS and Windows: what is built, checked and next |
+| [system-dictation.md](in-progress/system-dictation.md) | Dictate anywhere with Ctrl+Space: the global hook, the notch's dictation wings, paste into the app in front, the window that closes to the background; phases 0–3 and 5 built, macOS not compiled, phase 4 (transcribe.cpp) left |
 | [voice-and-hands.md](in-progress/voice-and-hands.md) | Voice: done so far are the Neural Engine ear, call fixes, Settings › Voice, Gemini Live and Phonic calls, and Mac actions; done too are JOSIE-style turns with Smart Turn; left are speaker echo, the wake word and CUA |
 
 ## old/ — history

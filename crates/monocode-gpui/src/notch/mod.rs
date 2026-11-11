@@ -10,6 +10,7 @@
 //! and the window shrinks back to the island when it settles. Its rules live
 //! in `monocode_core::notch`; this module only paints and moves.
 mod clips;
+mod dictating;
 mod face;
 pub(crate) mod levels;
 mod live;
@@ -24,7 +25,7 @@ mod talk;
 pub(crate) mod tests;
 mod tray;
 
-pub(crate) use platform::{bring_forward, claim_foreground};
+pub(crate) use platform::{bring_forward, claim_foreground, output_volume, set_output_volume};
 
 use crate::input::{self, Input};
 use crate::theme::*;
@@ -338,6 +339,8 @@ pub(crate) struct Notch {
     /// Spotify's "Playing next", and the field for its Client ID.
     queue: queue::Queue,
     pub(crate) spotify_field: Entity<Input>,
+    /// The system dictation the wings show while it runs.
+    dictating: dictating::State,
 }
 
 impl EventEmitter<NotchEvent> for Notch {}
@@ -393,6 +396,7 @@ pub(crate) fn open(look: Look, save: Save, cx: &mut App) -> Option<WindowHandle<
                     notch.watch_clipboard(cx);
                     notch.start_queue(cx);
                     notch.start_face(cx);
+                    notch.watch_dictation(cx);
                     notch
                 })
             },
@@ -525,6 +529,7 @@ impl Notch {
             talk_field,
             queue: Default::default(),
             spotify_field,
+            dictating: Default::default(),
         }
     }
 
@@ -688,6 +693,7 @@ impl Notch {
         self.cover_flight = (open
             && self.tab == Tab::Home
             && self.level.is_none()
+            && !self.dictating.shows()
             && !self.rest.busy()
             && self.media_showing())
         .then_some(self.shown)
@@ -774,7 +780,12 @@ impl Notch {
         self.keep_responsive();
         if hovered {
             // A notice is answered where it hangs; the panel opens on a click.
-            if self.open || self.look.opens_on_click() || self.notices.current().is_some() {
+            // Dictating, the wings stay on the dictation until a click.
+            if self.open
+                || self.look.opens_on_click()
+                || self.notices.current().is_some()
+                || self.dictating.shows()
+            {
                 self.hover = None;
                 return;
             }
@@ -864,6 +875,9 @@ impl Notch {
             Shape::Open {
                 body: self.body_height().ceil() as u32,
             }
+        } else if let Some((left, right)) = self.dictation_wings() {
+            // Dictating comes first; the agents' state comes back after.
+            Shape::Busy { left, right }
         } else if self.notices.current().is_some() {
             Shape::Notice { lines: 2 }
         } else if self.level.is_some() {
@@ -1742,6 +1756,7 @@ impl Notch {
                     ),
                 )
             })
+            .children(self.paste_last_glyph(cx))
             .children(media::battery_chip())
             .child(div().w(px(1.)).h(px(14.)).bg(ink(0.12)))
             .child(tabs)
@@ -1762,6 +1777,7 @@ impl Notch {
         if !matches!(shape, Shape::Busy { .. })
             || camera.is_some()
             || self.level.is_some()
+            || self.dictating.shows()
             || !self.media_showing()
         {
             self.music_motion = None;
@@ -1774,6 +1790,9 @@ impl Notch {
                     - camera.map_or(size.width, |c| c.width + left as f32 + right as f32))
                     / 2.;
                 let wings = (left as f32 + swell, right as f32 + swell);
+                if let Some(phase) = self.dictation_drawn() {
+                    return self.dictation_view(&phase, camera, wings, window, cx);
+                }
                 match self.level {
                     Some(level) => self.level_view(level, camera, wings),
                     None if camera.is_none() && self.media_showing() => {
@@ -1851,6 +1870,7 @@ impl Notch {
                 .as_ref()
                 .is_some_and(|motion| motion.moving)
             || self.level.is_some()
+            || self.dictating.shows()
             || self.notices.current().is_some();
         if in_use && self.responsive.is_none() {
             self.responsive = platform::responsive();

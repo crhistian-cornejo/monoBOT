@@ -1366,15 +1366,16 @@ fn register_system_power_observers(observer: &AnyObject) {
     }
 }
 
-extern "C" fn should_handle_reopen(this: &mut Object, _: Sel, _: id, has_open_windows: bool) {
-    if !has_open_windows {
-        let platform = unsafe { get_mac_platform(this) };
-        let mut lock = platform.0.lock();
-        if let Some(mut callback) = lock.reopen.take() {
-            drop(lock);
-            callback();
-            platform.0.lock().reopen.get_or_insert(callback);
-        }
+// monoBOT: the reopen callback runs on every Dock click, not only with no
+// visible window: the notch's panel counts as one, and the workspace window
+// closed to the background must still come back.
+extern "C" fn should_handle_reopen(this: &mut Object, _: Sel, _: id, _has_open_windows: bool) {
+    let platform = unsafe { get_mac_platform(this) };
+    let mut lock = platform.0.lock();
+    if let Some(mut callback) = lock.reopen.take() {
+        drop(lock);
+        callback();
+        platform.0.lock().reopen.get_or_insert(callback);
     }
 }
 

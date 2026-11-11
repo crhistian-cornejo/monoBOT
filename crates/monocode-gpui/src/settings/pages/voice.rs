@@ -7,11 +7,12 @@ use crate::{
     input::{self, Input},
     settings::{
         SettingsView,
-        widgets::{note, primary_button, secondary_button},
+        widgets::{icon_action, note, primary_button, secondary_button},
     },
     theme::*,
 };
 use gpui::{AnyElement, Context, Entity, SharedString, Task, div, prelude::*, px};
+use monocode_core::dictation::quiet::WhileDictating;
 use monocode_core::dictation::{format_model_size, percent, progress};
 use monocode_core::voice::{Provider, keys};
 use std::collections::HashMap;
@@ -62,6 +63,11 @@ const PACES: [(&str, &str); 3] = [
     ("normal", "Normal"),
     ("quick", "Quick"),
 ];
+/// The vocabulary's two fields, and where its messages go.
+const HEARD: &str = "vocabulary-heard";
+const WRITE: &str = "vocabulary-write";
+const VOCABULARY: &str = "vocabulary";
+
 const LIVE: [(&str, &str); 3] = [
     ("local", "This Mac"),
     ("gemini", "Gemini Live"),
@@ -119,6 +125,195 @@ impl SettingsView {
         );
         self.voice.inputs.insert(key, input.clone());
         input
+    }
+
+    /// One of the vocabulary's fields; Enter in either adds the entry.
+    fn vocabulary_input(
+        &mut self,
+        key: &'static str,
+        placeholder: &'static str,
+        cx: &mut Context<Self>,
+    ) -> Entity<Input> {
+        if let Some(input) = self.voice.inputs.get(key) {
+            return input.clone();
+        }
+        let input = cx.new(|cx| {
+            let mut input = Input::field(key, placeholder, content(0.35), cx);
+            input.set_font_size(13.);
+            input
+        });
+        self._subscriptions
+            .push(cx.subscribe(&input, |_, _, _: &input::Changed, cx| cx.notify()));
+        self._subscriptions
+            .push(cx.subscribe(&input, |this, _, _: &input::Submitted, cx| {
+                this.vocabulary_add(cx)
+            }));
+        self.voice.inputs.insert(key, input.clone());
+        input
+    }
+
+    fn vocabulary_text(&mut self, key: &'static str, cx: &mut Context<Self>) -> String {
+        self.vocabulary_input(key, "", cx)
+            .read(cx)
+            .content
+            .to_string()
+    }
+
+    /// Adds what the two fields say to the vocabulary (an entry for the
+    /// same words takes the new spelling) and clears them, or says why not.
+    pub(in crate::settings) fn vocabulary_add(&mut self, cx: &mut Context<Self>) {
+        let heard = self.vocabulary_text(HEARD, cx);
+        let write = self.vocabulary_text(WRITE, cx);
+        let mut list = self.prefs.dictation_vocabulary.clone();
+        match monobot_dictation::add_replacement(&mut list, &heard, &write) {
+            Ok(_) => {
+                self.voice.messages.remove(VOCABULARY);
+                for key in [HEARD, WRITE] {
+                    self.vocabulary_input(key, "", cx)
+                        .update(cx, |input, cx| input.set_text(String::new(), cx));
+                }
+                self.update(cx, |p| p.dictation_vocabulary = list);
+            }
+            Err(error) => {
+                self.voice.messages.insert(VOCABULARY, error.to_string());
+                cx.notify();
+            }
+        }
+    }
+
+    pub(in crate::settings) fn vocabulary_remove(&mut self, at: usize, cx: &mut Context<Self>) {
+        if at >= self.prefs.dictation_vocabulary.len() {
+            return;
+        }
+        self.update(cx, |p| {
+            p.dictation_vocabulary.remove(at);
+        });
+    }
+
+    #[cfg(test)]
+    pub(in crate::settings) fn vocabulary_type(
+        &mut self,
+        heard: &str,
+        write: &str,
+        cx: &mut Context<Self>,
+    ) {
+        for (key, text) in [(HEARD, heard), (WRITE, write)] {
+            self.vocabulary_input(key, "", cx)
+                .update(cx, |input, cx| input.set_text(text.into(), cx));
+        }
+    }
+
+    #[cfg(test)]
+    pub(in crate::settings) fn vocabulary_fields(&mut self, cx: &mut Context<Self>) -> [String; 2] {
+        [
+            self.vocabulary_text(HEARD, cx),
+            self.vocabulary_text(WRITE, cx),
+        ]
+    }
+
+    /// "Vocabulary": the words the user wants written their way, in every
+    /// dictation, and the two fields that add one.
+    fn vocabulary_group(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let heard = self.vocabulary_input(HEARD, "As dictation writes it", cx);
+        let write = self.vocabulary_input(WRITE, "As it should read", cx);
+        let typed =
+            !heard.read(cx).content.trim().is_empty() && !write.read(cx).content.trim().is_empty();
+        let description = self
+            .voice
+            .messages
+            .get(VOCABULARY)
+            .cloned()
+            .unwrap_or_else(|| {
+                "Type a word or name as dictation gets it wrong, then how it should read.".into()
+            });
+        let mut rows = vec![self.row(
+            Some("voice-vocabulary"),
+            true,
+            "Add a word",
+            Some(description.into()),
+            vec![
+                field(heard, 150.),
+                div()
+                    .text_size(px(12.))
+                    .text_color(content(0.35))
+                    .child("→")
+                    .into_any_element(),
+                field(write, 150.),
+                primary_button("voice-vocabulary-add", "Add", !typed)
+                    .debug_selector(|| "settings-voice-vocabulary-add".into())
+                    .child("Add")
+                    .on_click(cx.listener(|this, _, _, cx| this.vocabulary_add(cx)))
+                    .into_any_element(),
+            ],
+        )];
+        for (at, entry) in self.prefs.dictation_vocabulary.iter().enumerate() {
+            let label = div()
+                .flex()
+                .flex_wrap()
+                .items_baseline()
+                .gap_2()
+                .child(
+                    div()
+                        .font_weight(gpui::FontWeight::NORMAL)
+                        .text_color(content(0.55))
+                        .child(entry.heard.clone()),
+                )
+                .child(div().text_color(content(0.35)).child("→"))
+                .child(entry.write.clone());
+            let remove = icon_action(
+                SharedString::from(format!("voice-vocabulary-remove-{at}")),
+                format!("Remove {}", entry.heard),
+                "delete-02",
+                28.,
+                14.,
+                0.4,
+                false,
+            )
+            .debug_selector(move || format!("settings-voice-vocabulary-remove-{at}"))
+            .on_click(cx.listener(move |this, _, _, cx| this.vocabulary_remove(at, cx)))
+            .into_any_element();
+            rows.push(
+                div()
+                    .debug_selector(move || format!("settings-voice-vocabulary-{at}"))
+                    .child(self.row(None, false, label, None, vec![remove]))
+                    .into_any_element(),
+            );
+        }
+        if self.prefs.dictation_vocabulary.is_empty() {
+            rows.push(note(
+                "No words yet. For example «mono bot» → «monoBOT», or a colleague's name.",
+            ));
+        }
+        self.group(
+            Some("voice-vocabulary-group"),
+            false,
+            "Vocabulary",
+            Some("Written your way in every dictation, in the composer and in other apps. Whole words only, whatever their case or accents.".into()),
+            None,
+            rows,
+        )
+    }
+
+    /// "While dictating": what happens to what plays while a dictation
+    /// listens (not a call).
+    fn while_dictating(&self, cx: &mut Context<Self>) -> AnyElement {
+        let choices = WhileDictating::ALL.map(|choice| (choice.id(), choice.label()));
+        self.row(
+            Some("while-dictating"),
+            false,
+            "While dictating",
+            Some("Pause what plays, or lower the volume, while the microphone listens, so it hears only you. It comes back as it was when the dictation ends.".into()),
+            vec![self.segmented(
+                "while-dictating",
+                "While dictating",
+                self.prefs.while_dictating.id(),
+                &choices,
+                cx,
+                |this, value, cx| {
+                    this.update(cx, |p| p.while_dictating = WhileDictating::from_id(value))
+                },
+            )],
+        )
     }
 
     /// Saves what was pasted for `provider` in the keychain and clears the
@@ -343,6 +538,52 @@ impl SettingsView {
             .map(|message| note(message.clone()))
     }
 
+    /// "Dictate in other apps": the global shortcut's switch, with the
+    /// shortcut, what clashes with it, and why it cannot listen yet.
+    fn dictate_anywhere(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        use monocode_core::dictation::hotkey::Os;
+        let on = self.prefs.dictate_anywhere;
+        let shortcut = crate::dictation::system::shortcut(&self.prefs);
+        let description = match &shortcut {
+            Some(shortcut) => format!(
+                "Press {} in any app to dictate there: tap to start and stop, or hold to talk. The notch shows what it hears and the text goes in where the caret was. In a monoBOT composer it dictates into the composer. Change the shortcut in Keybindings ({}).",
+                shortcut.display(Os::current()),
+                crate::dictation::system::COMMAND,
+            ),
+            None => format!(
+                "The shortcut is turned off. Set one in Keybindings ({}).",
+                crate::dictation::system::COMMAND,
+            ),
+        };
+        let mut rows = vec![self.row(
+            Some("dictate-anywhere"),
+            false,
+            "Dictate in other apps",
+            Some(description.into()),
+            vec![self.toggle(
+                "dictate-anywhere",
+                "Dictate in other apps",
+                on,
+                false,
+                cx,
+                |this, on, cx| this.update(cx, |p| p.dictate_anywhere = on),
+            )],
+        )];
+        if let Some(conflict) = shortcut.as_ref().and_then(|s| s.conflict(Os::current())) {
+            rows.push(note(conflict));
+        }
+        let waiting = on
+            && shortcut.is_some()
+            && cfg!(target_os = "macos")
+            && crate::dictation::system::get(cx).is_some_and(|system| !system.read(cx).ready());
+        if waiting {
+            rows.push(note(
+                "Allow monoBOT in System Settings › Privacy & Security › Accessibility so the shortcut works in other apps.",
+            ));
+        }
+        rows
+    }
+
     pub(in crate::settings) fn voice_page(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         if !self.voice.checked {
             self.voice_refresh(cx);
@@ -382,6 +623,8 @@ impl SettingsView {
             ),
         )];
         dictation.extend(self.model_message(Model::Dictation.id()));
+        dictation.extend(self.dictate_anywhere(cx));
+        dictation.push(self.while_dictating(cx));
         page.push(self.group(
             Some("voice-dictation-group"),
             true,
@@ -390,6 +633,7 @@ impl SettingsView {
             None,
             dictation,
         ));
+        page.push(self.vocabulary_group(cx));
 
         let voice_detail = if snapshot.voice_installed {
             format!(
@@ -465,20 +709,8 @@ impl SettingsView {
             let saved = snapshot.keys.get(provider.id()).copied().unwrap_or(false);
             let input = self.voice_input(provider, cx);
             let pasted = !input.read(cx).content.trim().is_empty();
-            let field = div()
-                .w(px(240.))
-                .h(px(32.))
-                .rounded_lg()
-                .border_1()
-                .border_color(content(0.15))
-                .bg(content(0.03))
-                .px_3()
-                .flex()
-                .items_center()
-                .child(input)
-                .into_any_element();
             let mut controls = vec![
-                field,
+                field(input, 240.),
                 primary_button(
                     SharedString::from(format!("voice-save-{}", provider.id())),
                     if saved { "Replace" } else { "Save" },
@@ -536,4 +768,21 @@ impl SettingsView {
         ));
         page
     }
+}
+
+/// A text field in its hairline box, `width` wide.
+fn field(input: Entity<Input>, width: f32) -> AnyElement {
+    div()
+        .w(px(width))
+        .max_w_full()
+        .h(px(32.))
+        .rounded_lg()
+        .border_1()
+        .border_color(content(0.15))
+        .bg(content(0.03))
+        .px_3()
+        .flex()
+        .items_center()
+        .child(input)
+        .into_any_element()
 }

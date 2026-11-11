@@ -61,6 +61,12 @@ pub(crate) const BINDINGS: &[Binding] = &[
         fixed: false,
     },
     Binding {
+        command: crate::dictation::system::COMMAND,
+        keys: "⌃Space",
+        when: "Anywhere",
+        fixed: false,
+    },
+    Binding {
         command: "App: Toggle Sidebar",
         keys: "⌘B",
         when: "Always",

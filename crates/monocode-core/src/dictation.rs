@@ -3,6 +3,15 @@
 //! `monobot-dictation` crate, which the app links.
 use std::path::PathBuf;
 
+/// System dictation: the global shortcut, where its text goes, the paste
+/// into the app in front, and what the notch shows meanwhile.
+pub mod hotkey;
+pub mod keycodes;
+pub mod paste;
+pub mod quiet;
+pub mod route;
+pub mod system;
+
 /// Bars in the waveform, newest on the right.
 pub const BARS: usize = 40;
 

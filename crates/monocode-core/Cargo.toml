@@ -66,7 +66,7 @@ windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Media_Media
 keyring = { version = "3.6", default-features = false, features = ["windows-native"] }
 rusty-leveldb = "1"
 tempfile = "3"
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Performance", "Win32_System_Power", "Win32_System_SystemInformation", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_IpHelper", "Win32_Networking_WinSock", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Performance", "Win32_System_Power", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 # Exercise WebView2 storage fixtures on Linux and macOS too.
 [target.'cfg(not(windows))'.dev-dependencies]

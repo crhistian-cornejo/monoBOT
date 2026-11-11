@@ -198,15 +198,21 @@ impl SettingsView {
                 |this, v, cx| this.update(cx, |p| p.set_terminal_placement(v)),
             )],
         ));
-        if cfg!(target_os = "windows") {
+        if crate::app_window::CAN_HIDE {
+            // The stored field keeps its old name, `close_to_tray`.
+            let way_back = if cfg!(target_os = "macos") {
+                "Closing the window hides it instead of quitting, so the notch and running agents keep going. Bring it back from the notch or the Dock, and quit with ⌘Q. Turn this off to have closing the window quit monoBOT."
+            } else {
+                "Closing the window hides it instead of quitting, so the notch and running agents keep going. Bring it back from the notch, the tray icon or by opening monoBOT again, and quit with Ctrl+Q or from the tray's menu. Turn this off to have closing the window quit monoBOT."
+            };
             workspace.push(self.row(
                 Some("close-to-tray"),
                 false,
-                "Close to tray",
-                Some("Closing a window hides it to the system tray instead of quitting, so running agents keep going. Reopen from the tray icon, and quit for real from its menu. Turn this off to have close end the window.".into()),
+                "Keep monoBOT running in the background when the window closes",
+                Some(way_back.into()),
                 vec![self.toggle(
                     "close-to-tray",
-                    "Close to tray",
+                    "Keep monoBOT running in the background when the window closes",
                     p.close_to_tray,
                     false,
                     cx,

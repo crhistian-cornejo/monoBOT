@@ -139,7 +139,7 @@ impl Section {
                 "theme dark light color accent glass blur zoom scale wallpaper rail sidebar"
             }
             Section::Voice => {
-                "voice dictation microphone mic speech parakeet neural engine call model download delete gemini live phonic api key realtime"
+                "voice dictation dictate anywhere other apps shortcut paste notch microphone mic speech parakeet neural engine vocabulary words spelling replace pause media music lower volume while dictating call model download delete gemini live phonic api key realtime"
             }
             Section::Keybindings => "shortcut hotkey keyboard binding",
             Section::Chat => {

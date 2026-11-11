@@ -150,6 +150,27 @@ pub fn read() -> Levels {
     Levels::default()
 }
 
+/// The default output's volume (0 to 1) and whether it is muted, on this
+/// Mac; `None` elsewhere (Windows reads its endpoint in the app).
+pub fn output_volume() -> Option<(f32, bool)> {
+    #[cfg(target_os = "macos")]
+    return mac::volume();
+    #[cfg(not(target_os = "macos"))]
+    None
+}
+
+/// Sets the default output's volume, leaving its mute as it is; false
+/// where it cannot (another system, an output without a volume).
+pub fn set_output_volume(volume: f32) -> bool {
+    #[cfg(target_os = "macos")]
+    return mac::set_volume(volume);
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = volume;
+        false
+    }
+}
+
 /// The battery's charge and whether the charger is in, as the levels thread
 /// last read it (macOS); never asks the system itself, so the interface can
 /// call it while it draws.
@@ -222,7 +243,7 @@ mod mac {
         (status == 0).then_some(value)
     }
 
-    fn volume() -> Option<(f32, bool)> {
+    pub(super) fn volume() -> Option<(f32, bool)> {
         let device: u32 = property(SYSTEM_OBJECT, DEFAULT_OUTPUT, GLOBAL)?;
         let volume: f32 = property(device, MAIN_VOLUME, OUTPUT)?;
         let muted: u32 = property(device, MUTE, OUTPUT).unwrap_or(0);
@@ -312,6 +333,14 @@ mod mac {
         let address = (*loaded)?;
         // SAFETY: the symbol's C signature is `int (CGDirectDisplayID, float)`.
         Some(unsafe { std::mem::transmute::<usize, SetBrightness>(address) })
+    }
+
+    /// Sets the default output's main volume only.
+    pub(super) fn set_volume(volume: f32) -> bool {
+        let Some(device) = property::<u32>(SYSTEM_OBJECT, DEFAULT_OUTPUT, GLOBAL) else {
+            return false;
+        };
+        set_property(device, MAIN_VOLUME, OUTPUT, volume.clamp(0., 1.))
     }
 
     /// Writes a level; false when this Mac does not take it.

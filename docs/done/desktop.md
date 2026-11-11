@@ -127,6 +127,18 @@ In the tray the logo is the executable's own icon; a live item replaces it with
 its ring or mark, and its rows become the tooltip. Settings › Monos › Menu bar
 icon (Tray icon on Windows) turns it off.
 
+Closing the workspace window hides it instead of quitting, on macOS and
+Windows, while Settings › General › **Keep monoBOT running in the background
+when the window closes** is on (the default; stored as `close_to_tray`). The
+shell, the notch, the tray and the agents keep going. Unsaved file edits still
+ask first, as quitting does. The window comes back from the notch, the tray's
+**Open monoBOT**, a notification, the Dock (macOS) or by launching monoBOT
+again (Windows: one copy runs per data folder, and a second launch shows the
+first one's window and exits). Ctrl+Q / ⌘Q and the tray's or menu's Quit
+still quit. With the setting off, or on Linux, closing the window quits. The
+decision and the Windows single instance live in `monocode_core::app_window`;
+hiding and showing in `monocode-gpui/src/app_window.rs`.
+
 Windows keeps a new tray icon behind the overflow arrow, and no app can move
 it out: drag it onto the taskbar, or turn monoBOT on in Settings ›
 Personalization › Taskbar › Other system tray icons. The Tray icon row's
