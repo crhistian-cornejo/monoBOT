@@ -1,26 +1,25 @@
-# monoBOT 0.0.4
+# monoBOT 0.0.5
 
 ## What's new
 
-- **An Agents tab beside Swarm** shows what a Claude chat's subagents and
-  workflow runs are doing, live: each run's phases in the script's order and,
-  under them, every agent's state, time and latest step or report.
-- **Swarm** sits next to Orchestrator in the + menu with its own lime
-  `/swarm` chip, and modes no longer stack on top of a swarm.
-- **Dictate anywhere with Ctrl+Space.** The shortcut goes to the focused
-  composer, or to the notch when nothing is focused: the words appear as
-  they come and paste into the app in front, while monoBOT steps into the
-  background so the notch and agents keep running. Dictation text is
-  cleaner (fewer fillers, stutters and spoken commands), and downloads
-  resume if they are interrupted.
-- **Agents keep working.** The loop guard no longer stops an agent for
-  running commands that only look alike: calls count once they finish,
-  waiting starts the count over, and a stopped turn offers **Continue**.
-- **Stronger reasoning efforts shimmer** in the model menu: Max, Ultra,
-  Ultracode and Ultrathink rows fill with the effort's colour while
-  highlighted.
-- **Mail pictures on Windows** render again, including images pasted
-  inside the message itself.
+- **Hand big tasks to your monos.** A Claude chat can pass a large task that
+  splits into parallel parts to **Chief**, a mono that coordinates your code
+  monos in its own chat. Each part goes to a mono with its own chat and
+  worktree, where you see its changes; Chief reviews their work into your
+  checkout and sends the chat one summary when it is done. The monos stay
+  with you as agents and are reused for later tasks. Chief and the monos run
+  Claude Opus 5.5 at medium effort. The Swarm tab shows Chief and every mono
+  with its face. Turn it off in Settings › Chat › **Let Claude hand work to
+  your monos**.
+- **Subagents read at a glance.** Each subagent in a reply shows the working
+  spinner, a check once it is done or a red cross if it failed, and under its
+  title its latest step or the first line of its report. Subagents no longer
+  wear the faces that belong to your own agents.
+- **Background work sits in the chat.** Commands and subagents still running
+  after a reply show in a card under it, instead of over the message box.
+- **Stay signed in after an update.** On Windows, updating or quitting
+  monoBOT no longer signs Claude Code or Codex out: the app lets each CLI
+  finish saving its renewed sign-in before it closes it.
 
 ## Updates
 
