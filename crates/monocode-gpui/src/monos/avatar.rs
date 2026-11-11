@@ -127,7 +127,15 @@ fn persona_avatar(look: Look, status: &str, side: f32, still: bool) -> AnyElemen
         move |bounds, _, window, cx| {
             let working = status == "working";
             let moves = working || (!still && status != "needs-you");
-            let animate = moves && crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+            // A hop reads at 30 frames a second; a breath of about one
+            // percent and a blink at 15, so a page of resting faces no
+            // longer holds the window at 60.
+            let rate = if working {
+                crate::pulse::Rate::Steady
+            } else {
+                crate::pulse::Rate::Low
+            };
+            let animate = moves && crate::pulse::request(rate, window, cx);
             let t = crate::pulse::elapsed(cx).as_secs_f32();
             let beat = (look.color % 89) as f32 * 0.21;
             let pose = if animate && working && (t * 3.).floor() as u64 % 2 == 1 {
@@ -211,7 +219,15 @@ pub(crate) fn avatar(name: &str, color: u32, status: &str, side: f32, still: boo
             let moves = working || (!still && status != "needs-you");
             // Its poses trade a few times a second, but the hop and the bob
             // between them move every frame.
-            let animate = moves && crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+            // A hop reads at 30 frames a second; a breath of about one
+            // percent and a blink at 15, so a page of resting faces no
+            // longer holds the window at 60.
+            let rate = if working {
+                crate::pulse::Rate::Steady
+            } else {
+                crate::pulse::Rate::Low
+            };
+            let animate = moves && crate::pulse::request(rate, window, cx);
             let t = crate::pulse::elapsed(cx).as_secs_f32();
             let talk = animate && status == "working" && (t * 3.).floor() as u64 % 2 == 1;
             let sprite = &SPRITES[index];

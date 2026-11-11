@@ -301,6 +301,12 @@ pub(crate) const BINDINGS: &[Binding] = &[
         fixed: false,
     },
     Binding {
+        command: "Composer: Dictate",
+        keys: "⌘⇧M",
+        when: "composerFocus",
+        fixed: false,
+    },
+    Binding {
         command: "Editor: Find",
         keys: "⌘F",
         when: "editorFocus",

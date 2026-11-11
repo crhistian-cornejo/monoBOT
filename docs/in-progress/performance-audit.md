@@ -94,6 +94,22 @@ The `native-dev` build (opt-level 1) is what `cargo xtask dev` runs; draws in
 it cost about twice the optimized build's (0.6–1.5 ms against 0.6–0.9 ms for
 the notch), still far inside a frame.
 
+A fourth pass on Nov 10 (Windows), on the resources list below. Not
+measured: no frame or memory log was taken before and after.
+
+| What | Where | Checked by |
+| --- | --- | --- |
+| **A provider turn's loop woke 62 times a second while the provider was silent.** It now waits up to 100 ms when it has nothing batched, and a tick only while events wait to go out or a stop is under way; a stop, an approval or a steer is still seen within 100 ms | `core/provider.rs` (`IDLE_WAIT`) | Core tests |
+| **The composer's runner kept its QuickJS runtime for the life of the chat.** The runner, and its runtime, go once a turn is over and its last jump landed; in a window behind another it runs at 30 frames/s | `composer_runner.rs` (`resting`), `conversation.rs` | Clippy; GPUI tests |
+| **Resting Mono faces breathed at 60 frames/s.** A working hop runs at 30, a breath and a blink at 15 | `monos/avatar.rs` | GPUI tests |
+| **The mobile catalog was built every 3 s with nothing paired.** It is built only while a phone is paired or an invitation waits (`MobileHost::serving`) | `core/mobile/host.rs`, `shell/mobile_host.rs` | Core tests |
+| **The background's fade on Windows and Linux painted one quad per row of pixels on every frame.** The fade is straight between its stops, so it is now one gradient per gap (5–8 quads) | `core/project_appearance.rs` (`background_fade_stops`), `project_background.rs` | Not covered by a test; not seen in the app |
+| **Nothing slowed on a locked screen.** On Windows the shared clock now paces loops as for a hidden app while the lock screen is in front (asked at most once a second) | `pulse.rs` (`screen_locked`) | Not covered by a test (tests leave it off) |
+
+Left from item 4 below: the Monos' 10 s tick still notifies every time; what
+it refreshes notifies on its own only in some paths, so dropping it needs
+those paths checked first. Item 6 on macOS (a locked screen) is still open.
+
 ## Left to do, by value
 
 ### Yours to decide

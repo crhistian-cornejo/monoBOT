@@ -752,8 +752,12 @@ impl Externals {
                 session.step = event.tool.unwrap_or_else(|| "Working".into());
             }
             "PostToolUse" => {
+                // The tool ran, so any approval it waited on was given. The
+                // step stays the last action until the next one, as the
+                // agent's own window shows it; "Thinking" only before the
+                // turn's first tool.
                 start(session);
-                session.step = "Thinking".into();
+                session.needs_you = false;
             }
             "PermissionRequest" => {
                 start(session);
@@ -1051,6 +1055,11 @@ mod tests {
             3_000,
         );
         assert!(externals.activities()[0].needs_you);
+        // Approved: the tool ran, and the notch keeps its last action.
+        externals.apply(parse(&event("PostToolUse", Some("Bash"))).unwrap(), 3_500);
+        let after = &externals.activities()[0];
+        assert!(!after.needs_you);
+        assert_eq!(after.step, "Editing");
         externals.apply(parse(&event("Stop", None)).unwrap(), 4_000);
         let done = &externals.activities()[0];
         assert!(done.done && !done.needs_you);

@@ -133,6 +133,13 @@ pub fn progress(done: u64, total: u64) -> f32 {
     }
 }
 
+/// How long the microphone has been open, as the bar prints it: "0:07",
+/// "12:30".
+pub fn clock(elapsed: std::time::Duration) -> String {
+    let seconds = elapsed.as_secs();
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
 /// A fraction as the bar prints it.
 pub fn percent(progress: f32) -> String {
     format!("{}%", (progress * 100.).round())
@@ -173,6 +180,13 @@ pub fn models_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_bar_clock_counts_minutes_and_seconds() {
+        use std::time::Duration;
+        assert_eq!(clock(Duration::from_millis(7_900)), "0:07");
+        assert_eq!(clock(Duration::from_secs(750)), "12:30");
+    }
 
     #[test]
     fn adds_the_spoken_text_at_the_cursor_with_one_space_around_it() {

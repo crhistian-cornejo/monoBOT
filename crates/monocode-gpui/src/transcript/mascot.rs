@@ -1,179 +1,72 @@
-//! ProjectMascot / SubagentMascot: the React transcript's two-frame pixel faces.
-use crate::theme::content;
-use gpui::{AnyElement, canvas, div, prelude::*, px, rgb};
-use monocode_core::tool::ToolState;
-use std::time::Duration;
+//! A subagent's face: a small Mono, as the user's own bots wear. Each one
+//! keeps the species and color its name picks, so two subagents in the same
+//! turn read apart at a glance, and it hops while it works.
+use gpui::{AnyElement, div, prelude::*, px};
+use monocode_core::mono::persona;
+use monocode_core::{
+    project_appearance::{COLORS, MASCOTS},
+    tool::ToolState,
+};
 
-type Frame = [&'static str; 8];
+/// The face's side: the smallest a persona keeps its identity at.
+const SIDE: f32 = 16.;
+/// The failed tint the rows' text already uses.
+const FAILED: u32 = 0xf87171;
 
-// Keep this order in sync with projectMascots.ts: the name hash indexes it.
-const REST: [Frame; 10] = [
-    [
-        "..#..#..", ".######.", "##.##.##", "########", ".######.", ".#.##.#.", "#.#..#.#",
-        "........",
-    ],
-    [
-        "..####..", ".######.", "##.##.##", "########", "########", "########", "########",
-        "#.##.##.",
-    ],
-    [
-        "...#....", ".######.", ".#.##.#.", ".######.", ".#....#.", ".######.", "..#..#..",
-        "........",
-    ],
-    [
-        ".#....#.", ".##..##.", "########", "#.####.#", "########", "###..###", ".######.",
-        "..#..#..",
-    ],
-    [
-        ".######.", "########", "##.##.##", "########", ".##..##.", ".######.", ".#.##.#.",
-        "........",
-    ],
-    [
-        "#......#", ".#....#.", ".######.", "##.##.##", "########", "#.####.#", "#......#",
-        "........",
-    ],
-    [
-        "..####..", ".######.", "########", "##.##.##", "########", "...##...", "...##...",
-        "..####..",
-    ],
-    [
-        "...##...", "..####..", "..#..#..", "..####..", ".######.", ".######.", "##....##",
-        "..####..",
-    ],
-    [
-        "...#####", "...##.##", "...#####", ".#######", "########", "#####...", ".##.##..",
-        "..#..#..",
-    ],
-    [
-        "........", "##....##", "#.####.#", "########", "########", ".######.", "##....##",
-        "........",
-    ],
-];
-
-const TALK: [Frame; 10] = [
-    [
-        "..#..#..", ".######.", "##.##.##", "########", ".######.", "#.####.#", ".#....#.",
-        "#......#",
-    ],
-    [
-        "..####..", ".######.", "#.##.###", "########", "########", "########", "########",
-        ".##.##.#",
-    ],
-    [
-        "....#...", ".######.", ".#.##.#.", ".######.", ".##..##.", ".######.", ".#....#.",
-        "........",
-    ],
-    [
-        ".#....#.", ".##..##.", "########", "#.####.#", "########", "########", ".######.",
-        ".#....#.",
-    ],
-    [
-        ".######.", "########", "##.##.##", "########", ".##..##.", ".######.", ".#....#.",
-        "..####..",
-    ],
-    [
-        "#......#", "##....##", ".######.", "##.##.##", "########", ".######.", "#.#..#.#",
-        "........",
-    ],
-    [
-        "........", "..####..", ".######.", "########", "##.##.##", "...##...", "...##...",
-        "..####..",
-    ],
-    [
-        "...##...", "..####..", "..#..#..", "..####..", ".######.", ".######.", "##....##",
-        "...##...",
-    ],
-    [
-        "...#####", "...##.##", "...#####", ".#######", "########", "#####...", "..##.##.",
-        "..#...#.",
-    ],
-    [
-        "##....##", "#.####.#", "########", "########", ".######.", "##....##", "#......#",
-        "........",
-    ],
-];
-
-/// A 12px sprite centered in the same 14px icon slot as the React row.
-/// Activity is independent of state: a pending run can already have settled.
-pub(crate) fn subagent_mascot(name: &str, state: &ToolState, active: bool) -> AnyElement {
-    let color = match state {
-        ToolState::Failed | ToolState::Cancelled => rgb(0xf87171).into(),
-        ToolState::Running => content(0.70),
-        ToolState::Completed => content(0.45),
-    };
-    div()
-        .size(px(14.))
-        .flex_shrink_0()
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_color(color)
-        .child(project_mascot(name, active))
-        .into_any_element()
-}
-
-fn project_mascot(name: &str, active: bool) -> AnyElement {
-    // JavaScript charCodeAt iterates UTF-16 code units, rather than UTF-8 bytes
-    // or Unicode scalars. Wrapping u32 arithmetic mirrors `>>> 0` exactly.
-    let hash = name.encode_utf16().fold(0u32, |hash, ch| {
+/// JavaScript's `charCodeAt` hash (UTF-16 units, wrapping like `>>> 0`), as
+/// the pixel mascots picked by: a subagent keeps the face it had.
+fn hash(name: &str) -> usize {
+    name.encode_utf16().fold(0u32, |hash, ch| {
         hash.wrapping_mul(131).wrapping_add(u32::from(ch))
-    });
-    let index = hash as usize % REST.len();
-    let slot = div().size(px(12.)).flex_shrink_0();
-    if active {
-        // Two poses, so the low clock rate is plenty. Reduced motion holds
-        // the first pose and stops asking for frames.
-        crate::pulse::looping(
-            "subagent-mascot",
-            Duration::from_millis(460),
-            crate::pulse::Rate::Low,
-            move |phase| slot.child(sprite(index, phase >= 0.5)),
-        )
-        .into_any_element()
-    } else {
-        slot.child(sprite(index, false)).into_any_element()
-    }
+    }) as usize
 }
 
-fn sprite(index: usize, talk: bool) -> AnyElement {
-    canvas(
-        |_, window, _| window.text_style().color,
-        move |bounds, color, window, _| {
-            let rows = if talk { &TALK[index] } else { &REST[index] };
-            let unit = bounds.size.width / 8.;
-            let hop = if talk { px(-1.) } else { px(0.) };
-            let origin = bounds.origin + gpui::point(px(0.), hop);
-            // SVG's crispEdges snaps each shared boundary to physical pixels.
-            // Merge filled runs as mascotPath does, preserving transparent eyes.
-            let scale = window.scale_factor();
-            let snap = |position: gpui::Pixels| (position * scale).round() / scale;
-            for (y, row) in rows.iter().enumerate() {
-                let pixels = row.as_bytes();
-                let mut x = 0;
-                while x < pixels.len() {
-                    if pixels[x] != b'#' {
-                        x += 1;
-                        continue;
-                    }
-                    let begin = x;
-                    while x < pixels.len() && pixels[x] == b'#' {
-                        x += 1;
-                    }
-                    let left = snap(origin.x + unit * begin as f32);
-                    let right = snap(origin.x + unit * x as f32);
-                    let top = snap(origin.y + unit * y as f32);
-                    let bottom = snap(origin.y + unit * (y + 1) as f32);
-                    window.paint_quad(gpui::fill(
-                        gpui::Bounds::new(
-                            gpui::point(left, top),
-                            gpui::size(right - left, bottom - top),
-                        ),
-                        color,
-                    ));
-                }
-            }
-        },
-    )
-    .size_full()
-    .into_any_element()
+/// The persona face and color a subagent named `name` wears.
+pub(crate) fn subagent_face(name: &str, state: &ToolState) -> (String, u32) {
+    let hash = hash(name);
+    let species = MASCOTS[hash % MASCOTS.len()];
+    // The first color is the neutral grey; a face wears one of the others.
+    let colors = &COLORS[1..];
+    let color = match state {
+        ToolState::Failed | ToolState::Cancelled => FAILED,
+        _ => colors[(hash / MASCOTS.len()) % colors.len()],
+    };
+    (persona::key(species, None), color)
+}
+
+pub(crate) fn subagent_mascot(name: &str, state: &ToolState, active: bool) -> AnyElement {
+    let (face, color) = subagent_face(name, state);
+    div()
+        .size(px(SIDE))
+        .flex_shrink_0()
+        // A finished one steps back beside the one still at work.
+        .when(*state == ToolState::Completed, |d| d.opacity(0.7))
+        .child(crate::monos::avatar::avatar(
+            &face,
+            color,
+            if active { "working" } else { "idle" },
+            SIDE,
+            !active,
+        ))
+        .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_subagent_keeps_its_face_and_a_failed_one_turns_red() {
+        let (face, color) = subagent_face("Inspect the notch hooks", &ToolState::Running);
+        assert_eq!(
+            subagent_face("Inspect the notch hooks", &ToolState::Completed),
+            (face.clone(), color)
+        );
+        assert!(persona::parse(&face).is_some());
+        assert_ne!(color, COLORS[0]);
+        assert_eq!(
+            subagent_face("Inspect the notch hooks", &ToolState::Failed).1,
+            FAILED
+        );
+    }
 }

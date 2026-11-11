@@ -9,15 +9,70 @@ use gpui::{
 use gpui::{Corners, Pixels};
 #[cfg(target_os = "macos")]
 use monocode_core::project_appearance::background_texture;
-use monocode_core::project_appearance::{Background, Effect, read_image};
+use monocode_core::project_appearance::{Background, Effect, read_animation, read_image};
 use std::{
     hash::{Hash, Hasher},
     path::Path,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 const FADE: Duration = Duration::from_millis(240);
+/// A moving background's frames fit this side. Its effects (dither, ASCII,
+/// halftone) are pictures of few pixels anyway, and a full-screen 4K GIF
+/// would otherwise cost gigabytes of frames.
+const ANIMATION_SIDE: u32 = 960;
+/// What a moving background's frames may hold in all, in memory and again
+/// on the GPU; past it, every other frame goes and the pace stays.
+const ANIMATION_BYTES: usize = 64 * 1024 * 1024;
+/// A video background is decoded to this side, by the system's own scaler.
+const VIDEO_SIDE: u32 = 960;
+/// And shown at most this many frames a second, whatever the clip's rate.
+const VIDEO_FPS: u32 = 24;
+
+/// The effect a frame of a moving background takes, ready to draw: the same
+/// work `prepare_texture` does for a still picture.
+fn textured(source: image::RgbaImage, key: &Key) -> Arc<RenderImage> {
+    #[cfg(target_os = "macos")]
+    let mut pixels = background_texture(source, key.effect);
+    #[cfg(not(target_os = "macos"))]
+    let mut pixels = monocode_core::project_appearance::software_background_texture(
+        &source,
+        key.effect,
+        key.empty,
+        key.preview,
+    );
+    for pixel in pixels.pixels_mut() {
+        pixel.0.swap(0, 2);
+    }
+    Arc::new(RenderImage::new(vec![image::Frame::new(pixels)]))
+}
+
+/// What a video's decoder thread hands the view.
+enum Shown {
+    Frame(Arc<RenderImage>),
+    Failed(String),
+}
+
+/// A video playing as the background. Its thread decodes, applies the effect
+/// and waits for each frame's time; the view only swaps the frame it draws.
+/// Dropping it stops the thread at its next frame.
+struct Playback {
+    key: Key,
+    stop: Arc<AtomicBool>,
+    /// Nobody sees it (the window is hidden, the screen locked) or motion is
+    /// reduced: the thread holds its frame and waits.
+    paused: Arc<AtomicBool>,
+    _frames: gpui::Task<()>,
+}
+impl Drop for Playback {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct Key {
@@ -87,7 +142,35 @@ async fn prepare_texture(
     request: TextureRequest,
     screen: (u32, u32),
 ) -> Result<Arc<RenderImage>, String> {
-    let source = read_image(Path::new(&request.key.path))?;
+    let path = Path::new(&request.key.path);
+    if let Some(frames) = read_animation(path, ANIMATION_SIDE, ANIMATION_BYTES)? {
+        // Each frame takes the effect once, here; playing it only picks one.
+        let frames: Vec<image::Frame> = frames
+            .into_iter()
+            .map(|(source, shown)| {
+                #[cfg(target_os = "macos")]
+                let mut pixels = background_texture(source, request.key.effect);
+                #[cfg(not(target_os = "macos"))]
+                let mut pixels = monocode_core::project_appearance::software_background_texture(
+                    &source,
+                    request.key.effect,
+                    request.key.empty,
+                    request.key.preview,
+                );
+                for pixel in pixels.pixels_mut() {
+                    pixel.0.swap(0, 2);
+                }
+                image::Frame::from_parts(
+                    pixels,
+                    0,
+                    0,
+                    image::Delay::from_saturating_duration(shown),
+                )
+            })
+            .collect();
+        return Ok(Arc::new(RenderImage::new(frames)));
+    }
+    let source = read_image(path)?;
     #[cfg(target_os = "macos")]
     let mut pixels = background_texture(source, request.key.effect);
     #[cfg(not(target_os = "macos"))]
@@ -116,6 +199,53 @@ async fn prepare_texture(
     }
     Ok(Arc::new(RenderImage::new(vec![image::Frame::new(pixels)])))
 }
+/// The frame of a moving picture shown `elapsed` into its loop.
+fn frame_at(image: &RenderImage, elapsed: Duration) -> usize {
+    let shown: Vec<u128> = (0..image.frame_count())
+        .map(|frame| Duration::from(image.delay(frame)).as_nanos().max(1))
+        .collect();
+    let total: u128 = shown.iter().sum();
+    if total == 0 {
+        return 0;
+    }
+    let mut into = elapsed.as_nanos() % total;
+    for (frame, length) in shown.iter().enumerate() {
+        if into < *length {
+            return frame;
+        }
+        into -= length;
+    }
+    0
+}
+
+/// A moving background, cover-cropped like a still one. It steps on the
+/// shared clock at 30 frames a second at most (GPUI's own image would redraw
+/// the window at the display's rate for a 10 fps GIF), slower still while the
+/// app is hidden or the screen locked, and holds its first frame under
+/// reduced motion.
+fn moving(image: Arc<RenderImage>, radius: f32) -> impl IntoElement {
+    canvas(
+        |_, _, _| {},
+        move |bounds, _, window, cx| {
+            let frame = if crate::pulse::request(crate::pulse::Rate::Steady, window, cx) {
+                frame_at(&image, crate::pulse::elapsed(cx))
+            } else {
+                0
+            };
+            let fitted = ObjectFit::Cover.get_bounds(bounds, image.size(frame));
+            let _ = window.paint_image(
+                bounds,
+                fitted,
+                gpui::Corners::all(px(radius)),
+                image.clone(),
+                frame,
+                false,
+            );
+        },
+    )
+    .size_full()
+}
+
 #[derive(Default)]
 pub(crate) struct ProjectBackground {
     preview: bool,
@@ -129,6 +259,8 @@ pub(crate) struct ProjectBackground {
     /// Set when the shell switches here from a tab drawing no background; the
     /// fade starts once the texture is ready, so a reload doesn't pop in.
     fade: Option<Instant>,
+    /// The video this view plays, when its background is one.
+    video: Option<Playback>,
     _release: Option<gpui::Subscription>,
 }
 impl ProjectBackground {
@@ -166,6 +298,14 @@ impl ProjectBackground {
     /// Give back a texture no other view draws. The asset cache would otherwise
     /// keep every artwork and effect variant, in memory and on the GPU, for good.
     fn release(&mut self, window: Option<&mut Window>, cx: &mut App) {
+        // A video's frames are this view's alone, never the asset cache's.
+        if self.video.take().is_some() {
+            self.key = None;
+            if let Some(image) = self.image.take() {
+                cx.drop_image(image, window);
+            }
+            return;
+        }
         let key = self.key.take();
         let (Some(key), Some(image)) = (key, self.image.take()) else {
             return;
@@ -199,6 +339,88 @@ impl ProjectBackground {
         }
         // Quadratic ease-out, as the tab strip's motion.
         1. - (1. - t) * (1. - t)
+    }
+    /// Starts the video `key` names on a thread of its own.
+    fn play(&mut self, key: Key, window: &mut Window, cx: &mut Context<Self>) {
+        if self._release.is_none() {
+            self._release = Some(cx.on_release(|this, cx| this.release(None, cx)));
+        }
+        self.release(Some(window), cx);
+        self.key = Some(key.clone());
+        self.error = None;
+        self.loading = true;
+        let stop = Arc::new(AtomicBool::new(false));
+        let paused = Arc::new(AtomicBool::new(false));
+        let (send, frames) = async_channel::bounded::<Shown>(1);
+        {
+            let (stop, paused, key) = (stop.clone(), paused.clone(), key.clone());
+            let spawned = std::thread::Builder::new()
+                .name("background-video".into())
+                .spawn(move || {
+                    let started = Instant::now();
+                    let mut held = Duration::ZERO;
+                    let mut shown = false;
+                    let played = monocode_core::video::play(
+                        Path::new(&key.path),
+                        VIDEO_SIDE,
+                        VIDEO_FPS,
+                        &mut |frame| {
+                            // The first frame always shows, so a paused or
+                            // reduced-motion background still has a picture.
+                            while shown && paused.load(Ordering::Relaxed) {
+                                if stop.load(Ordering::Relaxed) {
+                                    return false;
+                                }
+                                std::thread::sleep(Duration::from_millis(100));
+                                held += Duration::from_millis(100);
+                            }
+                            if stop.load(Ordering::Relaxed) {
+                                return false;
+                            }
+                            let due = started + held + frame.at;
+                            if let Some(wait) = due.checked_duration_since(Instant::now()) {
+                                std::thread::sleep(wait);
+                            }
+                            shown = true;
+                            send.send_blocking(Shown::Frame(textured(frame.picture, &key)))
+                                .is_ok()
+                        },
+                    );
+                    if let Err(error) = played {
+                        let _ = send.send_blocking(Shown::Failed(error));
+                    }
+                });
+            if let Err(error) = spawned {
+                self.error = Some(error.to_string());
+                self.loading = false;
+                return;
+            }
+        }
+        let frames = cx.spawn(async move |this, cx| {
+            while let Ok(shown) = frames.recv().await {
+                let alive = this.update(cx, |this, cx| {
+                    this.loading = false;
+                    match shown {
+                        Shown::Frame(image) => {
+                            if let Some(old) = this.image.replace(image) {
+                                cx.drop_image(old, None);
+                            }
+                        }
+                        Shown::Failed(error) => this.error = Some(error),
+                    }
+                    cx.notify();
+                });
+                if alive.is_err() {
+                    break;
+                }
+            }
+        });
+        self.video = Some(Playback {
+            key,
+            stop,
+            paused,
+            _frames: frames,
+        });
     }
     fn prepare(&mut self, key: Key, window: &mut Window, cx: &mut Context<Self>) {
         if self._release.is_none() {
@@ -264,20 +486,42 @@ impl ProjectBackground {
                 #[cfg(not(target_os = "macos"))]
                 if !begin {
                     // Other backends have an opaque chat surface. Reveal that
-                    // surface with the same view-relative stops while it resizes.
-                    use monocode_core::project_appearance::background_fade;
+                    // surface with the same view-relative stops while it
+                    // resizes: the fade is straight between its stops, so one
+                    // gradient per gap draws it exactly (a handful of quads,
+                    // not one per row of pixels on every frame).
+                    use monocode_core::project_appearance::background_fade_stops;
                     let _ = (preview, &clip, opacity);
-                    let height = bounds.size.height.as_f32().ceil() as usize;
-                    for y in 0..height {
+                    let veil = |shown: f32| {
                         let mut color = surface;
-                        color.a =
-                            1. - background_fade((y as f32 + 0.5) / height as f32, empty, haze);
+                        color.a = 1. - shown;
+                        color
+                    };
+                    let height = bounds.size.height;
+                    let stops = background_fade_stops(empty, haze);
+                    let band = |from: f32, to: f32, top: gpui::Hsla, bottom: gpui::Hsla| {
+                        let area = Bounds::new(
+                            gpui::point(bounds.left(), bounds.top() + height * from),
+                            gpui::size(bounds.size.width, height * (to - from)),
+                        );
+                        (area, top, bottom)
+                    };
+                    let last = stops.last().map_or(0., |stop| stop.0);
+                    let bands = stops
+                        .windows(2)
+                        .map(|pair| band(pair[0].0, pair[1].0, veil(pair[0].1), veil(pair[1].1)))
+                        .chain((last < 1.).then(|| band(last, 1., veil(0.), veil(0.))));
+                    for (band, top, bottom) in bands {
+                        if band.size.height <= px(0.) {
+                            continue;
+                        }
                         window.paint_quad(gpui::fill(
-                            Bounds::new(
-                                gpui::point(bounds.left(), bounds.top() + px(y as f32)),
-                                gpui::size(bounds.size.width, px(1.)),
+                            band,
+                            gpui::linear_gradient(
+                                180.,
+                                gpui::linear_color_stop(top, 0.),
+                                gpui::linear_color_stop(bottom, 1.),
                             ),
-                            color,
                         ));
                     }
                 }
@@ -328,7 +572,17 @@ impl Render for ProjectBackground {
             #[cfg(not(target_os = "macos"))]
             preview: settings.effect == Effect::GradientBlur && self.preview,
         };
-        if self.key.as_ref() != Some(&key) || self.loading {
+        if monocode_core::video::is_video(Path::new(&key.path)) {
+            if self.video.as_ref().map(|video| &video.key) != Some(&key) {
+                self.play(key, window, cx);
+            }
+            if let Some(video) = &self.video {
+                let unseen = !window.is_visible() || crate::pulse::screen_locked(cx);
+                video
+                    .paused
+                    .store(unseen || cx.reduce_motion(), Ordering::Relaxed);
+            }
+        } else if self.key.as_ref() != Some(&key) || self.loading {
             self.prepare(key, window, cx);
         }
         let opacity = settings.opacity(self.empty) * self.faded(window);
@@ -341,19 +595,32 @@ impl Render for ProjectBackground {
             .size_full()
             .overflow_hidden()
             .when_some(self.image.clone(), |d, image| {
+                let radius = if cfg!(target_os = "macos") {
+                    0.
+                } else if self.preview {
+                    11.
+                } else if self.clip.is_some() {
+                    9.
+                } else {
+                    0.
+                };
+                let picture = if image.frame_count() > 1 {
+                    div()
+                        .size_full()
+                        .when(cfg!(not(target_os = "macos")), |d| d.opacity(opacity))
+                        .child(moving(image, radius))
+                        .into_any_element()
+                } else {
+                    img(image)
+                        .size_full()
+                        .object_fit(ObjectFit::Cover)
+                        .when(cfg!(not(target_os = "macos")), |image| {
+                            image.opacity(opacity).rounded(px(radius))
+                        })
+                        .into_any_element()
+                };
                 d.child(self.mask(true, &settings, opacity))
-                    .child(img(image).size_full().object_fit(ObjectFit::Cover).when(
-                        cfg!(not(target_os = "macos")),
-                        |image| {
-                            image.opacity(opacity).rounded(px(if self.preview {
-                                11.
-                            } else if self.clip.is_some() {
-                                9.
-                            } else {
-                                0.
-                            }))
-                        },
-                    ))
+                    .child(picture)
                     .child(self.mask(false, &settings, opacity))
             })
             .into_any_element()
@@ -363,6 +630,28 @@ impl Render for ProjectBackground {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_moving_background_shows_each_frame_for_its_own_time() {
+        let frame = |ms: u64| {
+            image::Frame::from_parts(
+                image::RgbaImage::new(2, 2),
+                0,
+                0,
+                image::Delay::from_saturating_duration(Duration::from_millis(ms)),
+            )
+        };
+        let image = RenderImage::new(vec![frame(100), frame(300), frame(100)]);
+        let at = |ms: u64| frame_at(&image, Duration::from_millis(ms));
+        assert_eq!(at(0), 0);
+        assert_eq!(at(99), 0);
+        assert_eq!(at(100), 1);
+        assert_eq!(at(399), 1);
+        assert_eq!(at(400), 2);
+        // It loops.
+        assert_eq!(at(500), 0);
+        assert_eq!(at(650), 1);
+    }
     use gpui::{TestAppContext, point, size};
 
     #[test]

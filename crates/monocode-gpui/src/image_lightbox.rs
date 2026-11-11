@@ -10,8 +10,23 @@ use std::{path::PathBuf, sync::Arc, time::Instant};
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum Source {
     Path(PathBuf),
-    Embedded { data: Arc<str>, mime: SharedString },
+    Embedded {
+        data: Arc<str>,
+        mime: SharedString,
+    },
+    /// A drawing (a Mermaid diagram): rendered at a size that stays sharp
+    /// when zoomed, on the theme's surface since its own is transparent.
+    Svg {
+        svg: Arc<str>,
+        width: f32,
+        height: f32,
+    },
 }
+
+/// The longest side an SVG source is rendered at, and how far beyond its
+/// own size: zoomed in, its text still reads.
+const SVG_MAX_SIDE: f32 = 4096.;
+const SVG_MAX_SCALE: f32 = 4.;
 
 #[derive(Clone, Debug, PartialEq, gpui::Action)]
 #[action(namespace = image_lightbox, no_json)]
@@ -121,6 +136,36 @@ impl ImageLightbox {
                 let bytes = monocode_core::composer::decode_image_data(&data).ok()?;
                 Image::from_bytes(format, bytes)
                     .to_image_data(renderer)
+                    .ok()
+            });
+            cx.spawn(async move |this, cx| {
+                let image = work.await;
+                let _ = this.update(cx, |this, cx| {
+                    this.failed = image.is_none();
+                    this.image = image;
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+        if let Source::Svg { svg, width, height } = &open.source {
+            let (svg, width, height) = (svg.clone(), *width, *height);
+            let renderer = cx.svg_renderer();
+            let work = cx.background_executor().spawn(async move {
+                let scale = (SVG_MAX_SIDE / width.max(height)).min(SVG_MAX_SCALE);
+                let parsed = renderer.parse_svg_without_images(svg.as_bytes()).ok()?;
+                renderer
+                    .render_parsed(
+                        &parsed,
+                        gpui::SvgSize::ExactSize(size(
+                            gpui::DevicePixels(
+                                (width * scale).ceil().clamp(1., SVG_MAX_SIDE) as i32
+                            ),
+                            gpui::DevicePixels(
+                                (height * scale).ceil().clamp(1., SVG_MAX_SIDE) as i32
+                            ),
+                        )),
+                    )
                     .ok()
             });
             cx.spawn(async move |this, cx| {
@@ -257,6 +302,7 @@ impl Render for ImageLightbox {
         }
         let bounds = self.image_bounds(view);
         let zoomed = self.view.scale > MIN_SCALE;
+        let drawing = matches!(self.source, Source::Svg { .. });
         div()
             .id("image-lightbox")
             .debug_selector(|| "image-lightbox".into())
@@ -396,6 +442,13 @@ impl Render for ImageLightbox {
                                 .blur_radius(px(50.))
                                 .spread_radius(px(-12.)),
                         ])
+                        // A drawing's background is transparent: lay it on
+                        // the surface its colors were chosen for.
+                        .when(drawing, |d| {
+                            d.rounded(px(10.))
+                                .overflow_hidden()
+                                .bg(crate::theme::background_base())
+                        })
                         .child(img(image).size_full()),
                 )
             })
@@ -543,6 +596,48 @@ mod tests {
                 y: 0.
             }
         );
+    }
+
+    #[gpui::test]
+    fn a_drawing_is_rendered_large_enough_to_zoom_into(cx: &mut TestAppContext) {
+        let window = cx.update(|cx| {
+            cx.open_window(
+                WindowOptions {
+                    window_bounds: Some(WindowBounds::Windowed(Bounds::new(
+                        point(px(0.), px(0.)),
+                        size(px(800.), px(600.)),
+                    ))),
+                    ..Default::default()
+                },
+                |window, cx| {
+                    cx.new(|cx| {
+                        ImageLightbox::new(
+                            Open {
+                                source: Source::Svg {
+                                    svg: r##"<svg xmlns="http://www.w3.org/2000/svg" width="300" height="100"><text x="10" y="50">Node</text></svg>"##.into(),
+                                    width: 300.,
+                                    height: 100.,
+                                },
+                                alt: "Mermaid diagram".into(),
+                            },
+                            window,
+                            cx,
+                        )
+                    })
+                },
+            )
+            .unwrap()
+        });
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, _| {
+                let image = view.image.as_ref().expect("the drawing is rendered");
+                // Four times its own size, so text stays sharp when zoomed.
+                assert_eq!(image.size(0).width.0, 1200);
+                assert_eq!(image.size(0).height.0, 400);
+                assert!(!view.failed);
+            })
+            .unwrap();
     }
 
     #[gpui::test]

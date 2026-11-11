@@ -291,3 +291,58 @@ fn a_microphone_that_will_not_open_says_why(cx: &mut TestAppContext) {
     dictation.update(cx, |dictation, cx| dictation.dismiss(cx));
     assert!(dictation.read_with(cx, |d, _| d.error().is_none()));
 }
+
+#[gpui::test]
+fn the_shortcut_taps_to_toggle_and_holds_to_talk(cx: &mut TestAppContext) {
+    let fake = Fake::installed("ship it");
+    let (input, dictation) = dictation(&fake, "", cx);
+
+    // A tap: down and straight up keeps listening until the next tap. The
+    // key repeating while it is down counts once.
+    dictation.update(cx, |dictation, cx| dictation.shortcut_down(cx));
+    cx.run_until_parked();
+    dictation.update(cx, |dictation, cx| {
+        dictation.shortcut_down(cx);
+        dictation.shortcut_up(cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Listening);
+    // The next tap stops and puts the words in.
+    dictation.update(cx, |dictation, cx| dictation.shortcut_down(cx));
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Idle);
+    assert_eq!(
+        input.read_with(cx, |input, _| input.content.to_string()),
+        "ship it"
+    );
+
+    // Held past the threshold: letting go stops and puts the words in.
+    input.update(cx, |input, cx| input.set_text(String::new(), cx));
+    dictation.update(cx, |dictation, cx| dictation.shortcut_down(cx));
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Listening);
+    dictation.update(cx, |dictation, cx| {
+        dictation.pressed = Some(Instant::now() - HOLD * 2);
+        dictation.shortcut_up(cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Idle);
+    assert_eq!(
+        input.read_with(cx, |input, _| input.content.to_string()),
+        "ship it"
+    );
+
+    // Let go while the microphone still opens: it stops as soon as it is open.
+    input.update(cx, |input, cx| input.set_text(String::new(), cx));
+    dictation.update(cx, |dictation, cx| {
+        dictation.shortcut_down(cx);
+        dictation.pressed = Some(Instant::now() - HOLD * 2);
+        dictation.shortcut_up(cx);
+    });
+    cx.run_until_parked();
+    assert_eq!(phase(&dictation, cx), Phase::Idle);
+    assert_eq!(
+        input.read_with(cx, |input, _| input.content.to_string()),
+        "ship it"
+    );
+}

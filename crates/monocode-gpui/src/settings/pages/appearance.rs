@@ -617,7 +617,7 @@ impl SettingsView {
             Some("chat-background"),
             false,
             "Chat background",
-            Some("An image behind your chat panes. It stays on this device.".into()),
+            Some("An image, GIF or video behind your chat panes. Animated ones play while you can see them. It stays on this device.".into()),
             None,
             rows,
         )

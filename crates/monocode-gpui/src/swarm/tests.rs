@@ -103,9 +103,9 @@ fn members_are_grouped_and_open_their_chat(cx: &mut TestAppContext) {
         window.update(visual, |p, _, _| p.tab()).unwrap(),
         SwarmTab::Members
     );
-    let coordinator = visual
-        .debug_bounds(&format!("swarm-member-{COORDINATOR}"))
-        .unwrap();
+    // Debug selectors are looked up by a 'static name.
+    let coordinator_id: &'static str = format!("swarm-member-{COORDINATOR}").leak();
+    let coordinator = visual.debug_bounds(coordinator_id).unwrap();
     let verifier = visual.debug_bounds("swarm-member-verifier").unwrap();
     let worker = visual.debug_bounds("swarm-member-worker-1").unwrap();
     // Coordinator, then the active verifier, then the worker standing by.

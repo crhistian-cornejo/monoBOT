@@ -8,8 +8,9 @@
 //! lease ends when its view was notified but did not paint a loop again, so
 //! a closed, scrolled-away or hidden spinner stops costing anything, and the
 //! clock parks once no lease is left. While no window is visible the clock
-//! slows every loop down further; a visible window behind another app's keeps
-//! the full pace, since its loops are still on screen.
+//! slows every loop down further, and so it does on a locked screen; a visible
+//! window behind another app's keeps the full pace, since its loops are still
+//! on screen.
 use gpui::{
     AnyElement, App, Element, ElementId, EntityId, Global, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, Pixels, Window,
@@ -62,6 +63,9 @@ struct Clock {
     beats: Vec<async_channel::Sender<()>>,
     tick: u64,
     running: bool,
+    /// When the screen was last found locked or not, see [`screen_locked`].
+    #[cfg_attr(any(not(target_os = "windows"), test), allow(dead_code))]
+    locked: Option<(Instant, bool)>,
 }
 impl Global for Clock {}
 
@@ -170,7 +174,9 @@ pub(crate) async fn beat(cx: &mut gpui::AsyncApp) {
 }
 
 fn tick(cx: &mut App) -> bool {
-    let background = !app_visible(cx);
+    // The notch's window is always on screen, so a locked screen would
+    // otherwise keep every loop at full pace for nobody.
+    let background = !app_visible(cx) || screen_locked(cx);
     let clock = cx.global_mut::<Clock>();
     // Before the loops notify, so whatever the waiters change draws with them.
     for beat in clock.beats.drain(..) {
@@ -219,6 +225,46 @@ pub(crate) fn app_active(cx: &mut App) -> bool {
 }
 
 /// Whether any window is on screen: an inactive window can still be in view.
+/// Whether nobody can see the screen because it is locked. Asked at most
+/// once a second; false where it cannot be told (tests, macOS for now).
+pub(crate) fn screen_locked(cx: &mut App) -> bool {
+    #[cfg(all(target_os = "windows", not(test)))]
+    {
+        let clock = cx.global_mut::<Clock>();
+        let now = Instant::now();
+        if let Some((at, locked)) = clock.locked
+            && now.duration_since(at) < Duration::from_secs(1)
+        {
+            return locked;
+        }
+        let locked = windows_locked();
+        clock.locked = Some((now, locked));
+        locked
+    }
+    #[cfg(any(not(target_os = "windows"), test))]
+    {
+        let _ = cx;
+        false
+    }
+}
+
+/// While the lock screen (Winlogon's secure desktop) is in front, the input
+/// desktop cannot be opened.
+#[cfg(all(target_os = "windows", not(test)))]
+fn windows_locked() -> bool {
+    use windows::Win32::System::StationsAndDesktops::{
+        CloseDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_SWITCHDESKTOP, OpenInputDesktop,
+    };
+    // SAFETY: the desktop handle is opened and closed here.
+    match unsafe { OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_SWITCHDESKTOP) } {
+        Ok(desktop) => {
+            let _ = unsafe { CloseDesktop(desktop) };
+            false
+        }
+        Err(_) => true,
+    }
+}
+
 fn app_visible(cx: &mut App) -> bool {
     cx.windows().into_iter().any(|window| {
         window

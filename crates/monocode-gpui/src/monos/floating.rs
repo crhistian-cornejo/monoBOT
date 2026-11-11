@@ -1,7 +1,7 @@
 //! FloatingMonoChat.tsx: the menu bar's chat panel. It floats over other
 //! apps without activating monoBOT, and its rail moves between Monos without
 //! touching the workspace window's selection.
-//! Like Tauri's, it opens only from the macOS menu bar; tests drive it anywhere.
+//! It opens from the macOS menu bar and the Windows tray; tests drive it anywhere.
 #![cfg_attr(not(target_os = "macos"), allow(dead_code))]
 use super::*;
 use gpui::{Bounds, WindowBounds, WindowKind, WindowOptions, point, size};
@@ -24,7 +24,8 @@ fn hide(window: &mut Window) {
     #[cfg(any(not(target_os = "macos"), test))]
     window.remove_window();
 }
-/// Blank chrome moves the panel, as `data-tauri-drag-region` does.
+/// Blank chrome moves the panel, as `data-tauri-drag-region` does. On
+/// Windows the header's title is a caption area instead, which also snaps.
 fn drag(window: &mut Window) {
     #[cfg(target_os = "macos")]
     window.start_window_move();
@@ -257,6 +258,9 @@ impl Floating {
                     .flex_1()
                     .min_w_0()
                     .min_h(px(22.))
+                    // Windows moves the panel by hit-testing this as its
+                    // caption; it holds no buttons, so none turn into one.
+                    .window_control_area(gpui::WindowControlArea::Drag)
                     .flex()
                     .items_center()
                     .gap_2()
@@ -557,12 +561,19 @@ impl Monos {
             Some(display) => {
                 let area = display.visible_bounds();
                 let height = px(HEIGHT).min(area.size.height - px(2. * MARGIN));
-                // Each further panel steps down and left, as Tauri's do.
+                // Each further panel steps down and left, as Tauri's do. On
+                // Windows they sit over the tray, in the bottom-right
+                // corner, and step up and left instead.
                 let offset = px((shown % 8) as f32 * 28.);
+                let top = if cfg!(target_os = "windows") {
+                    area.origin.y + area.size.height - height - px(MARGIN) - offset
+                } else {
+                    area.origin.y + px(MARGIN) + offset
+                };
                 Bounds {
                     origin: point(
                         area.origin.x + area.size.width - px(WIDTH + MARGIN) - offset,
-                        area.origin.y + px(MARGIN) + offset,
+                        top,
                     ),
                     size: size(px(WIDTH), height),
                 }

@@ -464,7 +464,8 @@ impl Shell {
         let Some(host) = self.mobile.host.clone() else {
             return;
         };
-        if self.mobile.publishing || !host.enabled() {
+        // Built on the interface thread every few seconds: not for nobody.
+        if self.mobile.publishing || !host.serving() {
             return;
         }
         let paths = self.mobile_projects(cx);

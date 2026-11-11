@@ -197,6 +197,8 @@ struct Workspace {
 
 pub(crate) struct QuickComposer {
     input: Entity<Input>,
+    /// Dictates into the prompt, as a chat's composer does.
+    dictation: Entity<crate::dictation::Dictation>,
     query: Entity<Input>,
     projects: Vec<String>,
     appearance: HashMap<String, ProjectAppearance>,
@@ -254,7 +256,10 @@ impl QuickComposer {
         });
         let query =
             cx.new(|cx| input::Input::field("Find a project", "Find a project", content(0.35), cx));
+        let dictation = cx.new(|cx| crate::dictation::Dictation::new(&input, cx));
         let subscriptions = vec![
+            // The mic and the bar follow what dictation does.
+            cx.observe(&dictation, |_, _, cx| cx.notify()),
             cx.subscribe(&input, |this, _, _: &input::Submitted, cx| {
                 this.launch(false, cx)
             }),
@@ -266,6 +271,7 @@ impl QuickComposer {
         ];
         let mut this = Self {
             input,
+            dictation,
             query,
             projects,
             appearance,
@@ -497,6 +503,9 @@ impl QuickComposer {
         window.activate_window();
     }
     pub fn dismiss(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // A hidden composer lets the microphone go and drops what it heard.
+        self.dictation
+            .update(cx, |dictation, cx| dictation.cancel(cx));
         self.close_picker_state(cx);
         self.shown = false;
         #[cfg(all(target_os = "macos", not(test)))]
@@ -1245,6 +1254,7 @@ impl QuickComposer {
                     }
                 })),
             )
+            .child(crate::dictation::mic(&self.dictation, cx))
             .child(
                 pill(
                     "quick-model",
@@ -1903,7 +1913,12 @@ impl Render for QuickComposer {
         }
         let picker = self.picker;
         let warning = !self.attachments.is_empty() && !self.attachments_supported();
-        let fill = if is_light() {
+        let fill = if cfg!(target_os = "windows") {
+            // Windows' acrylic adds no tint of its own, so a light window
+            // behind the card shows through at full strength and washes the
+            // text out; nearly opaque keeps it legible over anything.
+            floating_fill().opacity(0.94)
+        } else if is_light() {
             floating_fill().opacity(0.8)
         } else {
             gpui::rgba(0x1717178c).into()
@@ -1918,7 +1933,9 @@ impl Render for QuickComposer {
                 let key = event.keystroke.key.as_str();
                 let m = &event.keystroke.modifiers;
                 if key == "escape" {
-                    if this.picker.is_some() {
+                    if this.dictation.read(cx).phase().cancellable() {
+                        this.dictation.update(cx, |dictation, cx| dictation.cancel(cx));
+                    } else if this.picker.is_some() {
                         this.close_picker(window, cx);
                     } else {
                         this.dismiss(window, cx);
@@ -1943,6 +1960,8 @@ impl Render for QuickComposer {
                     cx.stop_propagation();
                 }
             }))
+            .on_action(crate::dictation::on_shortcut(&self.dictation))
+            .capture_key_up(crate::dictation::capture_release(&self.dictation))
             .on_drag_move::<ExternalPaths>(cx.listener(
                 |this, event: &gpui::DragMoveEvent<ExternalPaths>, _, cx| {
                     let over = event.bounds.contains(&event.event.position);
@@ -2003,6 +2022,9 @@ impl Render for QuickComposer {
                             .justify_center()
                             .pt_1()
                             .cursor_grab()
+                            // Windows moves the window by hit-testing the
+                            // strip as its caption; macOS by the call below.
+                            .window_control_area(gpui::WindowControlArea::Drag)
                             .on_mouse_down(MouseButton::Left, |_, window, cx| {
                                 cx.stop_propagation();
                                 window.start_window_move();
@@ -2067,6 +2089,7 @@ impl Render for QuickComposer {
                         )
                     })
                     .child(self.toolbar(cx))
+                    .child(self.dictation.clone())
                     .child(div().flex().flex_col().flex_shrink_0().opacity(fade).map(|d| match picker {
                         Some(Picker::Commands) => d.child(self.commands(cx)),
                         Some(Picker::Permissions) => d.child(self.permissions(cx)),
@@ -2195,6 +2218,39 @@ mod tests {
         });
         cx.run_until_parked();
         window
+    }
+
+    #[gpui::test]
+    fn it_dictates_into_the_prompt_and_escape_drops_a_dictation_first(cx: &mut TestAppContext) {
+        let fake = crate::dictation::tests::Fake::installed("fix the notch");
+        cx.update(|cx| cx.set_global(crate::dictation::Engines(fake.clone())));
+        let window = open(cx);
+        let dictation = window
+            .update(cx, |view, _, _| view.dictation.clone())
+            .unwrap();
+        dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+        cx.run_until_parked();
+        dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, cx| {
+                assert_eq!(view.input.read(cx).content.as_ref(), "fix the notch");
+            })
+            .unwrap();
+        // Hiding the composer while it listens lets the microphone go.
+        dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+        cx.run_until_parked();
+        window
+            .update(cx, |view, window, cx| {
+                view.dismiss(window, cx);
+                assert_eq!(
+                    view.dictation.read(cx).phase(),
+                    monocode_core::dictation::Phase::Idle
+                );
+            })
+            .ok();
+        cx.run_until_parked();
+        assert!(fake.calls().iter().any(|call| call.starts_with("cancel")));
     }
 
     #[gpui::test]

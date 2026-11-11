@@ -63,6 +63,20 @@ impl SettingsView {
                 )],
             ),
             self.row(
+                Some("calm-work"),
+                false,
+                "Calm work",
+                Some("While a reply works, show only what it is doing now. Click the line to see every step.".into()),
+                vec![self.toggle(
+                    "calm-work",
+                    "Calm work",
+                    p.calm_work,
+                    false,
+                    cx,
+                    |this, on, cx| this.update(cx, |p| p.calm_work = on),
+                )],
+            ),
+            self.row(
                 Some("fold-finished-work"),
                 false,
                 "Fold finished work",

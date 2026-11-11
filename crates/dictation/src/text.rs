@@ -7,6 +7,7 @@
 //! Spanish and English keeps each as its own language writes it.
 
 pub fn join(phrases: &[String]) -> String {
+    let phrases: Vec<String> = phrases.iter().map(|phrase| drop_fillers(phrase)).collect();
     // Runs of phrases in one language. A phrase that leans neither way
     // («OK.», a name) goes with the one before it; ahead of any that leans,
     // with the first that does.
@@ -39,6 +40,50 @@ pub fn join(phrases: &[String]) -> String {
         })
         .collect();
     tidied.join(" ")
+}
+
+/// Sounds made while thinking, not words, in English or Spanish. Words that
+/// can also carry meaning («este», «o sea», "like") stay.
+const FILLERS: [&str; 17] = [
+    "eh", "ehh", "ehm", "em", "emm", "erm", "hm", "hmm", "hmmm", "mm", "mmm", "um", "umm", "uh",
+    "uhh", "uhm", "mhm",
+];
+
+/// «Eh, el informe, mmm, está listo» → «El informe, está listo». A filler
+/// that opened a sentence hands its capital to the next word, and one that
+/// closed it hands over its full stop.
+fn drop_fillers(phrase: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    let mut capital = false;
+    for token in phrase.split_whitespace() {
+        let bare = token.trim_matches(|c: char| !c.is_alphabetic());
+        if bare.is_empty() || !FILLERS.contains(&bare.to_lowercase().as_str()) {
+            let mut word = token.to_owned();
+            let first = word.chars().next().filter(|c| c.is_lowercase());
+            if let (true, Some(first)) = (std::mem::take(&mut capital), first) {
+                word = first.to_uppercase().chain(word.chars().skip(1)).collect();
+            }
+            out.push(word);
+            continue;
+        }
+        let ends = |word: &str| word.ends_with(['.', '?', '!']);
+        let opened = out.last().is_none_or(|last| ends(last));
+        capital |= opened && bare.chars().next().is_some_and(char::is_uppercase);
+        let stop: String = token
+            .chars()
+            .rev()
+            .take_while(|c| matches!(c, '.' | '?' | '!'))
+            .collect();
+        if let Some(last) = out
+            .last_mut()
+            .filter(|last| !stop.is_empty() && !ends(last))
+        {
+            *last = last.trim_end_matches([',', ';', ':']).to_owned();
+            last.extend(stop.chars().rev());
+            capital = true;
+        }
+    }
+    out.join(" ")
 }
 
 fn squeeze<S: AsRef<str>>(phrases: &[S]) -> String {
@@ -236,6 +281,27 @@ mod tests {
         // A phrase that tells neither way ahead of the rest follows them.
         let phrases = ["Listo.".to_owned(), "ya está en producción?".to_owned()];
         assert_eq!(join(&phrases), "Listo. ¿Ya está en producción?");
+    }
+
+    #[test]
+    fn sounds_made_while_thinking_are_dropped() {
+        let said = |text: &str| join(&[text.to_owned()]);
+        assert_eq!(
+            said("Eh, el informe, mmm, está listo."),
+            "El informe, está listo."
+        );
+        assert_eq!(said("So, um, we should ship it."), "So, we should ship it.");
+        assert_eq!(
+            said("I checked the logs, uh. Then I left."),
+            "I checked the logs. Then I left."
+        );
+        // Words that also mean something stay.
+        assert_eq!(
+            said("Este informe, o sea, el de ayer."),
+            "Este informe, o sea, el de ayer."
+        );
+        // A phrase that was only a sound leaves nothing behind.
+        assert_eq!(join(&["Mmm.".to_owned(), "Hola.".to_owned()]), "Hola.");
     }
 
     #[test]

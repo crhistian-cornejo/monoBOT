@@ -76,6 +76,11 @@ impl Runner {
             cx.notify();
         }
     }
+    /// Done running: no turn and the last jump landed. The conversation
+    /// then drops the runner, and its QuickJS runtime with it.
+    pub fn resting(&self) -> bool {
+        !self.busy && !self.frame.active
+    }
 }
 impl Runner {
     /// The strip above the composer the runner plays in. Mounted cached, so
@@ -126,9 +131,15 @@ impl Render for Runner {
             }
         }
         // It covers ground quickly, so it takes the clock's full rate to read
-        // as running rather than hopping.
+        // as running rather than hopping, in the window being used; behind
+        // another window half the frames will do.
         if self.busy || self.frame.active {
-            crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
+            let rate = if window.is_window_active() {
+                crate::pulse::Rate::Smooth
+            } else {
+                crate::pulse::Rate::Steady
+            };
+            crate::pulse::request(rate, window, cx);
         }
         let frame = self.frame.clone();
         let color: gpui::Hsla = gpui::rgb(self.color).into();

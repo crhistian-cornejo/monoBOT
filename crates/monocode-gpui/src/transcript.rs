@@ -776,6 +776,9 @@ pub(crate) struct TranscriptView {
     smooth_reveal: bool,
     /// Tool groups open only when clicked, even while running.
     collapse_groups: bool,
+    /// Settings › Chat › Calm work: a running phase stays folded under its
+    /// current step.
+    calm: bool,
     /// Finished replies fold their work under "worked for".
     fold_work: bool,
     search_match: Option<(usize, String)>,
@@ -2730,6 +2733,7 @@ impl TranscriptView {
             anchor_prompts: true,
             smooth_reveal: true,
             collapse_groups: false,
+            calm: false,
             fold_work: true,
             search_match: None,
             edit_previews: HashMap::new(),
@@ -2818,11 +2822,13 @@ impl TranscriptView {
             && self.anchor_prompts == anchor_prompts
             && self.smooth_reveal == p.paced_reveal
             && self.collapse_groups == p.collapse_tool_groups
+            && self.calm == p.calm_work
             && self.fold_work == p.fold_finished_work
         {
             return;
         }
         self.collapse_groups = p.collapse_tool_groups;
+        self.calm = p.calm_work;
         self.fold_work = p.fold_finished_work;
         self.chat_layout = chat;
         self.anchor_prompts = anchor_prompts;
@@ -3704,7 +3710,19 @@ impl TranscriptView {
                 let (title, icon) = if group.calls.is_empty() {
                     (if active { "Thinking…" } else { "Thought" }.into(), "minus")
                 } else {
-                    crate::activity::summary(&group.calls, active)
+                    let (summary, icon) = crate::activity::summary(&group.calls, active);
+                    // Calm work: a folded running phase names the step it is
+                    // on, as one live line, not the sum of what it did.
+                    let current = (active && self.calm && !phase_open)
+                        .then(|| group.calls.last())
+                        .flatten()
+                        .map(|call| {
+                            crate::activity::current_step(
+                                &call.presentation_in(self.file_link_base.as_deref()),
+                            )
+                        })
+                        .filter(|label| !label.is_empty());
+                    (current.unwrap_or(summary), icon)
                 };
                 self.rows.push(UiRow {
                     key: (0, 0),
@@ -6138,7 +6156,7 @@ impl TranscriptView {
     /// Whether a tool group nobody has opened or closed shows its steps: a
     /// running one does, unless groups are set to stay collapsed.
     fn phase_opens(&self, active: bool) -> bool {
-        active && !self.collapse_groups
+        active && !self.collapse_groups && !self.calm
     }
     fn toggle_phase(&mut self, group: usize, open: bool, cx: &mut Context<Self>) {
         self.phase_toggle = Some(group);

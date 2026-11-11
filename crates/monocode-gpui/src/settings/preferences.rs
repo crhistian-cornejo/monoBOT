@@ -65,6 +65,9 @@ pub(crate) struct Preferences {
     pub paced_reveal: bool,
     /// Tool groups stay closed, even while they run, until clicked open.
     pub collapse_tool_groups: bool,
+    /// While a reply works its steps stay folded under one line that says
+    /// what it does now ("Editing main.rs"); a click opens them.
+    pub calm_work: bool,
     /// A finished reply folds its work under "worked for"; off keeps the
     /// text and tool groups inline.
     pub fold_finished_work: bool,
@@ -168,6 +171,7 @@ impl Default for Preferences {
             anchor_prompts: true,
             paced_reveal: true,
             collapse_tool_groups: false,
+            calm_work: true,
             fold_finished_work: true,
             follow_up: "steer".into(),
             model_controls: "menu".into(),

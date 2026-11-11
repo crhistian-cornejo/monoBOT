@@ -136,6 +136,10 @@ struct OpenMenu {
 }
 use response_menu::ResponseMenu;
 pub(crate) struct SessionChanged;
+/// A streamed update that changed nothing SessionChanged covers: the live
+/// step (a tool starting, text arriving). Cheap to send on every update; the
+/// notch catches up at its own pace.
+pub(crate) struct LiveProgress;
 pub(crate) struct ChooseFolder(pub(crate) AnchorSlot);
 /// The review card asked to open the session's recorded changes.
 pub(crate) struct OpenSessionChanges(pub(crate) crate::review::ReviewTab);
@@ -1582,6 +1586,8 @@ impl Conversation {
                             || needed_approval != this.needs_approval()
                         {
                             cx.emit(SessionChanged);
+                        } else {
+                            cx.emit(LiveProgress);
                         }
                         this.pump_follow_ups(cx);
                         // The user's queued messages go first.
@@ -1620,6 +1626,7 @@ impl Conversation {
 }
 
 impl EventEmitter<SessionChanged> for Conversation {}
+impl EventEmitter<LiveProgress> for Conversation {}
 impl EventEmitter<ChooseFolder> for Conversation {}
 impl EventEmitter<OpenSessionChanges> for Conversation {}
 impl EventEmitter<Transfer> for Conversation {}
@@ -2858,6 +2865,16 @@ impl Conversation {
         {
             return None;
         }
+        // Between turns the runner and its QuickJS runtime go; the next
+        // turn builds a fresh one.
+        if !self.busy
+            && self
+                .runner
+                .as_ref()
+                .is_some_and(|runner| runner.read(cx).resting())
+        {
+            self.runner = None;
+        }
         if self.busy && self.runner.is_none() {
             let transcript = self.transcript.clone();
             self.runner = Some(cx.new(|cx| crate::composer_runner::Runner::new(transcript, cx)));
@@ -3002,6 +3019,8 @@ impl Conversation {
                         }
                     }))
                     .capture_key_down(crate::dictation::capture_escape(&self.dictation))
+                    .on_action(crate::dictation::on_shortcut(&self.dictation))
+                    .capture_key_up(crate::dictation::capture_release(&self.dictation))
                     .relative()
                     .rounded(px(radius))
                     .border_1()

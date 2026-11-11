@@ -19,6 +19,26 @@ use std::{
 
 pub(crate) use engine::{Engine, Status};
 
+gpui::actions!(dictation, [Dictate]);
+
+/// A press shorter than this toggles dictation; held longer, it is push to
+/// talk and letting go stops.
+const HOLD: Duration = Duration::from_millis(300);
+
+/// Ctrl+Shift+M (⌘⇧M on macOS) in a composer, rebindable in Settings.
+pub(crate) fn bind(cx: &mut App) {
+    let modifier = if cfg!(target_os = "macos") {
+        "cmd"
+    } else {
+        "ctrl"
+    };
+    cx.bind_keys([gpui::KeyBinding::new(
+        &format!("{modifier}-shift-m"),
+        Dictate,
+        Some("Composer"),
+    )]);
+}
+
 /// The engine the composers dictate with; tests put a stand-in here.
 #[derive(Clone)]
 pub(crate) struct Engines(pub Arc<dyn Engine>);
@@ -73,6 +93,13 @@ pub(crate) struct Dictation {
     /// The session said it decides turns, and the last turn it ended.
     decides_turns: bool,
     turn_ended: bool,
+    /// When the shortcut that started this dictation went down; set until
+    /// its key comes up.
+    pressed: Option<Instant>,
+    /// The shortcut was let go while the microphone was still opening.
+    stop_once_listening: bool,
+    /// When the microphone opened, for the bar's clock.
+    listening_since: Option<Instant>,
 }
 
 impl Dictation {
@@ -96,6 +123,42 @@ impl Dictation {
             call_pace: None,
             decides_turns: false,
             turn_ended: false,
+            pressed: None,
+            stop_once_listening: false,
+            listening_since: None,
+        }
+    }
+
+    /// The shortcut went down. A key held down repeats; only its first
+    /// press counts.
+    pub(crate) fn shortcut_down(&mut self, cx: &mut Context<Self>) {
+        if self.pressed.is_some() {
+            return;
+        }
+        match self.phase {
+            Phase::Listening | Phase::Starting => self.finish(cx),
+            Phase::Idle | Phase::NeedsModel => {
+                self.pressed = Some(Instant::now());
+                self.stop_once_listening = false;
+                self.toggle(cx);
+            }
+            _ => {}
+        }
+    }
+
+    /// A key came up. If it ends a press that was held, the dictation was
+    /// push to talk: it stops. A tap leaves it listening until the next one.
+    pub(crate) fn shortcut_up(&mut self, cx: &mut Context<Self>) {
+        let Some(pressed) = self.pressed.take() else {
+            return;
+        };
+        if pressed.elapsed() < HOLD {
+            return;
+        }
+        if self.phase == Phase::Listening {
+            self.finish(cx);
+        } else {
+            self.stop_once_listening = true;
         }
     }
 
@@ -140,6 +203,7 @@ impl Dictation {
     fn unlisten(&mut self) {
         self.events = None;
         self.speaking = false;
+        self.listening_since = None;
     }
 
     fn fail(&mut self, reason: String, cx: &mut Context<Self>) {
@@ -225,7 +289,11 @@ impl Dictation {
                 .update(cx, |this, cx| match started {
                     Ok(ticket) if this.generation == generation => {
                         this.ticket = Some(ticket);
+                        this.listening_since = Some(Instant::now());
                         this.set_phase(Phase::Listening, cx);
+                        if std::mem::take(&mut this.stop_once_listening) {
+                            this.finish(cx);
+                        }
                         true
                     }
                     Ok(_) => false,
@@ -450,6 +518,27 @@ impl Drop for Dictation {
     }
 }
 
+/// The shortcut on a composer box: dictates into its draft.
+pub(crate) fn on_shortcut(
+    dictation: &Entity<Dictation>,
+) -> impl Fn(&Dictate, &mut Window, &mut App) + 'static {
+    let dictation = dictation.downgrade();
+    move |_, _, cx| {
+        let _ = dictation.update(cx, |dictation, cx| dictation.shortcut_down(cx));
+        cx.stop_propagation();
+    }
+}
+
+/// A key let go on a composer box: ends a held shortcut's dictation.
+pub(crate) fn capture_release(
+    dictation: &Entity<Dictation>,
+) -> impl Fn(&gpui::KeyUpEvent, &mut Window, &mut App) + 'static {
+    let dictation = dictation.downgrade();
+    move |_, _, cx| {
+        let _ = dictation.update(cx, |dictation, cx| dictation.shortcut_up(cx));
+    }
+}
+
 /// Escape on a composer box: drops `dictation` in progress first.
 pub(crate) fn capture_escape(
     dictation: &Entity<Dictation>,
@@ -477,7 +566,7 @@ pub(crate) fn mic(dictation: &Entity<Dictation>, cx: &App) -> impl IntoElement +
         .debug_selector(|| "dictation-mic".into())
         .role(Role::Button)
         .aria_label(phase.button_label())
-        .tooltip(chrome_tip(phase.button_label(), None))
+        .tooltip(chrome_tip(phase.button_label(), Some("Composer: Dictate")))
         .aria_toggled(if listening {
             Toggled::True
         } else {
@@ -657,6 +746,15 @@ impl Render for Dictation {
                             .text_color(content(0.5))
                             .child(caption),
                     )
+                    .when_some(self.listening_since, |d, since| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .font_features(crate::right_panel::tabular())
+                                .text_color(content(0.5))
+                                .child(model::clock(since.elapsed())),
+                        )
+                    })
                     .child(
                         div()
                             .flex_shrink_0()

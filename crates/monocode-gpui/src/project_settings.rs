@@ -576,7 +576,7 @@ impl BackgroundDialog {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Choose background image".into()),
+            prompt: Some("Choose a background image, GIF or video".into()),
         });
         let project = self.project.clone();
         cx.spawn(async move |this, cx| {
@@ -1066,7 +1066,7 @@ impl Render for BackgroundDialog {
             .child(div().debug_selector(||"background-dialog-header".into()).flex_shrink_0().flex().items_start().gap_2().px_4().pt_3()
                 .child(div().min_w_0().flex_1().pt(px(2.)).flex().flex_col()
                     .child(div().debug_selector(||"background-dialog-title".into()).text_size(px(16.)).line_height(px(20.)).font_weight(gpui::FontWeight::SEMIBOLD).child("Background Image"))
-                    .child(div().mt(px(2.)).min_w_0().truncate().text_size(px(12.)).line_height(px(16.5)).text_color(content(0.5)).child(format!("Choose a background image for {}",self.appearance.label(&self.project)))))
+                    .child(div().mt(px(2.)).min_w_0().truncate().text_size(px(12.)).line_height(px(16.5)).text_color(content(0.5)).child(format!("Choose an image, GIF or video for {}",self.appearance.label(&self.project)))))
                 .child(icon_button("close-project-background","Close background settings","close").size(px(28.)).on_click(cx.listener(|_,_,_,cx|cx.emit(Event::Close)))))
             .child(div().id("background-dialog-body").debug_selector(||"background-dialog-body".into())
                 .min_h_0().overflow_y_scroll().flex().flex_col().gap_5().p_4()

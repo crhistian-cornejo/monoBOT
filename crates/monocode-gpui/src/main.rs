@@ -483,6 +483,7 @@ fn main() {
             hang_watchdog::start(database.with_file_name("gpui-hangs"), cx);
             input::bind(cx);
             image_lightbox::bind(cx);
+            dictation::bind(cx);
             composer_completion::bind(cx);
             file_editor::bind(cx);
             conversation::find::bind(cx);

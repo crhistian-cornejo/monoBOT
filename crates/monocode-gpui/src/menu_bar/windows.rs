@@ -1,9 +1,11 @@
-//! monoBOT's icon in the Windows tray. With no live item it is monoBOT's
-//! own logo (the executable's icon); with one it is a ring with the number
-//! inside (a plan's fullest window, the agents at work) or the item's mark,
-//! and the rows are the tooltip. The item follows the taskbar's light or
-//! dark theme; one that needs the user wears the accent. A left or right
-//! click shows monoBOT's menu, as the menu bar icon does on macOS.
+//! monoBOT's icons in the Windows tray. monoBOT's own logo (the executable's
+//! icon) is always there; a live item gets a second icon beside it, a ring
+//! with the number inside (a plan's fullest window, the agents at work) or
+//! the item's mark, and its rows are the tooltip. The tray has no room for
+//! text, so the rows never sit beside the icon as they do on macOS. The
+//! item follows the taskbar's light or dark theme; one that needs the user
+//! wears the accent. A left or right click on either icon shows monoBOT's
+//! menu, as the menu bar icon does on macOS.
 //!
 //! Windows keeps a new tray icon in the overflow until the user drags it to
 //! the taskbar or turns it on in Settings › Personalization › Taskbar; no
@@ -63,24 +65,22 @@ unsafe extern "system" fn window_proc(
     unsafe { DefWindowProcW(window, message, wparam, lparam) }
 }
 
-/// What the icon shows now.
-#[derive(PartialEq)]
-enum Shown {
-    Logo,
-    Item(Item),
-}
-
 pub(super) struct Bar {
     window: HWND,
     visible: bool,
-    /// The live item, kept to redraw when the icon comes back.
+    /// The live item, kept to redraw when the icons come back.
     item: Option<Item>,
     accent: [u8; 3],
-    shown: Option<(Shown, HICON)>,
+    /// monoBOT's logo, there whenever the bar is.
+    logo: Option<HICON>,
+    /// The live item's own icon beside the logo.
+    beside: Option<HICON>,
 }
 
-/// The tray icon's id within the window.
-const ID: u32 = 1;
+/// The logo's id within the window.
+const LOGO: u32 = 1;
+/// The live item's id: its own icon, so the logo never gives way to it.
+const BESIDE: u32 = 2;
 
 impl Bar {
     pub(super) fn new(clicks: async_channel::Sender<()>) -> Option<Self> {
@@ -120,17 +120,18 @@ impl Bar {
             visible: true,
             item: None,
             accent: [0, 0, 0],
-            shown: None,
+            logo: None,
+            beside: None,
         };
         bar.redraw();
         Some(bar)
     }
 
-    fn data(&self) -> NOTIFYICONDATAW {
+    fn data(&self, id: u32) -> NOTIFYICONDATAW {
         NOTIFYICONDATAW {
             cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
             hWnd: self.window,
-            uID: ID,
+            uID: id,
             ..Default::default()
         }
     }
@@ -152,13 +153,36 @@ impl Bar {
         }
     }
 
-    fn remove(&mut self) {
-        if let Some((_, icon)) = self.shown.take() {
-            let data = self.data();
-            unsafe {
-                let _ = Shell_NotifyIconW(NIM_DELETE, &data);
-                let _ = DestroyIcon(icon);
+    /// Adds or updates one icon, then frees the one it replaces.
+    fn put(&self, id: u32, icon: HICON, tip: &str, previous: Option<HICON>, exists: bool) {
+        let mut data = self.data(id);
+        data.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
+        data.uCallbackMessage = CALLBACK;
+        data.hIcon = icon;
+        let tip: Vec<u16> = tip.encode_utf16().take(data.szTip.len() - 1).collect();
+        data.szTip[..tip.len()].copy_from_slice(&tip);
+        unsafe {
+            let _ = Shell_NotifyIconW(if exists { NIM_MODIFY } else { NIM_ADD }, &data);
+            if let Some(old) = previous {
+                let _ = DestroyIcon(old);
             }
+        }
+    }
+
+    fn delete(&self, id: u32, icon: HICON) {
+        let data = self.data(id);
+        unsafe {
+            let _ = Shell_NotifyIconW(NIM_DELETE, &data);
+            let _ = DestroyIcon(icon);
+        }
+    }
+
+    fn remove(&mut self) {
+        if let Some(icon) = self.beside.take() {
+            self.delete(BESIDE, icon);
+        }
+        if let Some(icon) = self.logo.take() {
+            self.delete(LOGO, icon);
         }
     }
 
@@ -167,60 +191,42 @@ impl Bar {
             self.remove();
             return;
         }
-        let wanted = match &self.item {
-            Some(item) => Shown::Item(item.clone()),
-            None => Shown::Logo,
-        };
-        if self
-            .shown
-            .as_ref()
-            .is_some_and(|(shown, _)| *shown == wanted)
-        {
-            return;
-        }
         let side = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
-        let (icon, tip) = match &wanted {
-            Shown::Logo => (logo(side), "monoBOT".to_owned()),
-            Shown::Item(item) => {
-                let ink = if light_taskbar() {
-                    [0, 0, 0]
-                } else {
-                    [255, 255, 255]
-                };
-                let color = if item.urgent { self.accent } else { ink };
-                // A logo leaves no room for the number: the tray shows the ring.
-                let mark = match (item.mark, item.fill) {
-                    (Mark::Logo(_), Some(fill)) => Mark::Ring(fill),
-                    (mark, _) => mark,
-                };
-                (
-                    icon(&mark::draw(mark, side as u32, item.figure, color)),
-                    format!("{}\n{}", item.rows.join(" · "), item.tooltip),
-                )
+        // Added first, so Windows places the item beside it.
+        if self.logo.is_none()
+            && let Some(icon) = logo(side)
+        {
+            self.put(LOGO, icon, "monoBOT", None, false);
+            self.logo = Some(icon);
+        }
+        let Some(item) = &self.item else {
+            if let Some(icon) = self.beside.take() {
+                self.delete(BESIDE, icon);
             }
-        };
-        let Some(icon) = icon else {
             return;
         };
-        let mut data = self.data();
-        data.uFlags = NIF_ICON | NIF_TIP | NIF_MESSAGE | NIF_SHOWTIP;
-        data.uCallbackMessage = CALLBACK;
-        data.hIcon = icon;
-        let tip: Vec<u16> = tip.encode_utf16().take(data.szTip.len() - 1).collect();
-        data.szTip[..tip.len()].copy_from_slice(&tip);
-        let previous = self.shown.take();
-        unsafe {
-            let message = if previous.is_some() {
-                NIM_MODIFY
-            } else {
-                NIM_ADD
-            };
-            let _ = Shell_NotifyIconW(message, &data);
-            if let Some((_, old)) = previous {
-                let _ = DestroyIcon(old);
-            }
-        }
-        self.shown = Some((wanted, icon));
+        let ink = if light_taskbar() {
+            [0, 0, 0]
+        } else {
+            [255, 255, 255]
+        };
+        let color = if item.urgent { self.accent } else { ink };
+        // A provider's logo leaves no room for the number: the tray shows the ring.
+        let mark = match (item.mark, item.fill) {
+            (Mark::Logo(_), Some(fill)) => Mark::Ring(fill),
+            (mark, _) => mark,
+        };
+        let Some(icon) = icon(&mark::draw(mark, side as u32, item.figure, color)) else {
+            return;
+        };
+        let tip = format!(
+            "{}
+{}",
+            item.rows.join(" · "),
+            item.tooltip
+        );
+        let previous = self.beside.replace(icon);
+        self.put(BESIDE, icon, &tip, previous, previous.is_some());
     }
 }
 

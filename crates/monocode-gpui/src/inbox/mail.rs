@@ -97,6 +97,8 @@ pub(crate) struct Mailbox {
     view: model::View,
     views_scroll: ScrollHandle,
     views_overflow: (bool, bool),
+    /// The inbox's newsletters, together at its end, are shown.
+    newsletters_open: bool,
     list_width: f32,
     resize_start: Option<(f32, f32)>,
     limit_glow: Option<LimitGlow>,
@@ -261,6 +263,83 @@ fn png_image(bytes: Vec<u8>) -> Arc<Image> {
     Arc::new(Image::from_bytes(ImageFormat::Png, bytes))
 }
 
+/// A sender's picture (Gravatar, else their organisation's logo), fetched
+/// and kept off the interface thread; none leaves the initial.
+struct Face;
+impl gpui::Asset for Face {
+    type Source = String;
+    type Output = Option<Arc<Image>>;
+    #[expect(
+        clippy::manual_async_fn,
+        reason = "An async method captures the non-Send App reference."
+    )]
+    fn load(
+        address: String,
+        _: &mut App,
+    ) -> impl std::future::Future<Output = Self::Output> + Send + 'static {
+        async move { model::sender_face(&address).map(png_image) }
+    }
+}
+
+/// A row's sender: their picture, or their initial on a color of their own.
+#[derive(IntoElement)]
+struct SenderFace {
+    name: String,
+    address: String,
+    side: f32,
+}
+impl RenderOnce for SenderFace {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let address = self.address.trim().to_lowercase();
+        let picture = window.use_asset::<Face>(&address, cx).flatten();
+        let circle = div()
+            .size(px(self.side))
+            .flex_shrink_0()
+            .rounded_full()
+            .overflow_hidden();
+        match picture {
+            Some(picture) => circle
+                .bg(background_base())
+                .child(
+                    gpui::img(picture)
+                        .size_full()
+                        .object_fit(gpui::ObjectFit::Cover),
+                )
+                .into_any_element(),
+            None => {
+                let label = if self.name.trim().is_empty() {
+                    &address
+                } else {
+                    &self.name
+                };
+                let initial = label
+                    .trim()
+                    .chars()
+                    .find(|c| c.is_alphanumeric())
+                    .unwrap_or('?')
+                    .to_uppercase()
+                    .to_string();
+                // A sender keeps one color, from the project palette.
+                let colors = &monocode_core::project_appearance::COLORS[1..];
+                let hash = address.bytes().fold(0u32, |hash, byte| {
+                    hash.wrapping_mul(31).wrapping_add(byte.into())
+                });
+                let color: gpui::Hsla = rgb(colors[hash as usize % colors.len()]).into();
+                circle
+                    .bg(color.opacity(0.22))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_size(px((self.side * 0.45).max(9.)))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(color)
+                    .child(initial)
+                    .into_any_element()
+            }
+        }
+    }
+}
+
 impl Mailbox {
     pub(crate) fn new(data_dir: PathBuf, auto_images: bool, cx: &mut Context<Self>) -> Self {
         let search = cx.new(|cx| {
@@ -306,6 +385,7 @@ impl Mailbox {
             view: model::View::Inbox,
             views_scroll: ScrollHandle::new(),
             views_overflow: (false, true),
+            newsletters_open: false,
             list_width: LIST_WIDTH,
             resize_start: None,
             limit_glow: None,
@@ -1394,25 +1474,79 @@ impl Mailbox {
             let heads: Vec<&Message> = threads.iter().map(|(m, _)| *m).collect();
             let counts: HashMap<String, usize> =
                 threads.iter().map(|(m, n)| (m.id.clone(), *n)).collect();
-            model::by_day(&heads, now)
+            // The inbox reads what needs the user first and its newsletters
+            // last; other views, and a search, stay by day.
+            let sections = if self.view == model::View::Inbox && !searching {
+                model::inbox_sections(&heads, now)
+            } else {
+                model::by_day(&heads, now)
+                    .into_iter()
+                    .map(|(title, messages)| model::Section {
+                        kind: model::SectionKind::Day,
+                        title,
+                        messages,
+                    })
+                    .collect()
+            };
+            sections
                 .into_iter()
-                .map(|(day, messages)| {
+                .map(|section| {
+                    let lists = section.kind == model::SectionKind::Newsletters;
+                    let open = !lists || self.newsletters_open;
+                    let unread = section.messages.iter().filter(|m| m.unread).count();
+                    let header = div()
+                        .id(SharedString::from(format!(
+                            "mail-section-{}",
+                            section.title
+                        )))
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .px(px(12.))
+                        .pb(px(4.))
+                        .pt(px(8.))
+                        .text_size(px(11.))
+                        .text_color(if section.kind == model::SectionKind::NeedsYou {
+                            accent_color()
+                        } else {
+                            content(0.45)
+                        })
+                        .when(lists, |d| {
+                            d.role(Role::Button)
+                                .aria_expanded(open)
+                                .cursor_pointer()
+                                .hover(|s| s.text_color(content(0.8)))
+                                .child(icon(
+                                    if open {
+                                        "chevron-down"
+                                    } else {
+                                        "chevron-right"
+                                    },
+                                    12.,
+                                ))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.newsletters_open = !this.newsletters_open;
+                                    cx.notify();
+                                }))
+                        })
+                        .child(section.title.clone())
+                        .when(lists, |d| {
+                            d.child(div().text_color(content(0.35)).child(if unread > 0 {
+                                format!("{} · {unread} unread", section.messages.len())
+                            } else {
+                                section.messages.len().to_string()
+                            }))
+                        });
                     div()
                         .flex()
                         .flex_col()
-                        .child(
-                            div()
-                                .px(px(12.))
-                                .pb(px(4.))
-                                .pt(px(8.))
-                                .text_size(px(11.))
-                                .text_color(content(0.45))
-                                .child(day),
-                        )
-                        .children(messages.into_iter().map(|m| {
-                            let count = counts.get(&m.id).copied().unwrap_or(1);
-                            self.row(m, count, now, cx)
-                        }))
+                        .child(header)
+                        .when(open, |d| {
+                            d.children(section.messages.into_iter().map(|m| {
+                                let count = counts.get(&m.id).copied().unwrap_or(1);
+                                self.row(m, count, now, cx)
+                            }))
+                        })
                         .into_any_element()
                 })
                 .collect()
@@ -1500,25 +1634,12 @@ impl Mailbox {
         let hover_id = message.id.clone();
         let active = self.selected.as_ref() == Some(&message.id);
         let unread = message.unread;
-        div()
-            .id(SharedString::from(format!("mail-row-{}", message.id)))
-            .role(Role::Button)
-            .aria_label(if message.subject.is_empty() {
-                "(no subject)".to_string()
-            } else {
-                message.subject.clone()
-            })
-            .w_full()
+        let text = div()
+            .min_w_0()
+            .flex_1()
             .flex()
             .flex_col()
             .gap(px(2.))
-            .px(px(12.))
-            .py(px(8.))
-            .border_b_1()
-            .border_color(content(0.05))
-            .cursor_pointer()
-            .when(active, |d| d.bg(content(0.1)))
-            .when(!active, |d| d.hover(|s| s.bg(content(0.04))))
             .child(
                 div()
                     .flex()
@@ -1590,7 +1711,32 @@ impl Mailbox {
             )
             .when(!message.labels.is_empty(), |d| {
                 d.child(organize::label_chips(&message.labels))
+            });
+        div()
+            .id(SharedString::from(format!("mail-row-{}", message.id)))
+            .role(Role::Button)
+            .aria_label(if message.subject.is_empty() {
+                "(no subject)".to_string()
+            } else {
+                message.subject.clone()
             })
+            .w_full()
+            .flex()
+            .items_start()
+            .gap(px(10.))
+            .px(px(12.))
+            .py(px(8.))
+            .border_b_1()
+            .border_color(content(0.05))
+            .cursor_pointer()
+            .when(active, |d| d.bg(content(0.1)))
+            .when(!active, |d| d.hover(|s| s.bg(content(0.04))))
+            .child(div().pt(px(2.)).child(SenderFace {
+                name: message.from.clone(),
+                address: message.address.clone(),
+                side: 28.,
+            }))
+            .child(text)
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 if *hovering {
                     this.prefetch_soon(hover_id.clone(), cx);

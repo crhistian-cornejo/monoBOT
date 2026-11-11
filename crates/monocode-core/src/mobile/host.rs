@@ -315,6 +315,15 @@ impl MobileHost {
         self.inner.lock().is_ok_and(|inner| inner.config.enabled)
     }
 
+    /// Whether a phone could read the catalog: one is paired, or an
+    /// invitation waits for one. With neither there is nobody to publish to.
+    pub fn serving(&self) -> bool {
+        self.inner.lock().is_ok_and(|inner| {
+            inner.config.enabled
+                && (!inner.config.devices.is_empty() || !inner.invitations.is_empty())
+        })
+    }
+
     pub fn configure(
         &self,
         enabled: bool,

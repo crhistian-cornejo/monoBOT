@@ -1073,6 +1073,73 @@ mod tests {
     }
 
     #[gpui::test]
+    fn calm_work_folds_a_running_phase_under_its_current_step(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let view = cx.new(|_| TranscriptView::new());
+        view.update(cx, |view, cx| {
+            let row = |role: &str, text: &str| Row {
+                role: role.into(),
+                text: text.into(),
+                first: true,
+                sent_at: None,
+            };
+            let tool = |id: &str, name: &str, input: &str, state: ToolState| {
+                let mut call = ToolCall::new(id, name);
+                call.input = input.into();
+                call.state = state;
+                row("tool", &serde_json::to_string(&call).unwrap())
+            };
+            view.calm = true;
+            view.streaming(true, cx);
+            view.patch(
+                0,
+                vec![
+                    row("user", "Fix it"),
+                    tool(
+                        "read",
+                        "Read",
+                        r#"{"file_path":"src/main.rs"}"#,
+                        ToolState::Completed,
+                    ),
+                    tool(
+                        "edit",
+                        "Edit",
+                        r#"{"file_path":"src/lib.rs"}"#,
+                        ToolState::Running,
+                    ),
+                ],
+                cx,
+            );
+            view.rebuild(0, cx);
+            let phase = view.rows.iter().find_map(|row| match &row.body {
+                Body::Phase { title, active, .. } => Some((title.clone(), *active)),
+                _ => None,
+            });
+            assert_eq!(phase, Some(("Editing src/lib.rs".into(), true)));
+            // Folded: the steps wait behind the one line.
+            assert!(
+                !view
+                    .rows
+                    .iter()
+                    .any(|row| matches!(row.body, Body::Tool { .. }))
+            );
+            // Opened by hand, it lists every step under the usual summary.
+            view.phases.insert(1, true);
+            view.rebuild(0, cx);
+            assert!(
+                view.rows
+                    .iter()
+                    .any(|row| matches!(row.body, Body::Tool { .. }))
+            );
+            let title = view.rows.iter().find_map(|row| match &row.body {
+                Body::Phase { title, .. } => Some(title.clone()),
+                _ => None,
+            });
+            assert_ne!(title.as_deref(), Some("Editing src/lib.rs"));
+        });
+    }
+
+    #[gpui::test]
     fn first_assistant_prose_replaces_all_streamed_initial_thoughts(cx: &mut TestAppContext) {
         cx.update(|cx| cx.set_reduce_motion(true));
         let view = cx.new(|_| TranscriptView::new());

@@ -53,6 +53,7 @@ pub mod tool;
 pub mod transcript;
 pub mod usage;
 pub mod user_links;
+pub mod video;
 pub mod visual;
 pub mod visual_bridge;
 pub mod voice;

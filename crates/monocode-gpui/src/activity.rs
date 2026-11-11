@@ -313,6 +313,30 @@ pub(crate) fn summary(tools: &[ToolCall], live: bool) -> (String, &'static str) 
     }
     (title, dominant)
 }
+/// A step as it happens, for a running phase's one live line: "Reading
+/// main.rs", "Running cargo test". A step with no verb of its own keeps its
+/// caption as it is.
+pub(crate) fn current_step(shown: &monocode_core::tool::ToolPresentation) -> String {
+    let verb = match shown.action.as_str() {
+        "Read" => "Reading",
+        "Write" => "Writing",
+        "Edit" => "Editing",
+        "Find" | "Search" => "Searching",
+        "List" => "Listing",
+        "Run" => "Running",
+        other => other,
+    };
+    let target = shown
+        .command
+        .as_deref()
+        .filter(|_| shown.action == "Run" && shown.target.is_empty())
+        .unwrap_or(&shown.target);
+    [verb, target]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
 /// CSS .zen-phase-step: left 6px spine, 8px quarter curve, 20px content inset.
 pub(crate) fn rail(last: bool) -> impl IntoElement {
     rail_branch(last, true)
@@ -462,5 +486,31 @@ mod shimmer_tests {
                 first = Some(current);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use monocode_core::tool::ToolCall;
+
+    fn step(name: &str, input: serde_json::Value) -> String {
+        let mut call = ToolCall::new("1", name);
+        call.input = input.to_string();
+        super::current_step(&call.presentation_in(Some("/repo")))
+    }
+
+    #[test]
+    fn a_running_phase_names_its_step_as_it_happens() {
+        assert_eq!(
+            step(
+                "Edit",
+                serde_json::json!({"file_path": "/repo/src/main.rs"})
+            ),
+            "Editing src/main.rs"
+        );
+        assert!(
+            step("Read", serde_json::json!({"file_path": "/repo/a.rs"})).starts_with("Reading")
+        );
+        assert!(step("Bash", serde_json::json!({"command": "cargo test"})).starts_with("Running"));
     }
 }

@@ -5,6 +5,7 @@ use std::{
     hash::{DefaultHasher, Hash, Hasher},
     io::Cursor,
     path::{Path, PathBuf},
+    time::Duration,
 };
 pub type SourceImage = RgbaImage;
 
@@ -224,6 +225,105 @@ pub fn read_image(path: &Path) -> Result<RgbaImage, String> {
     .into_rgba8())
 }
 
+/// How long an animation's frame shows when its file asks for less than a
+/// browser would: a GIF's 0 or 10 ms means "as fast as you like", which
+/// browsers read as 100 ms.
+const SLOWEST_FAST_FRAME: Duration = Duration::from_millis(100);
+
+/// The frames of an animated picture (a GIF, an animated WebP or PNG), each
+/// with how long it shows, scaled down to fit `max_side`. `None` for a still
+/// picture. Past `max_bytes` of frames, every other frame is dropped and its
+/// time given to the one before, so a long animation keeps its pace in less
+/// memory.
+pub fn read_animation(
+    path: &Path,
+    max_side: u32,
+    max_bytes: usize,
+) -> Result<Option<Vec<(RgbaImage, Duration)>>, String> {
+    use image::{AnimationDecoder, ImageFormat};
+    let metadata = std::fs::metadata(path).map_err(|e| format!("Cannot read image: {e}"))?;
+    if metadata.len() > 30 * 1024 * 1024 {
+        return Err("Choose an image smaller than 30 MB.".into());
+    }
+    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+    let frames = match image::guess_format(&bytes) {
+        Ok(ImageFormat::Gif) => image::codecs::gif::GifDecoder::new(Cursor::new(&bytes))
+            .map_err(|e| e.to_string())?
+            .into_frames(),
+        Ok(ImageFormat::WebP) => {
+            let decoder = image::codecs::webp::WebPDecoder::new(Cursor::new(&bytes))
+                .map_err(|e| e.to_string())?;
+            if !decoder.has_animation() {
+                return Ok(None);
+            }
+            decoder.into_frames()
+        }
+        Ok(ImageFormat::Png) => {
+            let decoder = image::codecs::png::PngDecoder::new(Cursor::new(&bytes))
+                .map_err(|e| e.to_string())?;
+            if !decoder.is_apng().map_err(|e| e.to_string())? {
+                return Ok(None);
+            }
+            decoder.apng().map_err(|e| e.to_string())?.into_frames()
+        }
+        _ => return Ok(None),
+    };
+    let mut kept: Vec<(RgbaImage, Duration)> = Vec::new();
+    // How many of the file's frames each kept one stands for, and how many
+    // it should: halving doubles the stride for every frame after it too.
+    let mut stands_for: Vec<usize> = Vec::new();
+    let mut stride = 1usize;
+    let mut used = 0usize;
+    for frame in frames {
+        let frame = frame.map_err(|_| "This animation could not be read.".to_owned())?;
+        let (numer, denom) = frame.delay().numer_denom_ms();
+        let shown = Duration::from_micros(u64::from(numer) * 1000 / u64::from(denom.max(1)));
+        let shown = if shown < Duration::from_millis(20) {
+            SLOWEST_FAST_FRAME
+        } else {
+            shown
+        };
+        if let (Some(last), Some(count)) = (kept.last_mut(), stands_for.last_mut()) {
+            if *count < stride {
+                last.1 += shown;
+                *count += 1;
+                continue;
+            }
+        }
+        let mut picture = frame.into_buffer();
+        if picture.width() > max_side || picture.height() > max_side {
+            picture = imageops::thumbnail(&picture, max_side, max_side);
+        }
+        used += picture.as_raw().len();
+        kept.push((picture, shown));
+        stands_for.push(1);
+        // Halve the frames, keeping the total time, until they fit.
+        while used > max_bytes && kept.len() > 1 {
+            stride *= 2;
+            let mut halved = Vec::with_capacity(kept.len().div_ceil(2));
+            let mut counts = Vec::with_capacity(kept.len().div_ceil(2));
+            let mut pairs = kept.into_iter().zip(stands_for);
+            while let Some(((picture, mut shown), mut count)) = pairs.next() {
+                if let Some(((dropped, extra), more)) = pairs.next() {
+                    shown += extra;
+                    count += more;
+                    used -= dropped.as_raw().len();
+                }
+                halved.push((picture, shown));
+                counts.push(count);
+            }
+            kept = halved;
+            stands_for = counts;
+        }
+    }
+    Ok((kept.len() > 1).then_some(kept))
+}
+
+/// Whether the picture at `path` moves.
+pub fn is_animated(path: &Path) -> bool {
+    read_animation(path, 16, usize::MAX).is_ok_and(|frames| frames.is_some())
+}
+
 /// Own a validated copy, so moving or deleting the original does not break it.
 pub fn import_image(
     source: &Path,
@@ -231,7 +331,29 @@ pub fn import_image(
     project: &str,
     logo: bool,
 ) -> Result<String, String> {
+    if !logo && crate::video::is_video(source) {
+        return import_video(source, directory, project);
+    }
     let image = read_image(source)?;
+    // A moving background keeps its file as it is: a PNG of it would keep
+    // only the first frame.
+    if !logo && is_animated(source) {
+        let bytes = std::fs::read(source).map_err(|e| e.to_string())?;
+        let extension = match image::guess_format(&bytes) {
+            Ok(image::ImageFormat::Gif) => "gif",
+            Ok(image::ImageFormat::WebP) => "webp",
+            _ => "png",
+        };
+        std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+        let mut hash = DefaultHasher::new();
+        project.hash(&mut hash);
+        bytes.hash(&mut hash);
+        let path = directory.join(format!("background-{:016x}.{extension}", hash.finish()));
+        if !path.exists() {
+            std::fs::write(&path, &bytes).map_err(|e| format!("Cannot save image: {e}"))?;
+        }
+        return Ok(path.to_string_lossy().into_owned());
+    }
     let image = if logo && (image.width() > 256 || image.height() > 256) {
         imageops::thumbnail(&image, 256, 256)
     } else {
@@ -255,8 +377,50 @@ pub fn import_image(
     Ok(path.to_string_lossy().into_owned())
 }
 
+/// A video background's own copy: a hard link when the drive allows one, so
+/// a clip of gigabytes takes no more room, else a copy. Named by where it
+/// came from, its size and its time, not its bytes, which would mean reading
+/// all of it.
+fn import_video(source: &Path, directory: &Path, project: &str) -> Result<String, String> {
+    const LARGEST: u64 = 2 * 1024 * 1024 * 1024;
+    let metadata = std::fs::metadata(source).map_err(|e| format!("Cannot read video: {e}"))?;
+    if metadata.len() > LARGEST {
+        return Err("Choose a video smaller than 2 GB.".into());
+    }
+    std::fs::create_dir_all(directory).map_err(|e| e.to_string())?;
+    let mut hash = DefaultHasher::new();
+    project.hash(&mut hash);
+    source.hash(&mut hash);
+    metadata.len().hash(&mut hash);
+    metadata.modified().ok().hash(&mut hash);
+    let extension = source
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("mp4")
+        .to_ascii_lowercase();
+    let path = directory.join(format!("background-{:016x}.{extension}", hash.finish()));
+    if !path.exists() && std::fs::hard_link(source, &path).is_err() {
+        std::fs::copy(source, &path).map_err(|e| format!("Cannot save video: {e}"))?;
+    }
+    Ok(path.to_string_lossy().into_owned())
+}
+
 pub fn background_fade(y: f32, empty: bool, haze: bool) -> f32 {
-    let stops: &[(f32, f32)] = match (empty, haze) {
+    let stops = background_fade_stops(empty, haze);
+    for pair in stops.windows(2) {
+        if y <= pair[1].0 {
+            let t = ((y - pair[0].0) / (pair[1].0 - pair[0].0)).clamp(0., 1.);
+            return pair[0].1 + (pair[1].1 - pair[0].1) * t;
+        }
+    }
+    0.
+}
+
+/// The fade's stops, top to bottom: where (0 to 1 down the view) and how
+/// much of the picture shows there. Straight lines join them, and below the
+/// last nothing shows, so a renderer can draw one gradient per gap.
+pub fn background_fade_stops(empty: bool, haze: bool) -> &'static [(f32, f32)] {
+    match (empty, haze) {
         (true, true) => &[
             (0., 1.),
             (0.19, 1.),
@@ -285,14 +449,7 @@ pub fn background_fade(y: f32, empty: bool, haze: bool) -> f32 {
             (0.62, 0.11),
             (0.72, 0.),
         ],
-    };
-    for pair in stops.windows(2) {
-        if y <= pair[1].0 {
-            let t = ((y - pair[0].0) / (pair[1].0 - pair[0].0)).clamp(0., 1.);
-            return pair[0].1 + (pair[1].1 - pair[0].1) * t;
-        }
     }
-    0.
 }
 
 /// View-independent artwork, matching the React worker. Crop, fade and Haze
@@ -527,6 +684,81 @@ pub fn png_bytes(image: RgbaImage) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A GIF of `count` frames, each `ms` long, on disk.
+    fn gif(dir: &Path, count: u8, ms: u32) -> PathBuf {
+        use image::codecs::gif::GifEncoder;
+        let path = dir.join("moving.gif");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut encoder = GifEncoder::new(file);
+        for shade in 0..count {
+            let picture = RgbaImage::from_pixel(64, 32, image::Rgba([shade * 40, 90, 160, 255]));
+            let delay = image::Delay::from_numer_denom_ms(ms, 1);
+            encoder
+                .encode_frame(image::Frame::from_parts(picture, 0, 0, delay))
+                .unwrap();
+        }
+        drop(encoder);
+        path
+    }
+
+    #[test]
+    fn an_animation_keeps_its_frames_and_pace_and_a_still_has_none() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = gif(directory.path(), 4, 50);
+        let frames = read_animation(&path, 32, usize::MAX).unwrap().unwrap();
+        assert_eq!(frames.len(), 4);
+        assert!(frames.iter().all(|(picture, shown)| {
+            picture.width() <= 32 && *shown == Duration::from_millis(50)
+        }));
+        // Too many bytes: half the frames, each shown twice as long.
+        let one = frames[0].0.as_raw().len();
+        let halved = read_animation(&path, 32, one * 2).unwrap().unwrap();
+        assert_eq!(halved.len(), 2);
+        assert!(halved
+            .iter()
+            .all(|(_, shown)| *shown == Duration::from_millis(100)));
+        // "As fast as you like" reads as a browser's 100 ms.
+        let fast = gif(directory.path(), 2, 0);
+        let frames = read_animation(&fast, 32, usize::MAX).unwrap().unwrap();
+        assert_eq!(frames[0].1, Duration::from_millis(100));
+        let still = directory.path().join("still.png");
+        RgbaImage::from_pixel(8, 8, image::Rgba([1, 2, 3, 255]))
+            .save(&still)
+            .unwrap();
+        assert_eq!(read_animation(&still, 32, usize::MAX).unwrap(), None);
+    }
+
+    #[test]
+    fn a_video_background_is_kept_beside_the_others() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("Ocean.MP4");
+        std::fs::write(&source, b"not really a video").unwrap();
+        let kept = import_image(&source, &directory.path().join("assets"), "/p", false).unwrap();
+        assert!(kept.ends_with(".mp4"));
+        assert_eq!(std::fs::read(&kept).unwrap(), b"not really a video");
+        // The same file again is the same copy.
+        let again = import_image(&source, &directory.path().join("assets"), "/p", false).unwrap();
+        assert_eq!(kept, again);
+        // A video is never a logo.
+        assert!(import_image(&source, &directory.path().join("assets"), "/p", true).is_err());
+    }
+
+    #[test]
+    fn a_moving_background_is_kept_as_its_own_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = gif(directory.path(), 3, 80);
+        let kept = import_image(&source, &directory.path().join("assets"), "/p", false).unwrap();
+        assert!(kept.ends_with(".gif"));
+        assert_eq!(
+            std::fs::read(&kept).unwrap(),
+            std::fs::read(&source).unwrap()
+        );
+        assert!(is_animated(Path::new(&kept)));
+        // A logo is still one still picture.
+        let logo = import_image(&source, &directory.path().join("assets"), "/p", true).unwrap();
+        assert!(logo.ends_with(".png"));
+    }
     #[test]
     fn dither_matches_the_react_workers_palette_and_two_pixel_bayer_cells() {
         let source = RgbaImage::from_pixel(9, 9, image::Rgba([130, 180, 210, 127]));

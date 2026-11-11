@@ -6,7 +6,9 @@ use std::{
 
 pub fn png(url: &str) -> Result<Vec<u8>, String> {
     let parsed = url::Url::parse(url).map_err(|_| "Invalid avatar URL".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
+    // Public pictures over https only: a plain-http one could be swapped on
+    // the way, and nothing here needs one.
+    if parsed.scheme() != "https" {
         return Err("Invalid avatar URL".into());
     }
     let response = monobot_http::agent()

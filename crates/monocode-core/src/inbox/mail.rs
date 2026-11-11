@@ -1012,6 +1012,114 @@ pub fn by_day<'a>(messages: &[&'a Message], now: i64) -> Vec<(String, Vec<&'a Me
     groups
 }
 
+/// What heads a part of the inbox.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SectionKind {
+    /// Unread mail from people that triage marked as priority.
+    NeedsYou,
+    /// Everything else of one day.
+    Day,
+    /// Mail from lists (they say how to unsubscribe), together and last.
+    Newsletters,
+}
+
+/// One part of the inbox list, under its title.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Section<'a> {
+    pub kind: SectionKind,
+    pub title: String,
+    pub messages: Vec<&'a Message>,
+}
+
+/// Mail a list sent: it says how to unsubscribe.
+pub fn is_newsletter(message: &Message) -> bool {
+    message.unsubscribe.is_some()
+}
+
+/// The inbox in the order it is read: what needs the user first, then the
+/// rest by day, then the newsletters together. `heads` is newest first (one
+/// per conversation); each part keeps that order.
+pub fn inbox_sections<'a>(heads: &[&'a Message], now: i64) -> Vec<Section<'a>> {
+    let needs_you = |m: &Message| m.unread && m.triage == Triage::Priority && !is_newsletter(m);
+    let first: Vec<&Message> = heads.iter().copied().filter(|m| needs_you(m)).collect();
+    let rest: Vec<&Message> = heads
+        .iter()
+        .copied()
+        .filter(|m| !needs_you(m) && !is_newsletter(m))
+        .collect();
+    let lists: Vec<&Message> = heads.iter().copied().filter(|m| is_newsletter(m)).collect();
+    let mut sections = Vec::new();
+    if !first.is_empty() {
+        sections.push(Section {
+            kind: SectionKind::NeedsYou,
+            title: "Needs you".into(),
+            messages: first,
+        });
+    }
+    sections.extend(
+        by_day(&rest, now)
+            .into_iter()
+            .map(|(title, messages)| Section {
+                kind: SectionKind::Day,
+                title,
+                messages,
+            }),
+    );
+    if !lists.is_empty() {
+        sections.push(Section {
+            kind: SectionKind::Newsletters,
+            title: "Newsletters".into(),
+            messages: lists,
+        });
+    }
+    sections
+}
+
+/// The picture of whoever writes from `address`, as PNG bytes: their
+/// Gravatar, else their organisation's logo; none leaves the initial. Both
+/// answers, a picture or that there is none, are kept on disk for weeks, so
+/// opening the inbox asks the web only for new senders.
+pub fn sender_face(address: &str) -> Option<Vec<u8>> {
+    use sha2::Digest;
+    const KEEP_FOUND: std::time::Duration = std::time::Duration::from_secs(30 * 24 * 3600);
+    const KEEP_NONE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 3600);
+    let email = address.trim().to_lowercase();
+    let url = gravatar_url(&email, 64)?;
+    let key: String = sha2::Sha256::digest(email.as_bytes())
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    let file = cache_dir().join("mail-faces").join(key);
+    let kept = std::fs::metadata(&file)
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|at| at.elapsed().ok())
+        .and_then(|age| {
+            let bytes = std::fs::read(&file).ok()?;
+            let keep = if bytes.is_empty() {
+                KEEP_NONE
+            } else {
+                KEEP_FOUND
+            };
+            (age <= keep).then_some(bytes)
+        });
+    let gravatar = match kept {
+        Some(bytes) => (!bytes.is_empty()).then_some(bytes),
+        None => {
+            let found = crate::inbox::avatar::png(&url).ok();
+            if file
+                .parent()
+                .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+            {
+                let _ = std::fs::write(&file, found.as_deref().unwrap_or_default());
+            }
+            found
+        }
+    };
+    gravatar.or_else(|| logo(&email))
+}
+
 /// The time in a row: the hour today, else the day.
 pub fn row_time(at: i64, now: i64) -> String {
     let day = day_label(at, now);
@@ -1897,6 +2005,44 @@ mod tests {
             thread: String::new(),
             unsubscribe: None,
         }
+    }
+
+    #[test]
+    fn the_inbox_reads_what_needs_you_then_days_then_newsletters() {
+        let mut urgent = message("urgent");
+        urgent.triage = Triage::Priority;
+        urgent.at = now() - 7_200_000;
+        let mut read_urgent = message("read");
+        read_urgent.triage = Triage::Priority;
+        read_urgent.unread = false;
+        let mut list = message("list");
+        list.triage = Triage::Priority;
+        list.unsubscribe = Some(Unsubscribe {
+            link: "https://news.example/unsub".into(),
+            one_click: true,
+        });
+        let routine = message("routine");
+        let mut heads = vec![&list, &routine, &read_urgent, &urgent];
+        heads.sort_by_key(|m| std::cmp::Reverse(m.at));
+        let sections = inbox_sections(&heads, now());
+        let shape: Vec<(SectionKind, Vec<&str>)> = sections
+            .iter()
+            .map(|s| {
+                (
+                    s.kind.clone(),
+                    s.messages.iter().map(|m| m.id.as_str()).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (SectionKind::NeedsYou, vec!["urgent"]),
+                (SectionKind::Day, vec!["routine", "read"]),
+                (SectionKind::Newsletters, vec!["list"]),
+            ]
+        );
+        assert_eq!(sections[1].title, "Today");
     }
 
     fn all() -> Vec<Message> {

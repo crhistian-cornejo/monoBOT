@@ -229,6 +229,37 @@ fn rasterize(
         .map_err(|error| error.to_string())
 }
 
+/// Opens the diagram full window, where it zooms and pans: its SVG is laid
+/// out again off the interface thread, then rendered there at a size that
+/// keeps the text sharp up close.
+fn open_large(source: SharedString, dark: bool, window: &mut Window, cx: &mut App) {
+    let handle = window.window_handle();
+    let work = cx
+        .background_executor()
+        .spawn(async move { diagram_svg(&source, dark).map(|svg| (svg, source)) });
+    cx.spawn(async move |cx| {
+        let Ok(((svg, width, height), source)) = work.await else {
+            return;
+        };
+        let open = crate::image_lightbox::Open {
+            source: crate::image_lightbox::Source::Svg {
+                svg: svg.into(),
+                width,
+                height,
+            },
+            alt: format!(
+                "Mermaid diagram
+{source}"
+            )
+            .into(),
+        };
+        let _ = cx.update_window(handle, |_, window, cx| {
+            window.dispatch_action(Box::new(open), cx)
+        });
+    })
+    .detach();
+}
+
 fn source_preview(fence: &Arc<Fence>) -> Arc<Fence> {
     let mut end = fence.code.len().min(MAX_SOURCE_BYTES);
     if let Some(line) = fence.lines.get(MAX_SOURCE_LINES) {
@@ -309,6 +340,10 @@ impl RenderOnce for Diagram {
         };
         let copied = self.fence.code.clone();
         let copy_state = state.clone();
+        let dark = !is_light();
+        let expand_source = self.fence.code.clone();
+        let click_source = self.fence.code.clone();
+        let expandable = has_diagram && !show_source;
         div()
             .id(self.id)
             .w_full()
@@ -358,6 +393,16 @@ impl RenderOnce for Diagram {
                                 }),
                         )
                     })
+                    .when(expandable, |d| {
+                        d.child(
+                            icon_button("mermaid-expand", "Open full size", "maximize-2")
+                                .debug_selector(|| "mermaid-expand".into())
+                                .on_click(move |_, window, cx| {
+                                    open_large(expand_source.clone(), dark, window, cx);
+                                    cx.stop_propagation();
+                                }),
+                        )
+                    })
                     .child(
                         icon_button(
                             "mermaid-copy",
@@ -373,8 +418,18 @@ impl RenderOnce for Diagram {
             )
             .child(
                 div()
+                    .id("mermaid-panel")
                     .w_full()
                     .debug_selector(|| "mermaid-panel".into())
+                    // The drawing itself opens full size too.
+                    .when(expandable, |d| {
+                        d.cursor(gpui::CursorStyle::PointingHand)
+                            .tooltip(crate::theme::chrome_tip("Open full size", None))
+                            .on_click(move |_, window, cx| {
+                                open_large(click_source.clone(), dark, window, cx);
+                                cx.stop_propagation();
+                            })
+                    })
                     .when(ratio.is_some(), |d| d.py(px(PREVIEW_PADDING)))
                     .when(ratio.is_none(), |d| {
                         d.h(px(if show_source {

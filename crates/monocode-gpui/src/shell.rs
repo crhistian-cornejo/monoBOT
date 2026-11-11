@@ -1519,6 +1519,13 @@ impl Shell {
                 this.invalidate_chrome(cx);
                 cx.notify();
             }));
+        // Between SessionChanged events a turn's live step moves on with
+        // every streamed update; the notch follows it (debounced) rather
+        // than waiting for the 3 s clock.
+        self.observations.push(cx.subscribe(
+            &view,
+            |this, _, _: &crate::conversation::LiveProgress, cx| this.sync_notch(cx),
+        ));
         self.observations
             .push(cx.subscribe(&view, |this, _, transfer: &Transfer, cx| {
                 this.transfer_response(transfer.clone(), cx)

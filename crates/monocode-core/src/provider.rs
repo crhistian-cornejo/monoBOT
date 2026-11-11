@@ -59,6 +59,10 @@ pub use kind::Kind;
 
 const BATCH_BYTES: usize = 64 * 1024;
 const TICK: Duration = Duration::from_millis(16);
+/// How long a turn's loop waits for the provider with nothing to send. A
+/// stop, an approval or a steer is still seen within it; a quiet provider
+/// (a long tool, a model thinking) no longer wakes the loop 60 times a second.
+const IDLE_WAIT: Duration = Duration::from_millis(100);
 
 #[derive(Clone, Debug)]
 pub struct Request {
@@ -1877,7 +1881,13 @@ fn run_operation(
             if protocol.request.settings.text_only && started.elapsed() >= Duration::from_secs(45) {
                 return Err("Background text request timed out".into());
             }
-            match rx.recv_timeout(TICK) {
+            // Batched events go out within a tick; otherwise wait longer.
+            let wait = if pending.is_empty() && !interrupted {
+                IDLE_WAIT
+            } else {
+                TICK
+            };
+            match rx.recv_timeout(wait) {
                 Ok(Ok(line)) => {
                     let value: Value = match serde_json::from_slice(&line) {
                         Ok(value) => value,

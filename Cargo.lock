@@ -4393,6 +4393,7 @@ dependencies = [
  "url",
  "uuid",
  "webpki-roots 0.26.11",
+ "windows",
  "windows-sys 0.61.2",
  "zip 4.6.1",
  "zstd 0.14.3",
