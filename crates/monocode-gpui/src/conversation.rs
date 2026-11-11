@@ -2316,7 +2316,7 @@ impl Conversation {
                 .efforts
                 .iter()
                 .map(|effort| {
-                    MenuAction::new(format!("effort:{effort}"), effort_name(effort))
+                    MenuAction::effort(format!("effort:{effort}"), effort, effort_name(effort))
                         .checked(self.selected_effort() == Some(effort.as_str()))
                 })
                 .collect()

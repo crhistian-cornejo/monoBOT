@@ -9,6 +9,12 @@ pub(crate) const TEXT: u32 = 0xebebeb;
 pub(crate) const MUTED: u32 = 0x969696;
 /// Tauri's `--color-accent` default, Factory-inspired orange.
 pub(crate) const ACCENT: u32 = 0xef6f2e;
+/// The shimmer behind a strong reasoning effort in a model menu
+/// (`effort_tiles`): one colour per effort, the same in every theme.
+pub(crate) const TONE_ULTRA: u32 = 0xa855f7;
+pub(crate) const TONE_MAX: u32 = 0xf4b942;
+pub(crate) const TONE_ULTRACODE: u32 = 0x22d3ee;
+pub(crate) const TONE_ULTRATHINK: u32 = 0xec4899;
 pub(crate) const COLUMN: f32 = 832.;
 /// The transcript's side padding inside `COLUMN`: the docked composer's
 /// 10px inset, 1px border and 12px text padding, so prose lines up with the

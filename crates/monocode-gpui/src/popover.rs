@@ -854,6 +854,9 @@ pub(crate) struct MenuAction {
     pub keep_open: bool,
     pub submenu: Vec<MenuAction>,
     pub flyout: Option<Flyout>,
+    /// A shimmer in this colour behind the row while it is hovered or
+    /// highlighted: a strong reasoning effort (`effort_tiles`).
+    pub tiles: Option<Hsla>,
 }
 impl MenuAction {
     pub(crate) fn new(id: impl Into<SharedString>, label: impl Into<SharedString>) -> Self {
@@ -929,6 +932,16 @@ impl MenuAction {
     pub(crate) fn flyout(mut self, flyout: Flyout) -> Self {
         self.flyout = Some(flyout);
         self
+    }
+    /// A reasoning-effort row: it carries its tone's shimmer when it has one.
+    pub(crate) fn effort(
+        id: impl Into<SharedString>,
+        effort: &str,
+        label: impl Into<SharedString>,
+    ) -> Self {
+        let mut action = Self::new(id, label);
+        action.tiles = crate::effort_tiles::Tone::of(effort).map(|tone| tone.color());
+        action
     }
     fn opens(&self) -> bool {
         !self.disabled && (!self.submenu.is_empty() || self.flyout.is_some())
@@ -1388,6 +1401,24 @@ impl Menu {
             .when(filled && !action.disabled, |d| d.bg(fill))
             .when(!filled && !action.disabled, |d| d.hover(|s| s.bg(hover)))
             .when(!in_submenu, |d| d.child(self.rows[ix].probe()))
+            // First, so the row's own content paints over it.
+            .when_some(
+                action.tiles.filter(|_| highlighted && !action.disabled),
+                |d, color| {
+                    d.child(crate::effort_tiles::tiles(
+                        (
+                            if in_submenu {
+                                "submenu-tiles"
+                            } else {
+                                "menu-tiles"
+                            },
+                            ix,
+                        ),
+                        color,
+                        cx.reduce_motion(),
+                    ))
+                },
+            )
             .when_some(action.icon, |d, path| {
                 d.child(
                     icon(path, icon_size)
@@ -2027,6 +2058,51 @@ mod tests {
                 .size_full()
                 .child(menu_popover(&self.menu, Anchor::Point(self.anchor), cx))
         }
+    }
+
+    #[gpui::test]
+    fn a_strong_effort_row_shimmers_only_while_it_is_highlighted(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |window, cx| {
+                cx.new(|cx| MenuHost {
+                    menu: cx.new(|cx| {
+                        Menu::new(
+                            "Effort",
+                            vec![
+                                MenuAction::effort("effort:max", "max", "Max").into(),
+                                MenuAction::effort("effort:low", "low", "Low").into(),
+                            ],
+                            window,
+                            cx,
+                        )
+                    }),
+                    anchor: point(px(100.), px(100.)),
+                })
+            })
+            .unwrap()
+        });
+        let painted = |cx: &mut gpui::TestAppContext, active: usize| {
+            window
+                .update(cx, |host, _, cx| {
+                    host.menu.update(cx, |menu, cx| {
+                        menu.active = Some(active);
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            cx.refresh().unwrap();
+            window
+                .update(cx, |_, window, _| window.painted_quads().len())
+                .unwrap()
+        };
+        let on_low = painted(cx, 1);
+        let on_max = painted(cx, 0);
+        // The grid's tiles and their edges: far more than a row's own fill.
+        assert!(
+            on_max > on_low + 100,
+            "Max highlighted painted {on_max} quads, Low {on_low}"
+        );
     }
 
     #[gpui::test]

@@ -2983,7 +2983,7 @@ impl Monos {
                 .into(),
         ];
         items.extend(choice.efforts.iter().map(|(value, name)| {
-            MenuAction::new(format!("effort:{value}"), name.clone())
+            MenuAction::effort(format!("effort:{value}"), value, name.clone())
                 .checked(effort.as_deref() == Some(value.as_str()))
                 .into()
         }));

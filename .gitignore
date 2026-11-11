@@ -67,3 +67,6 @@ mobile/android/
 
 # Local document preview mockup
 /work/mono-document-preview.html
+
+# Cloned reference projects, not part of the app
+/Ref_projects/
