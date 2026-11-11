@@ -5,7 +5,7 @@ con la pantalla del simulador en vivo dentro de la app (o en el Simulator.app
 nativo), capturas, toques y lectura de la interfaz, como lo hace la pestaña Code
 de la app de escritorio de Claude.
 
-## Estado: fases 1 y 2 hechas (10 nov 2026)
+## Estado: fases 1, 2 y 3 hechas (10 nov 2026)
 
 El conector **iOS Simulator** (`ios_simulator`, solo macOS, experimental, apagado
 por defecto) se enciende en Ajustes › MCP. Con él, cada sesión de Claude, Codex o
@@ -51,6 +51,8 @@ Maestro o WebDriverAgent:
 - **Servidor**: HTTP mínimo solo en loopback (`NWListener`). Cada acción es un
   `POST`, con el token en `X-Monobot-Token`, y se ejecuta en el hilo principal,
   como exige XCUITest.
+- **Arranca en su propia sesión** (`setsid`). En un grupo de procesos propio
+  moría con el proceso que lo había arrancado.
 - **Un runner por dispositivo** sirve a todas las sesiones. El puerto y el token
   quedan en `simulator-runner/devices/<udid>.json` (modo 600). Se cierra solo
   tras 30 min sin peticiones o cuando el simulador se apaga. Si ya no responde,
@@ -206,11 +208,26 @@ inferencia, se dice.
 1. ~~**Agente sin panel**~~ **Hecha** (ver «Estado» arriba).
 2. ~~**Helper con entrada**~~ **Hecha, con XCUITest en lugar de idb** (ver «El
    runner de XCUITest»).
-3. **Panel en vivo en GPUI**: IOSurface compartido → `surface()`. Para la imagen
-   sigue haciendo falta un helper con SimulatorKit (o ScreenCaptureKit sobre la
-   ventana de Simulator.app). Los clics del usuario pueden ir al mismo runner de
-   XCUITest, aunque su segundo por toque resulta lento para la mano: puede hacer
-   falta un camino HID más directo solo para el panel.
+3. ~~**Panel en vivo en GPUI**~~ **Hecha, con fotogramas del runner.** Hay una
+   pestaña **Simulator** en el panel derecho (`simulator_pane.rs`), solo en Mac
+   y con el conector encendido. Muestra el simulador arrancado, o un botón
+   «Boot a simulator» si no hay ninguno.
+   - **Imagen**: la acción `screen` del runner (`XCUIScreen` a 2× los puntos,
+     JPEG). El core la decodifica a BGRA y la vista la pinta con `img`,
+     liberando el fotograma anterior. Solo pide fotogramas mientras la pestaña
+     está a la vista.
+   - **Entrada**: un clic toca, arrastrar desliza, teclear escribe (Intro,
+     borrar, tabulador, Esc y flechas como teclas). Todo pasa por una cola en
+     orden, y lo que se teclea mientras tanto se junta en un solo texto.
+   - La cabecera tiene Inicio y «Open in Simulator.app».
+   - **Medido**: el runner tarda unos 270 ms por captura, y `simctl io
+     screenshot` en JPEG tarda 440 ms. En la app optimizada salen 3–4 imágenes
+     por segundo. Para vídeo de verdad sigue haciendo falta el IOSurface del
+     framebuffer (SimulatorKit, como el helper de Claude) o ScreenCaptureKit
+     sobre Simulator.app; esa ventana es la vista rápida mientras tanto.
+   - **Sin probar a mano en la app**: se comprobaron por separado la conversión
+     de clics a puntos (tests), los fotogramas desde el core y que el runner
+     sigue vivo tras cerrar su proceso.
 4. **Extras**: grabar vídeo (H.264 → MP4), fotos y contactos con el bridge que
    corre dentro del simulador, ubicación, notificaciones push
    (`simctl push`), y un Xcode en otra máquina por SSH con H.264.

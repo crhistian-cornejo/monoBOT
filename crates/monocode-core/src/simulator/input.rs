@@ -334,12 +334,21 @@ fn start(udid: &str, key: &str) -> Result<Runner, String> {
         .stdin(Stdio::null())
         .stdout(log.try_clone().map_err(|e| e.to_string())?)
         .stderr(log);
-    // Its own process group: the runner outlives the agent session that
-    // started it and serves the next one, until it has been idle a while.
-    #[cfg(unix)]
+    // Its own session: the runner outlives the agent session that started
+    // it (in its own process group it still died with its parent) and
+    // serves the next one, until it has been idle a while.
+    #[cfg(target_os = "macos")]
     {
         use std::os::unix::process::CommandExt;
-        command.process_group(0);
+        // SAFETY: setsid is async-signal-safe and touches no memory.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
     }
     let mut child = command.spawn().map_err(|e| format!("xcodebuild: {e}"))?;
     let deadline = Instant::now() + Duration::from_secs(180);

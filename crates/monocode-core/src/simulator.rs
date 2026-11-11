@@ -308,20 +308,57 @@ pub fn boot(wanted: Option<&str>, open_app: bool) -> Result<Device, String> {
     .ok("simctl bootstatus")?;
     if open_app {
         // Showing the window is a convenience; the device works without it.
-        let _ = run(
-            OPEN,
-            &[
-                "-a",
-                "Simulator",
-                "--args",
-                "-CurrentDeviceUDID",
-                &device.udid,
-            ],
-            Duration::from_secs(30),
-        );
+        let _ = open_simulator_app(&device.udid);
     }
     device.state = "Booted".into();
     Ok(device)
+}
+
+/// Shows the device in Xcode's Simulator app.
+pub fn open_simulator_app(udid: &str) -> Result<(), String> {
+    run(
+        OPEN,
+        &["-a", "Simulator", "--args", "-CurrentDeviceUDID", udid],
+        Duration::from_secs(30),
+    )?
+    .ok("open Simulator")
+    .map(|_| ())
+}
+
+/// The first booted iOS device, if any.
+pub fn booted_device() -> Result<Option<Device>, String> {
+    Ok(devices()?.into_iter().find(Device::booted))
+}
+
+/// One frame for the live pane: the screen at twice its size in points, as
+/// BGRA pixels ready for a `RenderImage`, and that size in points.
+pub struct LiveFrame {
+    pub bgra: image::RgbaImage,
+    pub point_width: f32,
+    pub point_height: f32,
+}
+
+pub fn live_frame(udid: &str) -> Result<LiveFrame, String> {
+    use base64::Engine as _;
+    let (_, result) = act(
+        Some(udid),
+        "screen",
+        |_| serde_json::json!({"scale": 2, "quality": 0.7}),
+    )?;
+    let jpeg = base64::engine::general_purpose::STANDARD
+        .decode(result["jpeg"].as_str().ok_or("The runner sent no frame")?)
+        .map_err(|e| e.to_string())?;
+    let mut bgra = image::load_from_memory_with_format(&jpeg, image::ImageFormat::Jpeg)
+        .map_err(|e| format!("The frame could not be read: {e}"))?
+        .to_rgba8();
+    for pixel in bgra.pixels_mut() {
+        pixel.0.swap(0, 2);
+    }
+    Ok(LiveFrame {
+        bgra,
+        point_width: result["width"].as_f64().unwrap_or(0.0) as f32,
+        point_height: result["height"].as_f64().unwrap_or(0.0) as f32,
+    })
 }
 
 fn absolute<'a>(path: &'a str, what: &str) -> Result<&'a Path, String> {

@@ -141,6 +141,24 @@ final class Actions {
             let target = try app(body)
             let limit = body["max_lines"] as? Int ?? 600
             return ["text": Tree.render(try target.snapshot(), maxLines: max(20, min(limit, 3000)))]
+        case "screen":
+            // The live pane's frame: the screen at `scale` × its size in points.
+            let scale = max(1, min(number(body["scale"]) ?? 2, 3))
+            let quality = max(0.3, min(number(body["quality"]) ?? 0.7, 0.95))
+            // The image's size is in points; asking SpringBoard for the
+            // screen's frame would cost a third of a second per frame.
+            let shot = XCUIScreen.main.screenshot().image
+            let points = shot.size
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = scale
+            format.opaque = true
+            let frame = UIGraphicsImageRenderer(size: points, format: format).image { _ in
+                shot.draw(in: CGRect(origin: .zero, size: points))
+            }
+            guard let jpeg = frame.jpegData(compressionQuality: quality) else {
+                throw RunnerError("The screen could not be encoded")
+            }
+            return ["jpeg": jpeg.base64EncodedString(), "width": points.width, "height": points.height]
         case "stop":
             stopped = true
             return [:]

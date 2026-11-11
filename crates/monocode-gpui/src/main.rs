@@ -87,6 +87,7 @@ mod session_mark;
 mod session_review;
 mod settings;
 mod shell;
+mod simulator_pane;
 mod site_icons;
 mod sound;
 mod swarm;

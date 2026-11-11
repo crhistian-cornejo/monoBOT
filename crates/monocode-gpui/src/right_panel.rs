@@ -1,13 +1,15 @@
 //! Sidebar.tsx's inset `RightPanel`: the project tools beside the card, with
 //! reorderable Explorer / Changes / History tabs in the title bar, a
-//! Terminal tab when the terminal lives in the panel, and a trailing Swarm
-//! tab while the chat in view has an orchestration board.
+//! Terminal tab when the terminal lives in the panel, a trailing Swarm
+//! tab while the chat in view has an orchestration board, and a Simulator
+//! tab on a Mac while the iOS Simulator connector is on.
 use crate::{
     changes::Changes,
     explorer::Explorer,
     git_status::{GitChanged, ProjectGit},
     history::History,
     project_tabs::{TabLabel, TabReveal, tab_button},
+    simulator_pane::SimulatorPane,
     swarm::SwarmPanel,
     theme::*,
 };
@@ -70,6 +72,9 @@ pub(crate) enum RightTab {
     /// The board of the chat in view's swarm, while it has one. Always last
     /// and never part of the saved order.
     Swarm,
+    /// The booted iOS simulator, live, while its connector is on (macOS).
+    /// Never part of the saved order.
+    Simulator,
 }
 impl RightTab {
     fn label(self) -> &'static str {
@@ -79,6 +84,7 @@ impl RightTab {
             Self::Graph => "History",
             Self::Terminal => "Terminal",
             Self::Swarm => "Swarm",
+            Self::Simulator => "Simulator",
         }
     }
     /// loadRightPanelTabOrder: unique known tabs, the missing ones appended.
@@ -86,7 +92,11 @@ impl RightTab {
     pub(crate) fn normalize(order: &[RightTab]) -> Vec<RightTab> {
         let mut out = Vec::new();
         for tab in order.iter().chain(&[Self::Files, Self::Graph]) {
-            if !matches!(tab, Self::Terminal | Self::Changes | Self::Swarm) && !out.contains(tab) {
+            if !matches!(
+                tab,
+                Self::Terminal | Self::Changes | Self::Swarm | Self::Simulator
+            ) && !out.contains(tab)
+            {
                 out.push(*tab);
             }
         }
@@ -97,6 +107,20 @@ impl RightTab {
 pub(crate) enum PanelEvent {
     Tab(RightTab),
     Reordered(Vec<RightTab>),
+}
+
+/// Whether the Simulator tab is offered: on a Mac, with the iOS Simulator
+/// connector switched on in Settings › MCP. Reads the session defaults the
+/// app keeps in memory, no disk.
+fn simulator_tab() -> bool {
+    cfg!(target_os = "macos")
+        && monocode_core::connectors::connector(monocode_core::simulator::mcp::SERVER).is_some_and(
+            |connector| {
+                monocode_core::connectors::session_state()
+                    .0
+                    .is_enabled(connector)
+            },
+        )
 }
 
 /// Tool headers share the open-file tab bar's height and bottom rule.
@@ -266,6 +290,7 @@ pub(crate) struct RightPanel {
     /// Whether the Terminal tab follows the others; the shell draws its pane.
     terminal_tab: bool,
     pub(crate) swarm: Entity<SwarmPanel>,
+    simulator: Entity<SimulatorPane>,
     /// Whether the Swarm tab ends the strip.
     swarm_tab: bool,
     /// Classic reserves the title bar's height; rounded content starts at
@@ -297,6 +322,7 @@ impl RightPanel {
         let changes = cx.new(|cx| Changes::new(git.clone(), window, cx));
         let history = cx.new(|cx| History::new(git.clone(), window, cx));
         let swarm = cx.new(SwarmPanel::new);
+        let simulator = cx.new(SimulatorPane::new);
         let subscriptions = vec![
             cx.observe(&git, |_, _, cx| cx.notify()),
             cx.subscribe(&git, |_, _, _: &GitChanged, cx| cx.notify()),
@@ -313,6 +339,7 @@ impl RightPanel {
             changes,
             history,
             swarm,
+            simulator,
             swarm_tab: false,
             // The board that was in view may be gone; Explorer stands in.
             tab: if tab == RightTab::Swarm {
@@ -329,7 +356,7 @@ impl RightPanel {
             drag: None,
             reveal: None,
             skip_click: false,
-            tab_bounds: (0..5).map(|_| Default::default()).collect(),
+            tab_bounds: (0..6).map(|_| Default::default()).collect(),
             _subscriptions: subscriptions,
         }
     }
@@ -345,6 +372,9 @@ impl RightPanel {
         }
         if self.swarm_tab {
             tabs.push(RightTab::Swarm);
+        }
+        if simulator_tab() {
+            tabs.push(RightTab::Simulator);
         }
         tabs
     }
@@ -431,11 +461,15 @@ impl RightPanel {
         });
         self.swarm
             .update(cx, |s, cx| s.set_shown(shown && tab == RightTab::Swarm, cx));
+        let simulator = shown && tab == RightTab::Simulator && simulator_tab();
+        self.simulator
+            .update(cx, |s, cx| s.set_shown(simulator, cx));
     }
     pub(crate) fn focus_pane(&self, window: &mut Window, cx: &mut App) {
         let focus = match (self.shown, self.tab) {
             (true, RightTab::Files) => self.explorer.focus_handle(cx),
             (true, RightTab::Graph) => self.history.focus_handle(cx),
+            (true, RightTab::Simulator) => self.simulator.focus_handle(cx),
             _ => self.focus.clone(),
         };
         window.focus(&focus, cx);
@@ -477,8 +511,12 @@ impl RightPanel {
             .iter()
             .zip(&self.tab_bounds)
             .map(|(tab, slot)| {
-                slot.get()
-                    .filter(|_| !matches!(tab, RightTab::Terminal | RightTab::Swarm))
+                slot.get().filter(|_| {
+                    !matches!(
+                        tab,
+                        RightTab::Terminal | RightTab::Swarm | RightTab::Simulator
+                    )
+                })
             })
             .collect();
         if let Some(Some(own)) = bounds.get(from) {
@@ -553,6 +591,7 @@ impl RightPanel {
                     RightTab::Graph => ("right-panel-tab-History", "clock"),
                     RightTab::Terminal => ("right-panel-tab-Terminal", "terminal"),
                     RightTab::Swarm => ("right-panel-tab-Swarm", "users"),
+                    RightTab::Simulator => ("right-panel-tab-Simulator", "smart-phone"),
                 };
                 let unfolded = match progress {
                     Some((_, p)) if active => p,
@@ -651,6 +690,13 @@ impl Render for RightPanel {
                 .into_any_element(),
             RightTab::Swarm => self
                 .swarm
+                .clone()
+                .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
+                .into_any_element(),
+            RightTab::Simulator if simulator_tab() => self.simulator.clone().into_any_element(),
+            // The connector was switched off while its tab was open.
+            RightTab::Simulator => self
+                .explorer
                 .clone()
                 .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
                 .into_any_element(),
