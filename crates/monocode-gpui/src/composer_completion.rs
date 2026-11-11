@@ -79,7 +79,6 @@ impl Choice {
             Some("commit") => (GitAction::Commit.icon(), 0xfed7aa, 0xc2410c),
             Some("visualize") => return ("command-visualize", accent_color()),
             Some("goal") => return ("circle-dot", accent_color()),
-            Some("swarm") => return ("users", accent_color()),
             _ => {
                 return (
                     if self.insertion.starts_with("@note/") {
@@ -857,12 +856,12 @@ impl Completion {
                 (
                     "orchestrator",
                     "Orchestrator",
-                    "Plan and coordinate agent work",
+                    "Review and edit a plan, then run agents",
                 ),
                 (
                     "swarm",
                     "Swarm",
-                    "Launch agents that work in parallel on a live board",
+                    "Agents start at once and talk on a live board",
                 ),
                 ("operator", "Operator", "Give this thread access to monoBOT"),
                 ("plan", "Plan mode", "Review a plan before building"),

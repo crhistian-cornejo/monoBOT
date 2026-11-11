@@ -13,6 +13,7 @@ pub(crate) enum Command {
     Plan,
     Operator,
     Orchestrator,
+    Swarm,
 }
 impl Command {
     pub(crate) fn from_name(name: &str) -> Option<Self> {
@@ -21,6 +22,7 @@ impl Command {
             "plan" => Some(Self::Plan),
             "operator" => Some(Self::Operator),
             "orchestrator" => Some(Self::Orchestrator),
+            "swarm" => Some(Self::Swarm),
             _ => None,
         }
     }
@@ -30,6 +32,7 @@ impl Command {
             Self::Plan => "plan",
             Self::Operator => "operator",
             Self::Orchestrator => "orchestrator",
+            Self::Swarm => "swarm",
         }
     }
     pub(crate) fn icon(self) -> &'static str {
@@ -38,6 +41,8 @@ impl Command {
             Self::Plan => "ai-idea",
             Self::Operator => "cursor-magic",
             Self::Orchestrator => "share",
+            // The same glyph as the Swarm tab that shows its board.
+            Self::Swarm => "users",
         }
     }
     pub(crate) fn color(self) -> Hsla {
@@ -53,6 +58,9 @@ impl Command {
             (Self::Operator, false) => 0x0069a8,
             (Self::Orchestrator, true) => 0xf6cfff,
             (Self::Orchestrator, false) => 0xa800b7,
+            // Lime: no other composer command uses it.
+            (Self::Swarm, true) => 0xd8f999,
+            (Self::Swarm, false) => 0x497d00,
         })
         .into();
         if dark {

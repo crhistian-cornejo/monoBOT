@@ -100,6 +100,10 @@ impl Conversation {
         });
         self.completion
             .update(cx, |completion, cx| completion.dismiss(cx));
+        // The swarm replaces any mode picked for this draft; leaving one on
+        // would make the next message start a plan card or a plan turn.
+        self.follow_ups.draft_selected = false;
+        self.clear_submitted_mode(cx);
         self.status = "Starting the swarm…".into();
         cx.emit(composer_features::StartSwarm {
             request: request.to_owned(),

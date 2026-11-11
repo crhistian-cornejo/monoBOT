@@ -55,7 +55,10 @@ const COMMANDS: [(Command, &str); 4] = [
         Command::Operator,
         "Give this thread access to monoBOT sessions, folders, and notes.",
     ),
-    (Command::Orchestrator, "Plan and coordinate agent work."),
+    (
+        Command::Orchestrator,
+        "Review and edit a plan, then run agents.",
+    ),
     (
         Command::Draft,
         "Save this message without starting the agent.",
@@ -441,7 +444,8 @@ impl QuickComposer {
     fn message(&self, cx: &App) -> String {
         let prompt = self.prompt(cx);
         match self.leading(cx) {
-            Some(Command::Operator) | None => prompt,
+            // `/swarm` is a command the new chat runs, not a mode to strip.
+            Some(Command::Operator | Command::Swarm) | None => prompt,
             Some(command) => prompt[command.name().len() + 1..].trim().to_owned(),
         }
     }

@@ -67,7 +67,7 @@ impl Conversation {
         cx.notify();
     }
     pub(crate) fn toggle_mode(&mut self, id: &str, cx: &mut Context<Self>) {
-        if self.is_remote() && matches!(id, "operator" | "orchestrator") {
+        if self.is_remote() && matches!(id, "operator" | "orchestrator" | "swarm") {
             self.status = "This mode is not available on remote projects.".into();
             cx.notify();
             return;
@@ -75,6 +75,10 @@ impl Conversation {
         if id != "draft" {
             self.follow_ups.draft_selected = false;
         }
+        // `/swarm` lives only in the text: it runs as a command on Send, so
+        // choosing it turns every composer mode off instead of adding one.
+        let swarm = id == "swarm"
+            && input::Command::leading(&self.input.read(cx).content) != Some(input::Command::Swarm);
         match id {
             "draft" => {
                 self.follow_ups.draft_selected = !self.follow_ups.draft_selected;
@@ -97,9 +101,16 @@ impl Conversation {
                 self.settings.plan = false;
                 self.settings.operator = false;
             }
+            "swarm" => {
+                self.settings.plan = false;
+                self.settings.operator = false;
+                self.settings.orchestrator = false;
+            }
             _ => return,
         }
-        let selected = if self.follow_ups.draft_selected {
+        let selected = if swarm {
+            Some("swarm")
+        } else if self.follow_ups.draft_selected {
             Some("draft")
         } else if self.settings.orchestrator {
             Some("orchestrator")

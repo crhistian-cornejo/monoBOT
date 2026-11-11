@@ -106,6 +106,7 @@ const ACCESS_MODES: &[(&str, &str, &str, &str)] = &[
 const YELLOW_300: u32 = 0xffdf20;
 const SKY_300: u32 = 0x74d4ff;
 const FUCHSIA_300: u32 = 0xf4a8ff;
+const LIME_300: u32 = 0xbbf451;
 const AMBER_400: u32 = 0xffb900;
 fn tint(color: u32, alpha: f32) -> gpui::Hsla {
     let mut c: gpui::Hsla = gpui::rgb(color).into();
@@ -2204,7 +2205,7 @@ impl Conversation {
                 "thinking" => {
                     self.settings.thinking = Some(!self.settings.thinking.unwrap_or(false))
                 }
-                "plan" | "operator" | "orchestrator" | "draft" => {
+                "plan" | "operator" | "orchestrator" | "swarm" | "draft" => {
                     self.toggle_mode(id, cx);
                     return;
                 }
@@ -2669,7 +2670,17 @@ impl Conversation {
                             .icon("share")
                             .icon_color(tint(FUCHSIA_300, 0.65))
                             .badge("v1")
-                            .description("Plan and coordinate agent work"),
+                            .description("Review and edit a plan, then run agents"),
+                        MenuAction::new("swarm", "Swarm")
+                            .disabled(
+                                self.is_remote()
+                                    || self.settings.mono.is_some()
+                                    || self.orchestration_progress.is_some()
+                                    || self.managed_by.is_some(),
+                            )
+                            .icon("users")
+                            .icon_color(tint(LIME_300, 0.8))
+                            .description("Agents start at once and talk on a live board"),
                         MenuAction::new("draft", "Draft")
                             .icon("circle-dashed-hi")
                             .description("Save this message without starting the agent")
@@ -2682,6 +2693,10 @@ impl Conversation {
                             "draft" => self.draft_active(cx),
                             "operator" => self.settings.operator,
                             "orchestrator" => self.settings.orchestrator,
+                            "swarm" => {
+                                input::Command::leading(&self.input.read(cx).content)
+                                    == Some(input::Command::Swarm)
+                            }
                             _ => false,
                         };
                         action.checked(checked).into()
@@ -4810,6 +4825,31 @@ mod menu_tests {
             .update(cx, |c, _, cx| {
                 assert!(!c.settings.operator);
                 assert_eq!(c.input.read(cx).content, "operator New draft");
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn swarm_replaces_the_composer_mode_instead_of_stacking_on_it(cx: &mut TestAppContext) {
+        let window = conversation(cx);
+        window
+            .update(cx, |c, _, cx| {
+                c.input.update(cx, |i, cx| i.set_text("Ship it".into(), cx));
+                c.toggle_mode("orchestrator", cx);
+                c.toggle_mode("swarm", cx);
+                assert_eq!(c.input.read(cx).content, "/swarm Ship it");
+                assert!(!c.settings.orchestrator && !c.settings.plan && !c.settings.operator);
+                assert_eq!(
+                    input::Command::leading(&c.input.read(cx).content),
+                    Some(input::Command::Swarm)
+                );
+                c.toggle_mode("plan", cx);
+                assert_eq!(c.input.read(cx).content, "/plan Ship it");
+                assert!(c.settings.plan);
+                c.toggle_mode("swarm", cx);
+                c.toggle_mode("swarm", cx);
+                assert_eq!(c.input.read(cx).content, "Ship it");
+                assert!(!c.settings.plan);
             })
             .unwrap();
     }
