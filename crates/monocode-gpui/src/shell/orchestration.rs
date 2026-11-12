@@ -74,6 +74,9 @@ impl Live {
 pub(super) struct Control {
     /// Saves (setting key, value) in order.
     saver: Option<async_channel::Sender<(String, String)>>,
+    /// Open the Swarm tab, and the panel or sidebar it is in, on the next
+    /// render, which has the window.
+    show_swarm: bool,
     next_waiter: u64,
     /// A lead whose agents open beside it on the next render.
     open_agents: Option<i64>,
@@ -164,7 +167,9 @@ impl Shell {
         if let Some(live) = self.orchestrations.get(&id) {
             let progress = live.run.progress();
             let paused = live.run.status == RunStatus::Paused;
+            let swarm = live.run.swarm;
             view.update(cx, |v, cx| {
+                v.set_orchestration_swarm(swarm, cx);
                 v.set_orchestration_paused(paused, cx);
                 v.set_orchestration_progress(Some(progress), cx);
             });
@@ -378,6 +383,9 @@ impl Shell {
         if let Some(lead) = self.orchestration_control.open_agents.take() {
             self.open_orchestration_agents(lead, window, cx);
         }
+        if std::mem::take(&mut self.orchestration_control.show_swarm) {
+            self.show_swarm(window, cx);
+        }
     }
 
     fn open_orchestration_agents(
@@ -400,6 +408,8 @@ impl Shell {
                 beside = worker;
             }
         }
+        // A swarm's board shows even before its coordinator delegates.
+        self.show_swarm(window, cx);
     }
 
     /// The rail's «Cancel task»: through the run when it is live, so the
@@ -897,6 +907,7 @@ impl Shell {
         let summary = live.run.summary();
         let progress = live.run.progress();
         let paused = live.run.status == RunStatus::Paused;
+        let swarm = live.run.swarm;
         let ended = matches!(live.run.status, RunStatus::Finished | RunStatus::Stopped);
         let workers: Vec<i64> = live.run.tasks.iter().filter_map(|t| t.session).collect();
         let report = ended
@@ -921,6 +932,7 @@ impl Shell {
         }
         if let Some(view) = self.sessions.get(&lead) {
             view.update(cx, |v, cx| {
+                v.set_orchestration_swarm(swarm, cx);
                 v.set_orchestration_paused(paused, cx);
                 v.set_orchestration_progress((!ended).then_some(progress), cx);
             });
@@ -2013,6 +2025,13 @@ impl Shell {
 
     /// A new swarm opens its tab beside the coordinator.
     fn reveal_swarm(&mut self, cx: &mut Context<Self>) {
+        self.orchestration_control.show_swarm = true;
+        cx.notify();
+    }
+
+    /// Show the board of the chat in view: the Swarm tab of the right panel,
+    /// opening the panel, or of the sidebar in Classic.
+    fn show_swarm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.sync_swarm(cx);
         let Some(panel) = self.right_panel.clone() else {
             return;
@@ -2032,6 +2051,7 @@ impl Shell {
             }
             return;
         }
+        self.set_right_panel_open(true, window, cx);
         panel.update(cx, |p, cx| {
             p.select(crate::right_panel::RightTab::Swarm, cx)
         });

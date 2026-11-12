@@ -52,7 +52,7 @@ impl ChangesShelf {
 
 impl Conversation {
     /// The turn's totals while the pill has something to show.
-    fn change_totals(&self, cx: &gpui::App) -> Option<(usize, i64, i64)> {
+    pub(super) fn change_totals(&self, cx: &gpui::App) -> Option<(usize, i64, i64)> {
         if self.busy || self.is_remote() || self.settings.worktree_removed {
             return None;
         }

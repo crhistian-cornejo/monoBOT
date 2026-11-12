@@ -511,6 +511,7 @@ fn main() {
             composer_completion::bind(cx);
             file_editor::bind(cx);
             conversation::find::bind(cx);
+            conversation::environment::bind(cx);
             popover::bind(cx);
             cx.set_prompt_builder(modal::prompt_builder);
             explorer::bind(cx);

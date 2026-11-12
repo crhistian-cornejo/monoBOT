@@ -163,6 +163,18 @@ impl Conversation {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn orchestration_is_swarm(&self) -> bool {
+        self.orchestration_swarm
+    }
+
+    pub(crate) fn set_orchestration_swarm(&mut self, swarm: bool, cx: &mut Context<Self>) {
+        if self.orchestration_swarm != swarm {
+            self.orchestration_swarm = swarm;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn set_orchestration_paused(&mut self, paused: bool, cx: &mut Context<Self>) {
         if self.orchestration_paused != paused {
             self.orchestration_paused = paused;
@@ -733,12 +745,28 @@ impl Conversation {
                     .flex()
                     .items_center()
                     .gap_2()
-                    .child(icon("share", 16.).text_color(accent_color().opacity(0.8)))
+                    .child(
+                        icon(
+                            if self.orchestration_swarm {
+                                "users"
+                            } else {
+                                "share"
+                            },
+                            16.,
+                        )
+                        .text_color(accent_color().opacity(0.8)),
+                    )
                     .child(
                         self.orchestration_plan
                             .as_ref()
                             .map(|p| p.title.clone())
-                            .unwrap_or_else(|| "Orchestrator".into()),
+                            .unwrap_or_else(|| {
+                                if self.orchestration_swarm {
+                                    "Swarm".into()
+                                } else {
+                                    "Orchestrator".into()
+                                }
+                            }),
                     ),
             );
         if planning && self.orchestration_progress.is_none() {
@@ -783,15 +811,31 @@ impl Conversation {
                         .max_h(px(200.))
                         .overflow_y_scroll()
                         .text_color(content(0.6))
-                        .child(progress.clone()),
+                        // A swarm's coordinator plans before it delegates.
+                        .child(if progress.is_empty() {
+                            "The coordinator is planning the work; its agents show here and on the board as it hands them out.".to_owned()
+                        } else {
+                            progress.clone()
+                        }),
                 )
                 .child(
                     div()
                         .flex()
                         .gap_2()
                         .child(
-                            tool_pill("open-orchestration-agents", "Open agents")
-                                .child("Open agents")
+                            tool_pill(
+                                "open-orchestration-agents",
+                                if self.orchestration_swarm {
+                                    "Open board"
+                                } else {
+                                    "Open agents"
+                                },
+                            )
+                            .child(if self.orchestration_swarm {
+                                "Open board"
+                            } else {
+                                "Open agents"
+                            })
                                 .on_click(
                                     cx.listener(|_, _, _, cx| cx.emit(OpenOrchestrationAgents)),
                                 ),

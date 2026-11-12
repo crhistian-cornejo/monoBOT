@@ -646,6 +646,9 @@ pub(crate) struct Shell {
     /// Chief's summaries waiting for the chat that handed it the work, by
     /// that chat; delivered once it is idle.
     chief_reports: HashMap<i64, Vec<String>>,
+    /// Each session's sidebar section when its mark was last drawn, to
+    /// rebuild the list when one moves.
+    sidebar_sections: HashMap<i64, monocode_core::session_groups::Section>,
     /// Sessions an /operator thread started, by the session that started them.
     started_by: HashMap<i64, i64>,
     /// The sidebar rails under orchestrators and /operator threads.
@@ -1080,6 +1083,7 @@ impl Shell {
             orchestration_control: Default::default(),
             orchestration_summaries: sidebar_metadata.orchestrations,
             chief_reports: sidebar_metadata.chief_reports,
+            sidebar_sections: HashMap::new(),
             started_by: sidebar_metadata.started_by,
             rails: Default::default(),
             usage_footer: cx.new(|cx| UsageFooter::new(active_kind, cx)),
@@ -1622,6 +1626,12 @@ impl Shell {
         let provider = session.summary.provider.clone();
         self.session_marks[&id].update(cx, |mark, cx| mark.set(&provider, state, cx));
         self.tab_marks[&id].update(cx, |mark, cx| mark.set(&provider, tab_state, cx));
+        // A session that starts or stops working, or is seen, changes section.
+        let section = self.sidebar_section(id, cx);
+        if self.sidebar_sections.insert(id, section) != Some(section) {
+            self.sidebar_list.invalidate_structure();
+            cx.notify();
+        }
     }
     fn toggle_archive(&mut self, id: i64, cx: &mut Context<Self>) {
         if !self.archiving.insert(id) {

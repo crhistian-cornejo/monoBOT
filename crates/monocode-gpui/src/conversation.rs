@@ -10,6 +10,7 @@ mod composer_shelf;
 #[cfg(test)]
 mod dictation_tests;
 mod edit_last_turn;
+pub(crate) mod environment;
 pub(crate) mod find;
 mod follow_up;
 pub(crate) mod git_actions;
@@ -163,6 +164,7 @@ pub(crate) struct Conversation {
     remote_state: remote::State,
     remote_plans: remote_plans::State,
     find: find::State,
+    environment: environment::Environment,
     store: Database,
     pub(crate) transcript: Entity<TranscriptView>,
     pub(crate) review: Entity<crate::session_review::SessionReview>,
@@ -199,6 +201,9 @@ pub(crate) struct Conversation {
     pub(crate) orchestration_progress: Option<String>,
     plan_card: Option<orchestration::PlanCard>,
     orchestration_paused: bool,
+    /// The run this chat leads is a swarm (or Chief's): its card says so and
+    /// opens the board.
+    orchestration_swarm: bool,
     /// The orchestration lead managing this worker.
     managed_by: Option<i64>,
     status: String,
@@ -677,6 +682,7 @@ impl Conversation {
             orchestration_progress: None,
             plan_card: None,
             orchestration_paused: false,
+            orchestration_swarm: false,
             managed_by: None,
             status: "Loading conversation…".into(),
             loaded: false,
@@ -756,6 +762,7 @@ impl Conversation {
             remote_state: remote::State::default(),
             remote_plans: remote_plans::State::default(),
             find: find::State::default(),
+            environment: Default::default(),
         }
     }
     pub(crate) fn reveal_search(&mut self, row: usize, query: String, cx: &mut Context<Self>) {
@@ -3367,6 +3374,9 @@ impl Conversation {
                             )
                         },
                     )
+                    .when(!draft && self.summary.has_messages, |d| {
+                        d.child(self.environment_button(cx))
+                    })
                     .when(show_context, |d| {
                         d.child(
                             div()
@@ -3380,6 +3390,10 @@ impl Conversation {
                                         .unwrap_or_default()
                                 ))
                                 .child(self.context_anchor.probe())
+                                .cursor_pointer()
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.toggle_environment(cx);
+                                }))
                                 .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
                                     this.context_hovered = *hovered;
                                     cx.notify();
@@ -3974,11 +3988,23 @@ impl Conversation {
             return self.empty(window, cx);
         }
         let body = self.attachment_drop_target("session-chat", cx);
+        let (pane_probe, room, environment) = self.environment_frame(window, cx);
         self.find_actions(body, cx)
             .relative()
+            // The chat gives the Environment frame its room, moving left.
+            .pr(px(room))
+            .child(pane_probe)
+            .children(environment)
+            .on_action(cx.listener(|this, _: &environment::Toggle, _, cx| {
+                this.toggle_environment(cx);
+            }))
             .capture_action(
                 cx.listener(|this, _: &crate::shell::DismissMenu, window, cx| {
                     if this.close_remote_plan(cx) {
+                        cx.stop_propagation();
+                        return;
+                    }
+                    if this.close_environment(cx) {
                         cx.stop_propagation();
                         return;
                     }

@@ -1,7 +1,7 @@
 //! Only construct and lay out sidebar cards near the viewport.
 use super::*;
 use gpui::{ListAlignment, ListState, list};
-use monocode_core::session_groups::Entry;
+use monocode_core::session_groups::{Entry, Section, sections};
 use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -268,6 +268,17 @@ impl Shell {
         self.sidebar_list.clear_bounds();
     }
 
+    /// Where a loose session sits: working (or waiting on the user), done
+    /// and unseen, or earlier.
+    pub(super) fn sidebar_section(&self, id: i64, cx: &App) -> Section {
+        let session = self.session_metadata(id, cx);
+        Section::of(
+            session.busy || self.busy_sessions.contains(&id),
+            session.needs_approval(),
+            self.unseen_finished.contains(&id),
+        )
+    }
+
     fn sidebar_scope(&self) -> String {
         format!(
             "{}\0{}\0{}\0{:?}\0{}\0{}\0{}",
@@ -287,7 +298,7 @@ impl Shell {
 
     pub(super) fn prepare_sidebar_list(&mut self, entries: &[Entry], cx: &App) {
         if self.workspace.classic_layout {
-            self.prepare_classic_sidebar_list(entries);
+            self.prepare_classic_sidebar_list(entries, cx);
             return;
         }
         if self.workspace.agents_zone {
@@ -355,20 +366,30 @@ impl Shell {
         }
         let mut previous = None;
         let mut first = true;
-        for entry in entries {
-            let Entry::Session(id) = entry else {
-                continue;
-            };
-            if self.rails.children.contains(id) {
-                continue;
+        let loose: Vec<i64> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Session(id) if !self.rails.children.contains(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        // As T3 Code: what works first, then what finished unseen, then the
+        // rest under its date.
+        for (section, ids) in sections(&loose, |id| self.sidebar_section(id, cx)) {
+            for id in ids {
+                let label = match section {
+                    Section::Earlier => {
+                        age_label(self.session_metadata(id, cx).summary.updated_at, now)
+                    }
+                    section => section.label(),
+                };
+                if previous != Some(label) {
+                    rows.push(Row::Heading { label, first });
+                    previous = Some(label);
+                    first = false;
+                }
+                rows.push(Row::Session(id));
             }
-            let label = age_label(self.session_metadata(*id, cx).summary.updated_at, now);
-            if previous != Some(label) {
-                rows.push(Row::Heading { label, first });
-                previous = Some(label);
-                first = false;
-            }
-            rows.push(Row::Session(*id));
         }
         if first {
             rows.push(Row::Heading {
@@ -382,16 +403,39 @@ impl Shell {
         self.sidebar_list.update(self.sidebar_scope(), rows);
     }
 
-    fn prepare_classic_sidebar_list(&mut self, entries: &[Entry]) {
+    fn prepare_classic_sidebar_list(&mut self, entries: &[Entry], cx: &App) {
         let groups = self.project_groups();
         // Original Sidebar.tsx: the list has p-1.5, gap-0.5 and pb-10.
         // Its project navigation and Mono roster belong to the first rail.
         let mut rows = vec![Row::ClassicGap(6)];
+        // Loose sessions under Working and Done first, as T3 Code; the rest
+        // keep their place.
+        let loose: Vec<i64> = entries
+            .iter()
+            .filter_map(|entry| match entry {
+                Entry::Session(id) => Some(*id),
+                _ => None,
+            })
+            .collect();
+        let [working, done, _] = sections(&loose, |id| self.sidebar_section(id, cx));
+        let lifted: HashSet<i64> = working.1.iter().chain(&done.1).copied().collect();
+        for (section, ids) in [working, done] {
+            if ids.is_empty() {
+                continue;
+            }
+            rows.push(Row::Heading {
+                label: section.label(),
+                first: false,
+            });
+            rows.extend(ids.into_iter().map(Row::Session));
+            rows.push(Row::ClassicGap(6));
+        }
         for (ix, entry) in entries.iter().enumerate() {
             if ix > 0 {
                 rows.push(Row::ClassicGap(2));
             }
             let (members, collapsed) = match entry {
+                Entry::Session(id) if lifted.contains(id) => continue,
                 Entry::Session(id) => {
                     rows.push(Row::Session(*id));
                     continue;
@@ -1662,6 +1706,61 @@ mod tests {
         window
             .update(visual, |shell, _, _| {
                 assert!(!shell.workspace.agents_zone);
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn working_and_unseen_sessions_sit_under_their_own_headings_in_both_layouts(
+        cx: &mut TestAppContext,
+    ) {
+        let (window, a, _) = super::super::tests::window(cx);
+        window
+            .update(cx, |shell, _, cx| {
+                let project = shell.workspace.project.clone();
+                shell.sessions[&a].update(cx, |s, _| s.summary.cwd = project.clone());
+                let heading = |rows: &[super::Row], label: &str| {
+                    rows.iter().position(
+                        |row| matches!(row, super::Row::Heading { label: l, .. } if *l == label),
+                    )
+                };
+                let session = |rows: &[super::Row], id: i64| {
+                    rows.iter().position(|row| *row == super::Row::Session(id))
+                };
+                for classic in [false, true] {
+                    shell.workspace.classic_layout = classic;
+                    shell.busy_sessions.clear();
+                    shell.unseen_finished.clear();
+                    shell.sidebar_list.invalidate_structure();
+                    shell.refresh_sidebar_structure(cx);
+                    let rows = shell.sidebar_list.rows.clone();
+                    assert!(heading(&rows, "Working").is_none(), "{rows:?}");
+
+                    let rebuilt = |shell: &mut Shell, cx: &mut Context<Shell>| {
+                        shell.sidebar_list.invalidate_structure();
+                        shell.refresh_sidebar_structure(cx);
+                        shell.sidebar_list.rows.clone()
+                    };
+                    shell.busy_sessions.insert(a);
+                    let rows = rebuilt(shell, cx);
+                    let working = heading(&rows, "Working").expect("a Working heading");
+                    assert!(working < session(&rows, a).unwrap(), "{rows:?}");
+                    assert!(heading(&rows, "Done").is_none(), "{rows:?}");
+
+                    shell.busy_sessions.clear();
+                    shell.unseen_finished.insert(a);
+                    let rows = rebuilt(shell, cx);
+                    let done = heading(&rows, "Done").expect("a Done heading");
+                    assert!(done < session(&rows, a).unwrap(), "{rows:?}");
+                    assert!(heading(&rows, "Working").is_none(), "{rows:?}");
+                    assert_eq!(
+                        rows.iter()
+                            .filter(|row| **row == super::Row::Session(a))
+                            .count(),
+                        1,
+                        "listed once: {rows:?}"
+                    );
+                }
             })
             .unwrap();
     }

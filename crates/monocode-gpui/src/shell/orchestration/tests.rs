@@ -910,3 +910,55 @@ fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut Test
         })
         .unwrap();
 }
+
+#[gpui::test]
+fn a_swarm_card_opens_its_board_before_any_agent_and_after_the_panel_closed(
+    cx: &mut TestAppContext,
+) {
+    let (window, lead, _dir) = shell(cx);
+    window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            let message = monocode_core::follow_up::Message {
+                id: "m1".into(),
+                text: "/swarm Migrate auth".into(),
+                ..Default::default()
+            };
+            shell.start_swarm(lead, "Migrate auth".into(), Vec::new(), message, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.refresh().unwrap();
+    window
+        .update(visual, |shell, window, cx| {
+            assert!(
+                shell.workspace.right_panel_open,
+                "a new swarm opens the panel"
+            );
+            assert!(
+                shell.sessions[&lead].read(cx).orchestration_is_swarm(),
+                "the card says Swarm, not Orchestrator"
+            );
+            // The user closes the panel and moves to another tab.
+            shell.set_right_panel_open(false, window, cx);
+            let panel = shell.right_panel.clone().unwrap();
+            panel.update(cx, |p, cx| {
+                p.select(crate::right_panel::RightTab::Files, cx)
+            });
+            // No agent yet: the card's button still shows the board.
+            shell.sessions[&lead].update(cx, |_, cx| {
+                cx.emit(crate::conversation::composer_features::OpenOrchestrationAgents)
+            });
+        })
+        .unwrap();
+    visual.run_until_parked();
+    visual.refresh().unwrap();
+    window
+        .update(visual, |shell, _, cx| {
+            assert!(shell.workspace.right_panel_open);
+            let panel = shell.right_panel.clone().unwrap();
+            assert_eq!(panel.read(cx).tab(), crate::right_panel::RightTab::Swarm);
+        })
+        .unwrap();
+}

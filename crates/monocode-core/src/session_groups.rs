@@ -133,6 +133,57 @@ impl Groups {
     }
 }
 
+/// Where a loose session sits in the sidebar, as T3 Code's sidebar: work
+/// under way first, then finished work the user has not opened yet, then
+/// the rest by date.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Section {
+    /// Its agent works, or waits on the user's approval or answer.
+    Working,
+    /// Its last turn finished while the user was elsewhere.
+    Done,
+    Earlier,
+}
+
+impl Section {
+    pub fn of(working: bool, needs_you: bool, unseen_finished: bool) -> Self {
+        if working || needs_you {
+            Self::Working
+        } else if unseen_finished {
+            Self::Done
+        } else {
+            Self::Earlier
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Working => "Working",
+            Self::Done => "Done",
+            Self::Earlier => "Earlier",
+        }
+    }
+}
+
+/// Loose sessions split into the sidebar's sections, each keeping the
+/// list's order.
+pub fn sections(ids: &[i64], section: impl Fn(i64) -> Section) -> [(Section, Vec<i64>); 3] {
+    let mut split = [
+        (Section::Working, Vec::new()),
+        (Section::Done, Vec::new()),
+        (Section::Earlier, Vec::new()),
+    ];
+    for &id in ids {
+        let at = match section(id) {
+            Section::Working => 0,
+            Section::Done => 1,
+            Section::Earlier => 2,
+        };
+        split[at].1.push(id);
+    }
+    split
+}
+
 /// The sidebar's entries, top to bottom: pinned, reminders, folders, then
 /// loose sessions. `visible` is already in the list's order.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -442,6 +493,22 @@ pub fn resolve_work_item(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn loose_sessions_split_into_working_then_done_then_the_rest() {
+        assert_eq!(Section::of(true, false, true), Section::Working);
+        assert_eq!(Section::of(false, true, false), Section::Working);
+        assert_eq!(Section::of(false, false, true), Section::Done);
+        assert_eq!(Section::of(false, false, false), Section::Earlier);
+        let section = |id: i64| match id {
+            2 | 5 => Section::Working,
+            3 => Section::Done,
+            _ => Section::Earlier,
+        };
+        let [working, done, earlier] = sections(&[1, 2, 3, 4, 5], section);
+        assert_eq!(working, (Section::Working, vec![2, 5]));
+        assert_eq!(done, (Section::Done, vec![3]));
+        assert_eq!(earlier, (Section::Earlier, vec![1, 4]));
+    }
     use super::*;
     use chrono::NaiveDate;
 

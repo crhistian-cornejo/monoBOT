@@ -154,6 +154,37 @@ Windows toasts show monoBOT's logo: at startup the app writes it to
 `IconUri` of its AppUserModelID (`dev.usemono.gpui`), which GPUI registers by
 name only.
 
+## Sidebar sections
+
+Loose sessions in the code sidebar are grouped as T3 Code groups them:
+**Working** first (the agent works or waits on the user's approval or answer),
+then **Done** (its turn finished while the user was elsewhere and it has not
+been opened), then the rest under their dates in Focused, or in their usual
+place in Classic. Pins, reminders and folders keep their places. A session
+moves when its mark changes (`Section` in `monocode-core/src/session_groups.rs`,
+`sidebar_section` in `shell/sidebar_list.rs`).
+
+## Environment
+
+**Environment** is a frame that floats beside the chat in view, as IVY's
+«Entorno» card does (`conversation/environment.rs`). Cmd/Ctrl+I, the
+Environment button at the end of the composer's bar or a click on the context
+ring toggles it; Esc closes it. It slides in from the pane's edge (drawn in
+place under reduced motion) and has three sections, each folding under its
+title with a summary:
+
+- **Workspace:** the local folder or worktree, its path on hover, and Show
+  in Finder/Explorer.
+- **Version control:** the branch, which opens the branch picker, and the
+  turn's changes (`+added −removed`), which open the diff.
+- **Context:** the tokens used of the window, the share and a bar that turns
+  amber at 80% and red at 95%, and Compact the conversation.
+
+Where it goes is IVY's `sessionRoom`, ported as `environment::room`: in the
+chat's margin when the margin fits it (the chat stays put); otherwise beside
+the chat, which moves left by the frame's width while it keeps 520 px; in a
+narrow pane, over the chat.
+
 ## Subagents and background work in the chat
 
 A reply's subagents (Claude's Task tool, Codex's agents) list under it, one

@@ -188,6 +188,18 @@ flowchart TD
   entrega como turno interno cuando ese chat está libre, nunca encima de un
   turno o un borrador del usuario.
 
+## Arreglos del 12 de noviembre
+
+- La tarjeta de un run de swarm (o de Chief) dice **Swarm**, no
+  «Orchestrator», y mientras el coordinador planifica explica que los agentes
+  aparecen al delegar, en vez de quedar vacía.
+- **Open board** (antes «Open agents») abre la pestaña Swarm aunque todavía no
+  haya workers y aunque el usuario haya cerrado el panel: en Focused abre el
+  panel derecho, en Classic la barra lateral. Arrancar un swarm también abre el
+  panel en el siguiente render, que es el que tiene la ventana.
+- El coordinador y Chief leen solo lo necesario para repartir (unos archivos,
+  un par de minutos) y delegan enseguida; cada worker lee lo que su parte pide.
+
 ## Estado
 
 | Pieza | Estado |
