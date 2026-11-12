@@ -1,7 +1,12 @@
-# monoBOT 0.0.6
+# monoBOT 0.0.7
 
 ## What's new
 
+- **Gemini 4 Hydrogen.** Google's newly released high-efficiency frontier reasoning model
+  is now integrated with the Antigravity provider (`antigravity:gemini-4-hydrogen`).
+  It features 4 reasoning effort levels: **Low**, **Medium**, **High** (default), and
+  **Extra High (`xhigh`)**, with dynamic thinking depth scaling and up to a 1M token context
+  window for complex agentic coding workflows.
 - **Environment beside the chat.** Press Ctrl+I (Cmd+I on a Mac), click the
   new button at the end of the composer's bar or the context ring: a floating
   frame shows where the chat works (local folder or worktree), its branch,

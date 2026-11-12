@@ -201,6 +201,27 @@ export const MODELS: AgentModel[] = [
     nativeId: "",
   },
   {
+    id: "antigravity:gemini-4-hydrogen",
+    harness: "antigravity",
+    name: "Gemini 4 Hydrogen",
+    nativeId: "gemini-4-hydrogen",
+    contextWindow: 1_000_000,
+    settings: [
+      {
+        id: "effort",
+        label: "Reasoning",
+        kind: "select",
+        value: "high",
+        options: [
+          { value: "xhigh", label: "Extra High" },
+          { value: "high", label: "High" },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+      },
+    ],
+  },
+  {
     id: "antigravity:gemini-3.8-flash-high",
     harness: "antigravity",
     name: "Gemini 3.8 Flash (High)",
@@ -231,7 +252,7 @@ export const DEFAULT_MODEL_ID: Record<HarnessId, string> = {
   omp: "omp:default",
   fx: "fx:zai/glm-5.2-fast",
   hermes: "hermes:default",
-  antigravity: "antigravity:gemini-3.8-flash-high",
+  antigravity: "antigravity:gemini-4-hydrogen",
   devin: "devin:adaptive",
   droid: "droid:auto",
 };

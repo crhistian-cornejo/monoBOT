@@ -372,6 +372,20 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
             }
         }
     }
+    if kind == Kind::Antigravity && !models.iter().any(|m| m.id == "gemini-4-hydrogen") {
+        models.insert(0, Model {
+            id: "gemini-4-hydrogen".into(),
+            name: "Gemini 4 Hydrogen".into(),
+            alias_target: None,
+            efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
+            default_effort: Some("high".into()),
+            fast: false,
+            thinking: true,
+            default: true,
+            tiers: Vec::new(),
+            controls: Vec::new(),
+        });
+    }
     if models.is_empty() {
         if kind == Kind::Droid {
             models.push(Model {
@@ -383,6 +397,31 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
                 fast: false,
                 thinking: true,
                 default: true,
+                tiers: Vec::new(),
+                controls: Vec::new(),
+            });
+        } else if kind == Kind::Antigravity {
+            models.push(Model {
+                id: "gemini-4-hydrogen".into(),
+                name: "Gemini 4 Hydrogen".into(),
+                alias_target: None,
+                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
+                default_effort: Some("high".into()),
+                fast: false,
+                thinking: true,
+                default: true,
+                tiers: Vec::new(),
+                controls: Vec::new(),
+            });
+            models.push(Model {
+                id: "gemini-3.8-flash-high".into(),
+                name: "Gemini 3.8 Flash (High)".into(),
+                alias_target: None,
+                efforts: Vec::new(),
+                default_effort: None,
+                fast: false,
+                thinking: false,
+                default: false,
                 tiers: Vec::new(),
                 controls: Vec::new(),
             });
@@ -533,6 +572,11 @@ fn acp_models(value: &Value) -> Vec<Model> {
                 .and_then(|o| o["currentValue"].as_str())
                 .map(str::to_owned)
                 .or(model.default_effort);
+            if model.efforts.is_empty() && (id == "gemini-4-hydrogen" || id.ends_with(":gemini-4-hydrogen")) {
+                model.efforts = vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()];
+                model.default_effort = Some("high".into());
+                model.thinking = true;
+            }
             model.fast = configs
                 .iter()
                 .chain(row_config.iter())
@@ -1018,5 +1062,20 @@ mod tests {
         assert_eq!(rows[0].efforts, vec!["low", "high", "max"]);
         assert_eq!(rows[1].id, "kimi-code/k3-256k");
         assert_eq!(rows[1].efforts, vec!["low", "high", "max"]);
+    }
+    #[test]
+    fn antigravity_gemini_4_hydrogen_has_four_effort_levels() {
+        let rows = acp_models(&json!({
+            "models": {
+                "availableModels": [
+                    {"modelId": "gemini-4-hydrogen", "name": "Gemini 4 Hydrogen"}
+                ]
+            }
+        }));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "gemini-4-hydrogen");
+        assert_eq!(rows[0].efforts, vec!["low", "medium", "high", "xhigh"]);
+        assert_eq!(rows[0].default_effort.as_deref(), Some("high"));
+        assert!(rows[0].thinking);
     }
 }

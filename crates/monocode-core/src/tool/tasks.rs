@@ -443,6 +443,7 @@ fn desktop_model_name(id: &str) -> Option<&'static str> {
         "pi:default" | "omp:default" => "Default",
         "fx:zai/glm-5.2-fast" | "zai/glm-5.2-fast" => "GLM 5.2 Fast",
         "hermes:default" => "Configured model",
+        "antigravity:gemini-4-hydrogen" | "gemini-4-hydrogen" => "Gemini 4 Hydrogen",
         "antigravity:gemini-3.8-flash-high" | "gemini-3.8-flash-high" => "Gemini 3.8 Flash (High)",
         "devin:adaptive" | "adaptive" => "Adaptive",
         _ => return None,
