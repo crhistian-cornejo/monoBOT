@@ -4274,7 +4274,7 @@ dependencies = [
 
 [[package]]
 name = "monobot-dictation"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bzip2 0.4.4",
  "cpal",
@@ -4295,7 +4295,7 @@ dependencies = [
 
 [[package]]
 name = "monobot-email"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "ammonia",
  "base64 0.23.1",
@@ -4312,7 +4312,7 @@ dependencies = [
 
 [[package]]
 name = "monobot-http"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "rustls",
  "rustls-platform-verifier",
@@ -4321,7 +4321,7 @@ dependencies = [
 
 [[package]]
 name = "monobot-live"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "base64 0.22.1",
  "serde_json",
@@ -4330,11 +4330,11 @@ dependencies = [
 
 [[package]]
 name = "monobot-persona"
-version = "0.0.5"
+version = "0.0.6"
 
 [[package]]
 name = "monobot-voice"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "bzip2 0.5.2",
  "cpal",
@@ -4347,7 +4347,7 @@ dependencies = [
 
 [[package]]
 name = "monocode-core"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "async-channel",
  "base64 0.22.1",
@@ -4401,7 +4401,7 @@ dependencies = [
 
 [[package]]
 name = "monocode-gpui"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "alacritty_terminal",
  "async-channel",

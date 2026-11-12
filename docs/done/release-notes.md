@@ -1,25 +1,23 @@
-# monoBOT 0.0.5
+# monoBOT 0.0.6
 
 ## What's new
 
-- **Hand big tasks to your monos.** A Claude chat can pass a large task that
-  splits into parallel parts to **Chief**, a mono that coordinates your code
-  monos in its own chat. Each part goes to a mono with its own chat and
-  worktree, where you see its changes; Chief reviews their work into your
-  checkout and sends the chat one summary when it is done. The monos stay
-  with you as agents and are reused for later tasks. Chief and the monos run
-  Claude Opus 5.5 at medium effort. The Swarm tab shows Chief and every mono
-  with its face. Turn it off in Settings › Chat › **Let Claude hand work to
-  your monos**.
-- **Subagents read at a glance.** Each subagent in a reply shows the working
-  spinner, a check once it is done or a red cross if it failed, and under its
-  title its latest step or the first line of its report. Subagents no longer
-  wear the faces that belong to your own agents.
-- **Background work sits in the chat.** Commands and subagents still running
-  after a reply show in a card under it, instead of over the message box.
-- **Stay signed in after an update.** On Windows, updating or quitting
-  monoBOT no longer signs Claude Code or Codex out: the app lets each CLI
-  finish saving its renewed sign-in before it closes it.
+- **Environment beside the chat.** Press Ctrl+I (Cmd+I on a Mac), click the
+  new button at the end of the composer's bar or the context ring: a floating
+  frame shows where the chat works (local folder or worktree), its branch,
+  which opens the branch picker, the turn's changes, which open the diff, and
+  how full the context window is, with a bar that turns amber, then red, and
+  a button to compact. It sits in the chat's margin when there is room, moves
+  the chat left when there isn't, and Esc closes it.
+- **Sessions sorted by what they are doing.** The code sidebar now lists
+  sessions whose agent is working, or waiting on you, under **Working**, then
+  the ones that finished while you were away under **Done**, then the rest.
+- **Swarm boards open when you ask.** A swarm's card says **Swarm** and
+  explains that the coordinator is planning; **Open board** opens the Swarm
+  tab even before any agent starts and after you closed the panel, and a new
+  swarm opens it by itself. Coordinators (and Chief) now split the work and
+  delegate after a short look at the code, instead of reading the whole
+  project first.
 
 ## Updates
 
