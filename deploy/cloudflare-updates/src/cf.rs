@@ -48,7 +48,7 @@ async fn object(bucket: &Bucket, key: &str, head: bool, cache: &str) -> Result<R
         pairs.push(("Content-Disposition", attachment));
     }
     let response = match found.body() {
-        Some(body) if !head => Response::from_stream(body.stream()?)?,
+        Some(body) if !head => Response::from_body(body.response_body()?)?,
         _ => Response::empty()?,
     };
     Ok(response.with_headers(headers(&pairs)?))
