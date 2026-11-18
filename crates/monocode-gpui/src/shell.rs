@@ -723,6 +723,10 @@ pub(crate) struct Shell {
     /// shows each as finished for a while, so its notice goes up.
     notch_agents_done: std::collections::HashMap<i64, u64>,
     unseen_finished: HashSet<i64>,
+    /// When each working thread was first seen working, for the live timer
+    /// in its row; and the tick that redraws those rows once a second.
+    working_since: HashMap<i64, std::time::Instant>,
+    working_tick: Option<gpui::Task<()>>,
     archiving: HashSet<i64>,
     archive_shortcut_held: bool,
     /// Editors offered by a project's "Open in editor"; `None` while scanning.
@@ -1132,6 +1136,8 @@ impl Shell {
             notch_hooks: None,
             notch_agents_done: Default::default(),
             unseen_finished: HashSet::new(),
+            working_since: HashMap::new(),
+            working_tick: None,
             archiving: HashSet::new(),
             archive_shortcut_held: false,
             external_editors: None,
@@ -1729,6 +1735,35 @@ impl Shell {
             });
         })
         .detach();
+    }
+    /// Note when each open thread started working and keep a one-second tick
+    /// redrawing the sidebar while any does, for the rows' live timers.
+    fn track_working(&mut self, cx: &mut Context<Self>) {
+        let now = std::time::Instant::now();
+        let working: Vec<i64> = self
+            .sessions
+            .iter()
+            .filter(|(_, view)| view.read(cx).responding())
+            .map(|(id, _)| *id)
+            .collect();
+        self.working_since.retain(|id, _| working.contains(id));
+        for id in working {
+            self.working_since.entry(id).or_insert(now);
+        }
+        if self.working_since.is_empty() {
+            self.working_tick = None;
+        } else if self.working_tick.is_none() && !cx.is_test() {
+            self.working_tick = Some(cx.spawn(async move |this, cx| {
+                loop {
+                    cx.background_executor()
+                        .timer(std::time::Duration::from_secs(1))
+                        .await;
+                    let Ok(()) = this.update(cx, |this, cx| this.notify_sidebar(cx)) else {
+                        break;
+                    };
+                }
+            }));
+        }
     }
     fn notify_sidebar(&self, cx: &mut Context<Self>) {
         self.sidebar_list.invalidate_structure();
@@ -6969,13 +7004,21 @@ impl Shell {
                     .when(detailed, |d| d.child("Needs approval"))
                     .into_any()
             } else if detailed && session.responding() {
+                // As T3 Code's: how long it has been working, live.
+                let elapsed = self
+                    .working_since
+                    .get(&id)
+                    .map(|since| since.elapsed())
+                    .unwrap_or_default();
                 div()
+                    .debug_selector(move || format!("session-timer-{id}"))
                     .flex()
                     .items_center()
                     .gap_1()
                     .text_color(content(0.5))
+                    .font_features(crate::right_panel::tabular())
                     .children(self.session_marks.get(&id).cloned())
-                    .child("Working…")
+                    .child(working_clock(elapsed))
                     .into_any()
             } else if detailed && self.unseen_finished.contains(&id) {
                 div()
@@ -7173,6 +7216,7 @@ impl Shell {
         if self.workspace.classic_layout {
             return self.classic_sidebar(cx);
         }
+        self.track_working(cx);
         self.refresh_sidebar_structure(cx);
         let live_agents = self.live_agents_preview(cx);
         div()
@@ -13780,4 +13824,25 @@ mod tests {
             before.2
         );
     }
+}
+
+/// A working thread's live time: "0:42", "12:05", "1:02:09".
+fn working_clock(elapsed: std::time::Duration) -> String {
+    let seconds = elapsed.as_secs();
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn a_working_threads_timer_reads_minutes_then_hours() {
+    use std::time::Duration;
+    assert_eq!(working_clock(Duration::from_secs(0)), "0:00");
+    assert_eq!(working_clock(Duration::from_secs(42)), "0:42");
+    assert_eq!(working_clock(Duration::from_secs(725)), "12:05");
+    assert_eq!(working_clock(Duration::from_secs(3729)), "1:02:09");
 }

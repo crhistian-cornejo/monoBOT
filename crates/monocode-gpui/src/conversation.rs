@@ -4149,17 +4149,15 @@ fn tool_pill(id: &'static str, label: &'static str) -> gpui::Stateful<gpui::Div>
         .relative()
         .flex_shrink_0()
         .h(px(26.))
-        .px(px(6.))
-        .rounded_md()
+        .px(px(7.))
+        .rounded(px(7.))
         .flex()
         .items_center()
         .gap_1()
-        // Tauri's composer controls are outlined boxes, not filled pills:
-        // a 14% hairline, filled only on hover.
-        .border_1()
-        .border_color(content(0.14))
-        .text_color(content(1.))
-        .hover(|s| s.bg(content(0.06)))
+        // As Capy's: no frame at rest, so the field reads first; a fill
+        // shows what is under the pointer.
+        .text_color(content(0.85))
+        .hover(|s| s.bg(content(0.08)).text_color(content(1.)))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
 }
 /// `[data-composer-box]::before`: the frosted (or, in light themes, solid)
