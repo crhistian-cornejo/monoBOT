@@ -1669,6 +1669,61 @@ fn a_failed_queued_message_does_not_hold_back_the_next(cx: &mut TestAppContext) 
 }
 
 #[gpui::test]
+fn a_message_that_reached_the_agent_and_failed_shows_once(cx: &mut TestAppContext) {
+    use monocode_core::transcript::Row;
+    let s = setup(cx);
+    let id = mono::new_id();
+    let sent_at = Some(1_795_032_298_739);
+    cx.update(|cx| {
+        s.manager.update(cx, |m, cx| {
+            // Its turn ran: the chat holds the message and the model's error.
+            m.chats[&s.id].update(cx, |chat, cx| {
+                chat.mono_append(
+                    vec![
+                        Row {
+                            role: "user".into(),
+                            text: "HOLA".into(),
+                            first: true,
+                            sent_at,
+                        },
+                        Row {
+                            role: "error".into(),
+                            text: "The model is not supported.".into(),
+                            first: true,
+                            sent_at: None,
+                        },
+                    ],
+                    cx,
+                );
+            });
+            // Saved as "Not sent" too, as before the fix.
+            m.roster.get_mut(&s.id).unwrap().outbox.push(Message {
+                id: id.clone(),
+                text: "HOLA".into(),
+                sent_at,
+                internal: false,
+                error: Some("The model is not supported.".into()),
+                attachments: Vec::new(),
+            });
+            m.save(cx);
+            m.dispatch(&s.id, cx);
+        })
+    });
+    cx.run_until_parked();
+    s.manager.read_with(cx, |m, _| {
+        assert!(
+            !m.roster
+                .get(&s.id)
+                .unwrap()
+                .outbox
+                .iter()
+                .any(|message| message.id == id),
+            "it was sent; only the chat's error row remains"
+        );
+    });
+}
+
+#[gpui::test]
 fn chat_composer_matches_tauri_and_opens_the_model_list(cx: &mut TestAppContext) {
     let s = setup(cx);
     cx.update(|cx| cx.set_reduce_motion(true));

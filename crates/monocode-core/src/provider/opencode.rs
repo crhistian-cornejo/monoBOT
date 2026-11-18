@@ -349,6 +349,8 @@ fn connect(
         _account: account,
     };
     let started = Instant::now();
+    // When the server first reported its URL.
+    let mut listening: Option<Instant> = None;
     loop {
         if cancel.load(Ordering::Relaxed) {
             return Err("Stopped".into());
@@ -364,8 +366,14 @@ fn connect(
             }
             _ => {}
         }
-        // v2 prints its password after the URL and refuses requests without it.
-        if !server.url.is_empty() && (!v2 || server.password.is_some()) {
+        // v2 prints its password right after the URL and refuses requests
+        // without it; one that prints none (a password set by the user's
+        // own environment, say) goes on without after a moment.
+        if listening.is_none() && !server.url.is_empty() {
+            listening = Some(Instant::now());
+        }
+        let password_late = listening.is_some_and(|at| at.elapsed() >= Duration::from_secs(3));
+        if !server.url.is_empty() && (!v2 || server.password.is_some() || password_late) {
             let client = Client::new(server.url.clone(), directory, v2, server.password.clone());
             return Ok((client, Some(server)));
         }

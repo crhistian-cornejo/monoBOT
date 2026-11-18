@@ -59,13 +59,16 @@ pub(crate) fn engine(cx: &App) -> Arc<dyn Engine> {
 }
 
 /// The app downloads the speech model on its own the first time it runs, in
-/// the background, so dictation works when the user first reaches for the
-/// mic. Once it is there it stays on disk until the first dictation loads it.
+/// the background, and loads it, so dictation works at once when the user
+/// first reaches for the mic. Tests never touch the real model: loading it
+/// would hold the recognizer while a test's own dictation waits.
 pub(crate) fn init(cx: &mut App) {
-    let engine = engine(cx);
-    cx.background_executor()
-        .spawn(async move { engine.prepare() })
-        .detach();
+    if !cx.is_test() {
+        let engine = engine(cx);
+        cx.background_executor()
+            .spawn(async move { engine.prepare() })
+            .detach();
+    }
     system::init(cx);
 }
 

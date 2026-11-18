@@ -116,6 +116,12 @@ struct RunningHabit {
     cards: Vec<serde_json::Value>,
     mailbox: Vec<String>,
 }
+/// A message the user wrote, not another agent's request or an internal
+/// note: agents' requests keep their retry, since the asker waits on it.
+fn user_message(message: &Message) -> bool {
+    !message.internal && monocode_core::mono::agents::message_sender(&message.text).is_none()
+}
+
 pub(crate) struct Monos {
     #[cfg(all(target_os = "macos", not(test)))]
     status: Option<status::Status>,
@@ -1484,11 +1490,25 @@ impl Monos {
             .cloned()
             .map(|view| view.update(cx, |view, _| view.mono_take_failures()))
             .unwrap_or_default();
+        // Failed messages already in the chat (saved before this was fixed)
+        // were sent; they leave the outbox.
+        let reached: Vec<String> = match (self.chats.get(id), self.roster.get(id)) {
+            (Some(view), Some(mono)) if view.read(cx).history_ready() => mono
+                .outbox
+                .iter()
+                .filter(|m| {
+                    m.error.is_some() && user_message(m) && view.read(cx).mono_reached(m, cx)
+                })
+                .map(|m| m.id.clone())
+                .collect(),
+            _ => Vec::new(),
+        };
         let mut changed = false;
         if let Some(mono) = self.roster.get_mut(id) {
             let before = mono.outbox.len();
-            mono.outbox
-                .retain(|message| !delivered.contains(&message.id));
+            mono.outbox.retain(|message| {
+                !delivered.contains(&message.id) && !reached.contains(&message.id)
+            });
             changed = before != mono.outbox.len();
             for (id, error) in failures {
                 if let Some(message) = mono.outbox.iter_mut().find(|m| m.id == id) {
@@ -1610,6 +1630,23 @@ impl Monos {
                 if ok {
                     self.bot_turn_news(id, cx);
                 }
+            }
+            // A message whose turn reached the agent and then failed was
+            // sent: its error shows in the chat, in place, and it leaves the
+            // outbox instead of waiting again at the bottom as "Not sent".
+            if let Some(sent) = self.inflight.get(id).cloned()
+                && !ok
+                && !status.starts_with("Stopped")
+                && user_message(&sent)
+                && !self.agent_calls.routes(&sent.id)
+                && self.chats[id].read(cx).mono_reached(&sent, cx)
+            {
+                self.inflight.remove(id);
+                if let Some(mono) = self.roster.get_mut(id) {
+                    mono.outbox.retain(|m| m.id != sent.id);
+                }
+                self.save(cx);
+                self.configure_chat(id, cx);
             }
             if let Some(mut sent) = self.inflight.remove(id)
                 && !ok
@@ -1803,7 +1840,18 @@ impl Monos {
         };
         let root = self.root.clone();
         let id = id.to_string();
+        // A bot made a moment ago: its soul is written here, before its files
+        // load, rather than by a save that may land after.
+        let souls: Vec<(String, String)> = {
+            let pending = &mut self.roster.pending_souls;
+            let (mine, rest) = std::mem::take(pending)
+                .into_iter()
+                .partition(|(bot, _)| *bot == id);
+            *pending = rest;
+            mine
+        };
         let work = cx.background_executor().spawn(async move {
+            Roster::write_souls(&root, &souls);
             Ok::<_, String>((
                 mono::load_files(&root, &mono)?,
                 habits::load(&root, &mono.id)?,
@@ -1929,7 +1977,14 @@ impl Monos {
             .monos
             .iter()
             .filter(|m| section.holds(m))
-            .filter(|m| project.as_ref().is_none_or(|p| m.works_on(p)))
+            // Chief and its crew work on any project's checkout, as the run
+            // asks: they belong to every project's list.
+            .filter(|m| {
+                project.as_ref().is_none_or(|p| m.works_on(p))
+                    || (section == agents::Section::Coding
+                        && (monocode_core::mono::crew::is_coder(m)
+                            || monocode_core::mono::crew::is_chief(m)))
+            })
             .cloned()
             .collect();
         // Every section on screen adds its rows, for dragging within it.
