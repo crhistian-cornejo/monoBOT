@@ -950,7 +950,7 @@ impl SettingsView {
                                     .role(Role::Alert)
                                     .mt_3()
                                     .text_size(px(12.))
-                                    .text_color(gpui::rgb(0xff6467))
+                                    .text_color(crate::theme::danger())
                                     .child(custom.error.clone().unwrap_or_default()),
                             )
                         })

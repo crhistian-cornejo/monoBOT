@@ -944,6 +944,7 @@ impl Shell {
                             workspace::AppView::Inbox => "rail-inbox",
                             workspace::AppView::Notes => "rail-notes",
                             workspace::AppView::Automations => "rail-automations",
+                            workspace::AppView::Workstreams => "rail-workstreams",
                         },
                         view.label(),
                         glyph,
@@ -970,6 +971,7 @@ impl Shell {
                                 workspace::AppView::Inbox => this.open_inbox(w, cx),
                                 workspace::AppView::Notes => this.open_notes(w, cx),
                                 workspace::AppView::Automations => this.open_automations(w, cx),
+                                workspace::AppView::Workstreams => this.open_workstreams(w, cx),
                             }
                         }
                     }))
@@ -2228,33 +2230,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_agents_rows_reach_the_sidebar_edge(cx: &mut TestAppContext) {
-        let (window, _, _) = super::super::tests::window(cx);
-        // With the intro card closed nothing wide is left in the zone, so a
-        // rail that sized to its content would stop at the Principal's pill.
-        window
-            .update(cx, |shell, w, cx| {
-                shell.monos.clone().unwrap().update(cx, |m, _| {
-                    m.roster.bot_intro_dismissed = true;
-                });
-                shell.set_agents_zone(true, w, cx);
-            })
-            .unwrap();
-        cx.run_until_parked();
-        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
-        visual.run_until_parked();
-        let zone = visual.debug_bounds("rail-zone-agents").unwrap();
-        let rail = visual.debug_bounds("agents-rail").unwrap();
-        assert!(
-            rail.right() >= zone.right(),
-            "agents rail ends at {:?}, short of the switch at {:?}",
-            rail.right(),
-            zone.right()
-        );
-    }
-
-    #[gpui::test]
-    fn the_agents_zone_lists_bots_and_makes_one_from_the_role_menu(cx: &mut TestAppContext) {
+    fn the_captains_lead_the_single_sidebar_and_make_bots_from_the_role_menu(
+        cx: &mut TestAppContext,
+    ) {
         let (window, _, _) = super::super::tests::window(cx);
         window
             .update(cx, |shell, w, cx| shell.set_agents_zone(true, w, cx))
@@ -2262,16 +2240,14 @@ mod tests {
         cx.run_until_parked();
         let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
         visual.run_until_parked();
-        assert!(visual.debug_bounds("rail-zone-agents").is_some());
-        assert!(visual.debug_bounds("agents-rail").is_some());
-        // As Tauri's insetPersonal: the header says Agents, with no project
-        // picker, and none of Code's navigation or sessions.
-        assert!(visual.debug_bounds("sidebar-agents-title").is_some());
-        assert!(visual.debug_bounds("sidebar-project-button").is_none());
-        assert!(visual.debug_bounds("sidebar-mono-button").is_none());
-        // As Tauri, the zone never stands empty: with no bot yet it makes
-        // the Principal and opens it, which then wears Orchestrator.
-        window
+        // One sidebar: opening an agent keeps the project, its monos and
+        // threads; the personal agents (Captains) lead it.
+        assert!(visual.debug_bounds("rail-zone-agents").is_none());
+        assert!(visual.debug_bounds("sidebar-project-button").is_some());
+        let threads = visual.debug_bounds("sidebar-filter-button").unwrap();
+        // With no bot yet it makes the Principal and opens it, which then
+        // wears Orchestrator.
+        let principal_id = window
             .update(visual, |shell, _, cx| {
                 let monos = shell.monos.clone().unwrap();
                 let monos = monos.read(cx);
@@ -2286,18 +2262,45 @@ mod tests {
                     shell.workspace.last_bot.as_deref(),
                     Some(principal.id.as_str())
                 );
+                principal.id.clone()
             })
             .unwrap();
         assert!(visual.debug_bounds("agents-principal-new").is_none());
-        assert!(visual.debug_bounds("mono-rail-orchestrator").is_some());
-        // The "New bot" row opens the role menu.
-        let row = visual.debug_bounds("new-bot").unwrap();
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        let principal = visual
+            .debug_bounds(leak(format!("mono-rail-{principal_id}")))
+            .unwrap();
+        assert!(principal.bottom() <= threads.top(), "Captains come first");
+        // A Captain's row says Orchestrator on its second line.
+        assert!(
+            visual
+                .debug_bounds(leak(format!("captain-subtitle-{principal_id}")))
+                .is_some()
+        );
+        // The Captains' + opens New Captain: the face it will wear, its name
+        // and the role it starts as, then Create.
+        let row = visual.debug_bounds("sidebar-new-bot").unwrap();
         visual.simulate_click(row.center(), Default::default());
         visual.run_until_parked();
-        assert!(visual.debug_bounds("new-bot-custom").is_some(), "Blank bot");
-        let finance = visual.debug_bounds("new-bot-finance").unwrap();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("new-captain").is_some());
+        assert!(visual.debug_bounds("new-captain-name").is_some());
+        assert!(
+            visual.debug_bounds("new-captain-role-custom").is_some(),
+            "Blank"
+        );
+        let finance = visual.debug_bounds("new-captain-role-finance").unwrap();
         visual.simulate_click(finance.center(), Default::default());
         visual.run_until_parked();
+        visual.refresh().unwrap();
+        let create = visual.debug_bounds("new-captain-create").unwrap();
+        visual.simulate_click(create.center(), Default::default());
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(
+            visual.debug_bounds("new-captain").is_none(),
+            "Create closes it"
+        );
         window
             .update(visual, |shell, _, cx| {
                 let monos = shell.monos.clone().unwrap();
@@ -2313,9 +2316,6 @@ mod tests {
                 assert!(shell.workspace.agents_zone);
             })
             .unwrap();
-        // A new bot opens on its settings; close them first.
-        visual.simulate_keystrokes("escape");
-        visual.run_until_parked();
         // Leaving for Code closes the open bot; coming back reopens it.
         window
             .update(visual, |shell, w, cx| {

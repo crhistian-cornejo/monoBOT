@@ -647,8 +647,8 @@ fn swarm_rules(roles: &[Role]) -> String {
     )
 }
 
-/// What a Claude coding chat is told once: it may hand a large parallel task
-/// to Chief and the user's monos instead of doing it alone.
+/// What a coding chat on any provider is told once: it may hand a large
+/// parallel task to Chief and the user's monos instead of doing it alone.
 pub fn chief_offer(cli: &str) -> String {
     let cli = shell_path(cli);
     format!(

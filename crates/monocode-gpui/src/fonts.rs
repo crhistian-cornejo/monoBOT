@@ -1,8 +1,27 @@
 use gpui::{App, Font, FontFallbacks};
 use std::{borrow::Cow, sync::OnceLock};
 
-/// The interface face, as the web build's `--font-sans`: Geist, bundled.
-pub(crate) const UI: &str = "Geist";
+/// The bundled interface face, as the web build's `--font-sans`.
+const GEIST: &str = "Geist";
+/// GPUI's name for the platform's interface face: San Francisco on macOS,
+/// with its optical sizes and tracking tables applied by Core Text.
+const SYSTEM: &str = ".SystemUIFont";
+static SYSTEM_UI: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The interface face the user chose in Appearance.
+pub(crate) fn ui() -> &'static str {
+    if SYSTEM_UI.load(std::sync::atomic::Ordering::Relaxed) {
+        SYSTEM
+    } else {
+        GEIST
+    }
+}
+/// Follow the Appearance setting ("system" or "geist"). Returns whether the
+/// face changed, so the caller can repaint every window.
+pub(crate) fn set_interface(choice: &str) -> bool {
+    let system = choice == "system";
+    SYSTEM_UI.swap(system, std::sync::atomic::Ordering::Relaxed) != system
+}
 /// Code, as the web build's `--font-mono`: Geist Mono, bundled.
 const CODE: &str = "Geist Mono";
 

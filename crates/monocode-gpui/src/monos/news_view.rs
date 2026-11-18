@@ -30,10 +30,7 @@ fn status_colors(status: ReportStatus) -> (gpui::Hsla, gpui::Hsla) {
             rgb(0x10b981).into(),
             gpui::Hsla::from(rgb(0x10b981)).opacity(0.1),
         ),
-        ReportStatus::Blocked => (
-            rgb(0xf87171).into(),
-            gpui::Hsla::from(rgb(0xf87171)).opacity(0.1),
-        ),
+        ReportStatus::Blocked => (crate::theme::danger(), crate::theme::danger().opacity(0.1)),
         _ => (accent_color(), accent_color().opacity(0.1)),
     }
 }
@@ -490,7 +487,7 @@ impl Monos {
                             d.child(
                                 div()
                                     .text_size(px(11.))
-                                    .text_color(rgb(0xf87171))
+                                    .text_color(crate::theme::danger())
                                     .child(format!("Could not save note. {error}")),
                             )
                         }),

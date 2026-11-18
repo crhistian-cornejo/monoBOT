@@ -460,6 +460,19 @@ impl Roster {
         let _ = files::save(root, &mono.id, None, "SOUL.md", soul, None);
         self.monos.last()
     }
+    /// A Captain from the New Captain dialog: a bot of this role (a blank
+    /// one for `custom`) with the name the user typed, or its role's name.
+    pub fn create_captain(&mut self, root: &Path, role: &str, name: &str) -> Option<&Mono> {
+        let blank = role == "custom";
+        let id = self.create_bot(root, role, blank)?.id.clone();
+        let mono = self.monos.iter_mut().find(|m| m.id == id)?;
+        let name = name.trim();
+        if !name.is_empty() {
+            mono.name = name.to_owned();
+            mono.normalize();
+        }
+        self.monos.iter().find(|m| m.id == id)
+    }
     /// A group of agents (createGroupMono in Tauri): its goal, members and
     /// optional folders/context, with its instructions as the soul.
     pub fn create_group(

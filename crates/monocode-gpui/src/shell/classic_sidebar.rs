@@ -181,7 +181,7 @@ fn change_stat_layout(
     available: f32,
     window: &Window,
 ) -> ChangeStatLayout {
-    let mut font = gpui::font(crate::fonts::UI);
+    let mut font = gpui::font(crate::fonts::ui());
     font.weight = FontWeight::SEMIBOLD;
     font.features = crate::right_panel::tabular();
     let width_at = |text: &str, size: f32| {
@@ -255,7 +255,7 @@ impl gpui::RenderOnce for ChangeStats {
             .whitespace_nowrap()
             .gap(px(layout.gap))
             .text_size(px(layout.font_size))
-            .font_family(crate::fonts::UI)
+            .font_family(crate::fonts::ui())
             .font_weight(FontWeight::SEMIBOLD)
             .font_features(crate::right_panel::tabular())
             .when(!self.added.is_empty(), |d| {

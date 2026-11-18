@@ -39,7 +39,8 @@ fn missing_document_uses_error_cards_without_moving_content(cx: &mut TestAppCont
         .window
         .update(visual, |_, w, _| w.viewport_size())
         .unwrap();
-    assert_eq!(error.top(), px(12.));
+    // Under the title bar.
+    assert_eq!(error.top(), px(crate::theme::TITLE_BAR_HEIGHT + 8.));
     assert_eq!(error.right(), viewport.width - px(12.));
     assert_eq!(error.size.width, px(360.));
     assert_eq!(visual.debug_bounds("main-pane-frame").unwrap(), body);
@@ -5081,7 +5082,8 @@ fn git_project(project: &str) {
     git(&["commit", "--allow-empty", "-m", "Base"]);
 }
 
-/// The Code zone with no Mono open: the rail lists the Monos and Workstreams.
+/// No Mono open and the Workstreams page in view, where workstreams are
+/// listed and started.
 fn show_rail(s: &Setup, cx: &mut TestAppContext) {
     cx.update(|cx| {
         cx.set_reduce_motion(true);
@@ -5093,6 +5095,9 @@ fn show_rail(s: &Setup, cx: &mut TestAppContext) {
             cx.notify();
         });
     });
+    s.window
+        .update(cx, |shell, window, cx| shell.open_workstreams(window, cx))
+        .unwrap();
 }
 
 fn click(visual: &mut gpui::VisualTestContext, selector: &'static str) {
@@ -5357,8 +5362,7 @@ fn a_workstream_shows_its_agents_prs_and_shared_files(cx: &mut TestAppContext) {
     visual.run_until_parked();
     visual.refresh().unwrap();
 
-    // Listed under Workstreams, with its own tabs.
-    assert!(visual.debug_bounds("mono-rail-ws-tabs").is_some());
+    // Open, with its own tabs.
     s.manager.read_with(visual, |m, _| {
         let mono = m.roster.get("ws-tabs").unwrap();
         assert!(

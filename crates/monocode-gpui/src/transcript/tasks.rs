@@ -111,7 +111,7 @@ fn task_list(list: &TaskList, start: usize) -> AnyElement {
                         .map(|(index, task)| {
                             let (glyph, color) = match task.status {
                                 TaskStatus::Completed => ("check", rgb(0x6ee7b7).into()),
-                                TaskStatus::InProgress => ("circle-dashed", rgb(0x7dd3fc).into()),
+                                TaskStatus::InProgress => ("circle-dashed", crate::theme::info()),
                                 TaskStatus::Cancelled => ("minus", content(0.35)),
                                 TaskStatus::Pending => ("context-ring", content(0.35)),
                             };
@@ -471,13 +471,13 @@ fn agent(
                                 .min_w_0()
                                 .truncate()
                                 .text_color(if failed {
-                                    rgb(0xf87171).into()
+                                    crate::theme::danger()
                                 } else {
                                     content(0.75)
                                 })
                                 .group_hover("subagent-row", |s| {
                                     s.text_color(if failed {
-                                        rgb(0xf87171).into()
+                                        crate::theme::danger()
                                     } else {
                                         content(1.)
                                     })
@@ -520,7 +520,7 @@ fn agent(
                             .text_size(px(12.))
                             .line_height(px(16.))
                             .text_color(if failed {
-                                rgb(0xf87171).into()
+                                crate::theme::danger()
                             } else {
                                 content(0.45)
                             })
@@ -563,7 +563,7 @@ fn agent(
                     .text_size(px(12.))
                     .line_height(px(20.))
                     .text_color({
-                        let mut color: gpui::Hsla = rgb(0xf87171).into();
+                        let mut color: gpui::Hsla = crate::theme::danger();
                         color.a = 0.8;
                         color
                     })

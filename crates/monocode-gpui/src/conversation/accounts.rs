@@ -6,6 +6,9 @@ use monocode_core::{
 };
 pub(crate) struct UsageResumed;
 impl EventEmitter<UsageResumed> for Conversation {}
+/// A Captain's page asks for its settings («View Captain»).
+pub(crate) struct ViewCaptain;
+impl EventEmitter<ViewCaptain> for Conversation {}
 
 /// A limit reset for this conversation's account: whether one is being
 /// used, the one last tried by itself (never tried again by itself), and
@@ -153,7 +156,7 @@ impl Conversation {
                         .bg(content(0.04))
                         .px(px(8.))
                         .py(px(4.))
-                        .child(icon("gauge", 14.).text_color(gpui::rgb(AMBER_400)))
+                        .child(icon("gauge", 14.).text_color(crate::theme::warning()))
                         .child(
                             div()
                                 .min_w_0()
@@ -646,7 +649,7 @@ impl Conversation {
                     mono,
                 )
                 .when(mono, |d| d.h(px(26.)).text_size(px(11.)).bg(content(0.1)))
-                .child(icon("refresh", 13.).text_color(gpui::rgb(AMBER_400)))
+                .child(icon("refresh", 13.).text_color(crate::theme::warning()))
                 .child(label)
                 .when(!pending && !switching, |d| {
                     d.on_click(cx.listener(move |this, _, _, cx| {
@@ -687,7 +690,7 @@ impl Conversation {
                 .child(
                     icon(if waiting { "clock" } else { "play" }, 14.)
                         .text_color(if waiting && armed {
-                            gpui::rgb(AMBER_400).into()
+                            crate::theme::warning()
                         } else {
                             content(if mono { 0.6 } else { 0.55 })
                         })
@@ -737,7 +740,7 @@ impl Conversation {
             .items_center()
             .gap(px(8.))
             .whitespace_nowrap()
-            .child(icon("gauge", 14.).text_color(gpui::rgb(AMBER_400)))
+            .child(icon("gauge", 14.).text_color(crate::theme::warning()))
             .child(
                 div()
                     .text_size(px(12.))
@@ -822,7 +825,7 @@ fn usage_button(
         .line_height(px(16.))
         .whitespace_nowrap()
         .text_color(if primary {
-            gpui::rgb(AMBER_400).into()
+            crate::theme::warning()
         } else {
             content(0.55)
         })

@@ -53,7 +53,6 @@ pub(crate) const DIFF_DEL: u32 = 0xfda4af;
 // Tailwind v4.
 pub(crate) const AMBER_400: u32 = 0xffb900;
 pub(crate) const SKY_400: u32 = 0x00bcff;
-pub(crate) const RED_400: u32 = 0xff6467;
 /// `--color-background-base` in the default dark theme, hsl(240 0% 9%).
 pub(crate) const BACKGROUND_BASE: u32 = 0x171717;
 
@@ -231,9 +230,17 @@ pub(crate) fn diff_stat(
     stats: Option<&monocode_core::scm::DiffStats>,
     width: f32,
 ) -> Stateful<gpui::Div> {
-    let added = format_integer(stats.map_or(0, |s| s.additions.max(0)));
-    let deleted = format_integer(stats.map_or(0, |s| s.deletions.max(0)));
+    let (additions, deletions) = stats.map_or((0, 0), |s| (s.additions.max(0), s.deletions.max(0)));
+    let (added, deleted) = (format_integer(additions), format_integer(deletions));
     let scale = diff_stat_scale(width - 18., diff_stat_width(stats) - 18.);
+    // A clean tree prints its zeros in grey: colour says something changed.
+    let ink = |count: i64, add: bool| {
+        if count == 0 {
+            crate::theme::content(0.4)
+        } else {
+            crate::theme::diff_foreground(add)
+        }
+    };
     div()
         .id("project-diff-stat")
         .debug_selector(|| "project-diff-stat".into())
@@ -256,12 +263,12 @@ pub(crate) fn diff_stat(
         .font_features(tabular())
         .child(
             div()
-                .text_color(gpui::rgb(DIFF_ADD))
+                .text_color(ink(additions, true))
                 .child(format!("+{added}")),
         )
         .child(
             div()
-                .text_color(gpui::rgb(DIFF_DEL))
+                .text_color(ink(deletions, false))
                 .child(format!("-{deleted}")),
         )
 }
@@ -619,6 +626,7 @@ impl RightPanel {
             .filter(|d| d.active)
             .map(|d| (d.tab, d.offset));
         let count = self.tabs().len();
+        let crew = self.swarm.read(cx).is_crew();
         let tabs: Vec<AnyElement> = self
             .tabs()
             .into_iter()
@@ -652,8 +660,12 @@ impl RightPanel {
                     .child(
                         tab_button(
                             id,
-                            TabLabel::from(tab.label())
-                                .max_width(tab_label_width(self.tab_width, count)),
+                            TabLabel::from(match tab {
+                                // A Chief run's members are the user's monos.
+                                RightTab::Swarm if crew => "Crew",
+                                _ => tab.label(),
+                            })
+                            .max_width(tab_label_width(self.tab_width, count)),
                             path,
                             active,
                             false,

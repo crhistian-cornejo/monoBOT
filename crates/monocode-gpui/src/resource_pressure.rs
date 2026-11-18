@@ -13,7 +13,6 @@ use std::{
 
 const TICK: Duration = Duration::from_millis(500);
 const POLL: Duration = Duration::from_secs(3);
-const AMBER: u32 = 0xfbbf24;
 const EMERALD: u32 = 0x10b981;
 const RED: u32 = 0xf87171;
 
@@ -332,7 +331,7 @@ impl ResourceMonitor {
                             .py(px(10.))
                             .child(
                                 div().mt(px(2.)).child(if active {
-                                    icon("circle-alert", 16.).text_color(rgb(AMBER))
+                                    icon("circle-alert", 16.).text_color(crate::theme::warning())
                                 } else {
                                     icon("check", 16.).text_color(rgb(EMERALD))
                                 }),
@@ -717,7 +716,7 @@ impl Render for ResourceMonitor {
                         }
                     })
                     .hover(|s| s.bg(content(0.08)).text_color(content(1.)))
-                    .child(icon("circle-alert", 14.).text_color(rgb(AMBER)))
+                    .child(icon("circle-alert", 14.).text_color(crate::theme::warning()))
                     .child("High usage")
                     .on_click(cx.listener(|this, _, window, cx| this.open(window, cx)))
                     .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {

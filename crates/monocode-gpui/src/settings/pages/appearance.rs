@@ -307,6 +307,39 @@ impl SettingsView {
                 )],
             ),
             self.row(
+                Some("interface-font"),
+                false,
+                "Interface font",
+                Some("System uses the platform face, San Francisco on macOS. Geist matches the web app.".into()),
+                vec![self.segmented(
+                    "interface-font",
+                    "Interface font",
+                    &p.interface_font,
+                    &[("system", "System"), ("geist", "Geist")],
+                    cx,
+                    |this, v, cx| this.update(cx, |p| p.interface_font = v.into()),
+                )],
+            ),
+            self.row(
+                Some("corners"),
+                false,
+                "Corners",
+                Some("How round controls, cards and framed boxes are. Square keeps sharp edges.".into()),
+                vec![self.segmented(
+                    "corners",
+                    "Corners",
+                    &p.corners,
+                    &[
+                        ("square", "Square"),
+                        ("subtle", "Subtle"),
+                        ("rounded", "Rounded"),
+                        ("soft", "Soft"),
+                    ],
+                    cx,
+                    |this, v, cx| this.update(cx, |p| p.corners = v.into()),
+                )],
+            ),
+            self.row(
                 Some("show-excluded-files"),
                 false,
                 "Show excluded files",
@@ -325,11 +358,16 @@ impl SettingsView {
         page
     }
 
-    /// AccentColorPicker: Default plus six presets and a custom color.
+    /// AccentColorPicker: Default plus six presets, the macOS accent, and a
+    /// custom color.
     fn accent_picker(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let value = self.prefs.accent_color.clone();
+        // macOS adds a System swatch after the presets that follows the
+        // accent chosen in System Settings.
+        let system = crate::theme::system_accent();
         let preset = match &value {
             None => Some(0),
+            Some(v) if v == crate::theme::SYSTEM_ACCENT => Some(ACCENTS.len() + 1),
             Some(hex) => ACCENTS
                 .iter()
                 .position(|(c, _)| Some(*c) == parse_hex(hex))
@@ -354,9 +392,16 @@ impl SettingsView {
                         .iter()
                         .map(|&(c, label)| (rgb(c).into(), label, Some(format!("#{c:06x}")))),
                 )
+                .chain(system.map(|c| {
+                    (
+                        rgb(c).into(),
+                        "System",
+                        Some(crate::theme::SYSTEM_ACCENT.to_owned()),
+                    )
+                }))
                 .collect();
         div()
-            .w(px(192.))
+            .w(px(if system.is_some() { 216. } else { 192. }))
             .relative()
             .child(self.accent_anchor.probe())
             .child(
@@ -427,6 +472,7 @@ impl SettingsView {
                                         .prefs
                                         .accent_color
                                         .clone()
+                                        .filter(|v| v.starts_with('#'))
                                         .unwrap_or_else(|| "#4da3f5".into());
                                     this.accent_custom.update(cx, |i, cx| {
                                         i.set_text(text, cx);

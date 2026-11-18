@@ -1085,7 +1085,7 @@ impl Automations {
                 {
                     "succeeded" => (
                         "Succeeded",
-                        rgb(0x34d399).into(),
+                        crate::theme::success(),
                         rgb(0x10b981).alpha(0.12).into(),
                     ),
                     "failed" => (
@@ -1095,18 +1095,18 @@ impl Automations {
                     ),
                     "skipped" => (
                         "Skipped",
-                        rgb(0xfbbf24).into(),
-                        rgb(0xf59e0b).alpha(0.12).into(),
+                        crate::theme::warning(),
+                        crate::theme::warning().alpha(0.12),
                     ),
                     "cancelled" => ("Cancelled", content(0.5), content(0.08)),
                     "running" => (
                         "Running",
-                        rgb(0x60a5fa).into(),
+                        crate::theme::info(),
                         rgb(0x3b82f6).alpha(0.12).into(),
                     ),
                     _ => (
                         "Pending",
-                        rgb(0x60a5fa).into(),
+                        crate::theme::info(),
                         rgb(0x3b82f6).alpha(0.12).into(),
                     ),
                 };

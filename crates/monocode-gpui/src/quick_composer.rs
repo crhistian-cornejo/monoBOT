@@ -963,7 +963,7 @@ fn pill(
 }
 /// Tailwind's amber-400, which marks full access and fast mode.
 fn amber(alpha: f32) -> gpui::Hsla {
-    gpui::Hsla::from(gpui::rgb(0xfbbf24)).opacity(alpha)
+    crate::theme::warning().opacity(alpha)
 }
 fn effort_name(value: &str) -> String {
     crate::conversation::effort_name(value)
@@ -1326,7 +1326,7 @@ impl QuickComposer {
                                 div()
                                     .max_w(px(288.))
                                     .truncate()
-                                    .text_color(gpui::rgb(0xf87171))
+                                    .text_color(crate::theme::danger())
                                     .child(error),
                             )
                         } else {
@@ -1932,7 +1932,7 @@ impl Render for QuickComposer {
             .key_context("QuickComposer")
             .w_full()
             .text_color(content(1.))
-            .font_family(crate::fonts::UI)
+            .font_family(crate::fonts::ui())
             .capture_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, window, cx| {
                 let key = event.keystroke.key.as_str();
                 let m = &event.keystroke.modifiers;

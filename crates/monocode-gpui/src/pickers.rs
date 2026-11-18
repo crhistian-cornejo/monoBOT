@@ -9,6 +9,11 @@ use gpui::{
 use monocode_core::catalog::{self, Model};
 use monocode_core::provider::{self, Kind};
 
+mod sections;
+pub(crate) use sections::{
+    ModelOption, PICKER_WIDTH, PanelState, PickFavorite, bind, favorite_choice,
+};
+
 pub(crate) const MODEL_FLYOUT_HEIGHT: f32 = 460.;
 
 /// Friendly names used before a provider's live catalog arrives.
@@ -504,9 +509,15 @@ pub(crate) struct ModelList {
     tab: ModelTab,
     highlighted: usize,
     search: Entity<input::Input>,
+    /// The composer's picker: every provider in one list beside a panel of
+    /// the highlighted model's options, holding the session's settings.
+    sections: Option<sections::PanelState>,
+    /// The sectioned list, so the provider rail can jump to a section.
+    list_scroll: gpui::ScrollHandle,
     _changed: Subscription,
 }
 impl EventEmitter<ModelPicked> for ModelList {}
+impl EventEmitter<sections::ModelOption> for ModelList {}
 impl ModelList {
     pub(crate) fn new_for(
         provider: Kind,
@@ -556,6 +567,8 @@ impl ModelList {
                 .unwrap_or(ModelTab::Harness(provider)),
             highlighted: 0,
             search,
+            sections: None,
+            list_scroll: gpui::ScrollHandle::new(),
             _changed: changed,
         };
         list.highlighted = list.current_index(cx);
@@ -762,6 +775,13 @@ impl ModelList {
         self.search.read(cx).content.to_lowercase()
     }
     fn entries(&self, cx: &gpui::App) -> Vec<ModelEntry> {
+        if self.sections.is_some() {
+            return self
+                .section_rows(cx)
+                .into_iter()
+                .map(|row| row.entry)
+                .collect();
+        }
         let ModelTab::Harness(kind) = self.tab else {
             let query = self.query(cx);
             return cx
@@ -787,6 +807,11 @@ impl ModelList {
                 })
                 .collect();
         };
+        self.kind_entries(kind, cx)
+    }
+    /// One provider's models: its default, recently used ones, its catalog
+    /// and an override the catalog doesn't name, filtered by the search.
+    fn kind_entries(&self, kind: Kind, cx: &gpui::App) -> Vec<ModelEntry> {
         let enabled = self.enabled(kind);
         let mut entries = vec![ModelEntry {
             kind,
@@ -869,6 +894,27 @@ impl ModelList {
             })
             .collect()
     }
+    /// The providers the picker offers: the session's own, and every other
+    /// that is installed (on the connected machine, for a remote project)
+    /// and not hidden.
+    fn visible_kinds(&self) -> Vec<Kind> {
+        Kind::ALL
+            .into_iter()
+            .filter(|kind| {
+                if self.remote_project.is_some() {
+                    *kind == self.provider
+                        || self
+                            .remote_providers
+                            .as_ref()
+                            .is_some_and(|providers| providers.contains(kind))
+                } else {
+                    *kind == self.provider
+                        || (!self.hidden.iter().any(|id| id == kind.id())
+                            && !self.missing.contains(kind))
+                }
+            })
+            .collect()
+    }
     fn enabled(&self, kind: Kind) -> bool {
         (kind == self.provider || self.switch_allowed)
             && !self.missing.contains(&kind)
@@ -943,6 +989,9 @@ impl ModelList {
         }
     }
     fn pick(&mut self, ix: usize, cx: &mut Context<Self>) {
+        if self.sections.is_some() {
+            return self.pick_section(ix, cx);
+        }
         if let Some(entry) = self.entries(cx).into_iter().nth(ix)
             && entry.enabled
         {
@@ -1001,6 +1050,9 @@ impl Render for ModelList {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         if self.quick {
             return self.render_quick(cx);
+        }
+        if self.sections.is_some() {
+            return self.render_sections(cx);
         }
         let entries = self.entries(cx);
         let kind = match self.tab {
@@ -1161,20 +1213,8 @@ impl Render for ModelList {
                             .p(px(6.))
                             .child(self.tab(ModelTab::Favorites, cx))
                             .children(
-                                Kind::ALL
+                                self.visible_kinds()
                                     .into_iter()
-                                    .filter(|kind| {
-                                        if self.remote_project.is_some() {
-                                            *kind == self.provider
-                                                || self.remote_providers.as_ref().is_some_and(
-                                                    |providers| providers.contains(kind),
-                                                )
-                                        } else {
-                                            *kind == self.provider
-                                                || (!self.hidden.iter().any(|id| id == kind.id())
-                                                    && !self.missing.contains(kind))
-                                        }
-                                    })
                                     .map(|kind| self.tab(ModelTab::Harness(kind), cx)),
                             ),
                     )

@@ -500,7 +500,7 @@ impl Shell {
                                                 .id("action-error")
                                                 .role(Role::Alert)
                                                 .text_size(px(11.))
-                                                .text_color(rgb(0xf87171))
+                                                .text_color(crate::theme::danger())
                                                 .child(error.clone()),
                                             None => div()
                                                 .id("action-help")

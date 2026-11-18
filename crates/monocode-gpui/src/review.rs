@@ -8,13 +8,13 @@ use crate::{
     git_status::{GitChanged, ProjectGit},
     pane_motion::PaneReveal,
     popover::{Anchor, Menu, MenuAction, MenuEvent, menu_popover},
-    right_panel::{RED_400, selection, spinner, stroke},
+    right_panel::{selection, spinner, stroke},
     theme::*,
 };
 use gpui::{
     AnyElement, Bounds, Context, CursorStyle, Entity, EventEmitter, FocusHandle, Focusable,
     FontWeight, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Point, Role, ScrollHandle,
-    SharedString, Subscription, Task, Window, div, prelude::*, px, rgb,
+    SharedString, Subscription, Task, Window, div, prelude::*, px,
 };
 use monocode_core::{
     diff,
@@ -1839,7 +1839,11 @@ impl Render for ReviewPane {
                         .p_6()
                         .flex_col()
                         .text_center()
-                        .child(icon("circle-alert", 20.).mb_3().text_color(rgb(RED_400)))
+                        .child(
+                            icon("circle-alert", 20.)
+                                .mb_3()
+                                .text_color(crate::theme::danger()),
+                        )
                         .child(div().text_size(px(13.)).text_color(content(1.)).child(
                             match source.tab {
                                 ReviewTab::File { .. } => "Couldn’t open file",

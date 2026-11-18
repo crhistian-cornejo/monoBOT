@@ -143,9 +143,12 @@ pub(crate) fn configure_project(
         inset
     };
     inset_pane.a = if glass && p.body_glass { 0. } else { 1. };
-    let custom = accent_color
-        .filter(|s| s.len() == 7)
-        .and_then(|s| u32::from_str_radix(s.trim_start_matches('#'), 16).ok());
+    let custom = match accent_color {
+        Some(SYSTEM_ACCENT) => system_accent(),
+        other => other
+            .filter(|s| s.len() == 7)
+            .and_then(|s| u32::from_str_radix(s.trim_start_matches('#'), 16).ok()),
+    };
     let tokens = Tokens {
         light,
         ink: rgb(palette.content).into(),
@@ -182,6 +185,37 @@ pub(crate) fn configure_project(
         None => tokens,
     };
     TOKENS.with(|current| current.replace(Some(painted)) != Some(painted))
+}
+/// The accent setting that follows the accent chosen in macOS System
+/// Settings instead of a fixed colour.
+pub(crate) const SYSTEM_ACCENT: &str = "system";
+/// macOS's `controlAccentColor` as sRGB hex. Read at most once a second, so
+/// a change in System Settings shows on the next repaint without querying
+/// AppKit on every frame.
+#[cfg(target_os = "macos")]
+pub(crate) fn system_accent() -> Option<u32> {
+    thread_local! {
+        static CACHE: std::cell::Cell<Option<(std::time::Instant, Option<u32>)>> =
+            const { std::cell::Cell::new(None) };
+    }
+    if let Some((at, hex)) = CACHE.get()
+        && at.elapsed() < std::time::Duration::from_secs(1)
+    {
+        return hex;
+    }
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    let hex = NSColor::controlAccentColor()
+        .colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())
+        .map(|c| {
+            let byte = |v: f64| (v.clamp(0., 1.) * 255.).round() as u32;
+            byte(c.redComponent()) << 16 | byte(c.greenComponent()) << 8 | byte(c.blueComponent())
+        });
+    CACHE.set(Some((std::time::Instant::now(), hex)));
+    hex
+}
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn system_accent() -> Option<u32> {
+    None
 }
 /// Whether colors are still blending toward a project's theme.
 pub(crate) fn tweening() -> bool {
@@ -229,6 +263,37 @@ impl Tokens {
             ..*to
         }
     }
+}
+
+static CORNER_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+/// The corner choices, as Appearance and the notch's Look offer them: how
+/// round corners are, in percent of the radii the views ask for. Square
+/// keeps only fully round shapes; the others also round any framed box.
+pub(crate) const CORNERS: [(&str, &str, u32); 4] = [
+    ("square", "Square", 0),
+    ("subtle", "Subtle", 60),
+    ("rounded", "Rounded", 100),
+    ("soft", "Soft", 160),
+];
+/// A corner choice's scale; an unknown word is Rounded.
+pub(crate) fn corner_scale(choice: &str) -> u32 {
+    CORNERS
+        .iter()
+        .find(|(id, ..)| *id == choice)
+        .map_or(100, |(.., percent)| *percent)
+}
+/// Draw every window that has no corner scale of its own at `percent`.
+/// Returns whether it changed, so callers repaint.
+pub(crate) fn set_corner_scale(percent: u32) -> bool {
+    gpui::set_corner_scale(percent);
+    CORNER_SCALE.swap(percent, std::sync::atomic::Ordering::Relaxed) != percent
+}
+/// Apply the Appearance page's interface face and corner shape. Returns
+/// whether either changed.
+pub(crate) fn apply_shape(p: &crate::settings::Preferences) -> bool {
+    let face = crate::fonts::set_interface(&p.interface_font);
+    let corners = set_corner_scale(corner_scale(&p.corners));
+    face || corners
 }
 
 /// Platforms whose compositor blurs the desktop behind the window: macOS
@@ -340,6 +405,29 @@ pub(crate) fn primary_action(enabled: bool) -> Option<(Hsla, Hsla)> {
             white(1.)
         },
     ))
+}
+
+/// A status hue: the bright Tailwind 400 tone on dark surfaces, and on light
+/// ones a 700 tone that keeps 4.5:1 on white, where the 400 tones fall to
+/// about 2:1 and read as washed out.
+fn status(dark: u32, light: u32) -> Hsla {
+    rgb(if is_light() { light } else { dark }).into()
+}
+/// Errors, failed runs and destructive actions.
+pub(crate) fn danger() -> Hsla {
+    status(0xf87171, 0xc81e1e)
+}
+/// Something waits on the user: an approval, a question, a limit near.
+pub(crate) fn warning() -> Hsla {
+    status(0xfbbf24, 0xa95a07)
+}
+/// Finished work and passing checks.
+pub(crate) fn success() -> Hsla {
+    status(0x34d399, 0x047857)
+}
+/// Links and neutral notices.
+pub(crate) fn info() -> Hsla {
+    status(0x7dd3fc, 0x0369a1)
 }
 
 /// Selected text is tinted with the accent; light surfaces get a paler wash
@@ -775,6 +863,40 @@ fn chrome_button(
                 }),
         )
 }
+/// The app's 36×20 switch: the accent when on, a grey track when off. The
+/// caller adds the click.
+pub(crate) fn switch(
+    id: impl Into<SharedString>,
+    label: impl Into<SharedString>,
+    on: bool,
+) -> Stateful<Div> {
+    div()
+        .id(id.into())
+        .role(Role::Switch)
+        .aria_label(label.into())
+        .aria_toggled(if on {
+            gpui::Toggled::True
+        } else {
+            gpui::Toggled::False
+        })
+        .relative()
+        .h(px(20.))
+        .w(px(36.))
+        .flex_shrink_0()
+        .rounded_full()
+        .cursor_pointer()
+        .bg(if on { accent_color() } else { content(0.2) })
+        .child(
+            div()
+                .absolute()
+                .top(px(2.))
+                .left(px(if on { 18. } else { 2. }))
+                .size(px(16.))
+                .rounded_full()
+                .bg(white(1.)),
+        )
+}
+
 // `.primary-action` paints with literal white and black, not theme ink.
 pub(crate) fn white(alpha: f32) -> Hsla {
     gpui::hsla(0., 0., 1., alpha)
@@ -889,6 +1011,63 @@ mod composer_tests {
     }
 
     #[test]
+    fn status_hues_darken_on_light_surfaces_to_stay_readable() {
+        let mut preferences = crate::settings::Preferences::default();
+        configure(&preferences, false);
+        assert_eq!(danger(), rgb(0xf87171).into());
+        assert_eq!(warning(), rgb(0xfbbf24).into());
+        assert_eq!(success(), rgb(0x34d399).into());
+        assert_eq!(info(), rgb(0x7dd3fc).into());
+        // The 400 tones fall to about 2:1 on white; light themes take tones
+        // that keep 4.5:1.
+        preferences.theme = "light".into();
+        configure(&preferences, false);
+        assert_eq!(danger(), rgb(0xc81e1e).into());
+        assert_eq!(warning(), rgb(0xa95a07).into());
+        assert_eq!(success(), rgb(0x047857).into());
+        assert_eq!(info(), rgb(0x0369a1).into());
+    }
+
+    #[test]
+    fn the_system_accent_setting_paints_a_colour_or_falls_back_to_the_theme() {
+        let mut preferences = crate::settings::Preferences::default();
+        configure(&preferences, false);
+        let theme_accent = accent_color();
+        preferences.accent_color = Some(SYSTEM_ACCENT.into());
+        configure(&preferences, false);
+        match system_accent() {
+            Some(hex) => assert_eq!(picked_accent(), rgb(hex).into()),
+            None => assert_eq!(picked_accent(), theme_accent),
+        }
+    }
+
+    #[test]
+    fn the_interface_face_and_corner_shape_follow_appearance() {
+        let mut preferences = crate::settings::Preferences {
+            interface_font: "geist".into(),
+            corners: "square".into(),
+            ..Default::default()
+        };
+        apply_shape(&preferences);
+        assert_eq!(crate::fonts::ui(), "Geist");
+        assert!(
+            !apply_shape(&preferences),
+            "nothing changed, nothing repaints"
+        );
+        preferences.interface_font = "system".into();
+        preferences.corners = "rounded".into();
+        assert!(apply_shape(&preferences));
+        assert_eq!(crate::fonts::ui(), ".SystemUIFont");
+        let card =
+            gpui::squared_corners(gpui::Corners::all(px(10.)), gpui::size(px(200.), px(80.)));
+        assert_eq!(card, gpui::Corners::all(px(10.)));
+        // Leave the process-wide shape as the other tests expect it.
+        preferences.interface_font = "geist".into();
+        preferences.corners = "rounded".into();
+        apply_shape(&preferences);
+    }
+
+    #[test]
     fn a_preset_paints_its_own_sidebar_and_main_pane_in_each_mode() {
         let mut preferences = crate::settings::Preferences::default();
         preferences.apply_workspace_theme("solarized".into());
@@ -944,9 +1123,38 @@ mod composer_tests {
 
 #[cfg(test)]
 mod corner_tests {
-    use gpui::{Corners, px, size, squared_corners};
+    use gpui::{Corners, framed_corners, px, scaled_corners, size, squared_corners};
 
-    /// Tauri's radius tokens are all 0; only `9999px` shapes stay round.
+    /// Rounded keeps the radii and Soft rounds more; a styled box framed on
+    /// all sides that asks for none is rounded too, so nothing reads as a
+    /// bare rectangle; fully round shapes stay round even at Square.
+    #[test]
+    fn corner_choices_scale_radii_and_round_framed_boxes() {
+        let card = size(px(200.), px(80.));
+        let pill = Corners::all(px(14.));
+        let square = Corners::all(px(0.));
+        assert_eq!(super::corner_scale("rounded"), 100);
+        assert_eq!(super::corner_scale("unknown"), 100);
+        assert_eq!(
+            scaled_corners(100, Corners::all(px(10.)), card),
+            Corners::all(px(10.))
+        );
+        assert_eq!(framed_corners(square, card), Corners::all(px(6.)));
+        assert_eq!(
+            framed_corners(Corners::all(px(10.)), card),
+            Corners::all(px(10.))
+        );
+        // Too short for the radius: a hairline field keeps its own.
+        assert_eq!(framed_corners(square, size(px(200.), px(8.))), square);
+        let soft = super::corner_scale("soft");
+        assert_eq!(
+            scaled_corners(soft, Corners::all(px(10.)), card),
+            Corners::all(px(16.))
+        );
+        assert_eq!(scaled_corners(0, pill, size(px(90.), px(28.))), pill);
+        assert_eq!(scaled_corners(0, Corners::all(px(6.)), card), square);
+    }
+
     #[test]
     fn corners_are_square_unless_the_shape_is_fully_round() {
         gpui::set_square_corners(true);

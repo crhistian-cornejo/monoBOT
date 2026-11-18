@@ -209,7 +209,7 @@ impl Render for HarnessUpdates {
                 line = line.child(
                     div()
                         .text_size(px(11.))
-                        .text_color(gpui::rgb(0x34d399))
+                        .text_color(crate::theme::success())
                         .child(format!("✓ Updated to {version}")),
                 );
             } else {
@@ -277,7 +277,7 @@ impl Render for HarnessUpdates {
                     div()
                         .mt(px(6.))
                         .text_size(px(11.))
-                        .text_color(gpui::rgb(0xfca5a5))
+                        .text_color(crate::theme::danger())
                         .child(error.clone()),
                 );
             }

@@ -76,6 +76,15 @@ GPUI and its platform crate are pinned to `gpui-pre` 0.3.9. Local Apple renderer
 patches cover alpha blending, font matching, backdrop blur and shadows. The
 headless Metal regression is documented in [verification](../old/verification.md).
 
+Corners are drawn at a scale (`set_corner_scale` in
+`vendor/gpui-pre/src/window.rs`). The scale is in percent of the radii the views ask
+for. At 0 every corner is square, except the shapes that are fully round. A styled
+box framed on all four sides that asks for no radius gets 6 px at the scale
+(`framed_corners`, applied in `Style::paint`). Quads painted by hand keep the radii
+they give. The app
+sets the scale from Appearance. A window can set its own with
+`Window::set_corner_scale`, which the notch does from its Look page.
+
 On macOS a window above the menu bar (level 25 and up, as the notch's panel)
 counts as on screen whenever it is ordered in (`on_screen` in
 `vendor/gpui-pre-macos/src/window.rs`). AppKit reports such a mostly

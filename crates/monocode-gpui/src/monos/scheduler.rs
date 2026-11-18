@@ -703,7 +703,7 @@ impl Monos {
         let (label, color) = match run.outcome.as_str() {
             "posted" => ("Messaged you", rgb(mono.color).into()),
             "quiet" => ("Nothing to report", content(0.25)),
-            _ => ("Couldn't finish", rgb(0xf87171).into()),
+            _ => ("Couldn't finish", crate::theme::danger()),
         };
         let time = format!(
             "{}{}",
@@ -811,7 +811,11 @@ impl Monos {
                     ));
                 }
             } else if let Some(error) = &run.error {
-                body = body.child(div().text_color(rgb(0xf87171)).child(error.clone()));
+                body = body.child(
+                    div()
+                        .text_color(crate::theme::danger())
+                        .child(error.clone()),
+                );
             }
             card = card.child(body);
         }
@@ -969,7 +973,7 @@ impl Monos {
                                         .px_2()
                                         .pt_2()
                                         .text_size(px(12.))
-                                        .text_color(rgb(0xf87171))
+                                        .text_color(crate::theme::danger())
                                         .child(error),
                                 )
                             }),

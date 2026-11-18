@@ -58,6 +58,7 @@ mod modal;
 mod model_welcome;
 mod monos;
 mod motion;
+mod native_menu;
 mod notch;
 mod notes;
 mod notifications;
@@ -493,8 +494,10 @@ fn main() {
     // The Dock icon brings back a window closed to the background.
     app_window::on_reopen(gpui::Application::with_platform(platform).with_assets(assets::Assets))
         .run(move |cx: &mut App| {
-            // Square corners everywhere, as Tauri's radius tokens (all 0).
-            gpui::set_square_corners(true);
+            // The platform default until the shell applies the saved
+            // Appearance setting: rounded on macOS, square (as Tauri's
+            // radius tokens, all 0) elsewhere.
+            crate::theme::set_corner_scale(if cfg!(target_os = "macos") { 100 } else { 0 });
             #[cfg(debug_assertions)]
             dev_reload::install(cx);
             cx.set_global(title_raster);
@@ -511,6 +514,7 @@ fn main() {
             composer_completion::bind(cx);
             file_editor::bind(cx);
             conversation::find::bind(cx);
+            pickers::bind(cx);
             conversation::environment::bind(cx);
             popover::bind(cx);
             cx.set_prompt_builder(modal::prompt_builder);

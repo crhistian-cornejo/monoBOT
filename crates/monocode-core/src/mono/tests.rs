@@ -415,3 +415,24 @@ fn group_looks_repeat_the_least_worn_once_every_pair_is_taken() {
         );
     }
 }
+
+#[test]
+fn a_new_captain_takes_the_typed_name_or_its_roles_and_the_previewed_look() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut roster = Roster::default();
+    // The dialog previews the look the Captain will get.
+    let (mascot, color) = roster.next_look();
+    let finance = roster
+        .create_captain(temp.path(), "finance", "  Ledger  ")
+        .unwrap();
+    assert_eq!(finance.name, "Ledger");
+    assert_eq!((finance.mascot.clone(), finance.color), (mascot, color));
+    assert!(finance.is_bot());
+    let id = finance.id.clone();
+    let named = roster.create_captain(temp.path(), "finance", "").unwrap();
+    assert_eq!(named.name, bots::role("finance").unwrap().name);
+    assert_ne!(named.id, id);
+    let blank = roster.create_captain(temp.path(), "custom", "Scout").unwrap();
+    assert_eq!(blank.name, "Scout");
+    assert!(roster.create_captain(temp.path(), "no-such-role", "X").is_none());
+}

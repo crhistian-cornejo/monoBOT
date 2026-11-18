@@ -765,7 +765,7 @@ impl Notes {
         // mode, light text on a dark one in light mode.
         let mut ink = shell_fill();
         ink.a = 1.;
-        let danger: gpui::Hsla = gpui::rgb(0xf87171).into();
+        let danger: gpui::Hsla = crate::theme::danger();
         let actions = div()
             .flex()
             .items_center()
@@ -1189,7 +1189,7 @@ impl gpui::Render for Notes {
                         .items_center()
                         .gap_2()
                         .text_size(px(12.))
-                        .text_color(gpui::rgb(0xf87171))
+                        .text_color(crate::theme::danger())
                         .child(div().flex_1().child(error))
                         .child(
                             div()

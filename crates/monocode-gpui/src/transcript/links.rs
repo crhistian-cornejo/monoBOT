@@ -15,6 +15,7 @@ pub(super) struct OpenMenu {
     menu: Entity<Menu>,
     _events: Subscription,
 }
+#[derive(Clone)]
 enum Target {
     File {
         path: String,
@@ -100,7 +101,27 @@ impl TranscriptView {
         } else {
             "Link actions"
         };
-        let menu = cx.new(|cx| Menu::new(label, target.items(), window, cx));
+        let items = target.items();
+        let this = cx.entity().downgrade();
+        let picked = target.clone();
+        if crate::native_menu::present(
+            &items,
+            request.position,
+            window,
+            cx,
+            move |id, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(id) = id {
+                        this.run_link_action(&id, &picked, window, cx);
+                    }
+                    cx.notify();
+                });
+            },
+        ) {
+            cx.stop_propagation();
+            return;
+        }
+        let menu = cx.new(|cx| Menu::new(label, items, window, cx));
         let events = cx.subscribe_in(
             &menu,
             window,
@@ -199,10 +220,10 @@ impl TranscriptView {
                         .py_2()
                         .rounded(px(12.))
                         .border_1()
-                        .border_color(rgb(0xf87171))
+                        .border_color(crate::theme::danger())
                         .bg(rgb(0x252525))
                         .text_size(px(12.))
-                        .text_color(rgb(0xfca5a5))
+                        .text_color(crate::theme::danger())
                         .child(error.clone())
                         .child(
                             div()

@@ -119,7 +119,7 @@ impl Accounts {
                         .mt_2()
                         .text_size(px(10.))
                         .line_height(px(16.))
-                        .text_color(gpui::rgb(0xf87171))
+                        .text_color(crate::theme::danger())
                         .child(error.clone())
                 }))
                 .into_any_element();
@@ -470,7 +470,7 @@ impl Accounts {
                     .px_4()
                     .py_2()
                     .text_size(px(11.))
-                    .text_color(gpui::rgb(0xf87171))
+                    .text_color(crate::theme::danger())
                     .child(error.clone())
                     .into_any_element(),
             );
@@ -520,9 +520,9 @@ impl Accounts {
                                     .w(px(64. * percent as f32 / 100.))
                                     .rounded_full()
                                     .bg(if used >= 100. {
-                                        gpui::rgb(0xf87171).into()
+                                        crate::theme::danger()
                                     } else if used >= 80. {
-                                        gpui::rgb(0xfbbf24).into()
+                                        crate::theme::warning()
                                     } else {
                                         content(0.55)
                                     }),
@@ -817,9 +817,9 @@ fn organization_tag(identity: &accounts::Identity) -> Option<String> {
 /// React's barClass, shared with the footer chip and usage cards.
 pub(crate) fn bar_color(used: f64) -> gpui::Hsla {
     if used >= 90. {
-        gpui::rgb(0xf87171).into()
+        crate::theme::danger()
     } else if used >= 80. {
-        gpui::rgb(0xfbbf24).into()
+        crate::theme::warning()
     } else {
         content(0.45)
     }
@@ -906,7 +906,7 @@ fn meter(w: &usage::Window, now: i64, show_remaining: bool) -> Div {
                         .map(|d| {
                             if full {
                                 d.font_weight(FontWeight::MEDIUM)
-                                    .text_color(gpui::rgb(0xf87171))
+                                    .text_color(crate::theme::danger())
                             } else {
                                 d.text_color(content(0.6))
                             }
@@ -1080,7 +1080,7 @@ impl Render for Accounts {
                             .role(Role::Alert)
                             .mt_2()
                             .text_size(px(10.))
-                            .text_color(gpui::rgb(0xf87171))
+                            .text_color(crate::theme::danger())
                             .child(error)
                     })),
             )

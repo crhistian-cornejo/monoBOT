@@ -11,6 +11,8 @@ pub(crate) enum AppView {
     Inbox,
     Notes,
     Automations,
+    /// Multi-day work run by an orchestrator, on a page of its own.
+    Workstreams,
 }
 impl AppView {
     pub fn label(self) -> &'static str {
@@ -18,6 +20,7 @@ impl AppView {
             Self::Inbox => "Inbox",
             Self::Notes => "Notes",
             Self::Automations => "Automations",
+            Self::Workstreams => "Workstreams",
         }
     }
     pub fn icon(self) -> &'static str {
@@ -25,6 +28,7 @@ impl AppView {
             Self::Inbox => "inbox",
             Self::Notes => "note",
             Self::Automations => "zap",
+            Self::Workstreams => "git-branch-2",
         }
     }
 }
@@ -95,6 +99,10 @@ pub(crate) struct Workspace {
     pub sidebar_visible: bool,
     pub sidebar_width: f32,
     pub compact_session_cards: bool,
+    /// Set once the two-line thread cards (Capy's) became the default, so a
+    /// workspace saved before then switches to them once and a later choice
+    /// of compact cards sticks.
+    pub two_line_cards: bool,
     /// The Search field heading the sidebar; ⌘K opens search either way.
     pub sidebar_search_visible: bool,
     pub sidebar_notes_visible: bool,
@@ -330,7 +338,10 @@ impl Default for Workspace {
             collapsed: HashSet::new(),
             sidebar_visible: true,
             sidebar_width: 260.,
-            compact_session_cards: true,
+            // Two lines, as Capy's threads: the title and its age, then the
+            // workspace, the model and the provider.
+            compact_session_cards: false,
+            two_line_cards: true,
             sidebar_search_visible: true,
             sidebar_notes_visible: true,
             sidebar_automations_visible: true,
@@ -452,6 +463,11 @@ impl Workspace {
             }
             // Keep the native empty-session choice when upgrading from the
             // old games toggle. An explicitly saved new choice always wins.
+            // Two-line thread cards became the default; move every workspace
+            // to them once.
+            if saved.get("two_line_cards").is_none() {
+                state.compact_session_cards = false;
+            }
             let preferences = &saved["preferences"];
             if preferences.get("empty_session").is_none()
                 && let Some(games) = preferences["empty_session_games"].as_bool()
@@ -465,6 +481,7 @@ impl Workspace {
         if !has_rail_state {
             state.restore_project_rail_metadata();
         }
+        state.two_line_cards = true;
         // Hidden project navigation is retired; collapsed always means icons.
         state.preferences.collapsed_project_rail = "compact".into();
         state.project_rail_width = if state.project_rail_width.is_finite() {
@@ -1638,9 +1655,19 @@ mod tests {
         let s = Workspace::restore(Some("{}"), &[(1, "/work/a".into())], "/work/a");
         assert!(s.tabs.is_empty());
         assert!(
-            s.compact_session_cards,
-            "older workspaces retain compact cards"
+            !s.compact_session_cards,
+            "every workspace starts on two-line cards, as Capy's threads"
         );
+        // A workspace saved with compact cards before the change moves once;
+        // compact cards chosen after it stay.
+        let older = Workspace::restore(Some(r#"{"compact_session_cards":true}"#), &[], "/work/a");
+        assert!(!older.compact_session_cards);
+        let chosen = Workspace::restore(
+            Some(r#"{"compact_session_cards":true,"two_line_cards":true}"#),
+            &[],
+            "/work/a",
+        );
+        assert!(chosen.compact_session_cards);
         assert!(
             s.sidebar_activity_visible,
             "older workspaces keep the activity card visible"

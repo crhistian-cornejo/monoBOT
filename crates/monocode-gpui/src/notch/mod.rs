@@ -1883,6 +1883,8 @@ impl Notch {
 impl Render for Notch {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let started = Instant::now();
+        // The notch has its own corners, set in its Look page.
+        window.set_corner_scale(Some(crate::theme::corner_scale(&self.look.corners)));
         let element = self.render_notch(window, cx);
         if tracing() {
             eprintln!(
@@ -1970,7 +1972,7 @@ impl Notch {
         div()
             .size_full()
             .relative()
-            .font_family(crate::fonts::UI)
+            .font_family(crate::fonts::ui())
             // The room around the open panel is not the notch: a click there
             // folds it, as outside a popover.
             .when(open, |room| {

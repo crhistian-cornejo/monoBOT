@@ -1247,7 +1247,7 @@ impl gpui::Render for MailReply {
         self.step_reveal(window, cx);
         let status: Option<(String, gpui::Hsla)> = match (&self.countdown, &self.status) {
             (Some(left), _) => Some((format!("Sending in {left}s…"), content(0.55))),
-            (None, Some((text, true))) => Some((text.clone(), rgb(0xf87171).into())),
+            (None, Some((text, true))) => Some((text.clone(), crate::theme::danger())),
             (None, Some((text, false))) => Some((text.clone(), content(0.5))),
             _ => None,
         };

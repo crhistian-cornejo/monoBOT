@@ -1049,8 +1049,8 @@ fn compact_question(text: Option<&str>) -> String {
 fn status_color(status: &str) -> Option<Hsla> {
     match status {
         "draft" => None,
-        "running" => Some(rgb(0xfcd34d).into()),
-        "error" => Some(rgb(0xfca5a5).into()),
+        "running" => Some(crate::theme::warning()),
+        "error" => Some(crate::theme::danger()),
         _ => Some(rgb(0x6ee7b7).into()),
     }
 }

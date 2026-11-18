@@ -596,7 +596,7 @@ impl SettingsView {
                 if tree.dirty != Some(false) {
                     consequences = consequences.child(
                         div()
-                            .text_color(gpui::rgb(0xfbbf24))
+                            .text_color(crate::theme::warning())
                             .child("All uncommitted and untracked changes here are discarded."),
                     );
                 }
@@ -648,7 +648,7 @@ impl SettingsView {
                     .id("management-error")
                     .role(Role::Alert)
                     .text_size(px(11.))
-                    .text_color(gpui::rgb(0xf87171))
+                    .text_color(crate::theme::danger())
                     .child(error)
                     .into_any_element(),
             );

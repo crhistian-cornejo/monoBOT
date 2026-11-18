@@ -718,7 +718,7 @@ fn run_turn_using(
             }
             introductions.push((introduction, due));
         }
-        // A Claude coding chat learns it may hand large work to Chief and
+        // A coding chat, on any provider, learns it may hand large work to Chief and
         // the user's monos, once per provider conversation.
         if !raw_native_command && settings.chief_offer && !settings.orchestrator {
             let executable = std::env::current_exe().map_err(|e| e.to_string())?;

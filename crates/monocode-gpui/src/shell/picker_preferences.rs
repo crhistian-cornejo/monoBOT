@@ -8,6 +8,7 @@ impl Shell {
             let saved = &mut this.workspace.preferences;
             if saved.model_picker_tab == prefs.model_picker_tab
                 && saved.favorite_models == prefs.favorite_models
+                && saved.favorite_efforts == prefs.favorite_efforts
                 && saved.recent_models == prefs.recent_models
                 && saved.file_view_mode == prefs.file_view_mode
                 && saved.default_access == prefs.default_access
@@ -17,6 +18,7 @@ impl Shell {
             }
             saved.model_picker_tab = prefs.model_picker_tab.clone();
             saved.favorite_models = prefs.favorite_models.clone();
+            saved.favorite_efforts = prefs.favorite_efforts.clone();
             saved.recent_models = prefs.recent_models.clone();
             saved.file_view_mode = prefs.file_view_mode.clone();
             saved.default_access = prefs.default_access.clone();

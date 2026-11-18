@@ -188,7 +188,7 @@ impl Accounts {
                     .max_w(px(240.))
                     .text_size(px(10.))
                     .line_height(px(16.))
-                    .text_color(gpui::rgb(0xf87171))
+                    .text_color(crate::theme::danger())
                     .text_center()
                     .child(error)
             }))

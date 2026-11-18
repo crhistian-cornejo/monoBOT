@@ -169,6 +169,39 @@ pub fn bar_height(level: f32) -> f32 {
     (level * 20.).round().max(2.)
 }
 
+/// A 4×4 ordered-dither threshold, the same pattern the chat background's
+/// Dither effect uses, so the wave reads as part of that family.
+const BAYER: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
+
+/// The dictation wave as a dithered grid: `columns` × `rows` cells, row by
+/// row, `true` where a dot is lit. Each column samples the loudness history
+/// (oldest on the left), lights a band about the middle as tall as it is
+/// loud, and stipples the band's edges; silence leaves a sparse dotted line.
+pub fn dither_cells(levels: &[f32; BARS], columns: usize, rows: usize) -> Vec<bool> {
+    let mut cells = vec![false; columns * rows];
+    if columns == 0 || rows == 0 {
+        return cells;
+    }
+    let middle = (rows as f32 - 1.) / 2.;
+    for column in 0..columns {
+        let at = if columns == 1 {
+            (BARS - 1) as f32
+        } else {
+            column as f32 / (columns - 1) as f32 * (BARS - 1) as f32
+        };
+        let (low, high) = (at.floor() as usize, at.ceil() as usize);
+        let level = levels[low] + (levels[high] - levels[low]) * at.fract();
+        let reach = 0.35 + level.clamp(0., 1.) * (middle + 0.5);
+        for row in 0..rows {
+            let distance = (row as f32 - middle).abs();
+            let intensity = ((reach - distance) / 1.2 + 0.5).clamp(0., 1.);
+            let threshold = (f32::from(BAYER[row % 4][column % 4]) + 0.5) / 16.;
+            cells[row * columns + column] = intensity > threshold;
+        }
+    }
+    cells
+}
+
 /// The waveform eases each bar toward its level like the web bar's 75ms
 /// height transition, `dt` seconds after the last frame.
 pub fn ease_levels(shown: &mut [f32; BARS], levels: &[f32; BARS], dt: f32) {
@@ -189,6 +222,38 @@ pub fn models_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_dithered_wave_grows_with_loudness_and_stipples_silence() {
+        let (columns, rows) = (32, 7);
+        let lit = |level: f32| {
+            dither_cells(&[level; BARS], columns, rows)
+                .iter()
+                .filter(|lit| **lit)
+                .count()
+        };
+        let quiet = lit(0.);
+        let loud = lit(1.);
+        // Silence is a sparse dotted line through the middle, not nothing.
+        assert!(quiet > 0 && quiet < columns, "{quiet} dots in silence");
+        assert!(loud > quiet * 4, "{loud} dots when loud against {quiet}");
+        // The middle row is the densest at any level.
+        let cells = dither_cells(&[0.4; BARS], columns, rows);
+        let row = |r: usize| {
+            cells[r * columns..(r + 1) * columns]
+                .iter()
+                .filter(|c| **c)
+                .count()
+        };
+        assert!(row(3) >= row(0) && row(3) >= row(6));
+        // Newest on the right: a sound just heard lights the right edge.
+        let mut levels = [0.; BARS];
+        levels[BARS - 1] = 1.;
+        let cells = dither_cells(&levels, columns, rows);
+        let column = |c: usize| (0..rows).filter(|r| cells[r * columns + c]).count();
+        assert!(column(columns - 1) > column(0));
+        assert!(dither_cells(&levels, 0, rows).is_empty());
+    }
 
     #[test]
     fn the_bar_clock_counts_minutes_and_seconds() {

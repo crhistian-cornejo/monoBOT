@@ -614,7 +614,7 @@ impl Render for BotImportDialog {
                     .id("bot-import-error")
                     .role(Role::Alert)
                     .text_size(px(12.))
-                    .text_color(gpui::rgb(0xf87171))
+                    .text_color(crate::theme::danger())
                     .child(error.clone()),
             );
         }

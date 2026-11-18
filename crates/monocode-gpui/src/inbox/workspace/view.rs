@@ -88,7 +88,7 @@ pub(super) fn alert(text: impl Into<SharedString>) -> Div {
     div()
         .text_size(px(12.))
         .line_height(px(18.))
-        .text_color(rgb(0xf87171))
+        .text_color(crate::theme::danger())
         .child(text.into())
 }
 
@@ -328,7 +328,7 @@ impl Workspace {
                                 1.,
                                 idle,
                             )
-                            .text_color(rgb(0xf87171))
+                            .text_color(crate::theme::danger())
                             .on_click(
                                 cx.listener(move |this, _, _, cx| {
                                     this.delete_event(id.clone(), cx)
@@ -581,7 +581,7 @@ impl Workspace {
                                 1.,
                                 idle,
                             )
-                            .text_color(rgb(0xf87171))
+                            .text_color(crate::theme::danger())
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 this.remove_secret(kind, cx)
                             })),

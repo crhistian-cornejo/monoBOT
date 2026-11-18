@@ -4,7 +4,6 @@ use crate::{
 };
 use gpui::{
     App, Context, FocusHandle, FontWeight, KeyBinding, Role, Window, actions, div, prelude::*, px,
-    rgb,
 };
 #[cfg(test)]
 use monocode_core::usage::{FetchError, Snapshot};
@@ -656,10 +655,10 @@ impl UsageFooter {
                             .rounded_lg()
                             .px(px(10.))
                             .py_2()
-                            .bg(gpui::rgba(0xfbbf241a))
+                            .bg(crate::theme::warning().opacity(0.1))
                             .text_size(px(10.))
                             .line_height(px(16.))
-                            .text_color(rgb(0xfcd34d))
+                            .text_color(crate::theme::warning())
                             .child("Couldn’t refresh. Showing the last available snapshot."),
                     )
                 },

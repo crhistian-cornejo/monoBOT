@@ -698,7 +698,7 @@ impl Render for NewWorkstreamDialog {
                                 .debug_selector(|| "new-workstream-error".into())
                                 .role(Role::Alert)
                                 .text_size(px(12.))
-                                .text_color(rgb(0xf87171))
+                                .text_color(crate::theme::danger())
                                 .child(error),
                         )
                     }),
@@ -1147,7 +1147,7 @@ impl Monos {
                     .role(Role::Alert)
                     .px_1()
                     .text_size(px(12.))
-                    .text_color(rgb(0xf87171))
+                    .text_color(crate::theme::danger())
                     .child(error.clone())
                     .into_any_element(),
             ],
@@ -1350,4 +1350,112 @@ fn pr_row(pr: &BranchPr, group: PrGroup) -> AnyElement {
     )
     .on_click(move |_, _, cx| cx.open_url(&url))
     .into_any_element()
+}
+
+impl Monos {
+    /// The Workstreams page, opened from the sidebar's foot: what they are,
+    /// a button to start one and every workstream as a row.
+    pub(crate) fn workstreams_page(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        self.rail_ids.clear();
+        let list = self.rail_impl(None, false, false, super::agents::Section::Workstreams, cx);
+        div()
+            .id("workstreams-page")
+            .debug_selector(|| "workstreams-page".into())
+            .size_full()
+            .overflow_y_scroll()
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(px(720.))
+                    .px_6()
+                    .pt(px(40.))
+                    .pb_6()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div()
+                                    .text_size(px(22.))
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(content(1.))
+                                    .child("Workstreams"),
+                            )
+                            .child(beta_badge())
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .id("workstreams-page-new")
+                                    .debug_selector(|| "workstreams-page-new".into())
+                                    .role(Role::Button)
+                                    .aria_label("New workstream")
+                                    .h(px(30.))
+                                    .px_3()
+                                    .rounded(px(8.))
+                                    .flex()
+                                    .items_center()
+                                    .gap_1p5()
+                                    .text_size(px(13.))
+                                    .text_color(content(1.))
+                                    .bg(content(0.08))
+                                    .hover(|s| s.bg(content(0.12)))
+                                    .cursor_pointer()
+                                    .child(icon("plus", 14.).text_color(content(0.8)))
+                                    .child("New workstream")
+                                    .on_click(
+                                        cx.listener(|this, _, w, cx| this.new_workstream(w, cx)),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .max_w(px(560.))
+                            .text_size(px(13.))
+                            .line_height(px(20.))
+                            .text_color(content(0.55))
+                            .child(
+                                "Multi-day work run by an orchestrator: it plans the steps, hands \
+                                 them to agents across your projects and reports back as it goes.",
+                            ),
+                    )
+                    .child(div().mx(px(-8.)).child(list)),
+            )
+            .into_any_element()
+    }
+}
+
+/// The Workstreams page as an app view beside Inbox, Notes and Automations.
+pub(crate) struct WorkstreamsPage {
+    monos: Entity<Monos>,
+    focus: gpui::FocusHandle,
+    _changed: gpui::Subscription,
+}
+impl WorkstreamsPage {
+    pub(crate) fn new(monos: Entity<Monos>, cx: &mut Context<Self>) -> Self {
+        let changed = cx.observe(&monos, |_, _, cx| cx.notify());
+        Self {
+            monos,
+            focus: cx.focus_handle(),
+            _changed: changed,
+        }
+    }
+}
+impl gpui::Focusable for WorkstreamsPage {
+    fn focus_handle(&self, _: &App) -> gpui::FocusHandle {
+        self.focus.clone()
+    }
+}
+impl Render for WorkstreamsPage {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let page = self
+            .monos
+            .update(cx, |monos, cx| monos.workstreams_page(cx));
+        div().track_focus(&self.focus).size_full().child(page)
+    }
 }

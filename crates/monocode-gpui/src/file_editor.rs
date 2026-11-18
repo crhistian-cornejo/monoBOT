@@ -10,7 +10,7 @@ use crate::{
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, Image, ImageCacheError,
     ImageFormat, ImageSource, KeyBinding, ObjectFit, PromptLevel, RenderImage, Role, SharedString,
-    Subscription, Task, Window, actions, div, img, prelude::*, px, rgb,
+    Subscription, Task, Window, actions, div, img, prelude::*, px,
 };
 use monocode_core::files::document::{self, Document, TextDocument};
 use std::{path::PathBuf, sync::Arc, time::Duration};
@@ -1474,7 +1474,7 @@ impl gpui::Render for FileEditor {
                             .px_3()
                             .py_2()
                             .text_size(px(12.))
-                            .text_color(rgb(0xfbbf24))
+                            .text_color(crate::theme::warning())
                             .child(error),
                     )
                 },

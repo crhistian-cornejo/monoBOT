@@ -145,6 +145,10 @@ pub struct Look {
     pub shelf_rows: u32,
     /// What the shelf shows, in order, and how wide each one is.
     pub shelf: Vec<Widget>,
+    /// How round the open notch's cards, buttons and framed boxes are:
+    /// square, subtle, rounded or soft. The app's own windows have theirs
+    /// in Appearance.
+    pub corners: String,
 }
 
 impl Default for Look {
@@ -169,9 +173,13 @@ impl Default for Look {
                 Widget::new("recent", 2),
                 Widget::new("new", 1),
             ],
+            corners: "rounded".into(),
         }
     }
 }
+
+/// The notch's corner choices.
+pub const CORNERS: [&str; 4] = ["square", "subtle", "rounded", "soft"];
 
 fn word(choices: &[&str], saved: &str, fallback: &str) -> String {
     choices
@@ -191,6 +199,7 @@ impl Look {
         self.style = word(&STYLES, &self.style, &base.style);
         self.opens_on = word(&OPENS_ON, &self.opens_on, &base.opens_on);
         self.width = word(&WIDTHS, &self.width, &base.width);
+        self.corners = word(&CORNERS, &self.corners, &base.corners);
         self.notice_seconds = self.notice_seconds.clamp(2, 12);
         self.spotify_client = self.spotify_client.trim().to_owned();
         if !spotify::valid_client(&self.spotify_client) {

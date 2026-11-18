@@ -46,7 +46,7 @@ use crate::{
     theme::*,
     transcript::TranscriptView,
 };
-pub(crate) use accounts::UsageResumed;
+pub(crate) use accounts::{UsageResumed, ViewCaptain};
 use gpui::{
     AnyElement, Context, CursorStyle, Entity, EventEmitter, Focusable, MouseButton, Role,
     SharedString, StyleRefinement, Subscription, Window, canvas, div, prelude::*, px,
@@ -464,11 +464,11 @@ impl Conversation {
                             .flex_shrink_0()
                             .text_size(px(11.))
                             .text_color(if self.needs_approval() {
-                                gpui::rgb(0xfbbf24).into()
+                                crate::theme::warning()
                             } else if self.responding() {
                                 accent_color()
                             } else if done {
-                                gpui::rgb(0x34d399).into()
+                                crate::theme::success()
                             } else {
                                 content(0.45)
                             })
@@ -1227,9 +1227,9 @@ impl Conversation {
             && !self.app_environment.is_empty();
         let preferences = cx.try_global::<crate::settings::Preferences>();
         settings.swarm_offer = coding && preferences.is_some_and(|p| p.swarm_offer);
-        settings.chief_offer = coding
-            && self.summary.provider == Kind::Claude.id()
-            && preferences.is_some_and(|p| p.chief_offer);
+        // Any provider can hand work to Chief and the user's monos: the
+        // offer is a prompt and the control CLI, not a Claude feature.
+        settings.chief_offer = coding && preferences.is_some_and(|p| p.chief_offer);
         if settings.remote_action.as_ref().is_none_or(|action| {
             (action["type"] == "send"
                 && action["draftBlockId"].is_null()
@@ -2224,6 +2224,41 @@ impl Conversation {
         self.save_settings(cx);
         cx.notify();
     }
+    /// The session's settings for its model, as the model picker shows them.
+    fn panel_state(&self) -> crate::pickers::PanelState {
+        crate::pickers::PanelState {
+            effort: self.selected_effort().map(str::to_owned),
+            fast: self.settings.fast,
+            thinking: self.settings.thinking,
+            tier: self.selected_tier().map(str::to_owned),
+            model_settings: self.settings.model_settings.clone(),
+            account: self.settings.account.id.clone(),
+        }
+    }
+    /// An option changed in the model picker's panel: switch to its model
+    /// first when it is another one, then apply it as the settings menu does.
+    fn apply_model_option(&mut self, option: &crate::pickers::ModelOption, cx: &mut Context<Self>) {
+        let other = self.summary.provider != option.kind.id() || self.model != option.model;
+        if other && !self.apply_model_pick(&ModelPicked(option.kind, option.model.clone()), cx) {
+            return;
+        }
+        self.menu_choice(&option.action, cx);
+    }
+    /// ⌥1–⌥9: switch to that favorite at the effort it opens at.
+    pub(super) fn pick_favorite(&mut self, index: usize, cx: &mut Context<Self>) {
+        let Some((kind, model, effort)) = crate::pickers::favorite_choice(index, cx) else {
+            return;
+        };
+        let other = self.summary.provider != kind.id() || self.model != model;
+        if other && !self.apply_model_pick(&ModelPicked(kind, model.clone()), cx) {
+            return;
+        }
+        crate::pickers::remember_model(kind, model, cx);
+        if let Some(effort) = effort {
+            self.menu_choice(&format!("effort:{effort}"), cx);
+        }
+        cx.notify();
+    }
     fn set_effort_choice(&mut self, effort: &str, cx: &mut Context<Self>) {
         self.settings
             .model_settings
@@ -2725,8 +2760,10 @@ impl Conversation {
                 250.,
                 MenuStyle::Composer,
             ),
-            // ModelPicker: a "Model" row whose flyout lists the models.
+            // The model picker: favorites and every provider's models
+            // beside the highlighted model's options.
             ComposerMenu::Model => {
+                let state = self.panel_state();
                 let list = cx.new(|cx| {
                     let hidden = cx
                         .try_global::<crate::settings::Preferences>()
@@ -2741,6 +2778,7 @@ impl Conversation {
                     )
                     .hide_providers(hidden)
                     .allow_provider_switch(true)
+                    .sections(state, cx)
                 });
                 events.push(cx.subscribe_in(
                     &list,
@@ -2751,34 +2789,25 @@ impl Conversation {
                         }
                     },
                 ));
+                events.push(cx.subscribe(
+                    &list,
+                    |this, list, option: &crate::pickers::ModelOption, cx| {
+                        this.apply_model_option(option, cx);
+                        let (kind, model, state) = (
+                            Kind::from_id(&this.summary.provider),
+                            this.model.clone(),
+                            this.panel_state(),
+                        );
+                        list.update(cx, |list, cx| list.set_panel_state(kind, model, state, cx));
+                    },
+                ));
                 let focus = list.read(cx).search_focus(cx);
-                let mut items = if cx
-                    .try_global::<crate::settings::Preferences>()
-                    .is_none_or(|p| p.model_controls != "beside")
-                {
-                    self.mono_model_options()
-                } else {
-                    Vec::new()
-                };
-                items.push(
-                    MenuAction::new("model", "Model")
-                        .value_image(provider.id())
-                        .value(self.model_info().map_or_else(
-                            || model_name(provider, self.model.as_deref()),
-                            |model| model_display_name(provider, &model.id, &model.name),
-                        ))
-                        .flyout(Flyout {
-                            view: list.into(),
-                            width: 310.,
-                            padding: 0.,
-                            height: Some(442.),
-                            max_height: None,
-                            focus: Some(focus),
-                            surface: None,
-                        })
-                        .into(),
-                );
-                ("Model and settings", items, 250., MenuStyle::Settings)
+                (
+                    "Models",
+                    vec![MenuItem::Custom(list.into(), focus)],
+                    crate::pickers::PICKER_WIDTH + 2. * MenuStyle::Settings.padding(),
+                    MenuStyle::Settings,
+                )
             }
             ComposerMenu::Recent => (
                 "Recently used models",
@@ -3685,7 +3714,7 @@ pub(crate) fn effort_name(value: &str) -> String {
     .into()
 }
 
-fn model_control_toggle(control: &catalog::ModelControl) -> bool {
+pub(crate) fn model_control_toggle(control: &catalog::ModelControl) -> bool {
     control.choices.len() == 2
         && control.choices.iter().any(|(value, _)| value == "true")
         && control.choices.iter().any(|(value, _)| value == "false")

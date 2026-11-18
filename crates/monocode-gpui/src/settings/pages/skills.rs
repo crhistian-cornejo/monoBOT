@@ -780,7 +780,7 @@ impl SettingsView {
                                 .id("skill-read-error")
                                 .role(Role::Alert)
                                 .text_size(px(12.))
-                                .text_color(gpui::rgb(0xf87171))
+                                .text_color(crate::theme::danger())
                                 .child(error.clone())
                                 .into_any_element()
                         } else if let Some(document) = document {

@@ -973,7 +973,9 @@ impl Shell {
         let stack = div()
             .id("notification-stack")
             .absolute()
-            .top(px(12.))
+            // Under the title bar, so a notice never covers the tabs or the
+            // window's own controls.
+            .top(px(crate::theme::TITLE_BAR_HEIGHT + 8.))
             .right(px(12.))
             .w(px(360.))
             .max_w(px((self.viewport_width - 24.).max(0.)))
@@ -1433,7 +1435,8 @@ mod tests {
         let app = visual.debug_bounds("app-error").unwrap();
         let file = visual.debug_bounds("file-action-error").unwrap();
         let viewport = window.update(visual, |_, w, _| w.viewport_size()).unwrap();
-        assert_eq!(app.top(), px(12.));
+        // Under the title bar.
+        assert_eq!(app.top(), px(crate::theme::TITLE_BAR_HEIGHT + 8.));
         assert_eq!(app.right(), viewport.width - px(12.));
         assert_eq!(app.size.width, px(360.));
         assert_eq!(file.size.width, app.size.width);
@@ -1448,7 +1451,7 @@ mod tests {
         assert!(visual.debug_bounds("app-error").is_none());
         assert_eq!(
             visual.debug_bounds("file-action-error").unwrap().top(),
-            px(12.)
+            px(crate::theme::TITLE_BAR_HEIGHT + 8.)
         );
 
         visual.simulate_resize(gpui::size(px(300.), px(800.)));

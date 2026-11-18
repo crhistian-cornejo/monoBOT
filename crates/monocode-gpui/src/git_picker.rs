@@ -501,7 +501,7 @@ impl gpui::Render for GitPicker {
                     div()
                         .p(px(10.))
                         .text_size(px(11.))
-                        .text_color(gpui::rgb(0xf87171))
+                        .text_color(crate::theme::danger())
                         .child(error),
                 )
             })

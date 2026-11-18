@@ -5027,7 +5027,7 @@ impl TranscriptView {
                                     let menu_path = path.clone();
                                     d.role(Role::Link)
                                         .cursor_pointer()
-                                        .hover(|s| s.text_color(rgb(0x7dd3fc)))
+                                        .hover(|s| s.text_color(crate::theme::info()))
                                         .on_click(move |event, window, cx| {
                                             if event.click_count() == 1 {
                                                 window.dispatch_action(
@@ -5306,8 +5306,8 @@ impl TranscriptView {
                 let long = note.text.lines().count() > 4 || note.text.len() > 300;
                 let severity = note.severity.as_deref();
                 let color = match severity {
-                    Some("blocker") => rgb(0xf87171).into(),
-                    Some("concern") => rgb(0xfbbf24).into(),
+                    Some("blocker") => crate::theme::danger(),
+                    Some("concern") => crate::theme::warning(),
                     _ => content(0.55),
                 };
                 div()
@@ -5822,14 +5822,14 @@ impl TranscriptView {
                     .flex()
                     .flex_col()
                     .text_color(if error {
-                        rgb(0xf87171).into()
+                        crate::theme::danger()
                     } else {
                         content(1.)
                     })
                     .when(user && !bare, |d| {
                         // AgentTranscript.tsx: text-sm (14px / 20px), px-3 py-2.
                         // Measurement shapes this font at the same size.
-                        d.font(gpui::font(crate::fonts::UI))
+                        d.font(gpui::font(crate::fonts::ui()))
                             .text_size(PROMPT_TEXT_SIZE)
                             .line_height(px(20.))
                             .px(PROMPT_PAD_X * 0.5)

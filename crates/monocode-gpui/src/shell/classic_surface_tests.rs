@@ -539,18 +539,22 @@ fn new_layout_projects_restore_the_last_session_or_mono_tab(cx: &mut TestAppCont
                     let session = shell.workspace.active.unwrap();
                     Surface::Mono.open(shell, window, cx);
                     let mono = shell.mono_manager().read(cx).active.clone().unwrap();
-                    let ix = shell
-                        .workspace
-                        .projects
-                        .iter()
-                        .position(|p| p == path)
-                        .unwrap();
-                    (stable(format!("project-space-{ix}")), session, mono)
+                    (path, session, mono)
                 })
                 .unwrap();
             visual.run_until_parked();
             targets.push(target);
         }
+        // Switch projects as the header's project picker does.
+        let select = |path: &'static str, visual: &mut VisualTestContext| {
+            window
+                .update(visual, |shell, window, cx| {
+                    shell.select_project(path.into(), window, cx)
+                })
+                .unwrap();
+            visual.run_until_parked();
+            visual.refresh().unwrap();
+        };
         let click = |selector: &'static str, visual: &mut VisualTestContext| {
             visual.refresh().unwrap();
             let bounds = visual.debug_bounds(selector).unwrap();
@@ -578,12 +582,12 @@ fn new_layout_projects_restore_the_last_session_or_mono_tab(cx: &mut TestAppCont
                     .is_some()
             );
         };
-        click(targets[0].0, visual);
+        select(targets[0].0, visual);
         assert_mono(0, visual);
         click(stable(format!("title-tab-{}", targets[0].1)), visual);
-        click(targets[1].0, visual);
+        select(targets[1].0, visual);
         assert_mono(1, visual);
-        click(targets[0].0, visual);
+        select(targets[0].0, visual);
         window
             .read_with(visual, |shell, cx| {
                 assert!(!shell.mono_active(cx));
@@ -594,11 +598,11 @@ fn new_layout_projects_restore_the_last_session_or_mono_tab(cx: &mut TestAppCont
         assert_mono(0, visual);
         // Both same-project clicks and returning from another project restore
         // a selected Mono in either new frame style.
-        click(targets[0].0, visual);
+        select(targets[0].0, visual);
         assert_mono(0, visual);
-        click(targets[1].0, visual);
+        select(targets[1].0, visual);
         assert_mono(1, visual);
-        click(targets[0].0, visual);
+        select(targets[0].0, visual);
         assert_mono(0, visual);
     }
 }

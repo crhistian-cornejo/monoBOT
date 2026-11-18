@@ -310,11 +310,11 @@ impl TranscriptView {
                     .flex()
                     .items_center()
                     .gap(px(4.))
-                    .when(push_failed, |d| d.text_color(rgb(0xf87171)))
+                    .when(push_failed, |d| d.text_color(crate::theme::danger()))
                     .child(
                         icon(if push_failed { "close" } else { "cloud-upload" }, 12.).text_color(
                             if push_failed {
-                                rgb(0xf87171).into()
+                                crate::theme::danger()
                             } else {
                                 content(0.4)
                             },
@@ -361,9 +361,9 @@ impl TranscriptView {
         });
 
         let (badge, badge_color) = if push_failed {
-            ("close", rgb(0xf87171))
+            ("close", crate::theme::danger())
         } else {
-            ("check", rgb(DIFF_ADD))
+            ("check", crate::theme::success())
         };
         let header = div()
             .min_w_0()

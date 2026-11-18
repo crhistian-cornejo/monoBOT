@@ -229,7 +229,7 @@ fn message(text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 fn error(text: impl Into<SharedString>) -> Div {
-    message(text).text_color(rgb(0xf87171))
+    message(text).text_color(crate::theme::danger())
 }
 fn provider_mark(provider: &str) -> gpui::Svg {
     let (path, color) = match provider {
@@ -244,9 +244,9 @@ fn provider_mark(provider: &str) -> gpui::Svg {
 fn status_color(item: &Item) -> Hsla {
     match item.status() {
         "Merged" => rgb(0xa78bfa).into(),
-        "Closed" => rgb(0xf87171).into(),
+        "Closed" => crate::theme::danger(),
         "Draft" => content(0.4),
-        _ => rgb(0x4ade80).into(),
+        _ => crate::theme::success(),
     }
 }
 fn status_icon(item: &Item) -> &'static str {
@@ -1101,11 +1101,11 @@ impl Inbox {
                                                 d.when(failed > 0, |d| {
                                                     d.child(
                                                         icon("circle-x", 13.)
-                                                            .text_color(rgb(0xf87171)),
+                                                            .text_color(crate::theme::danger()),
                                                     )
                                                     .child(
                                                         div()
-                                                            .text_color(rgb(0xf87171))
+                                                            .text_color(crate::theme::danger())
                                                             .child(failed.to_string()),
                                                     )
                                                 })
@@ -1315,9 +1315,9 @@ impl Inbox {
         };
         let state = comment.state.trim().to_uppercase();
         let review_color = if state == "APPROVED" {
-            rgb(0x4ade80).into()
+            crate::theme::success()
         } else if state == "CHANGES_REQUESTED" {
-            rgb(0xf87171).into()
+            crate::theme::danger()
         } else {
             content(0.5)
         };
@@ -1380,7 +1380,7 @@ impl Inbox {
             })
             .when(comment.resolved, |d| {
                 d.child("·")
-                    .child(div().text_color(rgb(0x4ade80)).child("Resolved"))
+                    .child(div().text_color(crate::theme::success()).child("Resolved"))
             })
             .when(!comment.created_at.is_empty(), |d| {
                 d.child("·").child(
@@ -1614,9 +1614,9 @@ impl Inbox {
                 let event = review_event(&comment);
                 let state = comment.state.to_uppercase();
                 let color = if state == "APPROVED" {
-                    rgb(0x4ade80).into()
+                    crate::theme::success()
                 } else if state == "CHANGES_REQUESTED" {
-                    rgb(0xf87171).into()
+                    crate::theme::danger()
                 } else {
                     content(0.45)
                 };
@@ -2138,9 +2138,9 @@ impl Inbox {
                         })))))
                     .children(checks.checks.iter().enumerate().map(|(ix, check)| {
                         let state = check.state.to_lowercase();
-                        let color: Hsla = if matches!(state.as_str(), "success" | "neutral" | "skipped") { rgb(0x4ade80).into() }
-                            else if matches!(state.as_str(), "failure" | "failed" | "error" | "timed_out" | "cancelled" | "action_required") { rgb(0xf87171).into() }
-                            else { rgb(0xfbbf24).into() };
+                        let color: Hsla = if matches!(state.as_str(), "success" | "neutral" | "skipped") { crate::theme::success() }
+                            else if matches!(state.as_str(), "failure" | "failed" | "error" | "timed_out" | "cancelled" | "action_required") { crate::theme::danger() }
+                            else { crate::theme::warning() };
                         let url = check.url.clone();
                         div().id(("inbox-check", ix)).py(px(12.)).border_b_1().border_color(content(0.07)).flex().items_center().gap(px(10.))
                             .child(icon(if state == "success" { "check-circle" } else { "circle-dot" }, 15.).text_color(color))
@@ -2570,7 +2570,7 @@ impl Inbox {
                             .when(connected && provider != "github", |d| {
                                 d.child(
                                     action("inbox-disconnect", "Disconnect")
-                                        .text_color(rgb(0xf87171))
+                                        .text_color(crate::theme::danger())
                                         .on_click(
                                             cx.listener(|this, _, _, cx| this.connect(true, cx)),
                                         ),
@@ -2830,7 +2830,7 @@ impl Inbox {
                     div()
                         .mt(px(8.))
                         .text_size(px(11.))
-                        .text_color(rgb(0xf87171))
+                        .text_color(crate::theme::danger())
                         .child(text),
                 )
             })

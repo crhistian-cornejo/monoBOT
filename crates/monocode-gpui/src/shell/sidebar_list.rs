@@ -6,10 +6,8 @@ use std::cell::{Cell, RefCell};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum Row {
-    Navigation,
+    /// The personal agents (Captains), then the code monos and workstreams.
     Monos,
-    /// The Agents zone: the Principal, bots and groups.
-    Agents,
     Pinned,
     Folders,
     Group(Entry),
@@ -301,14 +299,12 @@ impl Shell {
             self.prepare_classic_sidebar_list(entries, cx);
             return;
         }
-        if self.workspace.agents_zone {
-            self.sidebar_list
-                .update(self.sidebar_scope(), vec![Row::Agents]);
-            return;
-        }
         let groups = self.project_groups();
         let now = monocode_core::time::now_ms();
-        let mut rows = vec![Row::Navigation, Row::Monos];
+        // One sidebar for code and agents: the personal agents (Captains)
+        // lead, then the code monos and the threads. Inbox, Notes and
+        // Automations live in the bar at the foot.
+        let mut rows = vec![Row::Monos];
         let mut folders = false;
         for entry in entries {
             let (members, collapsed) = match entry {
@@ -534,25 +530,24 @@ impl Shell {
         };
         self.sidebar_list.visible_rows.borrow_mut().push(ix);
         let content = match row {
-            Row::Navigation => return self.sidebar_navigation(cx),
             Row::Monos => {
+                let classic = self.workspace.classic_layout;
                 return self
                     .monos
                     .clone()
                     .map(|monos| {
                         monos.update(cx, |monos, cx| {
-                            monos.rail(Some(self.workspace.project.clone()), cx)
+                            let project = Some(self.workspace.project.clone());
+                            if classic {
+                                monos.rail(project, cx)
+                            } else {
+                                monos.unified_rail(project, cx)
+                            }
                         })
                     })
                     .unwrap_or_else(|| div().into_any());
             }
-            Row::Agents => {
-                return self
-                    .monos
-                    .clone()
-                    .map(|monos| monos.update(cx, |monos, cx| monos.agents_rail(false, false, cx)))
-                    .unwrap_or_else(|| div().into_any());
-            }
+
             Row::Pinned => section_label("Pinned").into_any(),
             Row::Folders => section_label("Folders").into_any(),
             Row::Group(entry) => {
@@ -617,10 +612,6 @@ impl Shell {
             .into_any()
     }
 }
-
-/// The navigation rows' trailing column: centred 7px in from the row's
-/// padding, on the same axis as the section headers' 24px icon buttons.
-const TRAILING_SLOT: f32 = 14.;
 
 impl Shell {
     pub(super) fn sidebar_options_menu_items(&self, cx: &App) -> Vec<MenuItem> {
@@ -965,216 +956,77 @@ impl Shell {
         }
     }
 
-    pub(super) fn sidebar_navigation(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        // The Focused layout shows Search as an icon beside Sidebar options.
-        let search_field = self.workspace.sidebar_search_visible && self.workspace.classic_layout;
-        let focused = !self.workspace.classic_layout;
-        let blank_session = focused && self.active_session_is_blank(cx);
+    /// The single sidebar's foot, as Capy's: Settings on the left, then the
+    /// app's pages as icons (Inbox, Notes, Automations, Workstreams), each
+    /// lit while it is open. A page hidden in Sidebar options stays hidden here.
+    pub(super) fn sidebar_bottom_bar(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let unread = self
+            .inbox
+            .as_ref()
+            .is_some_and(|inbox| inbox.read(cx).unread_count() > 0);
+        let open = self.app_view_label();
+        let pages: Vec<(&'static str, &'static str)> = [
+            ("Inbox", "inbox"),
+            ("Notes", "note"),
+            ("Automations", "zap"),
+            ("Workstreams", "git-branch-2"),
+        ]
+        .into_iter()
+        .filter(|(label, _)| match *label {
+            "Notes" => self.workspace.preferences.notes && self.workspace.sidebar_notes_visible,
+            "Automations" => self.workspace.sidebar_automations_visible,
+            "Inbox" => self.workspace.sidebar_inbox_visible,
+            "Workstreams" => self.workspace.preferences.monos && self.monos.is_some(),
+            _ => true,
+        })
+        .collect();
         div()
-            .w_full()
+            .id("sidebar-bottom-bar")
+            .debug_selector(|| "sidebar-bottom-bar".into())
+            .role(Role::Navigation)
+            .aria_label("Pages")
+            .h(px(44.))
+            .flex_shrink_0()
             .px_2()
-            .pt(px(if self.workspace.classic_layout {
-                2.
-            } else {
-                4.
-            }))
-            .pb(px(if self.workspace.classic_layout {
-                8.
-            } else {
-                12.
-            }))
             .flex()
-            .flex_col()
-            .gap_px()
-            .when(search_field, |d| {
-                d.child(
-                    div()
-                        .id("rail-search")
-                        .debug_selector(|| "sidebar-search-field".into())
-                        .group("rail-search")
-                        .w_full()
-                        .h(px(32.))
-                        .mb(px(if self.workspace.classic_layout {
-                            2.
-                        } else {
-                            4.
-                        }))
-                        .px_1p5()
-                        .rounded_md()
-                        .border_1()
-                        .border_color(content(0.08))
-                        .shadow(field_shadow())
-                        .text_color(content(if self.sidebar_hover == Some("Search") {
-                            1.
-                        } else {
-                            0.5
-                        }))
-                        .font_weight(FontWeight::MEDIUM)
-                        .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
-                        .on_hover(cx.listener(|this, hovered, _, cx| {
-                            this.sidebar_hover = if *hovered { Some("Search") } else { None };
-                            this.notify_navigation(cx);
-                        }))
-                        .on_mouse_down(
-                            MouseButton::Left,
-                            cx.listener(|this, _, window, cx| {
-                                this.focus_search(window, cx);
-                            }),
-                        )
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_size(px(14.))
-                        .child(
-                            icon("search", 16.)
-                                .text_color(content(0.35))
-                                .group_hover("rail-search", |s| s.text_color(content(0.7))),
-                        )
-                        .child(div().flex_1().min_w_0().h(px(20.)).child("Search"))
-                        .child(
-                            // The shortcut span sits outside the label's `font-medium`.
-                            div()
-                                .text_size(px(11.))
-                                .font_weight(FontWeight::NORMAL)
-                                .text_color(content(0.4))
-                                .child(if cfg!(target_os = "macos") {
-                                    "⌘K"
-                                } else {
-                                    "Ctrl K"
-                                }),
-                        ),
-                )
-            })
-            .children(
-                [
-                    ("New", "square-plus"),
-                    ("Inbox", "inbox"),
-                    ("Notes", "note"),
-                    ("Automations", "zap"),
-                ]
-                .into_iter()
-                .filter(|(label, _)| match *label {
-                    // Only the Focused layout lists New here.
-                    "New" => focused,
-                    "Notes" => {
-                        self.workspace.preferences.notes && self.workspace.sidebar_notes_visible
-                    }
-                    "Automations" => self.workspace.sidebar_automations_visible,
-                    "Inbox" => self.workspace.sidebar_inbox_visible,
-                    _ => true,
-                })
-                .map(|(label, glyph)| {
-                    let glyph = if self.workspace.classic_layout && label == "Notes" {
-                        "file"
-                    } else {
-                        glyph
-                    };
-                    let selected = if label == "New" {
-                        blank_session
-                    } else {
-                        self.app_view_label() == Some(label)
-                    };
-                    let unread = label == "Inbox"
-                        && self
-                            .inbox
-                            .as_ref()
-                            .is_some_and(|inbox| inbox.read(cx).unread_count() > 0);
-                    div()
-                        .id(label)
-                        .debug_selector(move || format!("sidebar-navigation-{label}"))
-                        .role(Role::Button)
-                        .aria_label(if unread { "Inbox, new items" } else { label })
-                        .aria_selected(selected)
-                        .cursor_pointer()
-                        .group("rail-action")
-                        .h(px(32.))
-                        .px_2()
-                        .rounded_md()
-                        .flex()
-                        .items_center()
-                        .gap_2()
-                        .text_size(px(14.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(content(if selected || self.sidebar_hover == Some(label) {
-                            1.
-                        } else {
-                            0.5
-                        }))
-                        .when(selected, |d| d.bg(content(0.1)))
-                        .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
-                        .child(icon(glyph, 16.).text_color(content(if selected {
-                            0.7
-                        } else {
-                            0.35
-                        })))
-                        .child(div().flex_1().child(label))
-                        .when_some(
-                            match label {
-                                "New" => Some(format!("{MOD}T").into_any_element()),
-                                "Notes" => self
-                                    .note_count
-                                    .map(|count| count.to_string().into_any_element()),
-                                "Inbox" if unread => Some(
-                                    div()
-                                        .flex_shrink_0()
-                                        .size(px(if self.workspace.classic_layout {
-                                            8.
-                                        } else {
-                                            6.
-                                        }))
-                                        .rounded_full()
-                                        .bg(accent_color())
-                                        .into_any_element(),
-                                ),
-                                _ => None,
-                            },
-                            // One column for hints, counts and the unread dot,
-                            // centred under the section buttons' icons below.
-                            |row, trailing| {
-                                row.child(
-                                    div()
-                                        .debug_selector(move || {
-                                            format!("sidebar-navigation-trailing-{label}")
-                                        })
-                                        .w(px(TRAILING_SLOT))
-                                        .flex_shrink_0()
-                                        .flex()
-                                        .justify_center()
-                                        .text_size(px(11.))
-                                        .font_weight(FontWeight::NORMAL)
-                                        .text_color(content(0.35))
-                                        .child(trailing),
-                                )
-                            },
-                        )
-                        .on_click(cx.listener(move |this, _, window, cx| match label {
-                            "New" => this.new_chat(cx),
-                            "Inbox" => this.open_inbox(window, cx),
-                            "Notes" => this.open_notes(window, cx),
-                            "Automations" => this.open_automations(window, cx),
-                            _ => (),
-                        }))
-                        .on_hover(cx.listener(move |this, hovered, _, cx| {
-                            if *hovered {
-                                this.sidebar_hover = Some(label);
-                            } else if this.sidebar_hover == Some(label) {
-                                this.sidebar_hover = None;
-                            }
-                            this.notify_navigation(cx);
-                        }))
-                }),
+            .items_center()
+            .gap_1()
+            .child(
+                command_icon_button("sidebar-settings", "Settings", "settings", "App: Settings")
+                    .size(px(28.))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.open_settings(crate::settings::Section::General, window, cx)
+                    })),
             )
-            .into_any()
-    }
-    /// The workspace shows an open session that has no messages yet.
-    fn active_session_is_blank(&self, cx: &App) -> bool {
-        !self.app_view_open()
-            && self.app_search.is_none()
-            && !self.mono_active(cx)
-            && self.workspace.active.is_some_and(|id| {
-                self.session_summaries.contains_key(&id)
-                    && !self.session_metadata(id, cx).summary.has_messages
-            })
+            .child(div().flex_1())
+            .children(pages.into_iter().map(|(label, glyph)| {
+                let selected = open == Some(label);
+                icon_button(label, label, glyph)
+                    .debug_selector(move || format!("sidebar-page-{label}"))
+                    .aria_selected(selected)
+                    .size(px(28.))
+                    .relative()
+                    .when(selected, |d| d.bg(content(0.1)))
+                    .when(label == "Inbox" && unread, |d| {
+                        d.aria_label("Inbox, new items").child(
+                            div()
+                                .absolute()
+                                .top(px(5.))
+                                .right(px(5.))
+                                .size(px(6.))
+                                .rounded_full()
+                                .bg(accent_color()),
+                        )
+                    })
+                    .on_click(cx.listener(move |this, _, window, cx| match label {
+                        "Inbox" => this.open_inbox(window, cx),
+                        "Notes" => this.open_notes(window, cx),
+                        "Automations" => this.open_automations(window, cx),
+                        "Workstreams" => this.open_workstreams(window, cx),
+                        _ => (),
+                    }))
+            }))
+            .into_any_element()
     }
     pub(super) fn notify_navigation(&self, cx: &mut Context<Self>) {
         if self.workspace.classic_layout {
@@ -1245,30 +1097,31 @@ mod tests {
     use gpui::TestAppContext;
 
     #[gpui::test]
-    fn focused_navigation_trailing_items_share_the_filter_axis(cx: &mut TestAppContext) {
+    fn the_pages_sit_in_the_bar_at_the_foot_below_the_threads(cx: &mut TestAppContext) {
         let (window, _, _) = super::super::tests::window(cx);
         let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
-        for count in [0, 128] {
-            window
-                .update(visual, |shell, _, cx| {
-                    shell.note_count = Some(count);
-                    shell.notify_sidebar(cx);
-                })
-                .unwrap();
-            visual.run_until_parked();
-            let axis = visual
-                .debug_bounds("sidebar-filter-button")
-                .unwrap()
-                .center()
-                .x;
-            for selector in [
-                "sidebar-navigation-trailing-New",
-                "sidebar-navigation-trailing-Notes",
-            ] {
-                let trailing = visual.debug_bounds(selector).unwrap();
-                assert_eq!(trailing.center().x, axis, "{selector} with {count} notes");
-            }
+        visual.run_until_parked();
+        // One sidebar: no Code and Agents switch.
+        assert!(visual.debug_bounds("rail-zone-agents").is_none());
+        let bar = visual.debug_bounds("sidebar-bottom-bar").unwrap();
+        let threads = visual.debug_bounds("sidebar-filter-button").unwrap();
+        assert!(threads.bottom() <= bar.top());
+        let inbox = visual.debug_bounds("sidebar-page-Inbox").unwrap();
+        for page in [
+            "sidebar-page-Inbox",
+            "sidebar-page-Notes",
+            "sidebar-page-Automations",
+        ] {
+            let bounds = visual.debug_bounds(page).unwrap();
+            assert!(bar.contains(&bounds.center()), "{page} sits in the bar");
         }
+        visual.simulate_click(inbox.center(), Default::default());
+        visual.run_until_parked();
+        window
+            .update(visual, |shell, _, _| {
+                assert_eq!(shell.app_view_label(), Some("Inbox"))
+            })
+            .unwrap();
     }
     #[gpui::test]
     fn focused_search_sits_beside_sidebar_options(cx: &mut TestAppContext) {
@@ -1288,46 +1141,46 @@ mod tests {
     }
 
     #[gpui::test]
-    fn focused_new_session_leads_navigation_and_marks_blank_sessions(cx: &mut TestAppContext) {
-        let (window, _, active) = super::super::tests::window(cx);
+    fn workstreams_open_as_a_page_from_the_foot(cx: &mut TestAppContext) {
+        let (window, _, _) = super::super::tests::window(cx);
         let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
         visual.run_until_parked();
-        let new = visual.debug_bounds("sidebar-navigation-New").unwrap();
-        let inbox = visual.debug_bounds("sidebar-navigation-Inbox").unwrap();
-        assert!(new.bottom() <= inbox.top());
-        let selected = |visual: &mut gpui::VisualTestContext| {
-            window
-                .update(visual, |shell, _, cx| shell.active_session_is_blank(cx))
-                .unwrap()
-        };
+        // No longer a section of the sidebar.
+        assert!(visual.debug_bounds("new-workstream").is_none());
+        let page = visual.debug_bounds("sidebar-page-Workstreams").unwrap();
+        visual.simulate_click(page.center(), Default::default());
+        visual.run_until_parked();
         window
-            .update(visual, |shell, _, cx| {
-                assert_eq!(shell.workspace.active, Some(active));
-                assert!(!shell.session_metadata(active, cx).summary.has_messages);
+            .update(visual, |shell, _, _| {
+                assert_eq!(shell.app_view_label(), Some("Workstreams"))
             })
             .unwrap();
-        assert!(selected(visual));
-        visual.simulate_click(inbox.center(), Default::default());
-        visual.run_until_parked();
-        assert!(!selected(visual), "Inbox takes the highlight");
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("workstreams-page").is_some());
+        assert!(visual.debug_bounds("workstreams-page-new").is_some());
+    }
+
+    #[gpui::test]
+    fn the_header_starts_a_new_thread(cx: &mut TestAppContext) {
+        let (window, _, active) = super::super::tests::window(cx);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
         window
-            .update(visual, |shell, w, cx| {
-                shell.close_app_view(w, cx);
+            .update(visual, |shell, _, cx| {
                 shell.sessions[&active]
                     .update(cx, |session, _| session.summary.has_messages = true);
             })
             .unwrap();
         visual.run_until_parked();
-        assert!(!selected(visual), "a conversation is not a new session");
+        let new = visual.debug_bounds("sidebar-new-thread").unwrap();
+        let options = visual.debug_bounds("sidebar-options").unwrap();
+        assert!((new.center().y - options.center().y).abs() <= px(1.));
+        visual.simulate_click(new.center(), Default::default());
+        visual.run_until_parked();
         window
-            .update(visual, |shell, _, cx| {
-                shell.workspace.classic_layout = true;
-                shell.invalidate_chrome(cx);
-                cx.notify();
+            .update(visual, |shell, _, _| {
+                assert_ne!(shell.workspace.active, Some(active))
             })
             .unwrap();
-        visual.run_until_parked();
-        assert!(visual.debug_bounds("sidebar-navigation-New").is_none());
     }
 
     #[gpui::test]
@@ -1371,6 +1224,7 @@ mod tests {
             window
                 .update(visual, |shell, _, cx| {
                     shell.workspace.new_layout_boxy = boxy;
+                    shell.workspace.compact_session_cards = true;
                     shell.layout_changed(cx);
                 })
                 .unwrap();
@@ -1385,7 +1239,7 @@ mod tests {
             visual.simulate_click(compact.center(), Default::default());
             visual.run_until_parked();
             let row = visual.debug_bounds(selector).unwrap();
-            assert_eq!(row.size.height, px(60.));
+            assert_eq!(row.size.height, px(52.));
             let model = visual.debug_bounds(model_selector).unwrap();
             let workspace = visual.debug_bounds(workspace_selector).unwrap();
             let title = visual.debug_bounds(title_selector).unwrap();
@@ -1461,12 +1315,12 @@ mod tests {
         );
         for (action, navigation) in [
             ("menu-action-sidebar-search", "sidebar-search-button"),
-            ("menu-action-sidebar-notes", "sidebar-navigation-Notes"),
+            ("menu-action-sidebar-notes", "sidebar-page-Notes"),
             (
                 "menu-action-sidebar-automations",
-                "sidebar-navigation-Automations",
+                "sidebar-page-Automations",
             ),
-            ("menu-action-sidebar-inbox", "sidebar-navigation-Inbox"),
+            ("menu-action-sidebar-inbox", "sidebar-page-Inbox"),
             ("menu-action-sidebar-monos", "new-mono"),
         ] {
             assert!(visual.debug_bounds(navigation).is_some());
@@ -1510,12 +1364,12 @@ mod tests {
             .unwrap();
         for (action, navigation) in [
             ("menu-action-sidebar-search", "sidebar-search-button"),
-            ("menu-action-sidebar-notes", "sidebar-navigation-Notes"),
+            ("menu-action-sidebar-notes", "sidebar-page-Notes"),
             (
                 "menu-action-sidebar-automations",
-                "sidebar-navigation-Automations",
+                "sidebar-page-Automations",
             ),
-            ("menu-action-sidebar-inbox", "sidebar-navigation-Inbox"),
+            ("menu-action-sidebar-inbox", "sidebar-page-Inbox"),
             ("menu-action-sidebar-monos", "new-mono"),
         ] {
             let row = visual.debug_bounds(action).unwrap();

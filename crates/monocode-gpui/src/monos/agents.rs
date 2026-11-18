@@ -38,6 +38,10 @@ pub(crate) enum Section {
     Groups,
     /// Workstream orchestrators, under Code after the Monos.
     Workstreams,
+    /// The single sidebar's personal agents, above the threads: the
+    /// Principal, the bots and the groups. Code monos and Chief's crew stay
+    /// with the code, as the threads any provider can hand work to.
+    Captains,
 }
 
 impl Section {
@@ -48,6 +52,11 @@ impl Section {
             Self::Bots => mono.is_bot() && !mono.is_principal(),
             Self::Groups => mono.is_group(),
             Self::Workstreams => mono.is_workstream(),
+            Self::Captains => {
+                mono.is_personal()
+                    && !monocode_core::mono::crew::is_coder(mono)
+                    && !monocode_core::mono::crew::is_chief(mono)
+            }
         }
     }
     pub(super) fn label(self) -> &'static str {
@@ -57,6 +66,7 @@ impl Section {
             Self::Bots => "Bots",
             Self::Groups => "Groups",
             Self::Workstreams => "Workstreams",
+            Self::Captains => "Captains",
         }
     }
 }
@@ -76,6 +86,10 @@ impl Monos {
     /// Mono is open: the Agents zone draws up to three sections, and a dialog
     /// painted twice answers its clicks in the wrong place.
     pub(super) fn owns_modals(&self, section: Section, compact: bool) -> bool {
+        // The single sidebar's Captains, always there, paint them once.
+        if self.unified {
+            return section == Section::Captains;
+        }
         let has = |section: Section| self.roster.monos.iter().any(|m| section.holds(m));
         match section {
             Section::Coding => true,
@@ -284,18 +298,12 @@ impl Monos {
 
     /// The Bots label's "+": opens the new-bot menu at the pointer.
     pub(super) fn new_bot_button(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        icon_button("new-bot", "New bot", "plus")
+        icon_button("new-bot", "New Captain", "plus")
             .debug_selector(|| "sidebar-new-bot".into())
             .size(px(20.))
             .mr(px(-3.))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                    cx.stop_propagation();
-                    this.roles_menu = Some(event.position);
-                    cx.notify();
-                }),
-            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(|this, _, window, cx| this.open_new_captain(window, cx)))
             .into_any_element()
     }
 
@@ -358,7 +366,7 @@ impl Monos {
     }
 
     /// The new-bot menu: a blank bot, then every offered role.
-    fn roles_surface(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn roles_surface(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let position: Point<Pixels> = self.roles_menu?;
         let item = |id: &'static str,
                     name: &'static str,

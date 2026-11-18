@@ -39,6 +39,9 @@ things were, move it to `old/`.
 | [notch.md](in-progress/notch.md) | The notch on macOS and Windows: what is built, checked and next |
 | [system-dictation.md](in-progress/system-dictation.md) | Dictate anywhere with Ctrl+Space: the global hook, the notch's dictation wings, paste into the app in front, the window that closes to the background; phases 0–3 and 5 built, macOS not compiled, phase 4 (transcribe.cpp) left |
 | [voice-and-hands.md](in-progress/voice-and-hands.md) | Voice: done so far are the Neural Engine ear, call fixes, Settings › Voice, Gemini Live and Phonic calls, and Mac actions; done too are JOSIE-style turns with Smart Turn; left are speaker echo, the wake word and CUA |
+| [capy-ui.md](in-progress/capy-ui.md) | One interface for code and personal agents after Capy 0.9: model picker and Chief for every provider done; the single shell, composer, monos as subagents, transcript and tokens planned in phases |
+| [claude-code-review.md](in-progress/claude-code-review.md) | What the Claude desktop Code tab does that monoBOT lacks: the iOS Simulator as a native view beside the chat (inspector, action history, logs) and ten ranked features |
+| [ui-ux-audit.md](in-progress/ui-ux-audit.md) | UI/UX audit of Nov 17 against app-screen rules and Apple's guidelines: status colours, corners, system font and accent fixed; native menus, vibrancy and session-attention ideas from T3 Code, Synara and Capy left |
 | [agents-tab.md](in-progress/agents-tab.md) | The Agents tab and the effort shimmer, built Nov 11: pending runtime checks and unrelated test failures already on main |
 
 ## old/ — history

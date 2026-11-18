@@ -1081,9 +1081,9 @@ impl Render for Automations {
                                     .m(px(16.))
                                     .p(px(10.))
                                     .rounded(px(8.))
-                                    .bg(gpui::rgba(0xf8717114))
+                                    .bg(crate::theme::danger().opacity(0.08))
                                     .text_size(px(12.))
-                                    .text_color(rgb(0xfca5a5))
+                                    .text_color(crate::theme::danger())
                                     .child(error),
                             )
                         })

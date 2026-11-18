@@ -1081,6 +1081,17 @@ impl Explorer {
             MenuAction::new("reveal", REVEAL_LABEL).into(),
         ];
         self.menu = None;
+        let this = cx.entity().downgrade();
+        let picked_target = target.clone();
+        if crate::native_menu::present(&items, at, window, cx, move |id, window, cx| {
+            let _ = this.update(cx, |this, cx| match id {
+                Some(id) => this.run_action(&id, picked_target, window, cx),
+                None => cx.notify(),
+            });
+        }) {
+            self.rebuild(cx);
+            return;
+        }
         let menu = cx.new(|cx| Menu::new("File actions", items, window, cx));
         let events = cx.subscribe_in(&menu, window, |this, _, event: &MenuEvent, window, cx| {
             let Some(open) = this.menu.take() else {
@@ -1284,7 +1295,11 @@ impl Explorer {
                 .pb_1()
                 .text_size(px(12.))
                 .line_height(px(16.))
-                .text_color(rgb(if error { RED_400 } else { AMBER_400 }))
+                .text_color(if error {
+                    crate::theme::danger()
+                } else {
+                    crate::theme::warning()
+                })
                 .child(
                     div()
                         .flex()
@@ -1355,7 +1370,7 @@ impl Explorer {
                     statuses.files.get(&entry.path)
                 };
                 let git_color: Option<Hsla> = status.and_then(|s| match s.as_str() {
-                    "modified" => Some(rgb(AMBER_400).into()),
+                    "modified" => Some(crate::theme::warning()),
                     "added" | "untracked" => Some(rgb(DIFF_ADD).into()),
                     "deleted" => Some(rgb(DIFF_DEL).into()),
                     _ => None,

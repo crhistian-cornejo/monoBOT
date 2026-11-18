@@ -4,9 +4,6 @@ use super::*;
 
 const LIVE_AGENT_MIN: usize = 2;
 const LIVE_AGENT_CAP: usize = 4;
-// Tailwind amber-400 and emerald-400.
-const AMBER: u32 = 0xfbbf24;
-const EMERALD: u32 = 0x34d399;
 
 pub(super) struct LiveAgent {
     pub(super) id: i64,
@@ -271,11 +268,11 @@ impl Shell {
             || (self.workspace.active == Some(id) && !self.mono_active(cx));
         let status: AnyElement = if agent.needs_approval {
             icon("alert-circle", 12.)
-                .text_color(rgb(AMBER))
+                .text_color(crate::theme::warning())
                 .into_any_element()
         } else if agent.done {
             icon("check", 12.)
-                .text_color(rgb(EMERALD))
+                .text_color(crate::theme::success())
                 .into_any_element()
         } else {
             let provider = agent.provider.clone();
@@ -354,9 +351,9 @@ impl Shell {
                     .text_size(px(11.))
                     .line_height(px(14.))
                     .text_color(if agent.needs_approval {
-                        rgb(AMBER).into()
+                        crate::theme::warning()
                     } else if agent.done {
-                        rgb(EMERALD).into()
+                        crate::theme::success()
                     } else {
                         content(0.5)
                     })

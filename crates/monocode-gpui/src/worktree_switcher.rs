@@ -516,7 +516,7 @@ impl Render for WorktreeSwitcher {
                             .px_2()
                             .py_2()
                             .text_size(px(11.))
-                            .text_color(gpui::rgb(0xf87171))
+                            .text_color(crate::theme::danger())
                             .child(error),
                     )
                 },

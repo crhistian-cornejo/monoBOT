@@ -707,6 +707,20 @@ impl Style {
             .corner_radii
             .to_pixels(rem_size)
             .clamp_radii_for_quad_size(bounds.size);
+        // MonoBOT: a box framed on all four sides is never a bare rectangle;
+        // its fill, frame and shadow share the radius.
+        let framed = self.is_border_visible() && {
+            let widths = self.border_widths.to_pixels(rem_size);
+            widths.top > Pixels::ZERO
+                && widths.right > Pixels::ZERO
+                && widths.bottom > Pixels::ZERO
+                && widths.left > Pixels::ZERO
+        };
+        let corner_radii = if framed {
+            crate::framed_corners(corner_radii, bounds.size)
+        } else {
+            corner_radii
+        };
 
         window.paint_drop_shadows(bounds, corner_radii, &self.box_shadow);
 

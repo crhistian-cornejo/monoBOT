@@ -359,7 +359,7 @@ impl gpui::Render for Floating {
             .size_full()
             .bg(shell_fill())
             .text_color(content(1.))
-            .font_family(crate::fonts::UI)
+            .font_family(crate::fonts::ui())
             .on_key_down(cx.listener(|this, event: &gpui::KeyDownEvent, _, cx| {
                 if event.keystroke.key == "escape" {
                     this.stop(cx);

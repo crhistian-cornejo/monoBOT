@@ -25,7 +25,7 @@ impl SettingsView {
                     .mt_4()
                     .role(gpui::Role::Alert)
                     .text_size(px(12.))
-                    .text_color(gpui::rgb(0xf87171))
+                    .text_color(crate::theme::danger())
                     .child(error.clone())
                     .into_any_element(),
             );

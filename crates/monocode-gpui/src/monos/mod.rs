@@ -43,6 +43,7 @@ mod search;
 mod status;
 mod sync;
 pub(crate) use sync::{SyncUpdated, SyncView};
+mod new_captain;
 #[cfg(test)]
 mod tests;
 mod work;
@@ -76,6 +77,7 @@ use std::{
     path::PathBuf,
     time::Duration,
 };
+pub(crate) use workstreams::WorkstreamsPage;
 
 /// A Mono's document folders, cached by `(mono id, transcript rows, last row length)`.
 type DocumentFolders = (
@@ -217,6 +219,10 @@ pub(crate) struct Monos {
     call: Option<group_call::CallState>,
     /// Where the new-bot menu opened, while it is open.
     roles_menu: Option<gpui::Point<gpui::Pixels>>,
+    /// The New Captain dialog, while it is open.
+    new_captain: Option<new_captain::NewCaptain>,
+    /// Rendering the single sidebar's rail, whose Captains own the modals.
+    unified: bool,
     /// The open bot's subagent runs, read from its chat until it changes.
     subagent_runs: Option<(agents::RunsKey, Vec<agents::SubagentRun>)>,
     /// The image bot's gallery, read from its chat, by the chat's size.
@@ -608,6 +614,8 @@ impl Monos {
             activity_sources_all: false,
             rail_ids: Vec::new(),
             roles_menu: None,
+            new_captain: None,
+            unified: false,
             subagent_runs: None,
             gallery_items: None,
             gallery_filter: Default::default(),
@@ -1157,6 +1165,13 @@ impl Monos {
                     &view,
                     move |this, _, _: &SessionChanged, cx| {
                         this.chat_changed(&source, cx);
+                    },
+                ));
+                this.observations.push(cx.subscribe(
+                    &view,
+                    move |this, _, _: &crate::conversation::ViewCaptain, cx| {
+                        this.settings = Some(SettingsSection::General);
+                        cx.notify();
                     },
                 ));
                 let source = id.clone();
@@ -1799,6 +1814,59 @@ impl Monos {
     }
     /// The Code zone's Monos, then its workstreams (the project's, when
     /// one is given), as ProjectRail and the inset sidebar list them.
+    /// A Captain's second line: the first line of the latest thing it said,
+    /// else what it is for.
+    fn captain_subtitle(&self, mono: &Mono, cx: &App) -> SharedString {
+        let line = self.captain_line(mono, cx);
+        if mono.is_principal() {
+            format!("Orchestrator · {line}").into()
+        } else {
+            line
+        }
+    }
+    fn captain_line(&self, mono: &Mono, cx: &App) -> SharedString {
+        self.chats
+            .get(&mono.id)
+            .and_then(|chat| {
+                chat.read(cx)
+                    .mono_rows(cx)
+                    .iter()
+                    .rev()
+                    .find(|row| row.role == "assistant" && !row.text.trim().is_empty())
+                    .and_then(|row| {
+                        row.text
+                            .lines()
+                            .map(|line| line.trim().trim_start_matches(['#', '*', '-', '>']).trim())
+                            .find(|line| !line.is_empty())
+                            .map(str::to_owned)
+                    })
+            })
+            .or_else(|| mono.specialty.clone().filter(|s| !s.trim().is_empty()))
+            .unwrap_or_else(|| "Personal agent".to_owned())
+            .into()
+    }
+    /// The single sidebar's agents above the threads: the Captains (the
+    /// user's personal agents), then the code monos.
+    pub(crate) fn unified_rail(
+        &mut self,
+        project: Option<String>,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.rail_ids.clear();
+        self.unified = true;
+        let captains = self.rail_impl(None, false, false, agents::Section::Captains, cx);
+        // Workstreams have their own page, opened from the sidebar's foot.
+        let monos = self.rail_impl(project, false, false, agents::Section::Coding, cx);
+        self.unified = false;
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .child(captains)
+            .children(self.roles_surface(cx))
+            .child(monos)
+            .into_any_element()
+    }
     pub(crate) fn rail(&mut self, project: Option<String>, cx: &mut Context<Self>) -> AnyElement {
         self.rail_ids.clear();
         let monos = self.rail_impl(project.clone(), false, false, agents::Section::Coding, cx);
@@ -1894,9 +1962,10 @@ impl Monos {
         } else {
             section_label_with(section.label(), workstreams)
         }
-        .when(has && section == agents::Section::Bots, |d| {
-            d.child(self.new_bot_button(cx))
-        })
+        .when(
+            (has && section == agents::Section::Bots) || section == agents::Section::Captains,
+            |d| d.child(self.new_bot_button(cx)),
+        )
         .when(has && section == agents::Section::Groups, |d| {
             d.child(self.new_group_button(cx))
         })
@@ -2007,6 +2076,10 @@ impl Monos {
                         if unread == 1 { "reply" } else { "replies" }
                     )
                 };
+                // Captains, as Capy's: a 40px face, the name and the latest
+                // thing it said under it.
+                let captain = section == agents::Section::Captains && !compact && !original;
+                let subtitle = captain.then(|| self.captain_subtitle(&mono, cx));
                 let id = mono.id.clone();
                 let options = id.clone();
                 let context = id.clone();
@@ -2021,7 +2094,7 @@ impl Monos {
                     .group("mono-rail-row")
                     .role(Role::Button)
                     .aria_label(label)
-                    .h(px(32.))
+                    .h(px(if captain { 52. } else { 32. }))
                     .when(original && !compact, |d| d.ml(px(6.)).mr_2())
                     .when(original && !compact && index + 1 < count, |d| d.mb_px())
                     .when(compact, |d| d.w(px(32.)))
@@ -2030,13 +2103,14 @@ impl Monos {
                     .relative()
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .opacity(if active { 1. } else { 0.65 })
+                    .gap(px(if captain { 10. } else { 8. }))
+                    .opacity(if active || captain { 1. } else { 0.65 })
                     .when(active, |d| d.bg(content(0.1)))
                     .hover(|s| s.bg(content(0.08)).opacity(1.))
                     .child(if mono.is_group() && !compact {
                         let (shown, more) = self.group_stack_members(&mono);
-                        avatar::group_avatar_stack(&shown, state, more, 18., original)
+                        let side = if captain { 26. } else { 18. };
+                        avatar::group_avatar_stack(&shown, state, more, side, original)
                     } else if mono.is_group() && compact {
                         let (shown, _) = self.group_stack_members(&mono);
                         avatar::group_avatar_stack(
@@ -2047,11 +2121,12 @@ impl Monos {
                             original,
                         )
                     } else {
+                        let side = if captain { 40. } else { 16. };
                         div()
-                            .size(px(16.))
+                            .size(px(side))
                             .relative()
                             .flex_shrink_0()
-                            .child(avatar::avatar(&mono.face(), mono.color, state, 16., true))
+                            .child(avatar::avatar(&mono.face(), mono.color, state, side, true))
                             .when(original, |d| {
                                 d.child(
                                     div()
@@ -2087,9 +2162,39 @@ impl Monos {
                                 .when(unread > 0, |d| d.pr(px(24.)))
                                 .group_hover("mono-rail-row", |s| s.pr(px(24.)))
                                 .text_size(px(14.))
-                                .font_weight(gpui::FontWeight::MEDIUM)
-                                .child(div().min_w_0().truncate().child(mono.label()))
-                                .when(principal, |d| {
+                                .font_weight(if captain {
+                                    gpui::FontWeight::NORMAL
+                                } else {
+                                    gpui::FontWeight::MEDIUM
+                                })
+                                .child(match subtitle.clone() {
+                                    Some(subtitle) => div()
+                                        .min_w_0()
+                                        .flex()
+                                        .flex_col()
+                                        .child(div().truncate().child(mono.label()))
+                                        .child(
+                                            div()
+                                                .debug_selector({
+                                                    let id = mono.id.clone();
+                                                    move || format!("captain-subtitle-{id}")
+                                                })
+                                                .truncate()
+                                                .text_size(px(12.))
+                                                .line_height(px(16.))
+                                                .text_color(content(0.5))
+                                                .child(subtitle),
+                                        )
+                                        .into_any_element(),
+                                    None => div()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(mono.label())
+                                        .into_any_element(),
+                                })
+                                // A Captain's row says it on its second line,
+                                // leaving the name its room.
+                                .when(principal && !captain, |d| {
                                     d.child(
                                         div()
                                             .id(SharedString::from(format!(
@@ -2119,7 +2224,7 @@ impl Monos {
                                 .debug_selector(|| "mono-rail-news-dot".into())
                                 .absolute()
                                 .right(px(13.))
-                                .top(px(13.))
+                                .top(px(if captain { 23. } else { 13. }))
                                 .size(px(6.))
                                 .rounded_full()
                                 .bg(accent_color())
@@ -2131,7 +2236,7 @@ impl Monos {
                             div()
                                 .absolute()
                                 .right_1()
-                                .top(px(4.))
+                                .top(px(if captain { 14. } else { 4. }))
                                 .size(px(24.))
                                 .flex()
                                 .items_center()
@@ -2170,7 +2275,7 @@ impl Monos {
                             div()
                                 .absolute()
                                 .right_1()
-                                .top(px(4.))
+                                .top(px(if captain { 14. } else { 4. }))
                                 .invisible()
                                 .group_hover("mono-rail-row", |s| s.visible())
                                 .child(
@@ -2232,6 +2337,7 @@ impl Monos {
                         .children(self.background_modal(cx))
                         .children(self.group_dialog_modal(cx))
                         .children(self.mail_connect_modal(cx))
+                        .children(self.new_captain_modal(cx))
                 },
             )
             .into_any_element()
@@ -2408,6 +2514,7 @@ impl gpui::Render for Monos {
             .children(self.background_modal(cx))
             .children(self.group_dialog_modal(cx))
             .children(self.mail_connect_modal(cx))
+            .children(self.new_captain_modal(cx))
             .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, _| {
                 if let Some((_, start, over)) = &mut this.drag
                     && (event.position - *start).magnitude() > 5.

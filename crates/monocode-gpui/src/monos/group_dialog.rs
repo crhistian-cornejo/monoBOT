@@ -8,7 +8,7 @@ use crate::{
 };
 use gpui::{
     AnyElement, App, Context, Entity, EventEmitter, FocusHandle, Focusable, KeyDownEvent, Role,
-    SharedString, Subscription, Window, div, prelude::*, px, rgb,
+    SharedString, Subscription, Window, div, prelude::*, px,
 };
 use monocode_core::mono::{
     Mono, Roster, bot_tools,
@@ -523,7 +523,7 @@ impl gpui::Render for GroupDialog {
                                 .id("group-dialog-problem-alert")
                                 .role(Role::Alert)
                                 .text_size(px(12.))
-                                .text_color(rgb(0xf87171))
+                                .text_color(crate::theme::danger())
                                 .child(prob.clone()),
                         )
                     }),

@@ -758,7 +758,7 @@ impl Monos {
                     .px_3()
                     .py_2()
                     .text_size(px(12.))
-                    .text_color(rgb(0xff6467))
+                    .text_color(crate::theme::danger())
                     .child(problem),
             );
         }

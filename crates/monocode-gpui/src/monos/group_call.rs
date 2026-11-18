@@ -1398,7 +1398,7 @@ impl Monos {
             .when_some(error, |view, error| view.child(
                 div().px_2().py_1().border_1().border_color(content(0.1))
                     .flex().items_center().gap_2()
-                    .child(div().flex_1().text_size(px(12.)).text_color(gpui::rgb(crate::right_panel::RED_400)).child(error))
+                    .child(div().flex_1().text_size(px(12.)).text_color(crate::theme::danger()).child(error))
                     .child(call_button("group-call-dismiss", "Dismiss").on_click(cx.listener(|this, _, _, cx| {
                         if let Some(call) = this.call.as_mut() { call.error = None; }
                         cx.notify();

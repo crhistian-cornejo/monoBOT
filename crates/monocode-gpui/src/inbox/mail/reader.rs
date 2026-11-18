@@ -198,8 +198,8 @@ impl Mailbox {
                         .px(px(12.))
                         .py(px(8.))
                         .border_1()
-                        .border_color(gpui::Hsla::from(rgb(0xf87171)).opacity(0.3))
-                        .bg(gpui::Hsla::from(rgb(0xf87171)).opacity(0.08))
+                        .border_color(crate::theme::danger().opacity(0.3))
+                        .bg(crate::theme::danger().opacity(0.08))
                         .text_size(px(12.))
                         .text_color(content(1.))
                         .child(format!(
@@ -431,9 +431,9 @@ impl Mailbox {
                             let (verdict, ink) = match file.risk.level {
                                 Level::Safe => ("Checked", content(0.45)),
                                 Level::Caution => ("Careful", accent_color()),
-                                Level::Danger => ("Blocked", rgb(0xf87171).into()),
+                                Level::Danger => ("Blocked", crate::theme::danger()),
                             };
-                            let red: gpui::Hsla = rgb(0xf87171).into();
+                            let red: gpui::Hsla = crate::theme::danger();
                             div()
                                 .max_w(px(320.))
                                 .flex()

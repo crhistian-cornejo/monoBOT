@@ -79,7 +79,7 @@ pub(super) fn shape_prompt(
     // The transcript inherits the shell's UI font; the bubble sets it too.
     let run = gpui::TextRun {
         len: text.len(),
-        font: gpui::font(crate::fonts::UI),
+        font: gpui::font(crate::fonts::ui()),
         color: Default::default(),
         background_color: None,
         underline: None,

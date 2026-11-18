@@ -460,7 +460,7 @@ fn state_label(state: State) -> &'static str {
 fn state_chip(state: State) -> AnyElement {
     let color = match state {
         State::Running => live_color(),
-        State::Failed => gpui::rgb(crate::right_panel::RED_400).into(),
+        State::Failed => crate::theme::danger(),
         _ => content(0.5),
     };
     div()
@@ -489,7 +489,7 @@ fn state_glyph(state: Option<State>, side: f32) -> AnyElement {
             .text_color(content(0.55))
             .into_any_element(),
         Some(State::Failed) => icon("circle-x", side)
-            .text_color(gpui::rgb(crate::right_panel::RED_400))
+            .text_color(crate::theme::danger())
             .into_any_element(),
         Some(State::Stopped) => div()
             .size(px(side))

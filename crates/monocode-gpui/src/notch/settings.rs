@@ -337,6 +337,18 @@ impl Notch {
                     look.show_count = on
                 }),
             ))
+            .child(row(
+                "Corners",
+                "How round its cards and buttons are",
+                segments(crate::theme::CORNERS.iter().map(|&(id, label, _)| {
+                    segment(
+                        gpui::SharedString::from(format!("notch-corners-{id}")),
+                        label,
+                        look.corners == id,
+                    )
+                    .on_click(choose(cx, move |look| look.corners = id.into()))
+                })),
+            ))
             .into_any_element()
     }
 

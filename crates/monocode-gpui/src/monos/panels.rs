@@ -261,7 +261,7 @@ fn sub_agent_card(agent: SubAgent) -> Stateful<Div> {
     let model: SharedString = model
         .strip_prefix("Claude ")
         .map_or(model.clone(), |short| short.to_owned().into());
-    let amber: gpui::Hsla = rgb(0xfbbf24).into();
+    let amber: gpui::Hsla = crate::theme::warning();
     let (label, color, live): (String, gpui::Hsla, bool) = match agent.state {
         AgentState::Working => ("Working".into(), accent_color(), true),
         AgentState::NeedsInput => ("Needs approval".into(), amber, true),
@@ -2575,7 +2575,7 @@ impl Monos {
                     .when(mono.heartbeat_minutes==0,|d|d.opacity(0.4)).border_t_1().border_color(content(0.04)))))
             .child(heading("Conversation",None))
             .child(card().child(setting("Reset conversation",Some("Clear all messages and start fresh. Its soul, memory and habits stay."),
-                div().id("mono-reset").role(Role::Button).aria_label("Reset").flex().items_center().px_3().py_1p5().rounded_md().text_size(px(12.)).border_1().border_color(content(0.04)).text_color(rgb(0xff6467)).hover(|s|s.bg(rgb(0xfb2c36).opacity(0.1))).child("Reset")
+                div().id("mono-reset").role(Role::Button).aria_label("Reset").flex().items_center().px_3().py_1p5().rounded_md().text_size(px(12.)).border_1().border_color(content(0.04)).text_color(crate::theme::danger()).hover(|s|s.bg(crate::theme::danger().opacity(0.1))).child("Reset")
                     .on_click(cx.listener(move |this,_,w,cx|this.reset_conversation(&reset,w,cx))).into_any_element())))
             .into_any_element()
     }

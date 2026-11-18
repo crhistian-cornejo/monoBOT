@@ -164,7 +164,7 @@ impl Conversation {
                         .border_color(tint(AMBER_400, 0.25))
                         .bg(tint(AMBER_400, 0.1))
                         .px(px(8.))
-                        .child(icon("refresh-cw", 14.).text_color(gpui::rgb(AMBER_400)))
+                        .child(icon("refresh-cw", 14.).text_color(crate::theme::warning()))
                         .child(
                             div()
                                 .flex_shrink_0()

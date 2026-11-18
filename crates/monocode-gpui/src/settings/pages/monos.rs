@@ -23,7 +23,7 @@ fn status_line(id: &'static str, text: String, error: bool) -> AnyElement {
         .line_height(px(16.))
         .text_align(gpui::TextAlign::Right)
         .text_color(if error {
-            gpui::rgb(0xf87171).into()
+            crate::theme::danger()
         } else {
             content(0.5)
         })

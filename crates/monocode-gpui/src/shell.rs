@@ -51,7 +51,6 @@ mod settings;
 mod shortcuts;
 mod sidebar_list;
 mod sidebar_peek;
-mod space_reorder;
 mod terminal_dock;
 mod terminal_panes;
 #[cfg(test)]
@@ -92,7 +91,7 @@ use gpui::{
     FocusHandle, Focusable, FontWeight, KeyBinding, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, PathPromptOptions, Pixels, Point, Role, ScrollHandle, SharedString,
     StyleRefinement, Subscription, Window, WindowControlArea, actions, canvas, div, prelude::*, px,
-    rgb, rgba,
+    rgb,
 };
 use monocode_core::{provider::Kind, store::Session};
 use session_groups::local_reminder_label;
@@ -448,11 +447,6 @@ const TOGGLE_RIGHT_PANEL_DOT_LABEL: &str = if cfg!(target_os = "macos") {
 } else {
     "Toggle right sidebar (Ctrl+Shift+B, uncommitted changes)"
 };
-const MOD: &str = if cfg!(target_os = "macos") {
-    "⌘"
-} else {
-    "Ctrl+"
-};
 const REVEAL_LABEL: &str = if cfg!(target_os = "macos") {
     "Reveal in Finder"
 } else if cfg!(target_os = "windows") {
@@ -660,7 +654,6 @@ pub(crate) struct Shell {
     projects_frame: Entity<Chrome>,
     project_rail_list: project_rail::ProjectRailList,
     project_rail_drag: Option<project_rail::ProjectRailDrag>,
-    space_reorder: space_reorder::SpaceReorder,
     project_rail_stats: project_rail::ProjectRailStats,
     project_resize: Option<(Pixels, f32)>,
     classic_sidebar_tab: classic_sidebar::ClassicSidebarTab,
@@ -764,6 +757,7 @@ pub(crate) struct Shell {
     note_count: Option<usize>,
     inbox: Option<Entity<crate::inbox::Inbox>>,
     automations: Option<Entity<crate::automations::Automations>>,
+    workstreams_page: Option<Entity<crate::monos::WorkstreamsPage>>,
     active_app_view: Option<app_views::AppView>,
     app_view_events: Vec<Subscription>,
     automation_state: automation_runs::State,
@@ -831,12 +825,9 @@ pub(crate) struct Shell {
     tab_shifts: HashMap<TitleTab, TabShift>,
     pane_ticks: HashMap<i64, PaneTick>,
     skip_tab_click: bool,
-    spaces_start: usize,
     /// The spaces bar's short nudge after a chevron pages it.
     spaces_nudge: Option<(f32, std::time::Instant)>,
     /// The space under the pointer, whose name and shortcuts show above it.
-    hovered_space: Option<String>,
-    space_anchor: AnchorSlot,
     error: Option<String>,
     tab_scroll: ScrollHandle,
     tab_scroll_task: Option<gpui::Task<()>>,
@@ -1092,7 +1083,6 @@ impl Shell {
             projects_frame,
             project_rail_list: project_rail::ProjectRailList::new(cx),
             project_rail_drag: None,
-            space_reorder: Default::default(),
             project_rail_stats: Default::default(),
             project_resize: None,
             classic_sidebar_tab,
@@ -1173,6 +1163,7 @@ impl Shell {
             note_count: None,
             inbox: None,
             automations: None,
+            workstreams_page: None,
             active_app_view: None,
             app_view_events: Vec::new(),
             automation_state: Default::default(),
@@ -1226,10 +1217,7 @@ impl Shell {
             tab_shifts: HashMap::new(),
             pane_ticks: HashMap::new(),
             skip_tab_click: false,
-            spaces_start: 0,
             spaces_nudge: None,
-            hovered_space: None,
-            space_anchor: AnchorSlot::default(),
             error: None,
             tab_scroll: ScrollHandle::new(),
             tab_scroll_task: None,
@@ -4719,13 +4707,6 @@ impl Shell {
         }
         self.workspace.project = path.clone();
         self.workspace.active = None;
-        if let Some(ix) = self.workspace.projects.iter().position(|p| p == &path) {
-            if ix < self.spaces_start {
-                self.spaces_start = ix;
-            } else if ix >= self.spaces_start + 5 {
-                self.spaces_start = ix - 4;
-            }
-        }
         self.workspace.collapsed.remove(&path);
         // Original-layout project buttons leave the standalone Mono/app view.
         // The new layout restores each project's selected tab, including Monos.
@@ -5673,6 +5654,38 @@ impl Shell {
                 })
             })
             .flatten();
+        // A right-click on a tab, session, folder, project or terminal opens
+        // AppKit's menu on macOS; button dropdowns keep the drawn menu.
+        let context = matches!(
+            target,
+            MenuTarget::Tab(_)
+                | MenuTarget::MonoTab(_)
+                | MenuTarget::SearchTab
+                | MenuTarget::AppTab(_)
+                | MenuTarget::Session(_)
+                | MenuTarget::Folder(_)
+                | MenuTarget::ProjectRailGroup(_)
+                | MenuTarget::Project { .. }
+                | MenuTarget::TerminalTab(_)
+        );
+        if let (true, Anchor::Point(at)) = (context, &anchor) {
+            let this = cx.entity().downgrade();
+            let picked = target.clone();
+            if crate::native_menu::present(&items, *at, window, cx, move |id, window, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(id) = id {
+                        this.run_menu(picked, &id, None, window, cx);
+                    }
+                    this.clear_context_selection();
+                    this.invalidate_chrome(cx);
+                    cx.notify();
+                });
+            }) {
+                self.invalidate_chrome(cx);
+                cx.notify();
+                return;
+            }
+        }
         let menu = cx.new(|cx| {
             let menu = Menu::new(label, items, window, cx)
                 .width(width)
@@ -6676,11 +6689,7 @@ impl Shell {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(content(1.))
             })
-            .when(!compact, |d| {
-                d.text_size(px(13.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(content(1.))
-            })
+            .when(!compact, |d| d.text_size(px(14.)).text_color(content(1.)))
             .child(crate::particle_text::particle_text(session.display_title()));
         let badges = div()
             .flex()
@@ -6725,7 +6734,7 @@ impl Shell {
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .gap(px(4.))
+                .gap(px(2.))
                 .child(
                     div()
                         .h(px(20.))
@@ -6807,9 +6816,9 @@ impl Shell {
             .h(px(if compact {
                 if nested { 28. } else { 32. }
             } else if nested {
-                56.
+                50.
             } else {
-                60.
+                52.
             }))
             // Sidebar.tsx's `px-2` inside its 1px card border.
             .px(px(if nested { 7. } else { 9. }))
@@ -6955,7 +6964,7 @@ impl Shell {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .text_color(rgb(0xfbbf24))
+                    .text_color(crate::theme::warning())
                     .child(icon("circle-alert", 14.))
                     .when(detailed, |d| d.child("Needs approval"))
                     .into_any()
@@ -6973,8 +6982,8 @@ impl Shell {
                     .flex()
                     .items_center()
                     .gap_1()
-                    .text_color(rgb(0x2dd4bf))
-                    .child(icon("check-circle-2", 14.).text_color(rgb(0x2dd4bf)))
+                    .text_color(crate::theme::success())
+                    .child(icon("check-circle-2", 14.).text_color(crate::theme::success()))
                     .child("Done")
                     .into_any()
             } else if session.has_saved_draft() {
@@ -6992,7 +7001,7 @@ impl Shell {
                 div()
                     .id(("session-reminder", id as usize))
                     .aria_label(local_reminder_label(reminder.due_at))
-                    .text_color(rgb(0xf59e0b))
+                    .text_color(crate::theme::warning())
                     .child(session_groups::reminder_caption(reminder.due_at))
                     .into_any()
             } else {
@@ -7102,15 +7111,8 @@ impl Shell {
             self.project_order_changed(&path, cx);
         }
     }
-    /// Saves a new project order and keeps the moved project in view.
-    fn project_order_changed(&mut self, path: &str, cx: &mut Context<Self>) {
-        if let Some(ix) = self.workspace.projects.iter().position(|p| p == path) {
-            if ix < self.spaces_start {
-                self.spaces_start = ix;
-            } else if ix >= self.spaces_start + 5 {
-                self.spaces_start = ix - 4;
-            }
-        }
+    /// Saves a new project order.
+    fn project_order_changed(&mut self, _path: &str, cx: &mut Context<Self>) {
         self.persist(cx);
         self.invalidate_chrome(cx);
         self.projects_frame.update(cx, |_, cx| cx.notify());
@@ -7173,10 +7175,6 @@ impl Shell {
         }
         self.refresh_sidebar_structure(cx);
         let live_agents = self.live_agents_preview(cx);
-        // Sidebar.tsx's insetPersonal: the header just says Agents, and the
-        // zone switch sits under it, above the Principal, bots and groups.
-        let agents = self.workspace.agents_zone;
-        let zone = self.rail_zone_switch(cx);
         div()
             .id("monocode-sidebar")
             .debug_selector(|| "sidebar-content".into())
@@ -7215,26 +7213,7 @@ impl Shell {
                                 .items_center()
                                 .gap_1()
                                 .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .flex()
-                                        .items_center()
-                                        .when(agents, |d| {
-                                            d.child(
-                                                div()
-                                                    .debug_selector(|| {
-                                                        "sidebar-agents-title".into()
-                                                    })
-                                                    .min_w_0()
-                                                    .truncate()
-                                                    .text_size(px(14.))
-                                                    .font_weight(FontWeight::MEDIUM)
-                                                    .child("Agents"),
-                                            )
-                                        })
-                                        .when(!agents, |d| {
-                                            d.child(
+                                    div().flex_1().min_w_0().flex().items_center().child(
                                         div()
                                             .id("workspace-project")
                                             .debug_selector(|| "sidebar-project-button".into())
@@ -7308,10 +7287,19 @@ impl Shell {
                                                     );
                                                 }
                                             })),
-                                    )
-                                        }),
+                                    ),
                                 )
-                                .when(self.workspace.sidebar_search_visible && !agents, |d| {
+                                .child(
+                                    command_icon_button(
+                                        "sidebar-new-thread",
+                                        "New thread",
+                                        "pencil-edit-02",
+                                        "Tab: New",
+                                    )
+                                    .debug_selector(|| "sidebar-new-thread".into())
+                                    .on_click(cx.listener(|this, _, _, cx| this.new_chat(cx))),
+                                )
+                                .when(self.workspace.sidebar_search_visible, |d| {
                                     d.child(
                                         command_icon_button(
                                             "sidebar-search",
@@ -7360,7 +7348,6 @@ impl Shell {
                                     )),
                                 ),
                         )
-                        .child(div().mx_2().mb_1().child(zone))
                         .child(self.virtual_sidebar(cx))
                         .children(live_agents)
                         .child(self.app_update_footer(cx))
@@ -7373,9 +7360,7 @@ impl Shell {
                         }),
                 ),
             )
-            .when(!self.workspace.classic_layout && !agents, |d| {
-                d.child(self.project_spaces(cx))
-            })
+            .child(self.sidebar_bottom_bar(cx))
             .when_some(self.session_preview.as_ref(), |d, preview| {
                 let id = preview.id;
                 d.child(
@@ -7423,202 +7408,6 @@ impl Shell {
                 )
             })
             .into_any()
-    }
-
-    fn project_spaces(&mut self, cx: &mut Context<Self>) -> AnyElement {
-        // Sidebar.tsx's ProjectSpacesBar: five equal spaces, paged by chevrons.
-        let shown = self.workspace.projects.len().min(5);
-        let last = self.workspace.projects.len().saturating_sub(shown);
-        self.spaces_start = self.spaces_start.min(last);
-        let first = self.spaces_start;
-        let projects: Vec<_> = self
-            .space_reorder
-            .order(&self.workspace.projects)
-            .into_iter()
-            .enumerate()
-            .skip(first)
-            .take(shown)
-            .collect();
-        if self
-            .hovered_space
-            .as_ref()
-            .is_some_and(|hovered| !projects.iter().any(|(_, path)| path == hovered))
-        {
-            self.hovered_space = None;
-        }
-        let prefs = &self.workspace.preferences;
-        let shortcuts = ["Project: Previous", "Project: Next"]
-            .into_iter()
-            .filter_map(|command| crate::settings::command_shortcut(prefs, command))
-            .collect::<Vec<_>>()
-            .join(" / ");
-        // A short slide in from the side the new spaces come from.
-        let (nudge_x, nudge_opacity) = match self.spaces_nudge {
-            Some((direction, start)) => {
-                let t = start.elapsed().as_secs_f32() / 0.2;
-                if t >= 1. {
-                    self.spaces_nudge = None;
-                    (0., 1.)
-                } else {
-                    let eased = crate::reveal::bezier(t, 0.32, 0.72, 0., 1.);
-                    (direction * 12. * (1. - eased), 0.4 + 0.6 * eased)
-                }
-            }
-            None => (0., 1.),
-        };
-        let tooltip = self.hovered_space.clone().map(|path| {
-            popover(
-                "project-space-tooltip",
-                Anchor::Slot(self.space_anchor.clone()),
-            )
-            .side(Side::Top)
-            .align(Align::Center)
-            .gap(8.)
-            .padding(8.)
-            .solid(rail_color())
-            .without_animation()
-            .allow_outside_press()
-            .child(
-                div()
-                    .id("project-space-tip")
-                    .role(Role::Tooltip)
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .whitespace_nowrap()
-                    .text_size(px(12.))
-                    .line_height(px(15.))
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(content(1.))
-                            .child(self.project_label(&path)),
-                    )
-                    .when(!shortcuts.is_empty(), |d| {
-                        d.child(div().text_color(content(0.55)).child(shortcuts.clone()))
-                    }),
-            )
-        });
-        div()
-            .h(px(30.))
-            .flex_shrink_0()
-            .px_2()
-            .pb_0p5()
-            .flex()
-            .items_center()
-            .gap_1()
-            .child(
-                icon_button("previous-projects", "Previous projects", "chevron-left")
-                    .size(px(20.))
-                    .opacity(if first == 0 { 0.3 } else { 1. })
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        if this.spaces_start > 0 {
-                            this.spaces_start -= 1;
-                            this.nudge_spaces(-1., cx);
-                        }
-                    })),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .relative()
-                    .left(px(nudge_x))
-                    .opacity(nudge_opacity)
-                    .flex()
-                    .items_center()
-                    .gap_1()
-                    .child(self.space_reorder.strip.probe())
-                    .children(projects.into_iter().map(|(ix, path)| {
-                        let active = path == self.workspace.project;
-                        let hovered = self.hovered_space.as_ref() == Some(&path);
-                        let dragging = self.space_reorder.dragging(&path);
-                        let offset = self.space_reorder.offset(&path, ix, first);
-                        div()
-                            .id(("project-space", ix))
-                            .debug_selector(move || format!("project-space-{ix}"))
-                            .group("project-space")
-                            .role(Role::Tab)
-                            .aria_label(format!("Project {}", self.project_label(&path)))
-                            .aria_description(path.clone())
-                            .aria_selected(active)
-                            .cursor_pointer()
-                            .flex_1()
-                            .min_w_0()
-                            .h(px(20.))
-                            .rounded_md()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .relative()
-                            .left(px(offset))
-                            .opacity(if active || dragging { 1. } else { 0.45 })
-                            .when(active || dragging, |d| d.bg(content(0.1)))
-                            .when(dragging, |d| d.cursor(CursorStyle::ClosedHand))
-                            .hover(|s| s.opacity(1.).bg(content(if active { 0.1 } else { 0.05 })))
-                            .child(self.project_mark(&path, 12.))
-                            .when(hovered, |d| d.child(self.space_anchor.probe()))
-                            .on_hover({
-                                let path = path.clone();
-                                cx.listener(move |this, hovered: &bool, _, cx| {
-                                    if *hovered {
-                                        this.hovered_space = Some(path.clone());
-                                    } else if this.hovered_space.as_ref() == Some(&path) {
-                                        this.hovered_space = None;
-                                    } else {
-                                        return;
-                                    }
-                                    this.invalidate_chrome(cx);
-                                })
-                            })
-                            .on_mouse_down(MouseButton::Left, {
-                                let path = path.clone();
-                                cx.listener(move |this, event: &MouseDownEvent, _, _| {
-                                    this.start_space_drag(&path, event);
-                                })
-                            })
-                            .on_mouse_down(MouseButton::Right, {
-                                let path = path.clone();
-                                cx.listener(move |this, event: &MouseDownEvent, window, cx| {
-                                    let anchor = Anchor::Point(event.position);
-                                    // Spaces have no pins or groups to offer.
-                                    let target = MenuTarget::Project {
-                                        path: path.clone(),
-                                        rail: false,
-                                    };
-                                    this.open_menu(target, anchor, window, cx);
-                                })
-                            })
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                if this.space_reorder.take_click() {
-                                    return;
-                                }
-                                // The tip steps aside once a space is clicked.
-                                this.hovered_space = None;
-                                this.select_project(path.clone(), window, cx)
-                            }))
-                    })),
-            )
-            .child(
-                icon_button("more-projects", "More projects", "chevron-right")
-                    .size(px(20.))
-                    .opacity(if first >= last { 0.3 } else { 1. })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        if this.spaces_start < last {
-                            this.spaces_start += 1;
-                            this.nudge_spaces(1., cx);
-                        }
-                    })),
-            )
-            .children(tooltip)
-            .into_any()
-    }
-
-    fn nudge_spaces(&mut self, direction: f32, cx: &mut Context<Self>) {
-        if !cx.reduce_motion() {
-            self.spaces_nudge = Some((direction, std::time::Instant::now()));
-        }
-        self.invalidate_chrome(cx);
     }
 
     /// App.tsx's toTitleTab with TitleBar's tabCopy: a split tab, or a chat
@@ -9060,7 +8849,9 @@ impl Render for Shell {
             });
         let project_theme = preview.as_ref().or(project_theme);
         // Repainting bypasses cached views, so every surface follows the blend.
-        if configure_project(p, project_theme, system_light, animate) {
+        // `|` so both run: each also records what it applied.
+        if configure_project(p, project_theme, system_light, animate) | crate::theme::apply_shape(p)
+        {
             cx.refresh_windows();
         }
         if tweening() {
@@ -9270,7 +9061,7 @@ impl Render for Shell {
             .size_full()
             .bg(shell_fill())
             .text_color(content(1.))
-            .font_family(crate::fonts::UI)
+            .font_family(crate::fonts::ui())
             .capture_any_mouse_down(cx.listener(|this, event: &MouseDownEvent, _, cx| {
                 if this.session_preview.as_ref().is_some_and(|preview| {
                     !preview
@@ -9532,7 +9323,7 @@ impl Render for Shell {
                 }
             }))
             .on_action(cx.listener(|this, _: &DismissMenu, window, cx| {
-                if this.cancel_project_rail_drag(cx) || this.cancel_space_drag(cx) {
+                if this.cancel_project_rail_drag(cx) {
                     return;
                 }
                 if this.cancel_classic_sidebar_tab(cx) {
@@ -9678,7 +9469,7 @@ impl Render for Shell {
             }))
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrevious, window, cx| window.focus_prev(cx))
-            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, window, cx| {
+            .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _, cx| {
                 if let Some(monos) = &this.monos {
                     monos.update(cx, |m, cx| m.move_rail_drag(event, cx));
                 }
@@ -9687,7 +9478,6 @@ impl Render for Shell {
                 this.move_pane_drag(event, cx);
                 this.move_folder_drag(event, cx);
                 this.move_project_rail_drag(event, cx);
-                this.move_space_drag(event, window, cx);
                 this.move_classic_sidebar_tab(event, cx);
                 this.drag_sash(event, cx);
                 this.drag_dock(event, cx);
@@ -9730,7 +9520,6 @@ impl Render for Shell {
                     this.finish_pane_drag(window, cx);
                     this.finish_folder_drag(cx);
                     this.finish_project_rail_drag(cx);
-                    this.finish_space_drag(cx);
                     this.end_classic_sidebar_tab(cx);
                     if let Some(m) = this.monos.clone() {
                         m.update(cx, |m, cx| m.finish_reorder(cx));
@@ -10047,6 +9836,8 @@ mod tests {
                     session.summary.has_messages = true;
                 });
                 shell.sessions[&b].update(cx, |session, _| session.summary.has_messages = true);
+                // The one-line cards, which preview their thread on hover.
+                shell.workspace.compact_session_cards = true;
                 shell.invalidate_chrome(cx);
             })
             .unwrap();
@@ -12530,22 +12321,13 @@ mod tests {
             root.read_with(cx, |s, cx| s.sessions[&active].read(cx).transcript.clone());
         let before = transcript.read_with(cx, |t, _| t.render_passes);
         let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
-        // Find the rows by their selectors: which ones the sidebar lists
-        // (New, Inbox, Notes…) depends on the layout and preferences.
-        let inbox = visual.debug_bounds("sidebar-navigation-Inbox").unwrap();
-        let notes = visual.debug_bounds("sidebar-navigation-Notes").unwrap();
+        // The pages in the bar at the sidebar's foot.
+        let inbox = visual.debug_bounds("sidebar-page-Inbox").unwrap();
+        let notes = visual.debug_bounds("sidebar-page-Notes").unwrap();
         visual.simulate_mouse_move(inbox.center(), None, Default::default());
         visual.run_until_parked();
-        assert_eq!(
-            root.read_with(visual, |s, _| s.sidebar_hover),
-            Some("Inbox")
-        );
         visual.simulate_mouse_move(notes.center(), None, Default::default());
         visual.run_until_parked();
-        assert_eq!(
-            root.read_with(visual, |s, _| s.sidebar_hover),
-            Some("Notes")
-        );
         assert_eq!(transcript.read_with(visual, |t, _| t.render_passes), before);
     }
     #[gpui::test]

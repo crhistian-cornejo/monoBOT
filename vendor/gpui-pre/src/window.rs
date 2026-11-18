@@ -1240,6 +1240,9 @@ enum InputModality {
 
 /// Holds the state for a specific window.
 pub struct Window {
+    /// MonoBOT: this window's corner scale in percent, or `None` to follow
+    /// the app-wide one ([`set_corner_scale`]).
+    corner_scale: Option<u32>,
     pub(crate) handle: AnyWindowHandle,
     pub(crate) invalidator: WindowInvalidator,
     pub(crate) removed: bool,
@@ -2160,6 +2163,7 @@ impl Window {
         platform_window.map_window().unwrap();
 
         Ok(Window {
+            corner_scale: None,
             handle,
             invalidator,
             removed: false,
@@ -3146,6 +3150,21 @@ impl Window {
     /// Show the platform character palette.
     pub fn show_character_palette(&self) {
         self.platform_window.show_character_palette();
+    }
+
+    /// MonoBOT: draw this window's corners at `percent` of the radii its
+    /// views ask for (0 squares them), or follow the app-wide scale.
+    pub fn set_corner_scale(&mut self, percent: Option<u32>) {
+        if self.corner_scale != percent {
+            self.corner_scale = percent;
+            self.refresh();
+        }
+    }
+
+    /// The corner scale this window paints with.
+    pub fn corner_scale(&self) -> u32 {
+        self.corner_scale
+            .unwrap_or_else(|| CORNER_SCALE.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     /// The scale factor of the display associated with the window. For example, it could
@@ -4662,7 +4681,7 @@ impl Window {
     ) {
         self.invalidator.debug_assert_paint();
 
-        let corner_radii = squared_corners(corner_radii, bounds.size);
+        let corner_radii = scaled_corners(self.corner_scale(), corner_radii, bounds.size);
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
@@ -4699,7 +4718,7 @@ impl Window {
     ) {
         self.invalidator.debug_assert_paint();
 
-        let corner_radii = squared_corners(corner_radii, bounds.size);
+        let corner_radii = scaled_corners(self.corner_scale(), corner_radii, bounds.size);
         let scale_factor = self.scale_factor();
         let content_mask = self.snapped_content_mask();
         let opacity = self.element_opacity();
@@ -4794,7 +4813,7 @@ impl Window {
             content_mask: self.snapped_content_mask(),
             background: quad.background.opacity(opacity),
             border_color: quad.border_color.opacity(opacity),
-            corner_radii: squared_corners(quad.corner_radii, quad.bounds.size)
+            corner_radii: scaled_corners(self.corner_scale(), quad.corner_radii, quad.bounds.size)
                 .scale(self.scale_factor()),
             border_widths: snapped_border_widths,
             border_style: quad.border_style,
@@ -5232,7 +5251,8 @@ impl Window {
         };
 
         let content_mask = self.snapped_content_mask();
-        let corner_radii = squared_corners(
+        let corner_radii = scaled_corners(
+            self.corner_scale(),
             corner_radii.clamp_radii_for_quad_size(visible_bounds.size),
             visible_bounds.size,
         )
@@ -7932,33 +7952,87 @@ pub fn quad(
     }
 }
 
-static SQUARE_CORNERS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// MonoBOT: how round corners are drawn, as a percentage of the radii the
+/// views ask for. 0 squares every corner that does not make the shape fully
+/// round (circles, pills, switches), as its web app set every radius token
+/// to 0; 100 keeps the radii; above rounds more. A window can set its own
+/// with [`Window::set_corner_scale`]; others follow this one.
+static CORNER_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
 
-/// MonoBOT: draw square corners everywhere, as its web app sets every radius
-/// token to 0. A corner keeps its radius only when it makes the shape fully
-/// round (circles, pills, switches), like the web app's `9999px`.
-pub fn set_square_corners(enabled: bool) {
-    SQUARE_CORNERS.store(enabled, std::sync::atomic::Ordering::Relaxed);
+/// The radius a styled box framed on all four sides that asks for none is
+/// drawn with, before the corner scale, so framed controls never read as
+/// bare rectangles. Shapes painted by hand keep the radii they give.
+const FRAMED_RADIUS: f32 = 6.;
+
+/// The radii a styled box framed on all four sides is drawn with: its own,
+/// or [`FRAMED_RADIUS`] when it asks for none and is tall enough.
+pub fn framed_corners(radii: Corners<Pixels>, size: Size<Pixels>) -> Corners<Pixels> {
+    let square = radii.top_left == Pixels::ZERO
+        && radii.top_right == Pixels::ZERO
+        && radii.bottom_right == Pixels::ZERO
+        && radii.bottom_left == Pixels::ZERO;
+    let half = size.width.min(size.height) * 0.5;
+    if square && half >= px(FRAMED_RADIUS) {
+        Corners::all(px(FRAMED_RADIUS))
+    } else {
+        radii
+    }
 }
 
-/// The radii to paint for a shape of this size under [`set_square_corners`].
+/// Square every corner (`true`) or keep the radii as asked (`false`).
+pub fn set_square_corners(enabled: bool) {
+    set_corner_scale(if enabled { 0 } else { 100 });
+}
+
+/// The app-wide corner scale, in percent; see [`CORNER_SCALE`].
+pub fn set_corner_scale(percent: u32) {
+    CORNER_SCALE.store(percent, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The radii to paint for a shape of this size at the app-wide scale.
 pub fn squared_corners(radii: Corners<Pixels>, size: Size<Pixels>) -> Corners<Pixels> {
-    if !SQUARE_CORNERS.load(std::sync::atomic::Ordering::Relaxed) {
+    scaled_corners(
+        CORNER_SCALE.load(std::sync::atomic::Ordering::Relaxed),
+        radii,
+        size,
+    )
+}
+
+/// The radii to paint for a shape at `percent` of its own.
+pub fn scaled_corners(percent: u32, radii: Corners<Pixels>, size: Size<Pixels>) -> Corners<Pixels> {
+    let half = size.width.min(size.height) * 0.5;
+    let fully_round = |radius: Pixels| radius > Pixels::ZERO && radius >= half - px(0.5);
+    if percent == 0 {
+        let keep = |radius: Pixels| {
+            if fully_round(radius) {
+                radius
+            } else {
+                Pixels::ZERO
+            }
+        };
+        return Corners {
+            top_left: keep(radii.top_left),
+            top_right: keep(radii.top_right),
+            bottom_right: keep(radii.bottom_right),
+            bottom_left: keep(radii.bottom_left),
+        };
+    }
+    let scale = percent as f32 / 100.;
+    if percent == 100 {
         return radii;
     }
-    let round = size.width.min(size.height) * 0.5 - px(0.5);
-    let keep = |radius: Pixels| {
-        if radius > Pixels::ZERO && radius >= round {
+    let scaled = |radius: Pixels| {
+        if fully_round(radius) {
             radius
         } else {
-            Pixels::ZERO
+            (radius * scale).min(half)
         }
     };
     Corners {
-        top_left: keep(radii.top_left),
-        top_right: keep(radii.top_right),
-        bottom_right: keep(radii.bottom_right),
-        bottom_left: keep(radii.bottom_left),
+        top_left: scaled(radii.top_left),
+        top_right: scaled(radii.top_right),
+        bottom_right: scaled(radii.bottom_right),
+        bottom_left: scaled(radii.bottom_left),
     }
 }
 

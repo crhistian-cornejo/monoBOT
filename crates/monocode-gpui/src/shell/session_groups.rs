@@ -459,6 +459,11 @@ impl Shell {
                     },
                 )
                 .into(),
+                // As Capy's «Promote to Captain»: Chief takes the thread's
+                // request and splits it among the user's monos.
+                MenuAction::new("hand-to-crew", "Hand to your crew")
+                    .disabled(!summary.has_messages)
+                    .into(),
             ]);
         }
         items.extend([
@@ -553,6 +558,7 @@ impl Shell {
             }
             "rename" => self.start_rename(RenameTarget::Session(id), window, cx),
             "link-work-item" => self.open_link_dialog(id, window, cx),
+            "hand-to-crew" => self.hand_to_crew(id, cx),
             "reminder:cancel" => {
                 let occurrences: Vec<_> = self
                     .reminders
@@ -1031,9 +1037,7 @@ impl Shell {
                     .py_2()
                     .rounded_md()
                     .when(active, |d| d.bg(content(0.1)))
-                    .when(approval, |d| {
-                        d.bg(gpui::Hsla::from(rgb(0xfbbf24)).opacity(0.1))
-                    })
+                    .when(approval, |d| d.bg(crate::theme::warning().opacity(0.1)))
                     .child(input)
                     .into_any_element()
             });
@@ -1071,7 +1075,7 @@ impl Shell {
                         .rounded_sm()
                         .bg(content(0.1))
                         .border_1()
-                        .border_color(rgba(0x4da3f566))
+                        .border_color(crate::theme::accent_color().opacity(0.4))
                         .text_size(px(14.))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(content(1.))
@@ -1318,10 +1322,10 @@ impl Shell {
                     .text_size(px(11.))
                     .text_color(content(0.4))
                     .when(!expanded && approval, |d| {
-                        d.child(icon("circle-alert", 12.).text_color(rgb(0xfbbf24)))
+                        d.child(icon("circle-alert", 12.).text_color(crate::theme::warning()))
                     })
                     .when(!expanded && !approval && done, |d| {
-                        d.child(icon("check-circle-2", 12.).text_color(rgb(0x2dd4bf)))
+                        d.child(icon("check-circle-2", 12.).text_color(crate::theme::success()))
                     })
                     .child(sessions.len().to_string()),
             )
@@ -1504,11 +1508,11 @@ impl Shell {
                     .line_height(px(16.5))
                     .text_color(content(0.45))
                     .when(!expanded && approval, |d| {
-                        d.child(icon("circle-alert", 12.).text_color(rgb(0xfbbf24)))
+                        d.child(icon("circle-alert", 12.).text_color(crate::theme::warning()))
                     })
                     .when(!expanded && !approval && busy, |d| d.children(busy_mark))
                     .when(!expanded && !approval && !busy && done, |d| {
-                        d.child(icon("check", 12.).text_color(rgb(0x34d399)))
+                        d.child(icon("check", 12.).text_color(crate::theme::success()))
                     })
                     .child(sessions.len().to_string()),
             )
@@ -1747,7 +1751,7 @@ impl Shell {
             .rounded_md()
             .border_1()
             .border_color(if dialog.error.is_some() {
-                rgba(0xf8717199).into()
+                crate::theme::danger().opacity(0.6)
             } else {
                 content(0.1)
             })
@@ -1831,7 +1835,7 @@ impl Shell {
                                                             .id("link-error")
                                                         .role(Role::Alert)
                                                         .text_size(px(11.))
-                                                        .text_color(rgb(0xf87171))
+                                                        .text_color(crate::theme::danger())
                                                         .child(error.clone()),
                                                     None => div()
                                                             .id("link-help")
@@ -1851,8 +1855,8 @@ impl Shell {
                                                 .when(dialog.editing, |d| {
                                                     d.child(
                                                         button("link-remove", "Remove link")
-                                                            .text_color(rgb(0xf87171))
-                                                            .hover(|s| s.bg(rgba(0xf871711a)))
+                                                            .text_color(crate::theme::danger())
+                                                            .hover(|s| s.bg(crate::theme::danger().opacity(0.1)))
                                                             .on_click(cx.listener(|this, _, window, cx| {
                                                                 this.save_link(false, window, cx)
                                                             })),
@@ -1967,7 +1971,8 @@ mod tests {
         assert_eq!(first.size.height, px(28.));
         assert_eq!(second.left(), first.left());
         assert_eq!(second.size.height, px(28.));
-        assert_eq!(row(visual, plain).unwrap().size.height, px(32.));
+        // A loose thread has two lines, as Capy's.
+        assert_eq!(row(visual, plain).unwrap().size.height, px(52.));
         let started = row(visual, child).expect("a folder member keeps its Operator rail");
         assert_eq!(started.left() - first.left(), px(30.));
         window
@@ -1979,7 +1984,7 @@ mod tests {
         assert_eq!(row(visual, a).unwrap().size.height, px(28.));
         assert_eq!(row(visual, b).unwrap().size.height, px(28.));
         assert_eq!(row(visual, child).unwrap().size.height, px(28.));
-        assert_eq!(row(visual, plain).unwrap().size.height, px(60.));
+        assert_eq!(row(visual, plain).unwrap().size.height, px(32.));
         window
             .update(visual, |_, window, _| {
                 let scale = window.scale_factor();

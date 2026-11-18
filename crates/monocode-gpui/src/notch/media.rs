@@ -1636,7 +1636,7 @@ fn lyric_line(
     color: gpui::Hsla,
     window: &mut Window,
 ) -> gpui::ShapedLine {
-    let mut font = gpui::font(crate::fonts::UI);
+    let mut font = gpui::font(crate::fonts::ui());
     font.weight = weight;
     let run = gpui::TextRun {
         len: text.len(),
@@ -1870,7 +1870,7 @@ fn glide(
             canvas(
                 |_, _, _| (),
                 move |bounds, _, window, cx| {
-                    let mut font = gpui::font(crate::fonts::UI);
+                    let mut font = gpui::font(crate::fonts::ui());
                     font.weight = weight;
                     let run = gpui::TextRun {
                         len: text.len(),

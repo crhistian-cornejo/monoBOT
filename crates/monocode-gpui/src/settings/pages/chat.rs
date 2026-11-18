@@ -126,11 +126,11 @@ impl SettingsView {
             self.row(
                 Some("chief-offer"),
                 false,
-                "Let Claude hand work to your monos",
-                Some("For a large task that splits into parallel parts, a Claude chat may hand it to Chief, who gives each part to one of your code monos in its own chat and worktree, reviews their work and sends the chat one summary. New monos stay with you.".into()),
+                "Let chats hand work to your monos",
+                Some("For a large task that splits into parallel parts, a chat on any provider may hand it to Chief, who gives each part to one of your code monos in its own chat and worktree, reviews their work and sends the chat one summary. New monos stay with you.".into()),
                 vec![self.toggle(
                     "chief-offer",
-                    "Let Claude hand work to your monos",
+                    "Let chats hand work to your monos",
                     p.chief_offer,
                     false,
                     cx,

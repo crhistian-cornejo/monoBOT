@@ -245,7 +245,7 @@ impl TranscriptView {
                 .py_1()
                 .line_height(px(20.))
                 .text_color(if failed {
-                    rgb(0xf87171).into()
+                    crate::theme::danger()
                 } else {
                     content(0.55)
                 })
@@ -268,7 +268,7 @@ impl TranscriptView {
                     };
                     icon(glyph, 14.)
                         .text_color(if failed {
-                            rgb(0xf87171).into()
+                            crate::theme::danger()
                         } else {
                             content(0.45)
                         })
@@ -407,7 +407,7 @@ impl TranscriptView {
                     div()
                         .flex_shrink_0()
                         .text_color(if failed {
-                            rgb(0xf87171).into()
+                            crate::theme::danger()
                         } else {
                             content(0.5)
                         })
@@ -429,7 +429,7 @@ impl TranscriptView {
                             d.font_family(crate::fonts::mono()).text_size(px(12.))
                         })
                         .text_color(if failed {
-                            rgb(0xff6467).into()
+                            crate::theme::danger()
                         } else {
                             content(0.7)
                         })
@@ -458,7 +458,7 @@ impl TranscriptView {
                                         .bg(content(0.))
                                         .border_color(content(0.12))
                                         .text_color(if failed {
-                                            rgb(0xff6467).into()
+                                            crate::theme::danger()
                                         } else {
                                             content(0.5)
                                         })
@@ -483,7 +483,7 @@ impl TranscriptView {
                             d.role(Role::Button)
                                 .aria_label(format!("Open {path}"))
                                 .cursor_pointer()
-                                .hover(|style| style.text_color(rgb(0x7dd3fc)))
+                                .hover(|style| style.text_color(crate::theme::info()))
                                 .on_click(move |_, window, cx| {
                                     cx.stop_propagation();
                                     window.dispatch_action(
@@ -546,7 +546,9 @@ impl TranscriptView {
                                                 d.role(Role::Button)
                                                     .aria_label(format!("Open {path}"))
                                                     .cursor_pointer()
-                                                    .hover(|style| style.text_color(rgb(0x7dd3fc)))
+                                                    .hover(|style| {
+                                                        style.text_color(crate::theme::info())
+                                                    })
                                                     .on_click(move |_, window, cx| {
                                                         cx.stop_propagation();
                                                         window.dispatch_action(
@@ -574,7 +576,7 @@ impl TranscriptView {
                                             .bg(content(0.))
                                             .border_color(content(0.12))
                                             .text_color(if failed {
-                                                rgb(0xff6467).into()
+                                                crate::theme::danger()
                                             } else {
                                                 content(0.5)
                                             })
@@ -589,7 +591,11 @@ impl TranscriptView {
                 ),
             )
             .when(failed, |d| {
-                d.child(icon("close", 14.).text_color(rgb(0xff6467)).flex_shrink_0())
+                d.child(
+                    icon("close", 14.)
+                        .text_color(crate::theme::danger())
+                        .flex_shrink_0(),
+                )
             })
             .when(can_diff, |d| {
                 let toggle_key = diff_key.clone();
@@ -656,7 +662,7 @@ impl TranscriptView {
                                     14.,
                                 )
                                 .text_color(if has_error {
-                                    rgb(0xf87171).into()
+                                    crate::theme::danger()
                                 } else {
                                     content(0.4)
                                 }),
@@ -712,7 +718,7 @@ impl TranscriptView {
                                         d.role(Role::Button)
                                             .aria_label(format!("Open {path}"))
                                             .cursor_pointer()
-                                            .hover(|style| style.text_color(rgb(0x7dd3fc)))
+                                            .hover(|style| style.text_color(crate::theme::info()))
                                             .on_click(move |_, window, cx| {
                                                 cx.stop_propagation();
                                                 window.dispatch_action(
@@ -738,7 +744,7 @@ impl TranscriptView {
                         .font_family(crate::fonts::mono())
                         .text_size(px(12.))
                         .line_height(px(20.))
-                        .text_color(rgb(0xf87171))
+                        .text_color(crate::theme::danger())
                         .child(error_detail),
                 )
             })

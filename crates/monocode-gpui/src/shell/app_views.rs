@@ -14,6 +14,7 @@ impl Shell {
             AppView::Inbox => "Inbox",
             AppView::Notes => "Notes",
             AppView::Automations => "Automations",
+            AppView::Workstreams => "Workstreams",
         })
     }
 
@@ -221,6 +222,10 @@ impl Shell {
             AppView::Notes => self.notes.clone().map(IntoElement::into_any_element),
             AppView::Inbox => self.inbox.clone().map(IntoElement::into_any_element),
             AppView::Automations => self.automations.clone().map(IntoElement::into_any_element),
+            AppView::Workstreams => self
+                .workstreams_page
+                .clone()
+                .map(IntoElement::into_any_element),
         }
     }
 
@@ -231,12 +236,29 @@ impl Shell {
             Some(AppView::Automations) => {
                 self.automations.as_ref().map(|view| view.focus_handle(cx))
             }
+            Some(AppView::Workstreams) => self
+                .workstreams_page
+                .as_ref()
+                .map(|view| view.focus_handle(cx)),
             None => return false,
         };
         if let Some(focus) = focus {
             window.focus(&focus, cx);
         }
         true
+    }
+
+    /// The Workstreams page, from the sidebar's foot.
+    pub(crate) fn open_workstreams(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(monos) = self.monos.clone() else {
+            return;
+        };
+        self.prepare_app_view(window, cx);
+        if self.workstreams_page.is_none() {
+            self.workstreams_page =
+                Some(cx.new(|cx| crate::monos::WorkstreamsPage::new(monos, cx)));
+        }
+        self.show_app_view(AppView::Workstreams, window, cx);
     }
 
     pub(super) fn open_notes(&mut self, window: &mut Window, cx: &mut Context<Self>) {

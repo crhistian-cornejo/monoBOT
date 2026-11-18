@@ -1422,6 +1422,51 @@ impl Shell {
     /// `control chief` from a coding chat's own turn: Chief, a mono in its
     /// own chat, leads a run for the brief, giving tasks to the user's code
     /// monos; the chat that asked gets Chief's summary once it is over.
+    /// «Hand to your crew» on a thread: Chief takes its latest request, splits
+    /// it among the user's monos in their own chats and worktrees, reviews
+    /// their work into the thread's checkout and sends it one summary, as
+    /// when the thread's own agent hands the work over.
+    pub(super) fn hand_to_crew(&mut self, id: i64, cx: &mut Context<Self>) {
+        let Some(view) = self.sessions.get(&id) else {
+            return;
+        };
+        let view = view.read(cx);
+        let title = self.session_metadata(id, cx).display_title();
+        let request = view
+            .transcript
+            .read(cx)
+            .source_rows()
+            .iter()
+            .rev()
+            .find(|row| row.is_prompt() && !row.text.trim().is_empty())
+            .map(|row| row.text.clone());
+        let Some(request) = request else {
+            self.error =
+                Some("Ask for the work in this thread first, then hand it to your crew.".into());
+            cx.notify();
+            return;
+        };
+        let brief = format!(
+            "{request}\n\nThis is the latest request of the thread \"{title}\", handed over by the user. Do it in the thread's checkout."
+        );
+        let (reply, result) = std::sync::mpsc::channel();
+        self.agent_chief(
+            Call {
+                session: id,
+                request_id: format!("hand-to-crew-{id}"),
+                action: "chief".into(),
+                input: serde_json::json!({ "title": title.to_string(), "brief": brief }),
+                reply,
+            },
+            cx,
+        );
+        // A refusal comes back at once; a started run opens its board.
+        if let Ok(Err(refusal)) = result.try_recv() {
+            self.error = Some(refusal);
+        }
+        cx.notify();
+    }
+
     fn agent_chief(&mut self, call: Call, cx: &mut Context<Self>) {
         let requester = call.session;
         let text = |key: &str, max: usize| {

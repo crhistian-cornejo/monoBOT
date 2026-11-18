@@ -8,10 +8,10 @@ pub(crate) mod permission;
 pub(crate) mod quiet;
 pub(crate) mod system;
 
-use crate::{input::Input, right_panel::RED_400, theme::*};
+use crate::{input::Input, theme::*};
 use gpui::{
     App, Context, Entity, Global, IntoElement, KeyDownEvent, MouseButton, Render, Role,
-    SharedString, Task, Toggled, WeakEntity, Window, div, prelude::*, px, rgb, svg,
+    SharedString, Task, Toggled, WeakEntity, Window, div, prelude::*, px, svg,
 };
 use monobot_dictation::Event;
 use monocode_core::dictation::{self as model, BARS, Phase};
@@ -673,7 +673,7 @@ impl Render for Dictation {
                         .min_w_0()
                         .flex_1()
                         .truncate()
-                        .text_color(rgb(RED_400))
+                        .text_color(crate::theme::danger())
                         .child(error),
                 )
                 .child(
@@ -765,34 +765,68 @@ impl Render for Dictation {
                     .unwrap_or_default()
                     .to_owned()
                     .into();
-                row()
+                let listening = self.phase == Phase::Listening;
+                div()
                     .debug_selector(|| "dictation-bar".into())
-                    .gap_3()
-                    .child(wave(&self.shown))
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .truncate()
-                            .text_color(content(0.5))
-                            .child(caption),
-                    )
-                    .when_some(self.listening_since, |d, since| {
+                    .border_t_1()
+                    .border_color(content(0.07))
+                    .px_3()
+                    .py(px(6.))
+                    .text_size(px(12.))
+                    .line_height(px(16.))
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .when(!caption.is_empty(), |d| {
                         d.child(
                             div()
-                                .flex_shrink_0()
-                                .font_features(crate::right_panel::tabular())
-                                .text_color(content(0.5))
-                                .child(model::clock(since.elapsed())),
+                                .min_w_0()
+                                .truncate()
+                                .text_color(content(0.6))
+                                .child(caption),
                         )
                     })
                     .child(
                         div()
-                            .flex_shrink_0()
-                            .font_family(crate::fonts::mono())
-                            .text_size(px(11.))
-                            .text_color(content(0.4))
-                            .child("Esc to cancel".to_uppercase()),
+                            .flex()
+                            .items_center()
+                            .gap_3()
+                            .child(dither_wave(self.shown))
+                            .when_some(self.listening_since, |d, since| {
+                                d.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .font_features(crate::right_panel::tabular())
+                                        .text_color(content(0.5))
+                                        .child(model::clock(since.elapsed())),
+                                )
+                            })
+                            .when(listening, |d| {
+                                d.child(
+                                    div()
+                                        .id("dictation-done")
+                                        .debug_selector(|| "dictation-done".into())
+                                        .role(Role::Button)
+                                        .aria_label("Stop and keep the text")
+                                        .tooltip(crate::theme::text_tip(
+                                            "Stop and keep the text. Esc cancels.",
+                                        ))
+                                        .flex_shrink_0()
+                                        .size(px(26.))
+                                        .rounded(px(6.))
+                                        .flex()
+                                        .items_center()
+                                        .justify_center()
+                                        .cursor_pointer()
+                                        .bg(accent_color())
+                                        .hover(|s| s.opacity(0.9))
+                                        .child(icon("check", 14.).text_color(white(1.)))
+                                        .on_mouse_down(MouseButton::Left, |_, _, cx| {
+                                            cx.stop_propagation()
+                                        })
+                                        .on_click(cx.listener(|this, _, _, cx| this.toggle(cx))),
+                                )
+                            }),
                     )
                     .into_any_element()
             }
@@ -801,21 +835,43 @@ impl Render for Dictation {
     }
 }
 
-/// DictationWave: live bars of how loud the microphone is, newest on the
-/// right.
-fn wave(levels: &[f32; BARS]) -> impl IntoElement {
-    div()
-        .flex_shrink_0()
-        .h(px(20.))
-        .flex()
-        .items_center()
-        .gap(px(2.))
-        .children(levels.iter().map(|level| {
-            div()
-                .w(px(2.))
-                .h(px(model::bar_height(*level)))
-                .bg(accent_color())
-        }))
+/// DictationWave: how loud the microphone has been, newest on the right,
+/// as a dithered grid of 2px dots in the accent, the stipple of the chat
+/// background's Dither effect. Silence leaves a dotted line.
+fn dither_wave(levels: [f32; BARS]) -> impl IntoElement {
+    const CELL: f32 = 2.;
+    const PITCH: f32 = 3.;
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let columns = ((f32::from(bounds.size.width) + 1.) / PITCH)
+                .floor()
+                .max(0.) as usize;
+            let rows = ((f32::from(bounds.size.height) + 1.) / PITCH)
+                .floor()
+                .max(0.) as usize;
+            let cells = model::dither_cells(&levels, columns, rows);
+            let used = (rows as f32 * PITCH - 1.).max(0.);
+            let top = bounds.top() + (bounds.size.height - px(used)) / 2.;
+            let color = accent_color();
+            for (ix, _) in cells.iter().enumerate().filter(|(_, lit)| **lit) {
+                let (row, column) = (ix / columns, ix % columns);
+                window.paint_quad(gpui::fill(
+                    gpui::Bounds::new(
+                        gpui::point(
+                            bounds.left() + px(column as f32 * PITCH),
+                            top + px(row as f32 * PITCH),
+                        ),
+                        gpui::size(px(CELL), px(CELL)),
+                    ),
+                    color,
+                ));
+            }
+        },
+    )
+    .flex_1()
+    .min_w_0()
+    .h(px(20.))
 }
 
 #[cfg(test)]

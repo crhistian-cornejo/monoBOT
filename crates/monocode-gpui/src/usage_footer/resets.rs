@@ -100,7 +100,7 @@ impl UsageFooter {
                         .text_color(
                             if action.is_some_and(|a| a.result.as_ref().is_some_and(Result::is_err))
                             {
-                                rgb(0xfcd34d).into()
+                                crate::theme::warning()
                             } else {
                                 content(0.65)
                             },

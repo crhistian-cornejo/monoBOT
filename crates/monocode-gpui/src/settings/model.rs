@@ -382,6 +382,18 @@ pub(crate) const INDEX: &[(&str, Section, &str, &str)] = &[
         "zoom font size bigger smaller ui",
     ),
     (
+        "interface-font",
+        Section::Appearance,
+        "Interface font",
+        "typeface system san francisco sf pro geist native macos text",
+    ),
+    (
+        "corners",
+        Section::Appearance,
+        "Corners",
+        "rounded square radius native macos shape edges",
+    ),
+    (
         "collapsed-project-rail",
         Section::Appearance,
         "Collapsed project rail",

@@ -962,3 +962,40 @@ fn a_swarm_card_opens_its_board_before_any_agent_and_after_the_panel_closed(
         })
         .unwrap();
 }
+
+#[gpui::test]
+fn a_thread_handed_to_its_crew_starts_chief_on_its_latest_request(cx: &mut TestAppContext) {
+    let (window, requester, _dir) = shell(cx);
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    // Nothing asked yet: nothing to hand over.
+    window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            shell.hand_to_crew(requester, cx);
+            assert!(shell.error.as_deref().unwrap().contains("first"));
+            assert!(shell.orchestrations.is_empty());
+            shell.error = None;
+            shell.sessions[&requester].update(cx, |chat, cx| {
+                let mut transcript = monocode_core::transcript::Transcript::default();
+                transcript.begin("user");
+                transcript.append("Rotate the keys in src");
+                transcript.begin("assistant");
+                transcript.append("On it");
+                chat.mono_append(transcript.rows, cx);
+            });
+            shell.hand_to_crew(requester, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, _| {
+            assert_eq!(shell.error, None);
+            let live = shell
+                .orchestrations
+                .values()
+                .find(|live| live.run.requester == Some(requester))
+                .expect("Chief took the thread's request");
+            assert!(live.run.request.starts_with("Rotate the keys in src"));
+        })
+        .unwrap();
+}

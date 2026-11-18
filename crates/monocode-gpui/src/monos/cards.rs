@@ -48,7 +48,7 @@ fn choices(
                     .size(px(16.))
                     .flex_shrink_0()
                     .rounded_full()
-                    .bg(rgb(0x34d399))
+                    .bg(crate::theme::success())
                     .flex()
                     .items_center()
                     .justify_center()
@@ -149,13 +149,13 @@ pub(crate) fn launch(
     let title = view.map_or("Agent session".to_string(), |v| v.title.clone());
     let (label, glyph, color) = match view.map(|v| v.state) {
         Some("working") => ("Working", "loader-03", content(0.55)),
-        Some("input") => ("Needs input", "clock", rgb(0xfbbf24).into()),
+        Some("input") => ("Needs input", "clock", crate::theme::warning()),
         Some("draft") => ("Draft", "circle-dashed-hi", content(0.45)),
-        Some("failed") => ("Failed", "alert-circle", rgb(0xf87171).into()),
+        Some("failed") => ("Failed", "alert-circle", crate::theme::danger()),
         Some("stopped") => ("Stopped", "circle-x", content(0.45)),
         Some("unavailable") => ("Unavailable", "chatting", content(0.45)),
         Some(_) => ("Done", "check-circle", {
-            let mut c: gpui::Hsla = rgb(0x34d399).into();
+            let mut c: gpui::Hsla = crate::theme::success();
             c.a = 0.9;
             c
         }),

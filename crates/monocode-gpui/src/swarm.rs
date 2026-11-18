@@ -228,6 +228,11 @@ fn post_header(post: &Post, emphasis: bool) -> AnyElement {
 }
 
 impl SwarmPanel {
+    /// A Chief run, whose members are the user's monos: the panel's tab
+    /// says Crew instead of Swarm.
+    pub(crate) fn is_crew(&self) -> bool {
+        !self.looks.is_empty()
+    }
     pub(crate) fn new(cx: &mut Context<Self>) -> Self {
         let query = cx.new(|cx| field("Search", cx));
         let member_query = cx.new(|cx| field("Search members", cx));
@@ -793,10 +798,8 @@ impl SwarmPanel {
                                     .text_color(match member.state {
                                         _ if member.coordinator() => content(0.5),
                                         State::Working => accent_color(),
-                                        State::NeedsInput => {
-                                            rgb(crate::right_panel::AMBER_400).into()
-                                        }
-                                        State::Failed => rgb(crate::right_panel::RED_400).into(),
+                                        State::NeedsInput => crate::theme::warning(),
+                                        State::Failed => crate::theme::danger(),
                                         _ => content(0.45),
                                     })
                                     .child(state),

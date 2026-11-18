@@ -471,7 +471,7 @@ impl Shell {
                             .children(work_item)
                             .when(
                                 self.automation_state.session_automations.contains_key(&id),
-                                |d| d.child(icon("zap", 12.).text_color(rgb(0xfbbf24))),
+                                |d| d.child(icon("zap", 12.).text_color(crate::theme::warning())),
                             )
                             .when_some(rail, |d, (rail, _)| {
                                 d.child(
@@ -676,7 +676,7 @@ impl Shell {
             .text_color(content(0.45));
         if session.needs_approval() {
             status
-                .text_color(rgb(0xfbbf24))
+                .text_color(crate::theme::warning())
                 .child(icon("circle-alert", 12.))
                 .child(if self.orchestration_summaries.contains_key(&id) {
                     "Needs input"
@@ -692,7 +692,7 @@ impl Shell {
                 .into_any_element()
         } else if self.unseen_finished.contains(&id) {
             status
-                .text_color(rgb(0x34d399))
+                .text_color(crate::theme::success())
                 .child(icon("check", 12.))
                 .child("Done")
                 .into_any_element()
@@ -772,11 +772,11 @@ impl Shell {
                             needs_input || matches!(task.status.as_str(), "failed" | "blocked");
                         let done = task.status == "completed";
                         let tone: gpui::Hsla = if alert {
-                            rgb(0xfbbf24).into()
+                            crate::theme::warning()
                         } else if working {
                             accent_color()
                         } else if done {
-                            rgb(0x34d399).into()
+                            crate::theme::success()
                         } else {
                             content(0.45)
                         };

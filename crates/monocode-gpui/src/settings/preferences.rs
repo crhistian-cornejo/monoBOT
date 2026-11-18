@@ -58,6 +58,12 @@ pub(crate) struct Preferences {
     pub chat_background_session: u32,
     pub collapsed_project_rail: String,
     pub ui_scale: u32,
+    /// "system" draws the interface in the platform face (San Francisco on
+    /// macOS); "geist" keeps the bundled Geist the web build used.
+    pub interface_font: String,
+    /// "rounded" keeps the radii the views ask for, as macOS draws controls;
+    /// "square" squares everything that is not fully round.
+    pub corners: String,
     pub show_excluded_files: bool,
     // Chat
     pub transcript_layout: String,
@@ -124,6 +130,9 @@ pub(crate) struct Preferences {
     pub hidden_providers: Vec<String>,
     pub project_providers: HashMap<String, ProviderDefaults>,
     pub favorite_models: Vec<ModelChoice>,
+    /// The reasoning effort each favorite opens at, by `provider/model`
+    /// (`provider/` for the provider's default model).
+    pub favorite_efforts: HashMap<String, String>,
     pub recent_models: Vec<ModelChoice>,
     pub model_picker_tab: Option<String>,
     /// The last access mode picked in a composer; new chats start with it.
@@ -190,6 +199,18 @@ impl Default for Preferences {
             chat_background_session: 24,
             collapsed_project_rail: "compact".into(),
             ui_scale: 100,
+            interface_font: if cfg!(target_os = "macos") {
+                "system"
+            } else {
+                "geist"
+            }
+            .into(),
+            corners: if cfg!(target_os = "macos") {
+                "rounded"
+            } else {
+                "square"
+            }
+            .into(),
             show_excluded_files: false,
             transcript_layout: "chat".into(),
             anchor_prompts: true,
@@ -227,6 +248,7 @@ impl Default for Preferences {
             hidden_providers: Vec::new(),
             project_providers: HashMap::new(),
             favorite_models: Vec::new(),
+            favorite_efforts: HashMap::new(),
             recent_models: Vec::new(),
             model_picker_tab: None,
             default_access: None,
@@ -307,6 +329,8 @@ impl Preferences {
         self.chat_background_effect = d.chat_background_effect;
         self.chat_background = d.chat_background;
         self.ui_scale = d.ui_scale;
+        self.interface_font = d.interface_font;
+        self.corners = d.corners;
         self.collapsed_project_rail = d.collapsed_project_rail;
     }
 }
@@ -323,6 +347,13 @@ pub(crate) struct ProviderDefaults {
 pub(crate) struct ModelChoice {
     pub provider: String,
     pub model: Option<String>,
+}
+
+impl ModelChoice {
+    /// The key of this choice in [`Preferences::favorite_efforts`].
+    pub(crate) fn key(provider: &str, model: Option<&str>) -> String {
+        format!("{provider}/{}", model.unwrap_or_default())
+    }
 }
 
 impl gpui::Global for Preferences {}

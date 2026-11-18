@@ -76,9 +76,9 @@ pub(super) fn room(available: f32, column: f32) -> Room {
 /// The bar's colour for a context window this full.
 fn fill_color(ratio: f32) -> gpui::Hsla {
     if ratio >= FULL {
-        rgb(crate::right_panel::RED_400).into()
+        crate::theme::danger()
     } else if ratio >= WARN {
-        rgb(crate::right_panel::AMBER_400).into()
+        crate::theme::warning()
     } else {
         accent_color()
     }
@@ -722,7 +722,7 @@ mod tests {
     #[test]
     fn a_fuller_window_turns_amber_then_red() {
         assert_eq!(fill_color(0.5), accent_color());
-        assert_eq!(fill_color(0.85), rgb(crate::right_panel::AMBER_400).into());
-        assert_eq!(fill_color(0.97), rgb(crate::right_panel::RED_400).into());
+        assert_eq!(fill_color(0.85), crate::theme::warning());
+        assert_eq!(fill_color(0.97), crate::theme::danger());
     }
 }

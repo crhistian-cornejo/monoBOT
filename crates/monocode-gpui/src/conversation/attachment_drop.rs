@@ -16,6 +16,9 @@ impl Conversation {
         div()
             .id(id)
             .key_context("Session")
+            .on_action(cx.listener(|this, pick: &crate::pickers::PickFavorite, _, cx| {
+                this.pick_favorite(pick.0, cx)
+            }))
             .relative()
             .child(self.completion.read(cx).container_probe())
             .on_drag_move::<ExternalPaths>(cx.listener(

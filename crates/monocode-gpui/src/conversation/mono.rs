@@ -779,10 +779,67 @@ impl Conversation {
         let group = mono.is_group();
         // MonoHeader's greeting: it shows only before the first message.
         let body = if !self.summary.has_messages {
-            let greeting = div().flex().flex_col().items_center().justify_center().px_6().py_12()
-                .child(crate::monos::avatar::avatar(&mono.face(), mono.color, status, 56., false))
-                .child(div().mt(px(-8.)).h(px(32.)).px(px(14.)).flex().items_center().rounded_full().border_1().border_color(content(0.14)).bg(content(0.06)).text_size(px(13.)).font_weight(gpui::FontWeight::SEMIBOLD).child(name))
-                .child(div().mt_3().max_w(px(384.)).text_center().text_size(px(13.)).line_height(px(21.)).text_color(content(0.5)).child(if mono.projects.is_empty(){"Add the projects I should work on in my settings, or just ask me something.".into()}else{format!("I can see every session, note and folder in {}. Ask what’s going on, or hand me work.",mono.projects.iter().map(|p|std::path::Path::new(p).file_name().unwrap_or_default().to_string_lossy()).collect::<Vec<_>>().join(", "))}));
+            // A Captain's page, as Capy's: its face, its name and a way to
+            // what it is, then what it can do for you.
+            let greeting = div()
+                .debug_selector(|| "captain-header".into())
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .px_6()
+                .py_12()
+                .child(crate::monos::avatar::avatar(&mono.face(), mono.color, status, 112., false))
+                .child(
+                    div()
+                        .mt_4()
+                        .text_size(px(26.))
+                        .line_height(px(32.))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                        .text_color(content(1.))
+                        .child(name),
+                )
+                .child(
+                    div()
+                        .id("view-captain")
+                        .debug_selector(|| "view-captain".into())
+                        .role(Role::Button)
+                        .aria_label("View Captain")
+                        .mt_2()
+                        .px_2()
+                        .py_0p5()
+                        .rounded(px(6.))
+                        .text_size(px(14.))
+                        .text_color(accent_color())
+                        .cursor_pointer()
+                        .hover(|s| s.bg(accent_color().opacity(0.1)))
+                        .child("View Captain")
+                        .on_click(cx.listener(|_, _, _, cx| cx.emit(ViewCaptain))),
+                )
+                .child(
+                    div()
+                        .mt_4()
+                        .max_w(px(384.))
+                        .text_center()
+                        .text_size(px(13.))
+                        .line_height(px(21.))
+                        .text_color(content(0.5))
+                        .child(if mono.projects.is_empty() {
+                            "Add the projects I should work on in my settings, or just ask me something.".into()
+                        } else {
+                            format!(
+                                "I can see every session, note and folder in {}. Ask what’s going on, or hand me work.",
+                                mono.projects
+                                    .iter()
+                                    .map(|p| std::path::Path::new(p)
+                                        .file_name()
+                                        .unwrap_or_default()
+                                        .to_string_lossy())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        }),
+                );
             div()
                 .flex_1()
                 .flex()

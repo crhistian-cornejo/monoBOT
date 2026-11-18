@@ -171,7 +171,7 @@ pub(super) fn render(
                     div()
                         .text_size(px(12.))
                         .text_color(if state == "error" {
-                            gpui::rgb(0xf87171).into()
+                            crate::theme::danger()
                         } else {
                             content(0.55)
                         })

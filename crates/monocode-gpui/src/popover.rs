@@ -895,10 +895,6 @@ impl MenuAction {
         self.value = Some(text.into());
         self
     }
-    pub(crate) fn value_image(mut self, provider: &'static str) -> Self {
-        self.value_image = Some(provider);
-        self
-    }
     pub(crate) fn badge(mut self, text: impl Into<SharedString>) -> Self {
         self.badge = Some(text.into());
         self

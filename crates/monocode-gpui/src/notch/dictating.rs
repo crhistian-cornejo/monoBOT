@@ -620,7 +620,7 @@ fn level_bars(levels: &[f32], color: gpui::Hsla) -> impl IntoElement {
 /// A word's width as the wing draws it.
 fn word_width(text: &str, window: &mut Window) -> f32 {
     let mut font = window.text_style().font();
-    font.family = crate::fonts::UI.into();
+    font.family = crate::fonts::ui().into();
     font.weight = gpui::FontWeight::MEDIUM;
     let run = gpui::TextRun {
         len: text.len(),

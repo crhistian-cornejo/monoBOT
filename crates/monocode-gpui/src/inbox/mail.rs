@@ -164,7 +164,7 @@ fn caption(text: impl Into<SharedString>) -> Div {
 fn alert(text: impl Into<SharedString>) -> Div {
     div()
         .text_size(px(12.))
-        .text_color(rgb(0xf87171))
+        .text_color(crate::theme::danger())
         .child(text.into())
 }
 
