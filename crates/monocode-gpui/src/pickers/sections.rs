@@ -34,6 +34,18 @@ pub(super) struct Card {
     /// The card's bounds, so a press on it does not close the menu around
     /// the list.
     region: AnchorSlot,
+    /// The reasoning slider's bounds, and its knob while it is dragged.
+    track: AnchorSlot,
+    drag: Option<EffortDrag>,
+}
+
+/// The reasoning knob under the pointer: where it is, in window
+/// coordinates, and what letting go applies to.
+pub(super) struct EffortDrag {
+    x: f32,
+    kind: Kind,
+    model: Option<String>,
+    efforts: Vec<String>,
 }
 
 /// Whether the list groups models by the agent that runs them rather than
@@ -74,27 +86,92 @@ fn inside_corners(x: f32, y: f32, w: f32, h: f32, radius: f32, round: [bool; 4])
     })
 }
 
+/// Crisp dither cells: `CELL` squares on a `PITCH` grid with a gap between,
+/// snapped to device pixels so they stay sharp, as Capy draws them.
+const CELL: f32 = 3.;
+const PITCH: f32 = 4.;
+
+fn snap(value: f32, scale: f32) -> f32 {
+    (value * scale).round() / scale
+}
+
+/// Paints the lit cells of a `w` × `h` area at `origin`; `ink` gets each
+/// cell's centre relative to the origin and its grid position.
+fn crisp_cells(
+    window: &mut Window,
+    origin: gpui::Point<gpui::Pixels>,
+    w: f32,
+    h: f32,
+    mut ink: impl FnMut(f32, f32, i32, i32) -> Option<gpui::Hsla>,
+) {
+    let scale = window.scale_factor();
+    let (left, top) = (
+        snap(f32::from(origin.x), scale),
+        snap(f32::from(origin.y), scale),
+    );
+    let (cols, rows) = ((w / PITCH).floor() as i32, (h / PITCH).floor() as i32);
+    for row in 0..rows {
+        for col in 0..cols {
+            let (x, y) = (col as f32 * PITCH, row as f32 * PITCH);
+            let Some(color) = ink(x + CELL / 2., y + CELL / 2., col, row) else {
+                continue;
+            };
+            window.paint_quad(gpui::fill(
+                gpui::Bounds::new(
+                    gpui::point(px(snap(left + x, scale)), px(snap(top + y, scale))),
+                    gpui::size(px(CELL), px(CELL)),
+                ),
+                color,
+            ));
+        }
+    }
+}
+
+/// When the corner's sweep started, shared by every card.
+fn sweep_epoch() -> std::time::Instant {
+    static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *EPOCH.get_or_init(std::time::Instant::now)
+}
+
 /// The dithered glow in the card's top right corner: dense at the corner,
-/// thinning toward the name.
-fn corner_dither() -> impl IntoElement {
-    const WIDTH: f32 = 156.;
-    const HEIGHT: f32 = 60.;
+/// thinning toward the name. At the highest effort it moves: bands sweep
+/// from the corner down and away, diagonally, inside the same area.
+fn corner_dither(moving: bool) -> impl IntoElement {
+    const WIDTH: f32 = 160.;
+    const HEIGHT: f32 = 64.;
     gpui::canvas(
         |_, _, _| {},
-        |bounds, _, window, _| {
-            let mut ink = accent_color();
-            ink.a *= if dither::light() { 0.5 } else { 0.42 };
+        move |bounds, _, window, cx| {
+            let still = !moving || cx.reduce_motion();
+            let phase = if still {
+                0.
+            } else {
+                window.request_animation_frame();
+                sweep_epoch().elapsed().as_secs_f32()
+            };
+            let ink = accent_color();
             let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
-            dither::Grid::new(bounds.origin, w, h).paint(window, |col, row| {
-                let (x, y) = dither::Grid::center(col, row);
+            crisp_cells(window, bounds.origin, w, h, |x, y, col, row| {
                 // The card's own corner, less its 1px rule.
                 if !inside_corners(x, y, w, h, 11., [false, true, false, false]) {
                     return None;
                 }
                 let (dx, dy) = ((w - x) / w, y / h);
                 let reach = (dx * dx * 0.7 + dy * dy).sqrt();
-                let tone = (1. - reach).max(0.).powf(1.7) * 0.85;
-                dither::inked(col, row, tone).then_some(ink)
+                let mut tone = (1. - reach).max(0.).powf(1.5);
+                if !still {
+                    // A diagonal wave travelling out of the corner.
+                    let along = dx * 0.6 + dy * 0.4;
+                    let wave = ((along * 7. - phase * 2.6) * std::f32::consts::TAU / 2.).sin();
+                    tone = (tone * (0.7 + 0.45 * wave)).clamp(0., 1.);
+                }
+                if !dither::inked(col, row, tone) {
+                    return None;
+                }
+                // Denser cells read darker, as in Capy's corner.
+                let mut color = ink;
+                color.a *= 0.35 + 0.55 * tone;
+                Some(color)
             });
         },
     )
@@ -105,11 +182,33 @@ fn corner_dither() -> impl IntoElement {
     .h(px(HEIGHT))
 }
 
-/// The reasoning slider's paint: `steps` slots, the fill and knob on `at`,
-/// a tick on every slot past it.
-fn effort_track(steps: usize, at: Option<usize>) -> gpui::Canvas<()> {
-    const INSET: f32 = 3.;
-    const KNOB: f32 = 14.;
+const TRACK_INSET: f32 = 3.;
+const KNOB: f32 = 14.;
+
+/// Where the knob's centre sits for step `ix` of `steps` on a track `w` wide:
+/// its right edge at the end of the step's slot.
+fn knob_centre(ix: usize, steps: usize, w: f32) -> f32 {
+    let usable = w - TRACK_INSET * 2.;
+    TRACK_INSET + usable * (ix + 1) as f32 / steps as f32 - KNOB / 2.
+}
+
+/// The step whose knob position is nearest `x`, on a track `w` wide.
+fn nearest_step(x: f32, steps: usize, w: f32) -> usize {
+    (0..steps)
+        .min_by(|a, b| {
+            let (a, b) = (
+                (knob_centre(*a, steps, w) - x).abs(),
+                (knob_centre(*b, steps, w) - x).abs(),
+            );
+            a.total_cmp(&b)
+        })
+        .unwrap_or(0)
+}
+
+/// The reasoning slider's paint: `steps` slots, the fill and knob on `at`
+/// (or under the pointer at `drag`, relative to the track, while it is
+/// dragged), and a tick on every slot past it.
+fn effort_track(steps: usize, at: Option<usize>, drag: Option<f32>) -> gpui::Canvas<()> {
     gpui::canvas(
         |_, _, _| {},
         move |bounds, _, window, _| {
@@ -117,12 +216,18 @@ fn effort_track(steps: usize, at: Option<usize>) -> gpui::Canvas<()> {
                 return;
             }
             let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
-            let usable = w - INSET * 2.;
-            // The knob's right edge sits at the end of its slot.
-            let knob_left = |ix: usize| INSET + usable * (ix + 1) as f32 / steps as f32 - KNOB;
             let accent = accent_color();
-            for ix in at.map_or(0, |at| at + 1)..steps {
-                let x = knob_left(ix) + KNOB / 2.;
+            let centre = match drag {
+                Some(x) => {
+                    Some(x.clamp(knob_centre(0, steps, w), knob_centre(steps - 1, steps, w)))
+                }
+                None => at.map(|at| knob_centre(at, steps, w)),
+            };
+            for ix in 0..steps {
+                let x = knob_centre(ix, steps, w);
+                if centre.is_some_and(|c| x <= c + 1.) {
+                    continue;
+                }
                 window.paint_quad(gpui::fill(
                     gpui::Bounds::new(
                         bounds.origin + gpui::point(px(x.round()), px(h / 2. - 5.)),
@@ -131,15 +236,14 @@ fn effort_track(steps: usize, at: Option<usize>) -> gpui::Canvas<()> {
                     content(0.22),
                 ));
             }
-            let Some(at) = at else {
+            let Some(centre) = centre else {
                 return;
             };
-            let knob = knob_left(at);
-            let fill_w = knob + KNOB / 2. - INSET;
-            let fill_h = h - INSET * 2.;
-            let origin = bounds.origin + gpui::point(px(INSET), px(INSET));
+            let fill_w = centre - TRACK_INSET;
+            let fill_h = h - TRACK_INSET * 2.;
+            let origin = bounds.origin + gpui::point(px(TRACK_INSET), px(TRACK_INSET));
             let mut under = accent;
-            under.a *= 0.32;
+            under.a *= 0.28;
             window.paint_quad(
                 gpui::fill(
                     gpui::Bounds::new(origin, gpui::size(px(fill_w), px(fill_h))),
@@ -147,23 +251,36 @@ fn effort_track(steps: usize, at: Option<usize>) -> gpui::Canvas<()> {
                 )
                 .corner_radii(px(6.)),
             );
-            // Solid from the left, thinning into dots toward the knob.
-            dither::Grid::new(origin, fill_w, fill_h).paint(window, |col, row| {
-                let (x, y) = dither::Grid::center(col, row);
-                if !inside_corners(x, y, fill_w, fill_h, 6., [true, false, false, true]) {
-                    return None;
-                }
-                let t = x / fill_w.max(1.);
-                let tone = if t < 0.3 {
-                    1.
-                } else {
-                    1. - ((t - 0.3) / 0.7).powf(0.8) * 0.9
-                };
-                dither::inked(col, row, tone).then_some(accent)
-            });
+            // Solid from the left, then crisp dots thinning toward the knob.
+            let solid = (fill_w * 0.3).max(0.);
+            window.paint_quad(
+                gpui::fill(
+                    gpui::Bounds::new(origin, gpui::size(px(solid), px(fill_h))),
+                    accent,
+                )
+                .corner_radii(gpui::Corners {
+                    top_left: px(6.),
+                    bottom_left: px(6.),
+                    top_right: px(0.),
+                    bottom_right: px(0.),
+                }),
+            );
+            let dots = gpui::point(px(solid), px(0.));
+            crisp_cells(
+                window,
+                origin + dots,
+                fill_w - solid,
+                fill_h,
+                |x, _, col, row| {
+                    let t = x / (fill_w - solid).max(1.);
+                    let tone = 1. - t.powf(0.85) * 0.92;
+                    dither::inked(col, row, tone).then_some(accent)
+                },
+            );
+            let knob = centre - KNOB / 2.;
             window.paint_quad(gpui::quad(
                 gpui::Bounds::new(
-                    bounds.origin + gpui::point(px(knob), px(INSET)),
+                    bounds.origin + gpui::point(px(knob), px(TRACK_INSET)),
                     gpui::size(px(KNOB), px(fill_h)),
                 ),
                 px(6.),
@@ -538,7 +655,7 @@ impl ModelList {
                 crate::popover::popover("model-card", Anchor::Slot(self.card.root.clone()))
                     .side(crate::popover::Side::Right)
                     .align(crate::popover::Align::Start)
-                    .gap(6.)
+                    .gap(12.)
                     .width(CARD_WIDTH)
                     .priority(41)
                     .track(self.card.region.clone())
@@ -865,6 +982,8 @@ impl ModelList {
         let number = self.favorite_number(kind, id.as_deref(), cx);
         let starred = self.favorite_key(kind, id.as_deref(), cx).is_some();
         let mut blocks: Vec<AnyElement> = Vec::new();
+        // The highest effort (Max, Ultrathink…) sets the corner moving.
+        let mut top_effort = false;
         if let Some(model) = &model {
             let effort = state
                 .effort
@@ -872,6 +991,8 @@ impl ModelList {
                 .or_else(|| model.default_effort.clone())
                 .or_else(|| model.efforts.first().cloned());
             if !model.efforts.is_empty() {
+                let shown = self.effort_shown(&model.efforts, effort.as_deref());
+                top_effort = model.efforts.len() > 1 && shown == Some(model.efforts.len() - 1);
                 blocks.push(self.reasoning(
                     kind,
                     &id,
@@ -1027,7 +1148,7 @@ impl ModelList {
             .flex()
             .flex_col()
             // Capy's card: the dithered glow in the corner, behind the name.
-            .child(corner_dither())
+            .child(corner_dither(top_effort))
             .child(
                 div()
                     .relative()
@@ -1124,8 +1245,49 @@ impl ModelList {
             .into_any_element()
     }
 
+    /// The effort the slider shows: under a dragged knob, else `selected`.
+    fn effort_shown(&self, efforts: &[String], selected: Option<&str>) -> Option<usize> {
+        if let (Some(drag), Some(track)) = (&self.card.drag, self.card.track.get())
+            && drag.efforts == efforts
+        {
+            let x = drag.x - f32::from(track.left());
+            return Some(nearest_step(x, efforts.len(), f32::from(track.size.width)));
+        }
+        selected.and_then(|s| efforts.iter().position(|e| e == s))
+    }
+
+    /// The knob follows the pointer.
+    fn move_effort_drag(&mut self, x: f32, cx: &mut Context<Self>) {
+        if let Some(drag) = self.card.drag.as_mut()
+            && drag.x != x
+        {
+            drag.x = x;
+            cx.notify();
+        }
+    }
+
+    /// Letting go: the knob settles on the nearest effort, which applies.
+    fn end_effort_drag(&mut self, x: f32, cx: &mut Context<Self>) {
+        let Some(drag) = self.card.drag.take() else {
+            return;
+        };
+        let Some(track) = self.card.track.get() else {
+            return cx.notify();
+        };
+        let ix = nearest_step(
+            x - f32::from(track.left()),
+            drag.efforts.len(),
+            f32::from(track.size.width),
+        );
+        match drag.efforts.get(ix) {
+            Some(effort) => self.option(drag.kind, drag.model, format!("effort:{effort}"), cx),
+            None => cx.notify(),
+        }
+    }
+
     /// Reasoning as Capy's slider: one slot per effort, a dithered fill up
     /// to the knob on the chosen one, and a tick where each other one sits.
+    /// Drag the knob, or press anywhere on the track.
     fn reasoning(
         &self,
         kind: Kind,
@@ -1136,12 +1298,49 @@ impl ModelList {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let at = selected.and_then(|s| efforts.iter().position(|e| e == s));
+        let shown = self.effort_shown(efforts, selected);
         let label = if kind == Kind::Codex {
             "Reasoning"
         } else {
             "Effort"
         };
         let steps = efforts.len();
+        let track = self.card.track.clone();
+        let dragging = self
+            .card
+            .drag
+            .as_ref()
+            .filter(|drag| drag.efforts == efforts)
+            .map(|drag| drag.x);
+        let relative = dragging.and_then(|x| Some(x - f32::from(track.get()?.left())));
+        let painter = effort_track(steps, at, relative);
+        let this = cx.entity().downgrade();
+        // While dragging, the pointer is followed past the track's edges.
+        let follow = gpui::canvas(
+            |_, _, _| {},
+            move |_, _, window, _| {
+                if dragging.is_none() {
+                    return;
+                }
+                let moved = this.clone();
+                window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, cx| {
+                    if phase == gpui::DispatchPhase::Bubble {
+                        let x = f32::from(event.position.x);
+                        let _ = moved.update(cx, |this, cx| this.move_effort_drag(x, cx));
+                    }
+                });
+                let released = this.clone();
+                window.on_mouse_event(move |event: &gpui::MouseUpEvent, phase, _, cx| {
+                    if phase == gpui::DispatchPhase::Bubble {
+                        let x = f32::from(event.position.x);
+                        let _ = released.update(cx, |this, cx| this.end_effort_drag(x, cx));
+                    }
+                });
+            },
+        )
+        .absolute()
+        .size_0();
+        let (drag_kind, drag_model, drag_efforts) = (kind, id.clone(), efforts.to_vec());
         div()
             .flex()
             .flex_col()
@@ -1154,8 +1353,9 @@ impl ModelList {
                     .child(div().text_color(content(0.5)).child(label))
                     .child(
                         div().text_color(content(1.)).child(
-                            selected
-                                .map(crate::conversation::effort_name)
+                            shown
+                                .and_then(|ix| efforts.get(ix))
+                                .map(|effort| crate::conversation::effort_name(effort))
                                 .unwrap_or_default(),
                         ),
                     ),
@@ -1163,36 +1363,50 @@ impl ModelList {
             .child(
                 div()
                     .id("model-reasoning")
-                    .role(Role::RadioGroup)
+                    .debug_selector(|| "model-reasoning".into())
+                    .role(Role::Slider)
                     .aria_label(label)
                     .relative()
                     .h(px(28.))
                     .rounded(px(8.))
                     .bg(content(0.06))
-                    .child(effort_track(steps, at).absolute().inset_0())
+                    .child(track.probe())
+                    .child(painter.absolute().inset_0())
+                    .child(follow)
                     .child(div().absolute().inset_0().flex().children(
                         efforts.iter().enumerate().map(|(ix, effort)| {
-                            let chosen = at == Some(ix);
-                            let action = format!("effort:{effort}");
-                            let model = id.clone();
                             div()
                                 .id(("model-effort", ix))
                                 .debug_selector(move || format!("model-effort-{ix}"))
                                 .role(Role::RadioButton)
                                 .aria_label(crate::conversation::effort_name(effort))
-                                .aria_selected(chosen)
-                                .tooltip(chrome_tip(crate::conversation::effort_name(effort), None))
+                                .aria_selected(at == Some(ix))
                                 .flex_1()
                                 .h_full()
-                                .when(enabled, |d| {
-                                    d.cursor_pointer().on_click(cx.listener(
-                                        move |this, _, _, cx| {
-                                            this.option(kind, model.clone(), action.clone(), cx)
-                                        },
-                                    ))
-                                })
                         }),
-                    )),
+                    ))
+                    .when(enabled, |d| {
+                        d.cursor_pointer()
+                            .on_mouse_down(
+                                gpui::MouseButton::Left,
+                                cx.listener(move |this, event: &gpui::MouseDownEvent, _, cx| {
+                                    this.card.drag = Some(EffortDrag {
+                                        x: f32::from(event.position.x),
+                                        kind: drag_kind,
+                                        model: drag_model.clone(),
+                                        efforts: drag_efforts.clone(),
+                                    });
+                                    cx.stop_propagation();
+                                    cx.notify();
+                                }),
+                            )
+                            .on_mouse_up(
+                                gpui::MouseButton::Left,
+                                cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                                    this.end_effort_drag(f32::from(event.position.x), cx)
+                                }),
+                            )
+                    }),
             )
             .into_any_element()
     }
@@ -1590,6 +1804,49 @@ mod tests {
                 Some("low")
             );
         });
+    }
+
+    #[gpui::test]
+    fn the_effort_knob_drags_and_settles_on_the_nearest_effort(cx: &mut TestAppContext) {
+        let (window, events, _subs) = picker(cx);
+        window
+            .update(cx, |list, _, cx| {
+                list.highlighted = 0;
+                list.card.visible = true;
+                cx.notify();
+            })
+            .unwrap();
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        let low = visual.debug_bounds("model-effort-0").unwrap().center();
+        let high = visual.debug_bounds("model-effort-2").unwrap().center();
+        visual.simulate_mouse_down(low, gpui::MouseButton::Left, Default::default());
+        visual.refresh().unwrap();
+        // Halfway, the label already names the effort under the knob.
+        visual.simulate_mouse_move(high, gpui::MouseButton::Left, Default::default());
+        visual.refresh().unwrap();
+        assert!(events.borrow().is_empty(), "nothing applies mid-drag");
+        visual.simulate_mouse_up(high, gpui::MouseButton::Left, Default::default());
+        visual.refresh().unwrap();
+        assert_eq!(
+            *events.borrow(),
+            [Event::Option(
+                "claude",
+                Some("opus".into()),
+                "effort:high".into()
+            )]
+        );
+        window
+            .update(&mut visual, |list, _, _| assert!(list.card.drag.is_none()))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_knob_settles_on_the_nearest_step() {
+        let w = 240.;
+        assert_eq!(nearest_step(0., 4, w), 0);
+        assert_eq!(nearest_step(w, 4, w), 3);
+        assert_eq!(nearest_step(knob_centre(2, 4, w) + 3., 4, w), 2);
     }
 
     #[gpui::test]

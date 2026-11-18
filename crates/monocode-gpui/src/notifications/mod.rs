@@ -6,6 +6,7 @@ pub(crate) mod errors;
 pub(crate) mod file_error;
 pub(crate) mod github_activity;
 pub(crate) mod harness_updates;
+pub(crate) mod highlights;
 pub(crate) mod layout_notice;
 pub(crate) mod linked_activity;
 pub(crate) mod platform;

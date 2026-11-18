@@ -214,6 +214,7 @@ pub(crate) struct WhatsNew {
     version: String,
     date: Option<String>,
     rows: Vec<MarkdownRow>,
+    highlights: &'static [super::highlights::Highlight],
 }
 impl EventEmitter<WhatsNewEvent> for WhatsNew {}
 impl WhatsNew {
@@ -240,11 +241,176 @@ impl WhatsNew {
             })
             .unwrap_or_default();
         Self {
+            highlights: super::highlights::of(&version),
             version,
             date,
             rows,
         }
     }
+}
+
+/// A highlight's picture: its screenshot fading into the card over a
+/// blurred, dimmed copy of itself, or, without one, its icon on a dithered
+/// accent banner.
+fn banner(highlight: &super::highlights::Highlight, ix: usize) -> gpui::AnyElement {
+    let fade = {
+        let mut clear = crate::theme::pane_fill();
+        clear.a = 0.;
+        div()
+            .absolute()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .h(px(48.))
+            .bg(gpui::linear_gradient(
+                180.,
+                gpui::linear_color_stop(clear, 0.),
+                gpui::linear_color_stop(crate::theme::pane_fill(), 1.),
+            ))
+    };
+    match highlight.image {
+        Some(image) => div()
+            .relative()
+            .h(px(188.))
+            .overflow_hidden()
+            .child(
+                // The copy behind, larger and faint, reads as a blur.
+                img(image)
+                    .absolute()
+                    .top(px(-24.))
+                    .left(px(-24.))
+                    .right(px(-24.))
+                    .bottom(px(-24.))
+                    .object_fit(gpui::ObjectFit::Cover)
+                    .opacity(0.28),
+            )
+            .child(
+                img(image)
+                    .absolute()
+                    .top(px(18.))
+                    .left(px(28.))
+                    .right(px(28.))
+                    .bottom(px(-40.))
+                    .rounded(px(8.))
+                    .object_fit(gpui::ObjectFit::Cover),
+            )
+            .child(fade)
+            .into_any_element(),
+        None => div()
+            .relative()
+            .h(px(112.))
+            .overflow_hidden()
+            .bg(accent_color().opacity(0.07))
+            .child(highlight_dither(ix).absolute().inset_0())
+            .child(
+                div()
+                    .absolute()
+                    .inset_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(
+                        div()
+                            .size(px(52.))
+                            .rounded(px(14.))
+                            .bg(crate::theme::pane_fill())
+                            .border_1()
+                            .border_color(accent_color().opacity(0.35))
+                            .shadow(vec![gpui::BoxShadow {
+                                color: accent_color().opacity(0.35),
+                                offset: gpui::point(px(0.), px(0.)),
+                                blur_radius: px(24.),
+                                spread_radius: px(0.),
+                                inset: false,
+                            }])
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(icon(highlight.icon, 24.).text_color(accent_color())),
+                    ),
+            )
+            .child(fade)
+            .into_any_element(),
+    }
+}
+
+/// The banner's halftone: accent dots densest toward one side, the side
+/// alternating from card to card.
+fn highlight_dither(ix: usize) -> gpui::Canvas<()> {
+    use crate::visuals::dither;
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            let mut ink = accent_color();
+            ink.a *= if dither::light() { 0.55 } else { 0.5 };
+            let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            let right = ix.is_multiple_of(2);
+            dither::Grid::new(bounds.origin, w, h).paint(window, |col, row| {
+                let (x, y) = dither::Grid::center(col, row);
+                let across = if right { x / w } else { 1. - x / w };
+                let tone = (across * 0.9 - y / h * 0.35).clamp(0., 1.).powf(1.6);
+                dither::inked(col, row, tone).then_some(ink)
+            });
+        },
+    )
+}
+
+fn highlight_card(highlight: &super::highlights::Highlight, ix: usize) -> gpui::AnyElement {
+    use super::highlights::Tag;
+    let tag_color = match highlight.tag {
+        Tag::New => accent_color(),
+        Tag::Improved => crate::theme::info(),
+        Tag::Fixed => crate::theme::success(),
+    };
+    div()
+        .id(("whats-new-highlight", ix))
+        .debug_selector(move || format!("whats-new-highlight-{ix}"))
+        .role(Role::Article)
+        .aria_label(highlight.title)
+        .rounded(px(12.))
+        .border_1()
+        .border_color(content(0.08))
+        .overflow_hidden()
+        .bg(content(0.02))
+        .child(banner(highlight, ix))
+        .child(
+            div()
+                .px(px(16.))
+                .pt(px(4.))
+                .pb(px(16.))
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .child(
+                    div().flex().child(
+                        div()
+                            .h(px(20.))
+                            .px(px(7.))
+                            .rounded(px(6.))
+                            .flex()
+                            .items_center()
+                            .text_size(px(11.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(tag_color)
+                            .bg(tag_color.opacity(0.12))
+                            .child(highlight.tag.label()),
+                    ),
+                )
+                .child(
+                    div()
+                        .text_size(px(15.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(highlight.title),
+                )
+                .child(
+                    div()
+                        .text_size(px(13.))
+                        .line_height(px(19.))
+                        .text_color(content(0.7))
+                        .child(highlight.body),
+                ),
+        )
+        .into_any_element()
 }
 
 impl Render for WhatsNew {
@@ -264,7 +430,25 @@ impl Render for WhatsNew {
             .overflow_y_scroll()
             .px(px(20.))
             .py(px(16.));
-        if self.rows.is_empty() {
+        for (ix, highlight) in self.highlights.iter().enumerate() {
+            body = body.child(
+                div()
+                    .when(ix > 0, |d| d.pt(px(14.)))
+                    .child(highlight_card(highlight, ix)),
+            );
+        }
+        if !self.highlights.is_empty() && !self.rows.is_empty() {
+            body = body.child(
+                div()
+                    .pt(px(24.))
+                    .pb(px(10.))
+                    .text_size(px(12.))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(content(0.5))
+                    .child("All changes"),
+            );
+        }
+        if self.rows.is_empty() && self.highlights.is_empty() {
             body = body.child(
                 div()
                     .text_size(px(13.))
@@ -288,9 +472,9 @@ impl Render for WhatsNew {
             .role(Role::Dialog)
             .aria_label("What's new")
             .relative()
-            .w(px(512.))
+            .w(px(560.))
             .max_w_full()
-            .h((window.viewport_size().height * 0.72).min(px(640.)))
+            .h((window.viewport_size().height * 0.8).min(px(720.)))
             .flex()
             .flex_col()
             .overflow_hidden()
