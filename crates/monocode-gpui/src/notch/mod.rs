@@ -44,8 +44,17 @@ pub(crate) const OPEN_DELAY: Duration = Duration::from_millis(90);
 const CLOSE_DELAY: Duration = Duration::from_millis(260);
 /// The outward flare where the notch meets the top edge.
 pub(crate) const SHOULDER: f32 = 4.;
-/// The notch's corners: the app's square language, softened a little.
+/// The notch's corners at Square, the app's square language softened a
+/// little; each corner choice in its Look page rounds them more.
 const RADIUS: f32 = 4.;
+/// What each step of the corner scale adds to the radius, from Square (0%)
+/// to Soft (160%): 4, about 11, 16 and about 23px.
+const RADIUS_RANGE: f32 = 12.;
+
+/// The radius of the notch's corners at a corner scale in percent.
+pub(crate) fn corner_radius(percent: u32) -> f32 {
+    RADIUS + RADIUS_RANGE * percent as f32 / 100.
+}
 /// The widest a wing can grow: the lead's words cap at 230 points.
 const WIDEST_WING: u32 = 240;
 /// How much the closed notch swells under the pointer.
@@ -1135,21 +1144,22 @@ fn now_ms() -> u64 {
 
 /// The notch's outline: a short flare out to the top edge and nearly square
 /// corners below, or a box with every corner softened for the island.
-fn outline(bounds: Bounds<Pixels>, island: bool) -> Vec<gpui::Point<Pixels>> {
+fn outline(bounds: Bounds<Pixels>, island: bool, radius: f32) -> Vec<gpui::Point<Pixels>> {
     let (x0, y0) = (f32::from(bounds.origin.x), f32::from(bounds.origin.y));
     let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
     let mut points = Vec::new();
+    // Larger corners take more steps to stay smooth.
+    let steps = ((radius / 2.).round() as usize).clamp(4, 16);
     let mut arc = |cx: f32, cy: f32, r: f32, from: f32, to: f32| {
-        const STEPS: usize = 4;
-        for step in 0..=STEPS {
-            let angle = (from + (to - from) * step as f32 / STEPS as f32).to_radians();
+        for step in 0..=steps {
+            let angle = (from + (to - from) * step as f32 / steps as f32).to_radians();
             points.push(point(
                 px(x0 + cx + r * angle.cos()),
                 px(y0 + cy + r * angle.sin()),
             ));
         }
     };
-    let r = RADIUS.min(h / 2.).min(w / 2.);
+    let r = radius.min(h / 2.).min(w / 2.);
     if island {
         arc(r, r, r, 180., 270.);
         arc(w - r, r, r, 270., 360.);
@@ -1187,7 +1197,8 @@ fn body(
     canvas(
         |_, _, _| (),
         move |bounds, _, window, _| {
-            let points = outline(bounds, island);
+            let radius = corner_radius(window.corner_scale());
+            let points = outline(bounds, island, radius);
             // A system change lights the edge: soft rings in the accent,
             // under the black, so only their outer half shows.
             if glow > 0. && cfg!(target_os = "windows") {
@@ -1209,7 +1220,7 @@ fn body(
                 };
                 window.paint_drop_shadows(
                     lit,
-                    gpui::Corners::all(px(RADIUS)),
+                    gpui::Corners::all(px(radius)),
                     &[light(0.35, 22., 0.), light(0.6, 9., 1.)],
                 );
             } else if glow > 0. {
@@ -1270,7 +1281,7 @@ fn body(
                     bounds.size.height - px(if island { 1. } else { 0.5 }),
                 ),
             };
-            let inner = outline(inset, island);
+            let inner = outline(inset, island, corner_radius(window.corner_scale()));
             let edge_points: Vec<_> = if island {
                 inner
                     .iter()

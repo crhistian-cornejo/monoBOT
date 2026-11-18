@@ -207,6 +207,10 @@ impl Conversation {
             .children(self.version_section(cx))
             .child(self.context_section(cx))
             .into_any_element();
+        // Painted after the chat it sits beside: when the pane is too narrow
+        // for both (the right panel open, say) it covers the chat, and must
+        // not sit under it. Menus and popovers stay above (higher priority).
+        let frame = gpui::deferred(frame).with_priority(1).into_any_element();
         (probe, room.inset * openness, Some(frame))
     }
 

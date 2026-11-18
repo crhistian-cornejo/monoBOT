@@ -31,6 +31,8 @@ monoBOT, como pide `CLAUDE.md`.
 | «Hand to your crew» en el menú de un hilo: el equivalente al «Promote to Captain» de Capy. Chief toma la última petición del hilo y la reparte entre tus monos. La pestaña del panel derecho se llama **Crew** cuando muestra un run de Chief, y **Swarm** cuando es un swarm | `shell/orchestration.rs` (`hand_to_crew`), `swarm.rs` (`is_crew`), `right_panel.rs` |
 | Los controles del compositor (+, modelo, acceso) ya no llevan marco: muestran un fondo al pasar el puntero, como en Capy | `conversation.rs` (`tool_pill`) |
 | Un hilo que trabaja muestra en su fila un cronómetro en vivo (`0:42`), como T3 Code, en lugar de «Working…». La barra lateral se redibuja una vez por segundo solo mientras algún hilo trabaja | `shell.rs` (`track_working`, `working_clock`) |
+| Las esquinas del notch cambian también su forma al abrirse: el radio del contorno va de 4 px (Square) a unos 23 px (Soft), y sus botones segmentados se redondean igual | `notch/mod.rs` (`corner_radius`), `notch/settings.rs` |
+| El marco Environment se pinta siempre por encima del chat. Antes, con el panel derecho abierto, quedaba debajo del transcript | `conversation/environment.rs` |
 | Menús contextuales nativos de macOS, SF Pro, esquinas redondeadas, acento del sistema y colores de estado | `native_menu.rs`, `theme.rs`; ver `ui-ux-audit.md` |
 
 ## Cómo se corresponde Capy con monoBOT

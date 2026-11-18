@@ -2627,3 +2627,13 @@ fn pause_media_while_dictating_pauses_what_plays_and_plays_it_after(cx: &mut Tes
     assert!(toggles(&sent).is_empty(), "a toggle would pause it");
     assert!(playing(visual));
 }
+
+#[test]
+fn the_notch_opens_rounder_with_each_corner_choice() {
+    let radius = |choice: &str| super::corner_radius(crate::theme::corner_scale(choice));
+    assert_eq!(radius("square"), 4.);
+    assert_eq!(radius("rounded"), 16.);
+    assert!(radius("square") < radius("subtle"));
+    assert!(radius("subtle") < radius("rounded"));
+    assert!(radius("rounded") < radius("soft"));
+}

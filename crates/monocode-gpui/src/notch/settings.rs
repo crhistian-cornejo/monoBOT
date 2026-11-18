@@ -93,6 +93,8 @@ fn segment(
         .h(px(22.))
         .min_w(px(22.))
         .px(px(8.))
+        // Scaled by the notch's corner choice like the rest of it.
+        .rounded(px(6.))
         .flex()
         .items_center()
         .justify_center()
@@ -111,7 +113,7 @@ fn segment(
 }
 
 fn segments(children: impl IntoIterator<Item = gpui::Stateful<gpui::Div>>) -> gpui::Div {
-    div().flex().gap(px(1.)).children(children)
+    div().flex().gap(px(2.)).children(children)
 }
 
 /// A click that changes the look.
@@ -339,7 +341,7 @@ impl Notch {
             ))
             .child(row(
                 "Corners",
-                "How round its cards and buttons are",
+                "How round it opens",
                 segments(crate::theme::CORNERS.iter().map(|&(id, label, _)| {
                     segment(
                         gpui::SharedString::from(format!("notch-corners-{id}")),
