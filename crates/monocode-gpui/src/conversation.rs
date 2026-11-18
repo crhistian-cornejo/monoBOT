@@ -4071,8 +4071,7 @@ impl Conversation {
             .child({
                 let git = self.git_action_pill(cx);
                 let changes = self.changes_pill(cx);
-                let beside = git.is_some() || changes.is_some();
-                let pill = beside.then(|| {
+                let pill = (git.is_some() || changes.is_some()).then(|| {
                     div()
                         .flex()
                         .items_center()
@@ -4080,8 +4079,6 @@ impl Conversation {
                         .children(git)
                         .children(changes)
                 });
-                self.transcript
-                    .update(cx, |t, cx| t.set_jump_beside_pill(beside, cx));
                 div()
                     .relative()
                     .flex_1()
@@ -4092,8 +4089,8 @@ impl Conversation {
                             .cached(StyleRefinement::default().size_full()),
                     )
                     .children(self.find_bar(cx))
-                    // Level with the transcript's jump button, which moves to
-                    // the column's other end.
+                    // Level with the transcript's centered jump button, and
+                    // flush with the composer's left edge below.
                     .children(pill.map(|pill| {
                         div()
                             .absolute()
@@ -4106,7 +4103,7 @@ impl Conversation {
                                 div()
                                     .w_full()
                                     .max_w(px(COMPOSER_COLUMN))
-                                    .px(px(16.))
+                                    .px(px(10.))
                                     .flex()
                                     .child(pill),
                             )

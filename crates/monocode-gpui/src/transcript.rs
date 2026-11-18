@@ -868,9 +868,6 @@ pub(crate) struct TranscriptView {
     show_jump: bool,
     commit_files: git_turns::CommitFiles,
     copied_commit: Option<(String, Instant)>,
-    /// The conversation's git action pill holds the column's left end, so the
-    /// jump button moves from the center to the right end.
-    jump_beside_pill: bool,
     jump_anchor: crate::popover::AnchorSlot,
     scroll_bound: bool,
     fold_targets: HashMap<usize, Option<usize>>,
@@ -2812,7 +2809,6 @@ impl TranscriptView {
             show_jump: false,
             commit_files: HashMap::new(),
             copied_commit: None,
-            jump_beside_pill: false,
             jump_anchor: Default::default(),
             scroll_bound: false,
             fold_targets: HashMap::new(),
@@ -6297,12 +6293,6 @@ impl TranscriptView {
             cx.notify();
         }
     }
-    pub(crate) fn set_jump_beside_pill(&mut self, beside: bool, cx: &mut Context<Self>) {
-        if self.jump_beside_pill != beside {
-            self.jump_beside_pill = beside;
-            cx.notify();
-        }
-    }
     pub(crate) fn jump_bounds(&self) -> Option<gpui::Bounds<gpui::Pixels>> {
         self.show_jump.then(|| self.jump_anchor.get()).flatten()
     }
@@ -6520,9 +6510,6 @@ impl Render for TranscriptView {
             .child(self.link_overlays(cx))
             .children(self.work_item_card(window, cx))
             .when(self.show_jump, |d| {
-                // Centered, or the column's right end when the commit pill
-                // takes the left.
-                let beside_pill = self.jump_beside_pill;
                 d.child(
                     div()
                         .absolute()
@@ -6537,13 +6524,7 @@ impl Render for TranscriptView {
                                 .max_w(px(crate::theme::COLUMN))
                                 .px(px(COLUMN_PAD))
                                 .flex()
-                                .map(|d| {
-                                    if beside_pill {
-                                        d.justify_end()
-                                    } else {
-                                        d.justify_center()
-                                    }
-                                })
+                                .justify_center()
                                 .child(
                                     div()
                                         .id("jump-to-bottom")
@@ -8155,6 +8136,18 @@ mod scroll_tests {
                 view.list.scroll_by(px(-150.));
                 view.update_jump(cx);
                 assert!(view.show_jump);
+                cx.notify();
+            })
+            .unwrap();
+        cx.refresh().unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |view, _, cx| {
+                let jump = view.jump_bounds().expect("jump button painted");
+                assert!(
+                    (jump.center().x - view.viewport.center().x).abs() < px(1.),
+                    "the jump button sits centered over the column"
+                );
                 let offset = view.list.logical_scroll_top();
                 view.patch(
                     3,
