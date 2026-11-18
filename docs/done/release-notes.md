@@ -1,28 +1,41 @@
-# monoBOT 0.0.7
+# monoBOT 0.0.8
 
 ## What's new
 
-- **Gemini 4 Hydrogen.** Google's newly released high-efficiency frontier reasoning model
-  is now integrated with the Antigravity provider (`antigravity:gemini-4-hydrogen`).
-  It features 4 reasoning effort levels: **Low**, **Medium**, **High** (default), and
-  **Extra High (`xhigh`)**, with dynamic thinking depth scaling and up to a 1M token context
-  window for complex agentic coding workflows.
-- **Environment beside the chat.** Press Ctrl+I (Cmd+I on a Mac), click the
-  new button at the end of the composer's bar or the context ring: a floating
-  frame shows where the chat works (local folder or worktree), its branch,
-  which opens the branch picker, the turn's changes, which open the diff, and
-  how full the context window is, with a bar that turns amber, then red, and
-  a button to compact. It sits in the chat's margin when there is room, moves
-  the chat left when there isn't, and Esc closes it.
-- **Sessions sorted by what they are doing.** The code sidebar now lists
-  sessions whose agent is working, or waiting on you, under **Working**, then
-  the ones that finished while you were away under **Done**, then the rest.
-- **Swarm boards open when you ask.** A swarm's card says **Swarm** and
-  explains that the coordinator is planning; **Open board** opens the Swarm
-  tab even before any agent starts and after you closed the panel, and a new
-  swarm opens it by itself. Coordinators (and Chief) now split the work and
-  delegate after a short look at the code, instead of reading the whole
-  project first.
+- **Captains.** Your personal agents are now Captains, each with its own chat,
+  listed above your threads in one sidebar for code and personal agents. A
+  New Captain dialog picks a role and a name, and a Captain's chat opens on
+  its portrait with **View Captain**.
+- **Monos as subagents, from any provider.** Claude, Codex, OpenCode, Cursor
+  and the rest can hand a large task to Chief and your monos, or start a
+  swarm. **Hand to your crew** in a thread's menu does it for the thread's
+  latest request, and the right panel's **Crew** tab follows the run, keeping
+  its names and faces after it ends.
+- **A compact model picker.** Favorites first, then every model grouped by
+  who makes it, or by provider. Hover a model to set its effort on a dithered
+  slider, turn on fast mode or thinking, choose the account it runs on, or
+  make it a favorite (⌥1–⌥9).
+- **Live dictation.** Words show as you say them. The speech model loads when
+  monoBOT opens and stays ready, so stopping no longer sits on "Finishing…";
+  if the model is still loading the bar says so, and Esc gets you out.
+- **Corners your way.** Choose square to soft corners in Settings ›
+  Appearance, and separately for the notch, whose outline opens to match.
+  Context menus are native on macOS, the interface uses the system font, and
+  the accent follows the system's.
+- **Threads that show their time.** A working thread shows a live timer in
+  the sidebar. Workstreams have their own page, from the bar at the foot of
+  the sidebar.
+- **What's new** shows each release's highlights as cards.
+
+## Fixed
+
+- Codex chats can reach the app from their sandbox when they hand work to
+  Chief or a swarm, and OpenCode 2 chats get their own server with the app's
+  access, instead of the shared background service.
+- A new request is no longer mistaken for an older Chief run of the same
+  chat; it is told to wait for it or stop it. Deleting Chief's chat ends its
+  run, and Chief's own first turn is no longer offered Chief.
+- The Environment frame stays above the chat when the right panel is open.
 
 ## Updates
 
