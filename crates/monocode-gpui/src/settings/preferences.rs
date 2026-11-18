@@ -135,6 +135,9 @@ pub(crate) struct Preferences {
     pub favorite_efforts: HashMap<String, String>,
     pub recent_models: Vec<ModelChoice>,
     pub model_picker_tab: Option<String>,
+    /// The composer's model picker groups models by the agent that runs
+    /// them instead of by who makes them.
+    pub model_picker_by_provider: bool,
     /// The last access mode picked in a composer; new chats start with it.
     pub default_access: Option<String>,
     /// Last explicit effort choice for each provider, shared across projects.
@@ -251,6 +254,7 @@ impl Default for Preferences {
             favorite_efforts: HashMap::new(),
             recent_models: Vec::new(),
             model_picker_tab: None,
+            model_picker_by_provider: false,
             default_access: None,
             provider_efforts: HashMap::new(),
             background_model: None,

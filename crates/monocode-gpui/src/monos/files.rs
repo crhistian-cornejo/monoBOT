@@ -250,7 +250,15 @@ impl Monos {
         self.ensure_chat(id, cx);
     }
     pub(super) fn delete_mono(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        let (title, detail) = delete_prompt(self.roster.get(id).is_some_and(Mono::is_group));
+        let (title, detail) = delete_prompt(self.roster.get(id).map_or(Deleted::Mono, |mono| {
+            if mono.is_group() {
+                Deleted::Group
+            } else if super::agents::is_captain(mono) {
+                Deleted::Captain
+            } else {
+                Deleted::Mono
+            }
+        }));
         let prompt = window.prompt(
             gpui::PromptLevel::Warning,
             title,
@@ -283,19 +291,24 @@ impl Monos {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Deleted {
+    Group,
+    Captain,
+    Mono,
+}
+
 /// What deleting asks first. A group only leaves the roster: its members
-/// are Monos of their own and stay, with their chats.
-fn delete_prompt(group: bool) -> (&'static str, &'static str) {
-    if group {
-        (
+/// are agents of their own and stay, with their chats.
+fn delete_prompt(deleted: Deleted) -> (&'static str, &'static str) {
+    let stays = "Its scheduled habits stop. Sessions and notes it created stay saved.";
+    match deleted {
+        Deleted::Group => (
             "Delete group?",
             "Its members stay, each with its own chat, and its scheduled habits stop. The group chat, its members' conversations in it and its notes stay saved.",
-        )
-    } else {
-        (
-            "Delete mono?",
-            "Its scheduled habits stop. Sessions and notes it created stay saved.",
-        )
+        ),
+        Deleted::Captain => ("Delete Captain?", stays),
+        Deleted::Mono => ("Delete mono?", stays),
     }
 }
 
@@ -303,9 +316,14 @@ fn delete_prompt(group: bool) -> (&'static str, &'static str) {
 mod tests {
     #[test]
     fn deleting_a_group_says_group_and_that_its_members_stay() {
-        let (title, detail) = super::delete_prompt(true);
+        let (title, detail) = super::delete_prompt(super::Deleted::Group);
         assert_eq!(title, "Delete group?");
         assert!(detail.contains("members stay"));
-        assert_eq!(super::delete_prompt(false).0, "Delete mono?");
+        // A personal agent is a Captain; a code mono stays a mono.
+        assert_eq!(
+            super::delete_prompt(super::Deleted::Captain).0,
+            "Delete Captain?"
+        );
+        assert_eq!(super::delete_prompt(super::Deleted::Mono).0, "Delete mono?");
     }
 }

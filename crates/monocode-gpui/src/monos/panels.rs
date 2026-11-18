@@ -489,6 +489,8 @@ impl LookEditor {
     ) -> Self {
         let label = if mono.is_group() {
             "Group name"
+        } else if super::agents::is_captain(&mono) {
+            "Captain name"
         } else {
             "Mono name"
         };
@@ -498,7 +500,7 @@ impl LookEditor {
             f
         });
         let color = cx.new(|cx| {
-            let mut f = Input::field("Custom Mono color", "#rrggbb", content(0.4), cx);
+            let mut f = Input::field("Custom color", "#rrggbb", content(0.4), cx);
             f.set_text(format!("#{:06x}", mono.color), cx);
             f
         });
@@ -2709,6 +2711,8 @@ impl Monos {
                 "delete",
                 if mono.is_group() {
                     "Delete group…"
+                } else if super::agents::is_captain(&mono) {
+                    "Delete Captain…"
                 } else {
                     "Delete mono…"
                 },
@@ -2717,10 +2721,20 @@ impl Monos {
             .danger()
             .into(),
         ]);
+        let captain = super::agents::is_captain(&mono);
         let menu = cx.new(|cx| {
-            Menu::new("Mono options", items, window, cx)
-                .width(280.)
-                .style(MenuStyle::Group)
+            Menu::new(
+                if captain {
+                    "Captain options"
+                } else {
+                    "Mono options"
+                },
+                items,
+                window,
+                cx,
+            )
+            .width(280.)
+            .style(MenuStyle::Group)
         });
         let target = id.to_string();
         let picked = cx.subscribe_in(&menu, window, move |this, _, event: &MenuEvent, w, cx| {

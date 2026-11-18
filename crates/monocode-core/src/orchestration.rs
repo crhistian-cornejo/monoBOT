@@ -19,10 +19,17 @@ pub struct Summary {
     pub tasks: Vec<SummaryTask>,
     /// The run is still dispatching or waiting on its workers.
     pub live: bool,
+    /// The chat that handed a Chief run its work; its board stays the
+    /// crew's after the run ends.
+    pub requester: Option<i64>,
 }
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SummaryTask {
+    /// The run's task ID, as the board names its member.
+    pub id: String,
+    /// The mono that did it, in a Chief run.
+    pub mono: Option<String>,
     pub session: Option<i64>,
     pub title: String,
     pub provider: String,

@@ -19,7 +19,7 @@ monoBOT, como pide `CLAUDE.md`.
 | --- | --- |
 | Una sola barra lateral en el layout Focused. Desaparece el cambio Code/Agents: arriba van los **Captains** (los agentes personales: el Principal, los bots y los grupos), y debajo los **Monos**, los Workstreams y los hilos. La cabecera lleva el proyecto, «Nuevo hilo» y buscar. Una barra al pie pone Ajustes a la izquierda e Inbox, Notes y Automations como iconos. El carrusel de proyectos se elimina: el proyecto se cambia en la cabecera | `shell.rs` (`sidebar`), `shell/sidebar_list.rs` (`sidebar_bottom_bar`), `monos/mod.rs` (`unified_rail`), `monos/agents.rs` (`Section::Captains`) |
 | Esquinas con cuatro valores (Square, Subtle, Rounded, Soft) en Apariencia, y otros cuatro propios del notch en Look. Una caja con estilo y borde en los cuatro lados que no pide radio recibe 6 px multiplicados por la escala, para que nada quede como un rectángulo pelado. Lo pintado a mano, como los trozos de un mensaje largo, conserva sus radios | `vendor/gpui-pre/src/window.rs` (`scaled_corners`, `Window::set_corner_scale`), `theme.rs` (`CORNERS`), `notch/settings.rs`, `monocode-core/src/notch.rs` (`Look::corners`) |
-| Selector de modelos como el de Capy. Tiene una columna de proveedores que salta a cada sección, los favoritos con su esfuerzo y su número (⌥1–⌥9), todos los proveedores en una lista y un panel con Reasoning por pasos, Fast, Thinking, Tier, los controles del proveedor, Runs on y Favorite | `pickers/sections.rs`, `conversation.rs` (`ComposerMenu::Model`, `apply_model_option`, `pick_favorite`) |
+| Selector de modelos como el de Capy: una lista compacta con los favoritos y su esfuerzo y número (⌥1–⌥9) y después los modelos agrupados por quién los hace (`catalog::model_maker`), o por agente con «By provider». Al pasar el puntero por un modelo se abre a su lado una tarjeta con Reasoning en un deslizador con tramado, Fast, Thinking, Tier, los controles del proveedor, Runs on y Favorite, y un tramado en la esquina. La tarjeta tarda 180 ms en irse, para cruzar el hueco | `pickers/sections.rs`, `conversation.rs` (`ComposerMenu::Model`, `apply_model_option`, `pick_favorite`) |
 | Cualquier proveedor puede pasar trabajo a Chief y a los monos. La oferta es un prompt más el CLI `control chief`, y antes solo se activaba en Claude | `conversation.rs` (`chief_offer`), `settings/pages/chat.rs` |
 | Hilos en dos líneas, como los de Capy: título y edad arriba; espacio de trabajo, modelo y proveedor debajo. Es la vista por defecto. Los workspaces guardados antes pasan a ella una sola vez (`two_line_cards`), y «Compact session cards» vuelve a la de una línea y se mantiene | `shell.rs` (`session_row_with`), `workspace.rs` |
 | El dictado dibuja su onda como una trama de puntos de 2 px en el acento, con el mismo dither de Bayer 4×4 que el fondo del chat. Lleva el tiempo y un botón ✓ que termina y conserva el texto | `monocode-core/src/dictation.rs` (`dither_cells`), `dictation.rs` (`dither_wave`) |
@@ -34,6 +34,7 @@ monoBOT, como pide `CLAUDE.md`.
 | Las esquinas del notch cambian también su forma al abrirse: el radio del contorno va de 4 px (Square) a unos 23 px (Soft), y sus botones segmentados se redondean igual | `notch/mod.rs` (`corner_radius`), `notch/settings.rs` |
 | El marco Environment se pinta siempre por encima del chat. Antes, con el panel derecho abierto, quedaba debajo del transcript | `conversation/environment.rs` |
 | Menús contextuales nativos de macOS, SF Pro, esquinas redondeadas, acento del sistema y colores de estado | `native_menu.rs`, `theme.rs`; ver `ui-ux-audit.md` |
+| Revisión del sistema de agentes (18 nov). Codex llega al puente de la app cuando se le ofrece Chief o swarm, o tiene la capacidad de la app; antes su sandbox lo bloqueaba (`Settings::reaches_app`). Una petición nueva ya no se da por empezada si el chat tiene un run de Chief anterior: se le dice que espere o lo pare. «Hand to your crew» abre el hilo si no estaba cargado y muestra los errores que llegan tarde. Borrar el chat de Chief termina su run. Chief ya no se ofrece a sí mismo en su primer turno | `monocode-core/src/agent.rs`, `shell/orchestration.rs`, `shell/session_groups.rs` |
 
 ## Cómo se corresponde Capy con monoBOT
 
@@ -86,3 +87,15 @@ Cada fase deja la app funcionando y con tests.
    shimmer, lecturas agrupadas y diffs largos que se abren en su sitio.
 5. **Tokens**: escala de tipo, superficies y bordes como arriba, y
    comprobación de contraste en claro.
+
+## Segunda ronda de la revisión del sistema de agentes (18 nov)
+
+Hecho:
+
+- OpenCode 2: un chat que llama a la app (Chief, swarm, operador) ya no usa el servicio compartido. Arranca su propio `opencode serve`, con sus credenciales, y lee la contraseña que imprime (`provider/opencode.rs`, `startup_line`).
+- El resumen guardado de un run lleva quién lo pidió y el mono de cada tarea. Así el tablero sigue llamándose Crew, con sus caras, cuando el run termina, y el chat que lo pidió lo sigue viendo.
+- El tope de monos nuevos por run se guarda con el run (`Run::new_monos`).
+- El `SOUL.md` de un bot nuevo se escribe al guardar el roster, fuera del hilo de la interfaz. Mientras no está en disco, un trabajador recibe las instrucciones de su rol.
+- Chief y los monos de código del crew salen en la sección Monos del rail.
+- «View Captain» recarga los archivos y da el foco a los ajustes.
+- Los agentes personales se llaman Captains en toda la interfaz: «New Captain», «Delete Captain…», «Captain name» y la ficha al pasar el puntero. Los monos de código siguen siendo monos.

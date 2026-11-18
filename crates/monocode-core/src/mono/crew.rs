@@ -141,9 +141,15 @@ pub fn create(
 /// memory, without the chat rules a bot's own chat has.
 pub fn identity(root: &Path, mono: &Mono) -> String {
     let loaded = files::load(root, &mono.id, None).ok();
+    // A bot made a moment ago may not have its soul on disk yet; its
+    // role's instructions are what will be written.
     let soul = loaded
         .as_ref()
         .and_then(|f| f.soul.clone())
+        .or_else(|| {
+            let role = super::bots::role(mono.bot_role.as_deref()?)?;
+            Some(role.instructions.to_owned())
+        })
         .unwrap_or_default();
     let memory = loaded.map(|f| f.memory).unwrap_or_default();
     let mut block = format!(

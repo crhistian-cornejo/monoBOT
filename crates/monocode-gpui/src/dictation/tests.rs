@@ -13,6 +13,8 @@ pub(crate) struct Fake {
     /// What stop returns.
     pub said: Mutex<String>,
     pub calls: Mutex<Vec<String>>,
+    /// The speech model is still loading.
+    pub loading: Mutex<bool>,
     hearing: Mutex<Option<Hearing>>,
 }
 
@@ -55,6 +57,10 @@ impl Engine for Fake {
     }
 
     fn prepare(&self) {}
+
+    fn ready(&self) -> bool {
+        !*self.loading.lock().unwrap()
+    }
 
     fn install(&self, progress: &mut dyn FnMut(u64, u64)) -> Result<(), String> {
         self.call("install");
@@ -345,4 +351,28 @@ fn the_shortcut_taps_to_toggle_and_holds_to_talk(cx: &mut TestAppContext) {
         input.read_with(cx, |input, _| input.content.to_string()),
         "ship it"
     );
+}
+
+#[gpui::test]
+fn escape_gets_out_of_a_finish_that_waits_on_the_model(cx: &mut TestAppContext) {
+    let fake = Fake::installed("late words");
+    *fake.loading.lock().unwrap() = true;
+    let (input, dictation) = dictation(&fake, "draft", cx);
+    dictation.update(cx, |dictation, cx| dictation.toggle(cx));
+    cx.run_until_parked();
+    let escape = KeyDownEvent {
+        keystroke: gpui::Keystroke::parse("escape").unwrap(),
+        is_held: false,
+        prefer_character_input: false,
+    };
+    dictation.update(cx, |dictation, cx| {
+        dictation.toggle(cx);
+        assert_eq!(dictation.phase(), Phase::Finishing);
+        // The bar says what it waits for, not a bare "Finishing…".
+        assert!(dictation.preparing);
+        assert!(dictation.escape(&escape, cx));
+        assert_eq!(dictation.phase(), Phase::Idle);
+    });
+    cx.run_until_parked();
+    assert_eq!(input.read_with(cx, |i, _| i.content.to_string()), "draft");
 }

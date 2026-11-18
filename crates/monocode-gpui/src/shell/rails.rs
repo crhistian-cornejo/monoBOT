@@ -1046,9 +1046,10 @@ mod tests {
                             session: Some(worker),
                             title: "Write the tests".into(),
                             provider: "codex".into(),
-                            model: None,
                             status: "completed".into(),
+                            ..Default::default()
                         }],
+                        ..Default::default()
                     },
                 );
                 shell.selected_sessions.clear();

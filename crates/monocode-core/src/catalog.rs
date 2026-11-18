@@ -942,6 +942,46 @@ fn query_provider(
     result
 }
 
+/// Who makes a model, read from its id and name, for a picker that groups
+/// models by maker across the agents that run them. `None` when unknown.
+pub fn model_maker(id: &str, name: &str) -> Option<&'static str> {
+    let text = format!("{id} {name}").to_ascii_lowercase();
+    // The last path segment says the model; a prefix such as
+    // `opencode/` or `openrouter/` only says who serves it.
+    let words: Vec<&str> = text
+        .split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
+        .filter(|word| !word.is_empty())
+        .collect();
+    let has = |prefixes: &[&str]| {
+        words
+            .iter()
+            .any(|word| prefixes.iter().any(|prefix| word.starts_with(prefix)))
+    };
+    const MAKERS: [(&str, &[&str]); 14] = [
+        ("Anthropic", &["claude", "opus", "sonnet", "haiku", "fable"]),
+        ("OpenAI", &["gpt", "codex", "o1", "o3", "o4"]),
+        ("Google", &["gemini", "gemma"]),
+        ("DeepSeek", &["deepseek"]),
+        ("xAI", &["grok"]),
+        ("Moonshot", &["kimi"]),
+        ("Z.ai", &["glm"]),
+        ("Qwen", &["qwen", "qwq"]),
+        (
+            "Mistral",
+            &["mistral", "devstral", "codestral", "magistral"],
+        ),
+        ("Xiaomi", &["mimo"]),
+        ("MiniMax", &["minimax"]),
+        ("Meta", &["llama"]),
+        ("Cognition", &["swe"]),
+        ("Cursor", &["composer"]),
+    ];
+    MAKERS
+        .iter()
+        .find(|(_, prefixes)| has(prefixes))
+        .map(|(maker, _)| *maker)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1082,5 +1122,30 @@ mod tests {
         assert_eq!(rows[0].efforts, vec!["low", "medium", "high", "xhigh"]);
         assert_eq!(rows[0].default_effort.as_deref(), Some("high"));
         assert!(rows[0].thinking);
+    }
+
+    #[test]
+    fn models_are_grouped_by_who_makes_them() {
+        assert_eq!(
+            model_maker("claude-opus-5-5", "Opus 5.5"),
+            Some("Anthropic")
+        );
+        assert_eq!(
+            model_maker("gpt-5.5-codex", "GPT-5.5 Codex"),
+            Some("OpenAI")
+        );
+        assert_eq!(model_maker("o3", "o3"), Some("OpenAI"));
+        assert_eq!(
+            model_maker(
+                "opencode/deepseek-v4.1-flash-free",
+                "DeepSeek V4.1 Flash Free"
+            ),
+            Some("DeepSeek")
+        );
+        assert_eq!(model_maker("opencode/glm-5.3-flash-free", ""), Some("Z.ai"));
+        assert_eq!(model_maker("swe-2-high", "SWE-2 High"), Some("Cognition"));
+        // A word that only starts like a maker's prefix elsewhere does not count.
+        assert_eq!(model_maker("default", "Default"), None);
+        assert_eq!(model_maker("auto", "Auto"), None);
     }
 }

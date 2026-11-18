@@ -160,6 +160,9 @@ pub(crate) struct Monos {
     route: Option<Route>,
     settings: Option<SettingsSection>,
     settings_focus: gpui::FocusHandle,
+    /// Settings opened without a window at hand (the Captain header's
+    /// "View Captain"); the next render focuses them.
+    focus_settings: bool,
     fields: HashMap<String, Entity<Input>>,
     memory_edit: Option<String>,
     memory_adding: bool,
@@ -509,7 +512,7 @@ impl Monos {
         notice_region: AnchorSlot,
         cx: &mut Context<Self>,
     ) -> Self {
-        let (roster, root, roster_error) = match locked(&store) {
+        let (mut roster, root, roster_error) = match locked(&store) {
             Ok(db) => match Roster::load(&db) {
                 Ok(roster) => (roster, mono::root(&db), None),
                 Err(error) => (Roster::default(), mono::root(&db), Some(error)),
@@ -520,6 +523,8 @@ impl Monos {
                 Some(error),
             ),
         };
+        // New bots' souls are written with the roster, off the UI thread.
+        roster.defer_souls = true;
         let (bridge, rx) = if cx.is_test() {
             (None, None)
         } else {
@@ -578,6 +583,7 @@ impl Monos {
             route: None,
             settings: None,
             settings_focus: cx.focus_handle(),
+            focus_settings: false,
             fields: HashMap::new(),
             memory_edit: None,
             memory_adding: false,
@@ -960,6 +966,8 @@ impl Monos {
 
     fn save(&mut self, cx: &mut Context<Self>) {
         self.sync_soon();
+        let souls = std::mem::take(&mut self.roster.pending_souls);
+        let soul_root = self.root.clone();
         let roster = self.roster.clone();
         let cloud_ids: Vec<String> = roster
             .monos
@@ -985,6 +993,7 @@ impl Monos {
                 previous.await;
             }
             let work = cx.background_executor().spawn(async move {
+                Roster::write_souls(&soul_root, &souls);
                 let db = locked(&store)?;
                 roster.save(&db)?;
                 let cloud_error = if !cloud_ids.is_empty() {
@@ -1170,7 +1179,12 @@ impl Monos {
                 this.observations.push(cx.subscribe(
                     &view,
                     move |this, _, _: &crate::conversation::ViewCaptain, cx| {
+                        // As the settings button does: its files, and focus.
                         this.settings = Some(SettingsSection::General);
+                        this.focus_settings = true;
+                        if let Some(id) = this.active.clone() {
+                            this.reload_files(&id, cx);
+                        }
                         cx.notify();
                     },
                 ));
@@ -2203,7 +2217,7 @@ impl Monos {
                                             )))
                                             .debug_selector(|| "mono-rail-orchestrator".into())
                                             .tooltip(chrome_tip(
-                                                "Your main bot: it coordinates the others",
+                                                "Your main Captain: it coordinates the others",
                                                 None,
                                             ))
                                             .flex_shrink_0()
@@ -2446,6 +2460,9 @@ impl Monos {
 }
 impl gpui::Render for Monos {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if std::mem::take(&mut self.focus_settings) && self.settings.is_some() {
+            window.focus(&self.settings_focus, cx);
+        }
         self.hide_html(cx);
         let Some(mono) = self.current().cloned() else {
             return div().into_any_element();

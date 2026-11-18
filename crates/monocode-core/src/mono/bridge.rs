@@ -138,7 +138,7 @@ impl Server {
     }
     pub fn environment(&self, session: i64) -> HashMap<String, String> {
         HashMap::from([
-            ("MONOCODE_APP_ENDPOINT".into(), self.endpoint.clone()),
+            (ENDPOINT_VAR.into(), self.endpoint.clone()),
             ("MONOCODE_APP_TOKEN".into(), token(&self.secret, session)),
             ("MONOCODE_APP_SESSION".into(), session.to_string()),
         ])
@@ -300,11 +300,9 @@ pub const MCP_SERVER: &str = "monocode_app";
 /// Claude's allowlist entry: the app checks every call against the Mono's own
 /// capability and projects, so it needs no second permission check.
 pub const CLAUDE_ALLOWED_TOOLS: &str = "mcp__monocode_app";
-const ENV_KEYS: [&str; 3] = [
-    "MONOCODE_APP_ENDPOINT",
-    "MONOCODE_APP_TOKEN",
-    "MONOCODE_APP_SESSION",
-];
+/// The variable that carries the app bridge's address to an agent.
+pub const ENDPOINT_VAR: &str = "MONOCODE_APP_ENDPOINT";
+const ENV_KEYS: [&str; 3] = [ENDPOINT_VAR, "MONOCODE_APP_TOKEN", "MONOCODE_APP_SESSION"];
 
 fn configured(environment: &HashMap<String, String>) -> bool {
     ENV_KEYS.iter().all(|key| environment.contains_key(*key))

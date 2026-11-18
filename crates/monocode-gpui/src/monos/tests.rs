@@ -2188,7 +2188,8 @@ fn group_options_menu_lists_members_instead_of_the_look_pickers(cx: &mut TestApp
     let labels = s.manager.read_with(visual, |m, cx| {
         m.menu.as_ref().unwrap().1.read(cx).action_labels()
     });
-    assert_eq!(labels, ["Background image", "Delete mono…"]);
+    // A personal agent is a Captain.
+    assert_eq!(labels, ["Background image", "Delete Captain…"]);
 }
 
 #[gpui::test]

@@ -657,7 +657,7 @@ impl Shell {
         let mut items = Vec::new();
 
         let mut bot_subitems = vec![
-            MenuAction::new("new-bot-custom", "Blank bot")
+            MenuAction::new("new-bot-custom", "Blank Captain")
                 .description("Start from scratch: name, soul, model")
                 .icon("pencil-edit"),
         ];
@@ -669,7 +669,7 @@ impl Shell {
             );
         }
         items.push(
-            MenuAction::new("new-bot", "New bot")
+            MenuAction::new("new-bot", "New Captain")
                 .icon("plus")
                 .submenu(bot_subitems)
                 .into(),

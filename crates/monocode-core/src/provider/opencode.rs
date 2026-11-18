@@ -29,6 +29,8 @@ impl Drop for StreamStop {
 struct Server {
     child: std::process::Child,
     url: String,
+    /// A private v2 server's password, printed when it starts.
+    password: Option<String>,
     _registration: process::Registration,
     _account: crate::accounts::Tracked,
 }
@@ -268,7 +270,11 @@ fn connect(
     v2: bool,
 ) -> Result<(Client, Option<Server>), String> {
     let directory = request.cwd.to_string_lossy().into_owned();
-    if v2 {
+    // The background service is shared and started with another process's
+    // environment, so a chat that calls back into the app (Chief, swarm, the
+    // operator) gets a private server that carries this session's own
+    // credentials.
+    if v2 && !request.settings.reaches_app() {
         let mut url = exec(request, &["service", "status"], cancel)
             .ok()
             .and_then(|output| service_url(&output));
@@ -301,7 +307,12 @@ fn connect(
             {
                 process::mark_idle(found.server.child.id(), false);
                 return Ok((
-                    Client::new(found.server.url.clone(), directory, false, None),
+                    Client::new(
+                        found.server.url.clone(),
+                        directory,
+                        v2,
+                        found.server.password.clone(),
+                    ),
                     Some(found.server),
                 ));
             }
@@ -322,17 +333,9 @@ fn connect(
     for stream in [Box::new(stdout) as Box<dyn Read + Send>, Box::new(stderr)] {
         let send = send.clone();
         thread::spawn(move || {
-            let mut sent = false;
             for line in BufReader::new(stream).lines().map_while(Result::ok) {
-                if !sent && line.to_lowercase().contains("listening") {
-                    // The advertised URL may contain punctuation after it.
-                    let url = line
-                        .split_whitespace()
-                        .find(|part| part.starts_with("http://") || part.starts_with("https://"));
-                    if let Some(url) = url {
-                        let _ = send.send(url.trim_end_matches([',', '.', ';']).to_owned());
-                        sent = true;
-                    }
+                if let Some(said) = startup_line(&line) {
+                    let _ = send.send(said);
                 }
             }
         });
@@ -341,6 +344,7 @@ fn connect(
     let mut server = Server {
         child,
         url: String::new(),
+        password: None,
         _registration: registration,
         _account: account,
     };
@@ -353,19 +357,46 @@ fn connect(
             return Err("OpenCode server exited before it was ready".into());
         }
         match receive.recv_timeout(TICK) {
-            Ok(url) => {
-                server.url = url.clone();
-                return Ok((Client::new(url, directory, false, None), Some(server)));
-            }
+            Ok(Startup::Url(url)) if server.url.is_empty() => server.url = url,
+            Ok(Startup::Password(password)) => server.password = Some(password),
             Err(mpsc::RecvTimeoutError::Disconnected) => {
                 return Err("OpenCode server exited before reporting a URL".into());
             }
             _ => {}
         }
+        // v2 prints its password after the URL and refuses requests without it.
+        if !server.url.is_empty() && (!v2 || server.password.is_some()) {
+            let client = Client::new(server.url.clone(), directory, v2, server.password.clone());
+            return Ok((client, Some(server)));
+        }
         if started.elapsed() >= Duration::from_secs(30) {
             return Err("OpenCode server startup timed out".into());
         }
     }
+}
+
+/// What a starting `opencode serve` reports.
+#[derive(Debug, PartialEq)]
+enum Startup {
+    Url(String),
+    Password(String),
+}
+
+fn startup_line(line: &str) -> Option<Startup> {
+    let lower = line.to_lowercase();
+    if lower.contains("listening") {
+        // The advertised URL may contain punctuation after it.
+        return line
+            .split_whitespace()
+            .find(|part| part.starts_with("http://") || part.starts_with("https://"))
+            .map(|url| Startup::Url(url.trim_end_matches([',', '.', ';']).to_owned()));
+    }
+    let at = lower.find("server password")?;
+    let password = line[at + "server password".len()..]
+        .trim_start_matches([':', ' '])
+        .trim();
+    (!password.is_empty() && !password.contains(' '))
+        .then(|| Startup::Password(password.to_owned()))
 }
 
 pub(super) fn run(
@@ -748,4 +779,38 @@ pub(super) fn rewind(
     // A reverted history must never be resumed by the old warm generation.
     drop(server);
     Ok(session.into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_private_server_reports_its_url_and_v2_password() {
+        assert_eq!(
+            startup_line("server listening on http://127.0.0.1:47821"),
+            Some(Startup::Url("http://127.0.0.1:47821".into()))
+        );
+        assert_eq!(
+            startup_line("opencode server listening on http://127.0.0.1:4096."),
+            Some(Startup::Url("http://127.0.0.1:4096".into()))
+        );
+        assert_eq!(
+            startup_line("server password thoM0etv-zjr1JntS4"),
+            Some(Startup::Password("thoM0etv-zjr1JntS4".into()))
+        );
+        assert_eq!(startup_line("server password: "), None);
+        assert_eq!(startup_line("loading config"), None);
+    }
+
+    #[test]
+    fn only_chats_that_call_the_app_leave_the_shared_service() {
+        let mut settings = crate::agent::Settings::default();
+        assert!(!settings.reaches_app());
+        settings.environment.insert(
+            crate::mono::bridge::ENDPOINT_VAR.into(),
+            "127.0.0.1:1".into(),
+        );
+        assert!(settings.reaches_app());
+    }
 }

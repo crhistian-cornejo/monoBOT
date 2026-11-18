@@ -337,6 +337,14 @@ pub struct Roster {
     /// without discarding deliberate native edits or resurrecting deletions.
     #[serde(skip_serializing_if = "Option::is_none")]
     desktop_source: Option<Vec<Mono>>,
+    /// The app turns this on so a new bot's `SOUL.md` waits in
+    /// `pending_souls` for its next save off the UI thread, instead of
+    /// being written where the bot is made.
+    #[serde(skip)]
+    pub defer_souls: bool,
+    /// Souls of bots made while `defer_souls` is on, by bot ID.
+    #[serde(skip)]
+    pub pending_souls: Vec<(String, &'static str)>,
 }
 impl Roster {
     pub fn load(store: &Store) -> Result<Self, String> {
@@ -457,8 +465,19 @@ impl Roster {
         } else {
             info.instructions
         };
-        let _ = files::save(root, &mono.id, None, "SOUL.md", soul, None);
+        let id = mono.id.clone();
+        if self.defer_souls {
+            self.pending_souls.push((id, soul));
+        } else {
+            let _ = files::save(root, &id, None, "SOUL.md", soul, None);
+        }
         self.monos.last()
+    }
+    /// Write the souls `create_bot` deferred.
+    pub fn write_souls(root: &Path, souls: &[(String, &'static str)]) {
+        for (id, soul) in souls {
+            let _ = files::save(root, id, None, "SOUL.md", soul, None);
+        }
     }
     /// A Captain from the New Captain dialog: a bot of this role (a blank
     /// one for `custom`) with the name the user typed, or its role's name.

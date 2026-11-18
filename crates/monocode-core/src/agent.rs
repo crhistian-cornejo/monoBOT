@@ -155,8 +155,8 @@ pub struct Settings {
     /// (Settings › Chat); its rule is introduced once per conversation.
     #[serde(skip)]
     pub swarm_offer: bool,
-    /// A Claude coding chat may hand a large task to Chief and the user's
-    /// monos (Settings › Chat); introduced once per conversation.
+    /// A coding chat on any provider may hand a large task to Chief and the
+    /// user's monos (Settings › Chat); introduced once per conversation.
     #[serde(skip)]
     pub chief_offer: bool,
     pub new_worktree: bool,
@@ -166,6 +166,23 @@ pub struct Settings {
     pub handoff: Option<Handoff>,
     pub pending_provider_switch: Option<ProviderSwitch>,
     pub turns: std::collections::HashMap<usize, TurnInfo>,
+}
+
+impl Settings {
+    /// Whether the agent calls back into the app (`monocode-gpui control …`
+    /// over the local bridge): the operator, a coordinator, the Chief and
+    /// swarm offers, and any chat handed the app's capability. A sandbox
+    /// that blocks the network must still let these reach 127.0.0.1.
+    pub fn reaches_app(&self) -> bool {
+        self.operator
+            || self.operator_enabled
+            || self.orchestrator
+            || self.chief_offer
+            || self.swarm_offer
+            || self
+                .environment
+                .contains_key(crate::mono::bridge::ENDPOINT_VAR)
+    }
 }
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(default)]

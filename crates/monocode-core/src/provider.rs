@@ -620,10 +620,7 @@ impl Protocol {
                         }
                         if self.request.settings.plan {
                             params["sandboxPolicy"] = json!({"type":"readOnly"});
-                            if self.request.settings.operator
-                                || self.request.settings.operator_enabled
-                                || self.request.settings.orchestrator
-                            {
+                            if self.request.settings.reaches_app() {
                                 params["sandboxPolicy"]["networkAccess"] = true.into();
                             }
                             params["approvalPolicy"] = "never".into();
@@ -2149,6 +2146,29 @@ mod tests {
             if plan {
                 assert_eq!(started["params"]["sandboxPolicy"]["type"], "readOnly");
             }
+        }
+    }
+    #[test]
+    fn codex_chats_that_call_back_into_the_app_can_reach_its_bridge() {
+        let plain = protocol(Kind::Codex);
+        assert!(plain
+            .codex_access()
+            .2
+            .get("networkAccess")
+            .is_none_or(|v| v != true));
+        for set in [
+            (|s: &mut crate::agent::Settings| s.chief_offer = true) as fn(&mut _),
+            |s| s.swarm_offer = true,
+            |s| {
+                s.environment.insert(
+                    crate::mono::bridge::ENDPOINT_VAR.into(),
+                    "127.0.0.1:1".into(),
+                );
+            },
+        ] {
+            let mut p = protocol(Kind::Codex);
+            set(&mut p.request.settings);
+            assert_eq!(p.codex_access().2["networkAccess"], true);
         }
     }
     #[test]

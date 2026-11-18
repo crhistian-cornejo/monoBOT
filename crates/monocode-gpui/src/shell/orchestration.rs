@@ -44,8 +44,6 @@ pub(super) struct Live {
     board_dirty: bool,
     /// Results of recent posts by request ID, so a retried post lands once.
     posted: HashMap<String, Value>,
-    /// Code monos this run made, up to `control::MAX_NEW_MONOS`.
-    new_monos: usize,
 }
 impl Live {
     fn new(run: Run) -> Self {
@@ -60,7 +58,6 @@ impl Live {
             board_loaded: true,
             board_dirty: true,
             posted: HashMap::new(),
-            new_monos: 0,
         }
     }
     pub(super) fn checkout(&self) -> &str {
@@ -322,7 +319,7 @@ impl Shell {
         .detach();
     }
 
-    fn stop_orchestration(&mut self, lead: i64, cx: &mut Context<Self>) {
+    pub(super) fn stop_orchestration(&mut self, lead: i64, cx: &mut Context<Self>) {
         let Some(live) = self.orchestrations.get_mut(&lead) else {
             return;
         };
@@ -768,7 +765,7 @@ impl Shell {
         let live = self.orchestrations.get(&lead)?;
         live.run.requester?;
         let task = live.run.task(id)?.clone();
-        let may_create = live.new_monos < control::MAX_NEW_MONOS;
+        let may_create = live.run.new_monos < control::MAX_NEW_MONOS;
         // Busy in any run: a mono does one task at a time.
         let busy: HashSet<String> = self
             .orchestrations
@@ -795,7 +792,7 @@ impl Shell {
         let member = monos.read(cx).crew_member(&mono)?;
         let live = self.orchestrations.get_mut(&lead)?;
         if made {
-            live.new_monos += 1;
+            live.run.new_monos += 1;
             live.run.crew.push(control::CrewMember {
                 id: mono.clone(),
                 name: member.1.name.clone(),
@@ -1427,7 +1424,11 @@ impl Shell {
     /// their work into the thread's checkout and sends it one summary, as
     /// when the thread's own agent hands the work over.
     pub(super) fn hand_to_crew(&mut self, id: i64, cx: &mut Context<Self>) {
-        let Some(view) = self.sessions.get(&id) else {
+        // The thread may not have been opened since launch.
+        let Some(view) = self.ensure_session(id, cx) else {
+            self.error =
+                Some("This thread could not be opened, so it cannot be handed over.".into());
+            cx.notify();
             return;
         };
         let view = view.read(cx);
@@ -1460,10 +1461,22 @@ impl Shell {
             },
             cx,
         );
-        // A refusal comes back at once; a started run opens its board.
-        if let Ok(Err(refusal)) = result.try_recv() {
-            self.error = Some(refusal);
-        }
+        // A refusal may come at once or after the run's checks and its chat
+        // are made; a started run opens its board.
+        let answer = cx.background_executor().spawn(async move {
+            result
+                .recv_timeout(std::time::Duration::from_secs(120))
+                .ok()
+        });
+        cx.spawn(async move |this, cx| {
+            if let Some(Err(refusal)) = answer.await {
+                let _ = this.update(cx, |this, cx| {
+                    this.error = Some(refusal);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
         cx.notify();
     }
 
@@ -1483,14 +1496,22 @@ impl Shell {
             ));
             return;
         };
-        // A retried call finds the run it opened, even paused.
-        if let Some(lead) = self
+        // A retried call finds the run it opened, even paused; a new request
+        // is told the chat's earlier run is still open rather than pointed
+        // at it as if it had started.
+        if let Some((lead, live)) = self
             .orchestrations
             .iter()
             .find(|(_, live)| live.run.requester == Some(requester))
-            .map(|(lead, _)| *lead)
         {
-            let _ = call.reply.send(Ok(control::chief_started(&title, lead)));
+            let answer = if live.run.request.trim() == brief.trim() {
+                Ok(control::chief_started(&title, *lead))
+            } else if live.run.status == RunStatus::Paused {
+                Err("Chief's earlier run for this chat is paused. Resume or stop it from the Crew tab, then hand this over again.".into())
+            } else {
+                Err("Chief is still working on this chat's earlier request. Wait for its summary, or stop it from the Crew tab, then hand this over again.".into())
+            };
+            let _ = call.reply.send(answer);
             return;
         }
         let refusal = if self.orchestrations.contains_key(&requester) {
@@ -1646,9 +1667,15 @@ impl Shell {
                         let prompt = control::chief_prompt(&brief, &cli(), &run.crew);
                         let mut live = Live::new(run);
                         live.lead_busy = true;
+                        let progress = live.run.progress();
                         this.orchestrations.insert(chief, live);
                         if let Some(view) = this.sessions.get(&chief) {
-                            view.update(cx, |v, cx| v.install_transfer(settings, Some(prompt), cx));
+                            // Chief leads from its first turn, so that turn is
+                            // not offered Chief and a swarm itself.
+                            view.update(cx, |v, cx| {
+                                v.set_orchestration_progress(Some(progress), cx);
+                                v.install_transfer(settings, Some(prompt), cx)
+                            });
                         }
                         let _ = reply.send(Ok(control::chief_started(&title, chief)));
                         this.invalidate_chrome(cx);
@@ -1941,10 +1968,16 @@ impl Shell {
             .find(|(_, live)| live.run.worker(id).is_some() || live.run.requester == Some(id))
             .map(|(lead, _)| *lead)
             .or_else(|| {
+                // An ended run: its workers, and the chat that handed Chief
+                // the work, still show its board.
                 self.orchestration_summaries
                     .iter()
-                    .find(|(_, summary)| summary.tasks.iter().any(|t| t.session == Some(id)))
+                    .filter(|(_, summary)| {
+                        summary.requester == Some(id)
+                            || summary.tasks.iter().any(|t| t.session == Some(id))
+                    })
                     .map(|(lead, _)| *lead)
+                    .max()
             })
     }
 
@@ -1956,10 +1989,36 @@ impl Shell {
         board: &Board,
         cx: &App,
     ) -> HashMap<String, crate::swarm::MemberLook> {
-        let (Some(live), Some(monos)) = (self.orchestrations.get(&lead), self.monos.as_ref())
-        else {
+        let Some(monos) = self.monos.as_ref() else {
             return HashMap::new();
         };
+        // A live run, or what its summary kept once it ended: who asked, and
+        // each task's mono.
+        let (requester, task_monos): (Option<i64>, HashMap<String, String>) =
+            match self.orchestrations.get(&lead) {
+                Some(live) => (
+                    live.run.requester,
+                    live.run
+                        .tasks
+                        .iter()
+                        .filter_map(|t| Some((t.id.clone(), t.mono.clone()?)))
+                        .collect(),
+                ),
+                None => match self.orchestration_summaries.get(&lead) {
+                    Some(summary) => (
+                        summary.requester,
+                        summary
+                            .tasks
+                            .iter()
+                            .filter_map(|t| Some((t.id.clone(), t.mono.clone()?)))
+                            .collect(),
+                    ),
+                    None => return HashMap::new(),
+                },
+            };
+        if requester.is_none() {
+            return HashMap::new();
+        }
         let roster = &monos.read(cx).roster;
         let look = |id: &str| {
             roster
@@ -1977,7 +2036,6 @@ impl Shell {
             .iter()
             .filter_map(|member| {
                 let mono = if member.handle == board::COORDINATOR {
-                    live.run.requester?;
                     // There is one Chief; the roster keeps it across restarts.
                     roster
                         .monos
@@ -1986,7 +2044,7 @@ impl Shell {
                         .id
                         .clone()
                 } else {
-                    live.run.task(member.task.as_deref()?)?.mono.clone()?
+                    task_monos.get(member.task.as_deref()?)?.clone()
                 };
                 Some((member.handle.clone(), look(&mono)?))
             })

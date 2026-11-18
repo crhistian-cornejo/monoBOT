@@ -321,6 +321,9 @@ pub struct Run {
     pub defaults: Option<Defaults>,
     /// The user's code monos Chief may give tasks to, by name.
     pub crew: Vec<CrewMember>,
+    /// Code monos this run made, up to [`MAX_NEW_MONOS`]; saved, so a
+    /// restart does not lift the cap.
+    pub new_monos: usize,
 }
 
 /// A Chief run's worker defaults: Claude Opus at medium effort, resolved
@@ -1805,11 +1808,14 @@ Review the changes in this checkout and continue the user's task from here.
     pub fn summary(&self) -> Summary {
         Summary {
             live: self.live(),
+            requester: self.requester,
             tasks: self
                 .tasks
                 .iter()
                 .filter(|t| t.status != Status::Cancelled || t.session.is_some())
                 .map(|t| SummaryTask {
+                    id: t.id.clone(),
+                    mono: t.mono.clone(),
                     session: t.session,
                     title: t.title.clone(),
                     provider: t.provider.clone(),

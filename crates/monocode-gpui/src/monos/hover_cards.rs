@@ -359,7 +359,7 @@ impl Monos {
                 let name = bots::role(role)
                     .or_else(|| bots::role("assistant"))
                     .map_or("Assistant", |r| r.name);
-                format!("{name} bot")
+                format!("{name} Captain")
             }
         } else if mono.kind.as_deref() == Some("workstream") {
             "Workstream".into()

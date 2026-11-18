@@ -168,6 +168,12 @@ impl Dictation {
         Ok(ear)
     }
 
+    /// Whether the recognizer is in memory and not loading, so a dictation
+    /// that stops now transcribes at once. Never waits on a load.
+    pub fn ready(&self) -> bool {
+        self.recognizer.try_lock().is_ok_and(|slot| slot.is_some())
+    }
+
     /// Frees the recognizer's memory unless a session still uses it. Returns
     /// whether it was released; the next dictation loads it again.
     pub fn release(&self) -> bool {

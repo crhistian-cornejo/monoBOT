@@ -824,16 +824,26 @@ fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut Test
             );
             // The chat that asked shows Chief's board.
             assert_eq!(shell.swarm_lead(requester), Some(chief));
-            // Asked again, it answers with the run it opened.
+            // A retried call answers with the run it opened; a new request
+            // is told that run is still open.
             let again = call(
                 shell,
                 requester,
                 "chief",
                 "c3",
-                json!({"title": "Auth", "brief": "Again"}),
+                json!({"title": "Auth", "brief": "Rotate the keys in src"}),
                 cx,
             );
             assert_eq!(again.try_recv().unwrap().unwrap()["chief"], chief);
+            let other = call(
+                shell,
+                requester,
+                "chief",
+                "c4",
+                json!({"title": "Notes", "brief": "Write the release notes"}),
+                cx,
+            );
+            assert!(other.try_recv().unwrap().unwrap_err().contains("earlier"));
             // The fixture harness ends Chief's first turn at once; keep the
             // run going and Chief idle under a draft, as a real turn would.
             let live = shell.orchestrations.get_mut(&chief).unwrap();
@@ -864,7 +874,7 @@ fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut Test
         .update(cx, |shell, _, cx| {
             let live = &shell.orchestrations[&chief];
             let mono = live.run.task(&task).unwrap().mono.clone().expect("a mono");
-            assert_eq!(live.new_monos, 1);
+            assert_eq!(live.run.new_monos, 1);
             assert!(
                 live.run
                     .crew
@@ -996,6 +1006,49 @@ fn a_thread_handed_to_its_crew_starts_chief_on_its_latest_request(cx: &mut TestA
                 .find(|live| live.run.requester == Some(requester))
                 .expect("Chief took the thread's request");
             assert!(live.run.request.starts_with("Rotate the keys in src"));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn a_new_request_is_told_the_chats_earlier_chief_run_is_still_open(cx: &mut TestAppContext) {
+    let (window, requester, _dir) = shell(cx);
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            shell.sessions[&requester].update(cx, |chat, cx| {
+                let mut transcript = monocode_core::transcript::Transcript::default();
+                transcript.begin("user");
+                transcript.append("Rotate the keys in src");
+                chat.mono_append(transcript.rows, cx);
+            });
+            shell.hand_to_crew(requester, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            assert_eq!(shell.error, None);
+            // The run is paused, as after a restart.
+            for live in shell.orchestrations.values_mut() {
+                live.run.status = RunStatus::Paused;
+            }
+            shell.sessions[&requester].update(cx, |chat, cx| {
+                let mut transcript = monocode_core::transcript::Transcript::default();
+                transcript.begin("user");
+                transcript.append("Now write the release notes");
+                chat.mono_append(transcript.rows, cx);
+            });
+            shell.hand_to_crew(requester, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, _| {
+            let error = shell.error.as_deref().expect("the user is told why");
+            assert!(error.contains("paused"), "{error}");
+            assert_eq!(shell.orchestrations.len(), 1, "no second run");
         })
         .unwrap();
 }

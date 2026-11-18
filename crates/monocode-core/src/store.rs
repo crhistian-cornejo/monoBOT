@@ -1334,10 +1334,11 @@ mod tests {
                 session: Some(child),
                 title: "Tests".into(),
                 provider: "codex".into(),
-                model: None,
                 status: "running".into(),
+                ..Default::default()
             }],
             live: true,
+            ..Default::default()
         };
         store.save_orchestration_summary(lead, &summary).unwrap();
         let run = crate::orchestration::control::Run {

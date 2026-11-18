@@ -1,21 +1,180 @@
-//! The composer's model picker, after Capy 0.9's: favorites first, each at
-//! the reasoning effort it opens at and numbered for ⌥1–⌥9, then every
-//! provider's models in one list. Beside the list, a panel shows the
-//! highlighted model's options: reasoning, fast mode, thinking, service
-//! tier, the provider's own controls, the account it runs on, and whether
-//! it is a favorite. Changing one switches to that model and applies the
-//! option through the composer's own settings actions (`effort:`, `fast:on`,
-//! `usage-account:` …), so the picker holds no settings logic of its own.
+//! The composer's model picker, after Capy 0.9's: a compact list with
+//! favorites first, each at the reasoning effort it opens at and numbered
+//! for ⌥1–⌥9, then every model grouped by who makes it, or by the agent that
+//! runs it with "By provider". Hovering a model opens a card beside the list
+//! with its options: reasoning on a dithered slider, fast mode, thinking,
+//! service tier, the provider's own controls, the account it runs on, and
+//! whether it is a favorite. Changing one switches to that model and applies
+//! the option through the composer's own settings actions (`effort:`,
+//! `fast:on`, `usage-account:` …), so the picker holds no settings logic of
+//! its own.
 use super::*;
+use crate::popover::{Anchor, AnchorSlot};
 use crate::settings::ModelChoice;
+use crate::visuals::dither;
 use std::collections::HashMap;
 
-/// The provider rail, the list beside it and the options panel.
-const RAIL_WIDTH: f32 = 40.;
-const LIST_WIDTH: f32 = 300.;
-const PANEL_WIDTH: f32 = 264.;
-pub(crate) const PICKER_WIDTH: f32 = RAIL_WIDTH + LIST_WIDTH + PANEL_WIDTH;
-pub(crate) const PICKER_HEIGHT: f32 = 432.;
+const LIST_WIDTH: f32 = 320.;
+const CARD_WIDTH: f32 = 288.;
+pub(crate) const PICKER_WIDTH: f32 = LIST_WIDTH;
+pub(crate) const PICKER_HEIGHT: f32 = 400.;
+/// How long the card stays after the pointer leaves the list and the card,
+/// so the pointer can cross the gap between them.
+const CARD_HIDE_DELAY: std::time::Duration = std::time::Duration::from_millis(180);
+
+/// The hover card beside the list.
+#[derive(Default)]
+pub(super) struct Card {
+    pub(super) visible: bool,
+    over_list: bool,
+    over_card: bool,
+    hide: Option<gpui::Task<()>>,
+    /// The list's bounds, which the card opens beside.
+    root: AnchorSlot,
+    /// The card's bounds, so a press on it does not close the menu around
+    /// the list.
+    region: AnchorSlot,
+}
+
+/// Whether the list groups models by the agent that runs them rather than
+/// by who makes them.
+fn by_provider(cx: &gpui::App) -> bool {
+    cx.try_global::<crate::settings::Preferences>()
+        .is_some_and(|prefs| prefs.model_picker_by_provider)
+}
+
+/// The mark shown beside a maker's name, where an agent's mark is theirs.
+fn maker_mark(maker: &str) -> Option<&'static str> {
+    Some(match maker {
+        "Anthropic" => "claude",
+        "OpenAI" => "codex",
+        "Google" => "antigravity",
+        "xAI" => "grok",
+        "Moonshot" => "kimi",
+        "Cognition" => "devin",
+        "Cursor" => "cursor",
+        _ => return None,
+    })
+}
+
+/// Whether a cell centred at (x, y) lies inside a box of `size` whose
+/// corners in `round` (top-left, top-right, bottom-right, bottom-left) are
+/// rounded by `radius`.
+fn inside_corners(x: f32, y: f32, w: f32, h: f32, radius: f32, round: [bool; 4]) -> bool {
+    let corners = [
+        (radius, radius),
+        (w - radius, radius),
+        (w - radius, h - radius),
+        (radius, h - radius),
+    ];
+    corners.iter().zip(round).all(|(&(cx, cy), round)| {
+        let beyond_x = if cx < w / 2. { x < cx } else { x > cx };
+        let beyond_y = if cy < h / 2. { y < cy } else { y > cy };
+        !(round && beyond_x && beyond_y) || (x - cx).hypot(y - cy) <= radius
+    })
+}
+
+/// The dithered glow in the card's top right corner: dense at the corner,
+/// thinning toward the name.
+fn corner_dither() -> impl IntoElement {
+    const WIDTH: f32 = 156.;
+    const HEIGHT: f32 = 60.;
+    gpui::canvas(
+        |_, _, _| {},
+        |bounds, _, window, _| {
+            let mut ink = accent_color();
+            ink.a *= if dither::light() { 0.5 } else { 0.42 };
+            let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            dither::Grid::new(bounds.origin, w, h).paint(window, |col, row| {
+                let (x, y) = dither::Grid::center(col, row);
+                // The card's own corner, less its 1px rule.
+                if !inside_corners(x, y, w, h, 11., [false, true, false, false]) {
+                    return None;
+                }
+                let (dx, dy) = ((w - x) / w, y / h);
+                let reach = (dx * dx * 0.7 + dy * dy).sqrt();
+                let tone = (1. - reach).max(0.).powf(1.7) * 0.85;
+                dither::inked(col, row, tone).then_some(ink)
+            });
+        },
+    )
+    .absolute()
+    .top_0()
+    .right_0()
+    .w(px(WIDTH))
+    .h(px(HEIGHT))
+}
+
+/// The reasoning slider's paint: `steps` slots, the fill and knob on `at`,
+/// a tick on every slot past it.
+fn effort_track(steps: usize, at: Option<usize>) -> gpui::Canvas<()> {
+    const INSET: f32 = 3.;
+    const KNOB: f32 = 14.;
+    gpui::canvas(
+        |_, _, _| {},
+        move |bounds, _, window, _| {
+            if steps == 0 {
+                return;
+            }
+            let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
+            let usable = w - INSET * 2.;
+            // The knob's right edge sits at the end of its slot.
+            let knob_left = |ix: usize| INSET + usable * (ix + 1) as f32 / steps as f32 - KNOB;
+            let accent = accent_color();
+            for ix in at.map_or(0, |at| at + 1)..steps {
+                let x = knob_left(ix) + KNOB / 2.;
+                window.paint_quad(gpui::fill(
+                    gpui::Bounds::new(
+                        bounds.origin + gpui::point(px(x.round()), px(h / 2. - 5.)),
+                        gpui::size(px(1.), px(10.)),
+                    ),
+                    content(0.22),
+                ));
+            }
+            let Some(at) = at else {
+                return;
+            };
+            let knob = knob_left(at);
+            let fill_w = knob + KNOB / 2. - INSET;
+            let fill_h = h - INSET * 2.;
+            let origin = bounds.origin + gpui::point(px(INSET), px(INSET));
+            let mut under = accent;
+            under.a *= 0.32;
+            window.paint_quad(
+                gpui::fill(
+                    gpui::Bounds::new(origin, gpui::size(px(fill_w), px(fill_h))),
+                    under,
+                )
+                .corner_radii(px(6.)),
+            );
+            // Solid from the left, thinning into dots toward the knob.
+            dither::Grid::new(origin, fill_w, fill_h).paint(window, |col, row| {
+                let (x, y) = dither::Grid::center(col, row);
+                if !inside_corners(x, y, fill_w, fill_h, 6., [true, false, false, true]) {
+                    return None;
+                }
+                let t = x / fill_w.max(1.);
+                let tone = if t < 0.3 {
+                    1.
+                } else {
+                    1. - ((t - 0.3) / 0.7).powf(0.8) * 0.9
+                };
+                dither::inked(col, row, tone).then_some(accent)
+            });
+            window.paint_quad(gpui::quad(
+                gpui::Bounds::new(
+                    bounds.origin + gpui::point(px(knob), px(INSET)),
+                    gpui::size(px(KNOB), px(fill_h)),
+                ),
+                px(6.),
+                gpui::white(),
+                px(2.),
+                accent,
+                gpui::BorderStyle::Solid,
+            ));
+        },
+    )
+}
 
 /// The session's settings for its current model, as the panel shows them.
 #[derive(Clone, Default, PartialEq, Debug)]
@@ -68,6 +227,10 @@ pub(crate) fn favorite_choice(
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub(super) enum Section {
     Favorites,
+    /// Models by who makes them, across the agents that run them.
+    Maker(&'static str),
+    /// Each agent's own default, when grouping by maker.
+    Defaults,
     Provider(Kind),
 }
 
@@ -78,6 +241,8 @@ pub(super) struct SectionRow {
     pub effort: Option<String>,
     /// A favorite's ⌥ number, 1–9.
     pub number: Option<usize>,
+    /// The agent that runs it, where a section mixes agents.
+    pub via: Option<SharedString>,
 }
 
 impl ModelList {
@@ -94,6 +259,12 @@ impl ModelList {
         }
         self.highlighted = self.current_index(cx);
         self
+    }
+
+    /// The bounds the hover card reports, so the menu around the list
+    /// treats a press on the card as inside.
+    pub(crate) fn set_card_region(&mut self, region: AnchorSlot) {
+        self.card.region = region;
     }
 
     /// Follow the session after an option was applied.
@@ -142,23 +313,61 @@ impl ModelList {
                         .get(&ModelChoice::key(&choice.provider, choice.model.as_deref()))
                         .cloned(),
                     number: (ix < 9).then_some(ix + 1),
+                    via: None,
                 });
             }
         }
         let mut kinds = self.visible_kinds();
         // The session's own provider leads.
         kinds.sort_by_key(|kind| *kind != self.provider);
+        if by_provider(cx) {
+            for kind in kinds {
+                rows.extend(
+                    self.kind_entries(kind, cx)
+                        .into_iter()
+                        .map(|entry| SectionRow {
+                            entry,
+                            section: Section::Provider(kind),
+                            effort: None,
+                            number: None,
+                            via: None,
+                        }),
+                );
+            }
+            return rows;
+        }
+        // By maker, in the order they first appear from the session's agent
+        // on; models no maker claims stay under their agent, and the
+        // agents' defaults come last.
+        let mut groups: Vec<(Section, Vec<ModelEntry>)> = Vec::new();
         for kind in kinds {
-            rows.extend(
-                self.kind_entries(kind, cx)
-                    .into_iter()
-                    .map(|entry| SectionRow {
-                        entry,
-                        section: Section::Provider(kind),
-                        effort: None,
-                        number: None,
-                    }),
-            );
+            for entry in self.kind_entries(kind, cx) {
+                let section = match &entry.id {
+                    None => Section::Defaults,
+                    Some(id) => catalog::model_maker(id, &entry.name)
+                        .map_or(Section::Provider(kind), Section::Maker),
+                };
+                match groups.iter_mut().find(|(s, _)| *s == section) {
+                    Some((_, entries)) => entries.push(entry),
+                    None => groups.push((section, vec![entry])),
+                }
+            }
+        }
+        groups.sort_by_key(|(section, _)| match section {
+            Section::Maker(_) => 0,
+            Section::Provider(_) => 1,
+            _ => 2,
+        });
+        for (section, entries) in groups {
+            let mixed = section == Section::Defaults
+                || entries.iter().any(|entry| entry.kind != entries[0].kind);
+            rows.extend(entries.into_iter().map(|entry| SectionRow {
+                via: mixed.then(|| entry.kind.label().into()),
+                entry,
+                section,
+                effort: None,
+                number: None,
+            }));
         }
         rows
     }
@@ -302,154 +511,203 @@ impl ModelList {
                 row.effort.clone(),
             )
         });
-        let current_section = rows.get(self.highlighted).map(|row| row.section);
         let mut list: Vec<AnyElement> = Vec::new();
-        // Each section's header in the list and its first row, for the rail.
-        let mut jumps: Vec<(Section, usize, usize)> = Vec::new();
         let mut last: Option<Section> = None;
         for (ix, row) in rows.into_iter().enumerate() {
             if last != Some(row.section) {
-                jumps.push((row.section, list.len(), ix));
                 list.push(self.section_header(row.section, last.is_some(), cx));
                 last = Some(row.section);
             }
             list.push(self.section_row(ix, row, cx));
         }
-        let rail = div()
-            .id("model-rail")
-            .role(Role::TabList)
-            .aria_label("Providers")
-            .w(px(RAIL_WIDTH))
-            .flex_shrink_0()
-            .h_full()
-            .py_2()
-            .border_r_1()
-            .border_color(content(0.07))
-            .overflow_y_scroll()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap_1()
-            .children(jumps.into_iter().map(|(section, child, row)| {
-                let (id, label): (SharedString, SharedString) = match section {
-                    Section::Favorites => ("model-rail-favorites".into(), "Favorites".into()),
-                    Section::Provider(kind) => (
-                        format!("model-rail-{}", kind.id()).into(),
-                        kind.label().into(),
-                    ),
-                };
-                let selected = current_section == Some(section);
-                let selector = id.clone();
-                div()
-                    .id(id)
-                    .debug_selector(move || selector.to_string())
-                    .role(Role::Tab)
-                    .aria_label(label.clone())
-                    .aria_selected(selected)
-                    .tooltip(chrome_tip(label, None))
-                    .size(px(28.))
-                    .flex_shrink_0()
-                    .rounded(px(6.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .cursor_pointer()
-                    .when(selected, |d| d.bg(content(0.1)))
-                    .when(!selected, |d| d.hover(|s| s.bg(content(0.06))))
-                    .child(match section {
-                        Section::Favorites => icon("star", 16.)
-                            .text_color(content(if selected { 1. } else { 0.5 }))
-                            .into_any_element(),
-                        Section::Provider(kind) => provider_icon(kind.id(), 16.).into_any_element(),
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.list_scroll.scroll_to_top_of_item(child);
-                        this.highlighted = row;
-                        cx.notify();
-                    }))
-            }));
         if list.is_empty() {
             list.push(
                 div()
                     .px_2()
                     .py_3()
-                    .text_size(px(12.))
+                    .text_size(px(13.))
                     .text_color(content(0.5))
                     .child("No matching models")
                     .into_any_element(),
             );
         }
+        let by_provider = by_provider(cx);
+        let card = self.card.visible.then_some(highlighted).flatten().map(
+            |(kind, id, name, enabled, effort)| {
+                let this = cx.entity().downgrade();
+                crate::popover::popover("model-card", Anchor::Slot(self.card.root.clone()))
+                    .side(crate::popover::Side::Right)
+                    .align(crate::popover::Align::Start)
+                    .gap(6.)
+                    .width(CARD_WIDTH)
+                    .priority(41)
+                    .track(self.card.region.clone())
+                    .on_hover(move |hovered, _, cx| {
+                        let _ =
+                            this.update(cx, |this, cx| this.card_hover(None, Some(*hovered), cx));
+                    })
+                    .child(self.panel(kind, id, name, enabled, effort, cx))
+            },
+        );
+        if card.is_none() {
+            // A hidden card must not keep the menu open for presses where it was.
+            self.card.region.set(None);
+        }
         div()
             .id("model-picker")
             .role(Role::Dialog)
             .aria_label("Models")
-            .w(px(PICKER_WIDTH))
+            .relative()
+            .w(px(LIST_WIDTH))
             .h(px(PICKER_HEIGHT))
             .flex()
+            .flex_col()
+            .child(self.card.root.probe())
             .capture_action(cx.listener(|this, _: &input::Up, _, cx| {
                 this.step(-1, cx);
+                this.show_card_for_keys(cx);
                 cx.stop_propagation();
             }))
             .capture_action(cx.listener(|this, _: &input::Down, _, cx| {
                 this.step(1, cx);
+                this.show_card_for_keys(cx);
                 cx.stop_propagation();
             }))
             .capture_action(cx.listener(|this, _: &input::Submit, _, cx| {
                 this.pick(this.highlighted, cx);
                 cx.stop_propagation();
             }))
-            .child(rail)
             .child(
                 div()
-                    .w(px(LIST_WIDTH))
                     .flex_shrink_0()
-                    .h_full()
+                    .h(px(40.))
+                    .pl_3()
+                    .pr(px(6.))
                     .flex()
-                    .flex_col()
+                    .items_center()
+                    .gap_2()
+                    .border_b_1()
+                    .border_color(content(0.07))
+                    .text_color(content(1.))
+                    .child(div().flex_1().min_w_0().child(self.search.clone()))
                     .child(
                         div()
+                            .id("model-by-provider")
+                            .debug_selector(|| "model-by-provider".into())
+                            .role(Role::Switch)
+                            .aria_label("Group by provider")
+                            .aria_selected(by_provider)
                             .flex_shrink_0()
+                            .h(px(26.))
+                            .px(px(8.))
+                            .rounded(px(7.))
                             .flex()
                             .items_center()
-                            .gap_2()
-                            .px_3()
-                            .py(px(10.))
-                            .text_color(content(1.))
-                            .child(icon("search", 14.).text_color(content(0.5)))
-                            .child(div().flex_1().min_w_0().child(self.search.clone())),
-                    )
-                    .child(
-                        div()
-                            .id("model-list")
-                            .role(Role::ListBox)
-                            .aria_label("Models")
-                            .track_scroll(&self.list_scroll)
-                            .flex_1()
-                            .min_h_0()
-                            .overflow_y_scroll()
-                            .px_1()
-                            .pb_1()
-                            .flex()
-                            .flex_col()
-                            .children(list),
+                            .gap(px(5.))
+                            .text_size(px(12.))
+                            .cursor_pointer()
+                            .map(|d| {
+                                if by_provider {
+                                    d.bg(content(0.1)).text_color(content(0.95))
+                                } else {
+                                    d.text_color(content(0.5))
+                                        .hover(|s| s.bg(content(0.06)).text_color(content(0.9)))
+                                }
+                            })
+                            .child(icon("queue-list", 13.))
+                            .child("By provider")
+                            .on_click(cx.listener(|this, _, _, cx| this.toggle_by_provider(cx))),
                     ),
             )
             .child(
                 div()
-                    .id("model-options")
-                    .role(Role::Group)
-                    .aria_label("Model options")
-                    .w(px(PANEL_WIDTH))
-                    .flex_shrink_0()
-                    .h_full()
-                    .border_l_1()
-                    .border_color(content(0.07))
+                    .id("model-list")
+                    .role(Role::ListBox)
+                    .aria_label("Models")
+                    .track_scroll(&self.list_scroll)
+                    .flex_1()
+                    .min_h_0()
                     .overflow_y_scroll()
-                    .when_some(highlighted, |d, (kind, id, name, enabled, effort)| {
-                        d.child(self.panel(kind, id, name, enabled, effort, cx))
-                    }),
+                    .p_1()
+                    .flex()
+                    .flex_col()
+                    .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                        this.card_hover(Some(*hovered), None, cx)
+                    }))
+                    .children(list),
             )
+            .children(card)
             .into_any_element()
+    }
+
+    /// The pointer entered or left the list (`list`) or the card (`card`).
+    /// The card shows while either is under it, and waits a moment before it
+    /// hides, so the pointer can cross the gap between them.
+    fn card_hover(&mut self, list: Option<bool>, card: Option<bool>, cx: &mut Context<Self>) {
+        let before = (self.card.over_list, self.card.over_card);
+        if let Some(list) = list {
+            self.card.over_list = list;
+        }
+        if let Some(card) = card {
+            self.card.over_card = card;
+        }
+        if before == (self.card.over_list, self.card.over_card) {
+            return;
+        }
+        if self.card.over_list || self.card.over_card {
+            self.card.hide = None;
+            if !self.card.visible {
+                self.card.visible = true;
+                cx.notify();
+            }
+            return;
+        }
+        if !self.card.visible || self.card.hide.is_some() {
+            return;
+        }
+        self.card.hide = Some(cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(CARD_HIDE_DELAY).await;
+            let _ = this.update(cx, |this, cx| {
+                this.card.hide = None;
+                if !this.card.over_list && !this.card.over_card {
+                    this.card.visible = false;
+                    cx.notify();
+                }
+            });
+        }));
+    }
+
+    /// Arrow keys show the highlighted model's card without the pointer.
+    fn show_card_for_keys(&mut self, cx: &mut Context<Self>) {
+        self.card.hide = None;
+        self.card.visible = true;
+        cx.notify();
+    }
+
+    fn toggle_by_provider(&mut self, cx: &mut Context<Self>) {
+        if !cx.has_global::<crate::settings::Preferences>() {
+            return;
+        }
+        let at = self
+            .section_rows(cx)
+            .get(self.highlighted)
+            .map(|row| (row.entry.kind, row.entry.id.clone()));
+        cx.update_global::<crate::settings::Preferences, _>(|prefs, _| {
+            prefs.model_picker_by_provider = !prefs.model_picker_by_provider;
+        });
+        // Stay on the same model in its new place.
+        let rows = self.section_rows(cx);
+        self.highlighted = at
+            .and_then(|(kind, id)| {
+                rows.iter().position(|row| {
+                    row.section != Section::Favorites
+                        && row.entry.kind == kind
+                        && row.entry.id == id
+                })
+            })
+            .unwrap_or_else(|| self.current_index(cx));
+        self.list_scroll.scroll_to_top_of_item(0);
+        cx.notify();
     }
 
     fn section_header(&self, section: Section, rule: bool, cx: &mut Context<Self>) -> AnyElement {
@@ -460,47 +718,51 @@ impl ModelList {
                 .iter()
                 .find(|(k, _)| *k == kind)
                 .map(|(_, error)| ("Retry", Some((kind, error.clone())))),
-            Section::Favorites => None,
+            Section::Maker(_) | Section::Favorites | Section::Defaults => None,
+        };
+        let mark = match section {
+            Section::Provider(kind) => Some(kind.id()),
+            Section::Maker(maker) => maker_mark(maker),
+            Section::Favorites | Section::Defaults => None,
+        };
+        let label: SharedString = match section {
+            Section::Favorites => "Favorites".into(),
+            Section::Defaults => "Agent defaults".into(),
+            Section::Maker(maker) => maker.into(),
+            Section::Provider(kind) => kind.label().into(),
         };
         div()
             .flex_shrink_0()
-            .when(rule, |d| {
-                d.mt_1().border_t_1().border_color(content(0.07)).pt_1()
+            .h(px(28.))
+            .when(rule, |d| d.mt_1())
+            .px_2()
+            .flex()
+            .items_center()
+            .gap(px(6.))
+            .text_size(px(12.))
+            .text_color(content(0.45))
+            .when_some(mark, |d, mark| {
+                d.child(provider_icon(mark, 12.).opacity(0.6))
             })
-            .child(
-                div()
-                    .h(px(28.))
-                    .px_2()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .text_size(px(12.))
-                    .text_color(content(0.5))
-                    .map(|d| match section {
-                        Section::Favorites => d.child("Favorites"),
-                        Section::Provider(kind) => d
-                            .child(provider_icon(kind.id(), 12.).opacity(0.7))
-                            .child(kind.label()),
-                    })
-                    .child(div().flex_1())
-                    .when_some(status, |d, (label, retry)| match retry {
-                        None => d.child(label),
-                        Some((kind, error)) => d.child(
-                            div()
-                                .id(SharedString::from(format!("retry-models-{}", kind.id())))
-                                .role(Role::Button)
-                                .aria_label("Retry model discovery")
-                                .tooltip(text_tip(error))
-                                .cursor_pointer()
-                                .hover(|s| s.text_color(content(1.)))
-                                .child(label)
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.discover(kind, cx);
-                                    cx.notify();
-                                })),
-                        ),
-                    }),
-            )
+            .child(label)
+            .child(div().flex_1())
+            .when_some(status, |d, (label, retry)| match retry {
+                None => d.child(label),
+                Some((kind, error)) => d.child(
+                    div()
+                        .id(SharedString::from(format!("retry-models-{}", kind.id())))
+                        .role(Role::Button)
+                        .aria_label("Retry model discovery")
+                        .tooltip(text_tip(error))
+                        .cursor_pointer()
+                        .hover(|s| s.text_color(content(1.)))
+                        .child(label)
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.discover(kind, cx);
+                            cx.notify();
+                        })),
+                ),
+            })
             .into_any_element()
     }
 
@@ -515,16 +777,16 @@ impl ModelList {
             .aria_label(entry.name.clone())
             .aria_selected(current)
             .flex_shrink_0()
-            .h(px(32.))
+            .h(px(30.))
             .px_2()
             .rounded(px(8.))
             .flex()
             .items_center()
-            .gap_2()
+            .gap(px(10.))
             .text_size(px(13.))
             .text_color(content(if entry.enabled { 1. } else { 0.3 }))
             .when(entry.enabled, |d| d.cursor_pointer())
-            .when(highlighted, |d| d.bg(content(0.1)))
+            .when(highlighted, |d| d.bg(content(0.08)))
             .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
                 if *hovered && this.highlighted != ix {
                     this.highlighted = ix;
@@ -541,6 +803,14 @@ impl ModelList {
                     .items_baseline()
                     .gap(px(6.))
                     .child(div().min_w_0().truncate().child(entry.name.clone()))
+                    .when_some(row.via, |d, via| {
+                        d.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_color(content(0.4))
+                                .child(format!("· {via}")),
+                        )
+                    })
                     .when_some(row.effort, |d, effort| {
                         d.child(
                             div()
@@ -551,7 +821,7 @@ impl ModelList {
                     }),
             )
             .when(current, |d| {
-                d.child(icon("check-2", 14.).text_color(content(0.6)))
+                d.child(icon("check-2", 14.).text_color(content(0.7)))
             })
             .when_some(row.number, |d, number| {
                 d.child(
@@ -747,18 +1017,27 @@ impl ModelList {
                 .or_else(|| m.default_effort.clone())
                 .filter(|_| !m.efforts.is_empty())
         });
+        let rule = || div().h(px(1.)).bg(content(0.07)).flex_shrink_0();
+        let has_blocks = !blocks.is_empty();
         div()
-            .p_3()
-            .min_h_full()
+            .id("model-options")
+            .role(Role::Group)
+            .aria_label("Model options")
+            .relative()
             .flex()
             .flex_col()
-            .gap_4()
+            // Capy's card: the dithered glow in the corner, behind the name.
+            .child(corner_dither())
             .child(
                 div()
+                    .relative()
+                    .px_3()
+                    .pt_3()
+                    .pb(px(10.))
                     .flex()
                     .items_center()
-                    .gap_2()
-                    .child(provider_icon(kind.id(), 20.))
+                    .gap(px(10.))
+                    .child(provider_icon(kind.id(), 18.))
                     .child(
                         div()
                             .min_w_0()
@@ -780,60 +1059,73 @@ impl ModelList {
                             ),
                     ),
             )
-            .children(blocks)
-            .child(div().flex_1())
+            .when(has_blocks, |d| {
+                d.child(rule()).child(
+                    div()
+                        .relative()
+                        .px_3()
+                        .py(px(10.))
+                        .flex()
+                        .flex_col()
+                        .gap_3()
+                        .children(blocks),
+                )
+            })
+            .child(rule())
             .child(
-                div()
-                    .id("model-favorite")
-                    .debug_selector(|| "model-favorite".into())
-                    .role(Role::Button)
-                    .aria_label(if starred {
-                        "Remove from favorites"
-                    } else {
-                        "Add to favorites"
-                    })
-                    .h(px(30.))
-                    .rounded(px(8.))
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .gap(px(6.))
-                    .text_size(px(13.))
-                    .text_color(content(0.9))
-                    .bg(content(0.06))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(content(0.1)))
-                    .child(
-                        icon(if starred { "star-filled" } else { "star" }, 14.)
-                            .text_color(content(if starred { 0.8 } else { 0.5 })),
-                    )
-                    .child(if starred {
-                        "Favorite"
-                    } else {
-                        "Add to favorites"
-                    })
-                    .when_some(number.filter(|_| starred), |d, number| {
-                        d.child(
-                            div()
-                                .text_color(content(0.45))
-                                .font_features(crate::right_panel::tabular())
-                                .child(format!("⌥{number}")),
+                div().p(px(6.)).child(
+                    div()
+                        .id("model-favorite")
+                        .debug_selector(|| "model-favorite".into())
+                        .role(Role::Button)
+                        .aria_label(if starred {
+                            "Remove from favorites"
+                        } else {
+                            "Add to favorites"
+                        })
+                        .h(px(30.))
+                        .rounded(px(8.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .gap(px(6.))
+                        .text_size(px(13.))
+                        .text_color(content(0.9))
+                        .bg(content(0.06))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(content(0.1)))
+                        .child(
+                            icon(if starred { "star-filled" } else { "add-01" }, 14.)
+                                .text_color(content(if starred { 0.85 } else { 0.7 })),
                         )
-                    })
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.toggle_section_favorite(
-                            star_kind,
-                            star_id.clone(),
-                            star_effort.clone(),
-                            cx,
-                        )
-                    })),
+                        .child(if starred {
+                            "Favorite"
+                        } else {
+                            "Add to favorites"
+                        })
+                        .when_some(number.filter(|_| starred), |d, number| {
+                            d.child(
+                                div()
+                                    .text_color(content(0.45))
+                                    .font_features(crate::right_panel::tabular())
+                                    .child(format!("⌥{number}")),
+                            )
+                        })
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.toggle_section_favorite(
+                                star_kind,
+                                star_id.clone(),
+                                star_effort.clone(),
+                                cx,
+                            )
+                        })),
+                ),
             )
             .into_any_element()
     }
 
-    /// Reasoning as a stepped track: one step per effort, filled up to the
-    /// one chosen, its name on the right of the label.
+    /// Reasoning as Capy's slider: one slot per effort, a dithered fill up
+    /// to the knob on the chosen one, and a tick where each other one sits.
     fn reasoning(
         &self,
         kind: Kind,
@@ -849,6 +1141,7 @@ impl ModelList {
         } else {
             "Effort"
         };
+        let steps = efforts.len();
         div()
             .flex()
             .flex_col()
@@ -857,7 +1150,7 @@ impl ModelList {
                 div()
                     .flex()
                     .justify_between()
-                    .text_size(px(12.))
+                    .text_size(px(13.))
                     .child(div().text_color(content(0.5)).child(label))
                     .child(
                         div().text_color(content(1.)).child(
@@ -872,42 +1165,34 @@ impl ModelList {
                     .id("model-reasoning")
                     .role(Role::RadioGroup)
                     .aria_label(label)
-                    .h(px(24.))
-                    .p(px(2.))
+                    .relative()
+                    .h(px(28.))
                     .rounded(px(8.))
                     .bg(content(0.06))
-                    .flex()
-                    .gap(px(2.))
-                    .children(efforts.iter().enumerate().map(|(ix, effort)| {
-                        let filled = at.is_some_and(|at| ix <= at);
-                        let chosen = at == Some(ix);
-                        let action = format!("effort:{effort}");
-                        let model = id.clone();
-                        div()
-                            .id(("model-effort", ix))
-                            .debug_selector(move || format!("model-effort-{ix}"))
-                            .role(Role::RadioButton)
-                            .aria_label(crate::conversation::effort_name(effort))
-                            .aria_selected(chosen)
-                            .tooltip(chrome_tip(crate::conversation::effort_name(effort), None))
-                            .flex_1()
-                            .h_full()
-                            .rounded(px(6.))
-                            .bg(if chosen {
-                                accent_color()
-                            } else if filled {
-                                accent_color().opacity(0.4)
-                            } else {
-                                gpui::transparent_black()
-                            })
-                            .when(enabled, |d| {
-                                d.cursor_pointer()
-                                    .when(!filled, |d| d.hover(|s| s.bg(content(0.08))))
-                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                        this.option(kind, model.clone(), action.clone(), cx)
-                                    }))
-                            })
-                    })),
+                    .child(effort_track(steps, at).absolute().inset_0())
+                    .child(div().absolute().inset_0().flex().children(
+                        efforts.iter().enumerate().map(|(ix, effort)| {
+                            let chosen = at == Some(ix);
+                            let action = format!("effort:{effort}");
+                            let model = id.clone();
+                            div()
+                                .id(("model-effort", ix))
+                                .debug_selector(move || format!("model-effort-{ix}"))
+                                .role(Role::RadioButton)
+                                .aria_label(crate::conversation::effort_name(effort))
+                                .aria_selected(chosen)
+                                .tooltip(chrome_tip(crate::conversation::effort_name(effort), None))
+                                .flex_1()
+                                .h_full()
+                                .when(enabled, |d| {
+                                    d.cursor_pointer().on_click(cx.listener(
+                                        move |this, _, _, cx| {
+                                            this.option(kind, model.clone(), action.clone(), cx)
+                                        },
+                                    ))
+                                })
+                        }),
+                    )),
             )
             .into_any_element()
     }
@@ -925,6 +1210,8 @@ impl ModelList {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let label = label.into();
+        let element: SharedString = element.into();
+        let fast = element.as_ref() == "model-fast";
         let (model, action) = (id.clone(), action.to_owned());
         div()
             .flex()
@@ -932,7 +1219,16 @@ impl ModelList {
             .justify_between()
             .text_size(px(13.))
             .text_color(content(0.9))
-            .child(label.clone())
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .when(fast, |d| {
+                        d.child(icon("gauge", 14.).text_color(content(0.6)))
+                    })
+                    .child(label.clone()),
+            )
             .child(
                 switch(element, label, on)
                     .when(!enabled, |d| d.opacity(0.4))
@@ -1142,7 +1438,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn favorites_lead_with_their_effort_then_the_sessions_provider(cx: &mut TestAppContext) {
+    fn favorites_lead_with_their_effort_then_models_by_maker(cx: &mut TestAppContext) {
         let (window, _, _subs) = picker(cx);
         window
             .update(cx, |list, _, cx| {
@@ -1160,15 +1456,38 @@ mod tests {
                         Some(1)
                     )
                 );
-                // The session's provider comes before the others.
-                assert_eq!(shown[1].0, Section::Provider(Kind::Codex));
-                let codex: Vec<_> = shown
+                let sections: Vec<_> =
+                    rows.iter()
+                        .skip(1)
+                        .map(|r| r.section)
+                        .fold(Vec::new(), |mut all, section| {
+                            if all.last() != Some(&section) {
+                                all.push(section);
+                            }
+                            all
+                        });
+                // The session's agent's makers lead; each agent's default
+                // comes last, named by the agent.
+                assert_eq!(
+                    sections,
+                    [
+                        Section::Maker("OpenAI"),
+                        Section::Maker("Anthropic"),
+                        Section::Defaults
+                    ]
+                );
+                let defaults: Vec<_> = rows
                     .iter()
-                    .filter(|r| r.0 == Section::Provider(Kind::Codex))
-                    .map(|r| r.1.clone())
+                    .filter(|r| r.section == Section::Defaults)
+                    .map(|r| r.via.clone())
                     .collect();
-                assert_eq!(codex, [None, Some("gpt-a".into()), Some("gpt-b".into())]);
-                assert_eq!(shown.last().unwrap().0, Section::Provider(Kind::Claude));
+                assert_eq!(
+                    defaults,
+                    [
+                        Some(Kind::Codex.label().into()),
+                        Some(Kind::Claude.label().into())
+                    ]
+                );
                 // It opens on the session's model.
                 assert_eq!(rows[list.highlighted].entry.id.as_deref(), Some("gpt-a"));
             })
@@ -1176,18 +1495,50 @@ mod tests {
     }
 
     #[gpui::test]
-    fn the_rail_jumps_to_a_providers_models(cx: &mut TestAppContext) {
+    fn by_provider_groups_by_the_agent_and_keeps_the_model(cx: &mut TestAppContext) {
         let (window, _, _subs) = picker(cx);
         let mut visual = VisualTestContext::from_window(window.into(), cx);
-        click(&mut visual, "model-rail-claude".into());
+        click(&mut visual, "model-by-provider".into());
         window
             .update(&mut visual, |list, _, cx| {
-                let row = &list.section_rows(cx)[list.highlighted];
-                assert_eq!(row.section, Section::Provider(Kind::Claude));
-                assert_eq!(row.entry.id, None, "its first row, the default");
+                let rows = list.section_rows(cx);
+                let codex: Vec<_> = rows
+                    .iter()
+                    .filter(|r| r.section == Section::Provider(Kind::Codex))
+                    .map(|r| r.entry.id.clone())
+                    .collect();
+                assert_eq!(codex, [None, Some("gpt-a".into()), Some("gpt-b".into())]);
+                assert_eq!(
+                    rows.last().unwrap().section,
+                    Section::Provider(Kind::Claude)
+                );
+                assert_eq!(rows[list.highlighted].entry.id.as_deref(), Some("gpt-a"));
             })
             .unwrap();
-        click(&mut visual, "model-rail-favorites".into());
+        cx.update(|cx| {
+            assert!(
+                cx.global::<crate::settings::Preferences>()
+                    .model_picker_by_provider
+            )
+        });
+    }
+
+    #[gpui::test]
+    fn the_options_card_opens_while_a_model_is_hovered(cx: &mut TestAppContext) {
+        let (window, _, _subs) = picker(cx);
+        let mut visual = VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        assert!(
+            visual.debug_bounds("model-favorite").is_none(),
+            "no card before the pointer comes"
+        );
+        let row = visual.debug_bounds("model-option-0").unwrap();
+        visual.simulate_mouse_move(row.center(), None, Default::default());
+        visual.refresh().unwrap();
+        let card = visual
+            .debug_bounds("model-favorite")
+            .expect("the card opens on hover");
+        assert!(card.left() > row.right(), "beside the list");
         window
             .update(&mut visual, |list, _, _| assert_eq!(list.highlighted, 0))
             .unwrap();
@@ -1215,6 +1566,7 @@ mod tests {
         window
             .update(cx, |list, _, cx| {
                 list.highlighted = 0;
+                list.card.visible = true;
                 cx.notify();
             })
             .unwrap();
@@ -1243,8 +1595,14 @@ mod tests {
     #[gpui::test]
     fn a_new_favorite_keeps_the_effort_in_use(cx: &mut TestAppContext) {
         let (window, _, _subs) = picker(cx);
+        window
+            .update(cx, |list, _, cx| {
+                list.card.visible = true;
+                cx.notify();
+            })
+            .unwrap();
         let mut visual = VisualTestContext::from_window(window.into(), cx);
-        // The panel shows the session's model, gpt-a at medium.
+        // The card shows the session's model, gpt-a at medium.
         click(&mut visual, "model-favorite".into());
         cx.update(|cx| {
             let prefs = cx.global::<crate::settings::Preferences>();

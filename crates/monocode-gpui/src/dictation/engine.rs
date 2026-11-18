@@ -12,10 +12,12 @@ use std::time::Duration;
 /// How long Parakeet stays in memory after the last dictation. The CPU build
 /// holds over half a gigabyte and takes seconds to load, so it is kept while
 /// the user dictates a few messages in a row. The Neural build holds about
-/// 70 MB and loads in a fraction of a second, so it goes sooner.
+/// 70 MB, but loading it can mean Core ML compiling the encoder for the
+/// Neural Engine again, about 30 s when its cache is cold, which the user
+/// waited out on "Finishing…". So it stays a good while.
 fn idle(engine: Option<monobot_dictation::Engine>) -> Duration {
     match engine {
-        Some(monobot_dictation::Engine::Neural) => Duration::from_secs(45),
+        Some(monobot_dictation::Engine::Neural) => Duration::from_secs(30 * 60),
         _ => Duration::from_secs(3 * 60),
     }
 }
@@ -61,6 +63,10 @@ pub(crate) trait Engine: Send + Sync {
     /// that cannot tell dictate as usual, and the call times the pauses.
     fn start_call(&self, _pace: &str, on_event: Box<dyn Fn(Event) + Send>) -> Result<u64, String> {
         self.start(on_event)
+    }
+    /// The model is in memory, so a dictation stopped now ends at once.
+    fn ready(&self) -> bool {
+        true
     }
     /// `dictation_stop`: the whole transcript, or nothing once another
     /// dictation took the microphone.
@@ -206,7 +212,16 @@ impl Engine for Local {
         // Calls' end-of-turn detector, 32 MB; without it the words decide.
         if self.engine.installed() {
             let _ = self.engine.install_turn();
+            // Load the recognizer now, off the UI thread, so the first
+            // dictation does not wait for Core ML to compile it.
+            if self.engine.prepare().is_ok() {
+                self.release_when_idle();
+            }
         }
+    }
+
+    fn ready(&self) -> bool {
+        self.engine.ready()
     }
 
     fn install(&self, progress: &mut dyn FnMut(u64, u64)) -> Result<(), String> {

@@ -76,6 +76,13 @@ pub struct Options {
 
 /// How long the voice detector waits before it reports quiet.
 const MIN_SILENCE_MS: u32 = 450;
+/// How often the phrase being spoken is heard for the live caption, at
+/// most; a recognizer slower than half of this is asked less often.
+const PREVIEW_EVERY: Duration = Duration::from_millis(350);
+/// The least of an open phrase worth previewing, and the most: its last
+/// seconds, so a slow recognizer answers in time.
+const PREVIEW_LEAST: usize = RATE as usize * 6 / 10;
+const PREVIEW_MOST: usize = RATE as usize * 8;
 
 pub struct Session {
     stop: Arc<AtomicBool>,
@@ -132,6 +139,9 @@ impl Session {
                         first_heard: None,
                         longest: (longest_phrase * RATE as f32) as usize,
                         vocabulary: options.vocabulary,
+                        preview_sent: None,
+                        preview_took: None,
+                        preview_from: 0,
                     };
                     if run.turn.is_some() {
                         on_event(Event::DecidesTurns);
@@ -174,19 +184,31 @@ impl Drop for Session {
 
 /// Parakeet on its own thread: it loads there, then transcribes the phrases
 /// handed over, in order.
+/// What the decoder thread is asked to hear.
+enum Job {
+    /// A closed phrase, kept in the transcript.
+    Phrase(Vec<f32>),
+    /// The phrase still being spoken, for the live caption only.
+    Preview(Vec<f32>),
+}
+
 struct Decoder {
     /// Dropped once no more phrases will come, which ends the thread after
     /// the ones already queued.
-    phrases: Option<mpsc::Sender<Vec<f32>>>,
+    phrases: Option<mpsc::Sender<Job>>,
     heard: mpsc::Receiver<Result<String, Error>>,
+    previews: mpsc::Receiver<String>,
     /// Phrases handed over and not yet transcribed.
     pending: usize,
+    /// A preview is queued or being heard; one at a time.
+    previewing: bool,
 }
 
 impl Decoder {
     fn start(load: Loader, cancel: Arc<AtomicBool>) -> std::io::Result<Self> {
-        let (phrases, queued) = mpsc::channel::<Vec<f32>>();
+        let (phrases, queued) = mpsc::channel::<Job>();
         let (results, heard) = mpsc::channel();
+        let (previewed, previews) = mpsc::channel();
         std::thread::Builder::new()
             .name("dictation-decode".into())
             .spawn(move || {
@@ -197,17 +219,45 @@ impl Decoder {
                         return;
                     }
                 };
-                for audio in queued {
+                let mut next: Option<Job> = None;
+                loop {
+                    let job = match next.take() {
+                        Some(job) => job,
+                        None => match queued.recv() {
+                            Ok(job) => job,
+                            Err(_) => return,
+                        },
+                    };
                     // A cancelled dictation drops what is still queued.
-                    if cancel.load(Ordering::Acquire) || results.send(Ok(hear(&audio))).is_err() {
+                    if cancel.load(Ordering::Acquire) {
                         return;
+                    }
+                    match job {
+                        Job::Phrase(audio) => {
+                            if results.send(Ok(hear(&audio))).is_err() {
+                                return;
+                            }
+                        }
+                        // A preview with anything behind it is already old,
+                        // and must not hold up a phrase: skip it.
+                        Job::Preview(audio) => match queued.try_recv() {
+                            Ok(after) => {
+                                next = Some(after);
+                                let _ = previewed.send(String::new());
+                            }
+                            Err(_) => {
+                                let _ = previewed.send(hear(&audio));
+                            }
+                        },
                     }
                 }
             })?;
         Ok(Self {
             phrases: Some(phrases),
             heard,
+            previews,
             pending: 0,
+            previewing: false,
         })
     }
 
@@ -215,8 +265,27 @@ impl Decoder {
         let sent = self
             .phrases
             .as_ref()
-            .is_some_and(|phrases| phrases.send(audio).is_ok());
+            .is_some_and(|phrases| phrases.send(Job::Phrase(audio)).is_ok());
         self.pending += usize::from(sent);
+    }
+
+    /// Hears the phrase still being spoken, unless a preview is in flight.
+    fn preview(&mut self, audio: Vec<f32>) -> bool {
+        if self.previewing {
+            return false;
+        }
+        self.previewing = self
+            .phrases
+            .as_ref()
+            .is_some_and(|phrases| phrases.send(Job::Preview(audio)).is_ok());
+        self.previewing
+    }
+
+    /// The preview's words, once heard.
+    fn previewed(&mut self) -> Option<String> {
+        let words = self.previews.try_recv().ok()?;
+        self.previewing = false;
+        Some(words)
     }
 
     /// No more phrases will come.
@@ -282,6 +351,11 @@ struct Run {
     /// The most samples the recognizer takes at once.
     longest: usize,
     vocabulary: Vec<text::Replacement>,
+    /// When the live caption last asked for the open phrase, how long the
+    /// last answer took, and where that preview's audio began.
+    preview_sent: Option<Instant>,
+    preview_took: Option<Duration>,
+    preview_from: usize,
 }
 
 impl Run {
@@ -332,6 +406,9 @@ impl Run {
             // Once the user stopped, the turn ends with the session.
             if stopping.is_none() {
                 self.follow_turn(on_event);
+                if self.turn.is_none() {
+                    self.live_caption(on_event);
+                }
             }
         }
     }
@@ -492,6 +569,42 @@ impl Run {
         }
     }
 
+    /// Words as they are said: the open phrase is heard again every
+    /// moment and shown after the phrases already transcribed, never kept.
+    /// The phrase itself is transcribed when the detector closes it.
+    fn live_caption(&mut self, on_event: &impl Fn(Event)) {
+        if let Some(words) = self.decoder.previewed() {
+            self.preview_took = self.preview_sent.map(|sent| sent.elapsed());
+            // A preview of audio already handed over as a phrase is stale.
+            if let Some(shown) =
+                live_text(&self.joined(), &words, self.preview_from >= self.delivered)
+            {
+                on_event(Event::Partial(shown));
+            }
+        }
+        let every = self
+            .preview_took
+            .map_or(PREVIEW_EVERY, |took| (took * 2).max(PREVIEW_EVERY));
+        if !self.speaking
+            || self.decoder.busy()
+            || self.preview_sent.is_some_and(|sent| sent.elapsed() < every)
+        {
+            return;
+        }
+        let oldest = self.seen.saturating_sub(self.history.len());
+        let from = self
+            .delivered
+            .max(oldest)
+            .max(self.seen.saturating_sub(self.longest.min(PREVIEW_MOST)));
+        if self.seen.saturating_sub(from) < PREVIEW_LEAST {
+            return;
+        }
+        if self.decoder.preview(self.history[from - oldest..].to_vec()) {
+            self.preview_sent = Some(Instant::now());
+            self.preview_from = from;
+        }
+    }
+
     fn pre_roll(&self, start: usize) -> Vec<f32> {
         let oldest = self.seen.saturating_sub(self.history.len());
         let end = start.clamp(oldest, self.seen);
@@ -506,6 +619,20 @@ impl Run {
 
 /// Whether the release tail is over: `TAIL` after stop, or up to
 /// `LONGEST_TAIL` while the voice detector still hears speech.
+/// The live caption: the transcript so far and the words of the phrase
+/// still being spoken, or nothing for a stale or empty preview.
+fn live_text(joined: &str, words: &str, fresh: bool) -> Option<String> {
+    let words = words.trim();
+    if !fresh || words.is_empty() {
+        return None;
+    }
+    Some(if joined.is_empty() {
+        words.to_owned()
+    } else {
+        format!("{joined} {words}")
+    })
+}
+
 fn tail_over(since_stop: Duration, speaking: bool) -> bool {
     since_stop >= LONGEST_TAIL || (since_stop >= TAIL && !speaking)
 }
@@ -589,6 +716,61 @@ mod tests {
             .collect();
         assert_eq!(heard, ["1", "2", "3"]);
         assert!(!decoder.busy());
+    }
+
+    #[test]
+    fn a_preview_is_heard_apart_and_never_counts_as_a_phrase() {
+        let mut decoder = Decoder::start(Box::new(|| Ok(counting())), Arc::default()).unwrap();
+        decoder.hear(vec![0.; 2]);
+        assert!(decoder.preview(vec![0.; 5]));
+        // One preview at a time.
+        assert!(!decoder.preview(vec![0.; 6]));
+        assert_eq!(decoder.next(LONG).unwrap().unwrap(), "2");
+        assert!(!decoder.busy(), "a preview never holds up the finish");
+        let deadline = Instant::now() + LONG;
+        let words = loop {
+            if let Some(words) = decoder.previewed() {
+                break words;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(words, "5");
+        assert!(decoder.preview(vec![0.; 7]), "the next one may go");
+    }
+
+    #[test]
+    fn a_preview_with_a_phrase_behind_it_is_skipped() {
+        let (loaded, wait) = mpsc::channel::<()>();
+        let load: Loader = Box::new(move || {
+            wait.recv().unwrap();
+            Ok(counting())
+        });
+        let mut decoder = Decoder::start(load, Arc::default()).unwrap();
+        assert!(decoder.preview(vec![0.; 9]));
+        decoder.hear(vec![0.; 3]);
+        loaded.send(()).unwrap();
+        assert_eq!(decoder.next(LONG).unwrap().unwrap(), "3");
+        let deadline = Instant::now() + LONG;
+        let words = loop {
+            if let Some(words) = decoder.previewed() {
+                break words;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(words, "", "skipped, not heard");
+    }
+
+    #[test]
+    fn the_live_caption_follows_the_transcript_and_drops_stale_words() {
+        assert_eq!(live_text("", " hola ", true).as_deref(), Some("hola"));
+        assert_eq!(
+            live_text("Buenos días.", "qué tal", true).as_deref(),
+            Some("Buenos días. qué tal")
+        );
+        assert_eq!(live_text("Buenos días.", "qué tal", false), None);
+        assert_eq!(live_text("Buenos días.", "  ", true), None);
     }
 
     #[test]

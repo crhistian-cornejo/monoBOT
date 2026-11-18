@@ -34,8 +34,18 @@ the TDT decoding is ported from FluidAudio's `TdtDecoderV3`.
 - On Apple silicon it is the preferred build (`model::Engine`).
 - A Mac with the CPU build downloads it at launch (about 460 MB), keeps
   dictating with the CPU meanwhile, then deletes the CPU model (over 650 MB).
-- It is released after 45 s idle instead of 3 min, since it reloads in about
-  0.3 s.
+- It loads at launch, in the background, and stays 30 min after the last
+  dictation. It was released after 45 s, and a load can mean Core ML
+  compiling the 445 MB encoder again: on Nov 18 that took 33 s, and a 17 s
+  dictation sat on "Finishing…" until it was done.
+- If a dictation stops before the model is ready, the bar says "Preparing the
+  speech model…", and Escape gets out.
+- Words show as they are said: while the user speaks, the phrase still open
+  is heard again every 350 ms or more, at most its last 8 s, and shown after
+  the phrases already transcribed. These previews are never kept; the phrase
+  is transcribed when the voice detector closes it. A preview with a phrase
+  queued behind it is skipped, so it never delays the finish
+  (`crates/dictation/src/session.rs`, `live_caption`).
 - Measured on this Mac: 7 s of Spanish transcribed exactly in 0.1–0.3 s, a
   0.28 s load once Core ML has cached its compile (the first compile took
   30 s), and a 71 MB process.

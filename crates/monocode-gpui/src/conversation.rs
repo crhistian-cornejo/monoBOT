@@ -2558,6 +2558,12 @@ impl Conversation {
         self.git_events = None;
         let mut events = Vec::new();
         let (label, items, width, style) = self.menu_items(kind, &mut events, window, cx);
+        // The model picker's hover card sits beside the menu; a press on it
+        // must count as inside, like a submenu's.
+        let model_list = items.iter().find_map(|item| match item {
+            MenuItem::Custom(view, _) => view.clone().downcast::<crate::pickers::ModelList>().ok(),
+            _ => None,
+        });
         // The recent models open on the current one.
         let current = (kind == ComposerMenu::Recent)
             .then(|| {
@@ -2576,6 +2582,10 @@ impl Conversation {
                 None => menu,
             }
         });
+        if let Some(list) = model_list {
+            let region = menu.read(cx).submenu_region();
+            list.update(cx, |list, _| list.set_card_region(region));
+        }
         events.push(cx.subscribe_in(
             &menu,
             window,
@@ -4950,6 +4960,15 @@ mod menu_tests {
     #[gpui::test]
     fn model_menu_picks_by_keyboard_and_returns_focus(cx: &mut TestAppContext) {
         let window = conversation(cx);
+        // Grouped by provider, the session's Default leads its models.
+        cx.update(|cx| {
+            if !cx.has_global::<crate::settings::Preferences>() {
+                cx.set_global(crate::settings::Preferences::default());
+            }
+            cx.update_global::<crate::settings::Preferences, _>(|prefs, _| {
+                prefs.model_picker_by_provider = true;
+            });
+        });
         open(window, ComposerMenu::Model, cx);
         assert!(
             !input_focused(window, cx),

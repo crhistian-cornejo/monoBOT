@@ -1,7 +1,7 @@
 //! The Agents zone (PersonalRail.tsx): the Principal pinned on top, then the
 //! bots and the groups, each under its own label. The new-bot menu offers a
 //! blank bot and every role in BOT_ROLES; MonoIntroCard invites the first
-//! Mono, and "A bot of your own" the first bot made from scratch.
+//! Mono, and "A Captain of your own" the first one made from scratch.
 use super::*;
 use gpui::{MouseDownEvent, Pixels, Point};
 use monocode_core::mono::bots;
@@ -47,7 +47,13 @@ pub(crate) enum Section {
 impl Section {
     pub(super) fn holds(self, mono: &Mono) -> bool {
         match self {
-            Self::Coding => mono.is_coding(),
+            // Chief and its crew's code monos are bots that do code work;
+            // they sit with the code monos rather than nowhere.
+            Self::Coding => {
+                mono.is_coding()
+                    || monocode_core::mono::crew::is_coder(mono)
+                    || monocode_core::mono::crew::is_chief(mono)
+            }
             Self::Principal => mono.is_principal(),
             Self::Bots => mono.is_bot() && !mono.is_principal(),
             Self::Groups => mono.is_group(),
@@ -69,6 +75,12 @@ impl Section {
             Self::Captains => "Captains",
         }
     }
+}
+
+/// A personal agent other than a group: what the interface calls a
+/// Captain. Code monos and Chief's crew stay monos.
+pub(crate) fn is_captain(mono: &Mono) -> bool {
+    Section::Captains.holds(mono) && !mono.is_group()
 }
 
 /// `RailDivider`: a hairline between the rail's groups of items.
@@ -338,13 +350,13 @@ impl Monos {
             .into_any_element()
     }
 
-    /// With no bot yet, a "New bot" row opens the same menu.
+    /// With no Captain yet, a "New Captain" row opens the same menu.
     pub(super) fn new_bot_row(&mut self, cx: &mut Context<Self>) -> AnyElement {
         div()
             .id("new-bot-row")
             .debug_selector(|| "new-bot".into())
             .role(Role::Button)
-            .aria_label("New bot")
+            .aria_label("New Captain")
             .h(px(32.))
             .px_2()
             .flex()
@@ -354,7 +366,7 @@ impl Monos {
             .text_color(content(0.5))
             .hover(|s| s.bg(content(0.1)).text_color(content(1.)))
             .child(icon("plus", 16.))
-            .child("New bot")
+            .child("New Captain")
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -424,7 +436,7 @@ impl Monos {
             .flex_col()
             .child(item(
                 "custom",
-                "Blank bot",
+                "Blank Captain",
                 "Start from scratch: name, soul, model",
                 false,
                 true,
@@ -471,13 +483,13 @@ impl Monos {
         .child_create(cx.listener(|this, _, w, cx| this.create(Vec::new(), w, cx)))
     }
 
-    /// "A bot of your own", until there is a bot made from scratch or it is closed.
+    /// "A Captain of your own", until there is a bot made from scratch or it is closed.
     fn bot_intro_card(&mut self, cx: &mut Context<Self>) -> AnyElement {
         let (mascot, color) = self.roster.next_look();
         intro_card(
-            "A bot of your own",
+            "A Captain of your own",
             "Beyond Assistant, Finance, Documents and Research: give it a name, write its soul and pick its tools.",
-            "Create bot",
+            "Create Captain",
             &mascot,
             color,
         )

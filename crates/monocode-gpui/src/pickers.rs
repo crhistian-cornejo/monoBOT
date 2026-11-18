@@ -512,8 +512,10 @@ pub(crate) struct ModelList {
     /// The composer's picker: every provider in one list beside a panel of
     /// the highlighted model's options, holding the session's settings.
     sections: Option<sections::PanelState>,
-    /// The sectioned list, so the provider rail can jump to a section.
+    /// The sectioned list, scrolled back to the top on regrouping.
     list_scroll: gpui::ScrollHandle,
+    /// The hover card beside the sectioned list.
+    card: sections::Card,
     _changed: Subscription,
 }
 impl EventEmitter<ModelPicked> for ModelList {}
@@ -569,6 +571,7 @@ impl ModelList {
             search,
             sections: None,
             list_scroll: gpui::ScrollHandle::new(),
+            card: Default::default(),
             _changed: changed,
         };
         list.highlighted = list.current_index(cx);

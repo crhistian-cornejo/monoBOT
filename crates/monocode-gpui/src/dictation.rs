@@ -95,6 +95,9 @@ pub(crate) struct Dictation {
     eased_at: Option<Instant>,
     /// What has been heard so far, before it lands in the draft.
     partial: String,
+    /// Stopped before the speech model was in memory: finishing waits for it
+    /// to load, and the bar says so.
+    preparing: bool,
     /// The user is talking right now, by the voice detector.
     speaking: bool,
     /// Download progress, 0 to 1, while the model installs.
@@ -136,6 +139,7 @@ impl Dictation {
             shown: [0.; BARS],
             eased_at: None,
             partial: String::new(),
+            preparing: false,
             speaking: false,
             progress: 0.,
             model_bytes: 0,
@@ -387,6 +391,7 @@ impl Dictation {
         };
         self.generation += 1;
         let generation = self.generation;
+        self.preparing = !self.engine.ready();
         self.set_phase(Phase::Finishing, cx);
         let engine = self.engine.clone();
         let (done, result) = async_channel::bounded(1);
@@ -530,10 +535,13 @@ impl Dictation {
     /// Escape drops a dictation in progress before the composer sees the
     /// key. Returns whether it did.
     pub(crate) fn escape(&mut self, event: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
-        if event.keystroke.key != "escape" || !self.phase.cancellable() {
+        // Escape also gets out of a finish that waits on the model.
+        if event.keystroke.key != "escape"
+            || !(self.phase.cancellable() || self.phase == Phase::Finishing)
+        {
             return false;
         }
-        self.cancel(cx);
+        self.cancel_pending(cx);
         true
     }
 }
@@ -759,12 +767,18 @@ impl Render for Dictation {
                 if self.phase == Phase::Listening || self.shown != self.levels {
                     crate::pulse::request(crate::pulse::Rate::Smooth, window, cx);
                 }
-                let caption: SharedString = self
-                    .phase
-                    .caption(&self.partial)
-                    .unwrap_or_default()
-                    .to_owned()
-                    .into();
+                let caption: SharedString = if self.phase == Phase::Finishing
+                    && self.preparing
+                    && self.partial.is_empty()
+                {
+                    "Preparing the speech model… (Esc to cancel)".into()
+                } else {
+                    self.phase
+                        .caption(&self.partial)
+                        .unwrap_or_default()
+                        .to_owned()
+                        .into()
+                };
                 let listening = self.phase == Phase::Listening;
                 div()
                     .debug_selector(|| "dictation-bar".into())
