@@ -55,7 +55,13 @@ impl Section {
                     || monocode_core::mono::crew::is_chief(mono)
             }
             Self::Principal => mono.is_principal(),
-            Self::Bots => mono.is_bot() && !mono.is_principal(),
+            // Chief and the crew's coders are listed with the code monos.
+            Self::Bots => {
+                mono.is_bot()
+                    && !mono.is_principal()
+                    && !monocode_core::mono::crew::is_coder(mono)
+                    && !monocode_core::mono::crew::is_chief(mono)
+            }
             Self::Groups => mono.is_group(),
             Self::Workstreams => mono.is_workstream(),
             Self::Captains => {

@@ -836,12 +836,9 @@ impl Shell {
             self.preview_close = None;
         }
         // A deleted lead (Chief's chat, a swarm coordinator) ends its run, so
-        // it no longer holds the checkout or the requester's Crew tab.
-        if self.orchestrations.contains_key(&id) {
-            self.stop_orchestration(id, cx);
-            self.orchestrations.remove(&id);
-            self.invalidate_chrome(cx);
-        }
+        // it no longer holds the checkout or the requester's Crew tab. Its
+        // records went with the chat; nothing saves them again.
+        self.forget_run(id, cx);
         self.sessions.remove(&id);
         self.session_summaries.remove(&id);
         self.draft_sessions.remove(&id);

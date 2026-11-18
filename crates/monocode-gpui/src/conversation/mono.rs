@@ -541,6 +541,19 @@ impl Conversation {
         }
         self.mono_ui.failed.push((id, error));
     }
+    /// Whether the message reached the agent: its turn's user row is in the
+    /// transcript. A turn that then failed shows its error there; the
+    /// message was sent and must not also wait as "Not sent".
+    pub(crate) fn mono_reached(&self, message: &Message, cx: &App) -> bool {
+        message.sent_at.is_some()
+            && self
+                .transcript
+                .read(cx)
+                .source_rows()
+                .iter()
+                .rev()
+                .any(|row| row.role == "user" && row.sent_at == message.sent_at)
+    }
     pub(crate) fn mono_take_failures(&mut self) -> Vec<(String, String)> {
         std::mem::take(&mut self.mono_ui.failed)
     }

@@ -86,6 +86,13 @@ fn inside_corners(x: f32, y: f32, w: f32, h: f32, radius: f32, round: [bool; 4])
     })
 }
 
+/// Max and the Ultra efforts (Ultrathink, Ultracode…), whatever their place
+/// in a model's list: the corner moves for them.
+fn highest_effort(effort: &str) -> bool {
+    let effort = effort.to_ascii_lowercase();
+    effort == "max" || effort.starts_with("ultra")
+}
+
 /// Crisp dither cells, snapped to device pixels so they stay sharp, as
 /// Capy draws them: 2 px squares, touching on the slider (the Bayer
 /// pattern makes the checker) and apart in the corner.
@@ -228,7 +235,11 @@ fn effort_track(steps: usize, at: Option<usize>, drag: Option<f32>) -> gpui::Can
             let accent = accent_color();
             let centre = match drag {
                 Some(x) => {
-                    Some(x.clamp(knob_centre(0, steps, w), knob_centre(steps - 1, steps, w)))
+                    let (first, last) =
+                        (knob_centre(0, steps, w), knob_centre(steps - 1, steps, w));
+                    // A track narrower than the knob, in a first layout,
+                    // must not invert the range.
+                    Some(x.clamp(first.min(last), first.max(last)))
                 }
                 None => at.map(|at| knob_centre(at, steps, w)),
             };
@@ -638,6 +649,21 @@ impl ModelList {
             }
             list.push(self.section_row(ix, row, cx));
         }
+        // Grouped by maker, a provider still loading or whose models failed
+        // has no section of its own: its status and Retry come last.
+        if !by_provider(cx) {
+            let mut kinds = self.visible_kinds();
+            kinds.sort_by_key(|kind| *kind != self.provider);
+            for kind in kinds {
+                let shown = last == Some(Section::Provider(kind));
+                let pending =
+                    self.loading.contains(&kind) || self.errors.iter().any(|(k, _)| *k == kind);
+                if pending && !shown {
+                    let rule = !list.is_empty();
+                    list.push(self.section_header(Section::Provider(kind), rule, cx));
+                }
+            }
+        }
         if list.is_empty() {
             list.push(
                 div()
@@ -780,14 +806,15 @@ impl ModelList {
             }
             return;
         }
-        if !self.card.visible || self.card.hide.is_some() {
+        // A knob being dragged keeps its card, wherever the pointer goes.
+        if !self.card.visible || self.card.hide.is_some() || self.card.drag.is_some() {
             return;
         }
         self.card.hide = Some(cx.spawn(async move |this, cx| {
             cx.background_executor().timer(CARD_HIDE_DELAY).await;
             let _ = this.update(cx, |this, cx| {
                 this.card.hide = None;
-                if !this.card.over_list && !this.card.over_card {
+                if !this.card.over_list && !this.card.over_card && this.card.drag.is_none() {
                     this.card.visible = false;
                     cx.notify();
                 }
@@ -993,7 +1020,10 @@ impl ModelList {
                 .or_else(|| model.efforts.first().cloned());
             if !model.efforts.is_empty() {
                 let shown = self.effort_shown(&model.efforts, effort.as_deref());
-                top_effort = model.efforts.len() > 1 && shown == Some(model.efforts.len() - 1);
+                top_effort = shown.is_some_and(|ix| {
+                    highest_effort(&model.efforts[ix])
+                        || (model.efforts.len() > 1 && ix == model.efforts.len() - 1)
+                });
                 blocks.push(self.reasoning(
                     kind,
                     &id,
@@ -1057,6 +1087,15 @@ impl ModelList {
                     .get(&control.id)
                     .cloned()
                     .unwrap_or_else(|| control.current.clone());
+                // A provider's own effort control counts too (OpenCode's
+                // variant, an ACP agent's reasoning).
+                if matches!(
+                    control.id.as_str(),
+                    "effort" | "reasoning" | "reasoningEffort" | "reasoning_effort" | "variant"
+                ) && highest_effort(&value)
+                {
+                    top_effort = true;
+                }
                 let label = match control.id.as_str() {
                     "effort" | "reasoning" => "Effort".to_owned(),
                     _ => control.name.clone(),
@@ -1272,6 +1311,11 @@ impl ModelList {
         let Some(drag) = self.card.drag.take() else {
             return;
         };
+        // Let go outside the list and card: the card goes now, as it would
+        // have during the drag.
+        if !self.card.over_list && !self.card.over_card {
+            self.card.visible = false;
+        }
         let Some(track) = self.card.track.get() else {
             return cx.notify();
         };
@@ -1840,6 +1884,16 @@ mod tests {
         window
             .update(&mut visual, |list, _, _| assert!(list.card.drag.is_none()))
             .unwrap();
+    }
+
+    #[test]
+    fn max_and_the_ultra_efforts_move_the_corner() {
+        for effort in ["max", "Max", "ultrathink", "ultracode", "ultra"] {
+            assert!(highest_effort(effort), "{effort}");
+        }
+        for effort in ["xhigh", "high", "medium", "maximal-ish"] {
+            assert!(!highest_effort(effort), "{effort}");
+        }
     }
 
     #[test]

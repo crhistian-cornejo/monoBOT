@@ -344,7 +344,7 @@ pub struct Roster {
     pub defer_souls: bool,
     /// Souls of bots made while `defer_souls` is on, by bot ID.
     #[serde(skip)]
-    pub pending_souls: Vec<(String, &'static str)>,
+    pub pending_souls: Vec<(String, String)>,
 }
 impl Roster {
     pub fn load(store: &Store) -> Result<Self, String> {
@@ -467,14 +467,23 @@ impl Roster {
         };
         let id = mono.id.clone();
         if self.defer_souls {
-            self.pending_souls.push((id, soul));
+            self.pending_souls.push((id, soul.to_owned()));
         } else {
             let _ = files::save(root, &id, None, "SOUL.md", soul, None);
         }
         self.monos.last()
     }
+    /// A new bot's soul, written with the next save when souls are deferred,
+    /// else at once: a bot made with its own instructions.
+    pub fn set_new_soul(&mut self, root: &Path, id: &str, soul: &str) -> Result<(), String> {
+        if let Some((_, pending)) = self.pending_souls.iter_mut().find(|(bot, _)| bot == id) {
+            *pending = soul.to_owned();
+            return Ok(());
+        }
+        files::save(root, id, None, "SOUL.md", soul, None).map(|_| ())
+    }
     /// Write the souls `create_bot` deferred.
-    pub fn write_souls(root: &Path, souls: &[(String, &'static str)]) {
+    pub fn write_souls(root: &Path, souls: &[(String, String)]) {
         for (id, soul) in souls {
             let _ = files::save(root, id, None, "SOUL.md", soul, None);
         }

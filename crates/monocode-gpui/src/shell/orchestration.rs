@@ -344,6 +344,36 @@ impl Shell {
         self.publish_orchestration(lead, cx);
     }
 
+    /// A deleted lead's run: its agents stop and are free again, and it
+    /// leaves memory without being saved, since its records were deleted
+    /// with its chat.
+    pub(super) fn forget_run(&mut self, lead: i64, cx: &mut Context<Self>) {
+        let Some(mut live) = self.orchestrations.remove(&lead) else {
+            self.orchestration_summaries.remove(&lead);
+            self.orchestration_control.boards.remove(&lead);
+            return;
+        };
+        let stopped = live.run.stop();
+        let workers: Vec<i64> = live.run.tasks.iter().filter_map(|t| t.session).collect();
+        let _ = live.run.release_workers();
+        for (_, call) in live.waiters.drain(..) {
+            let _ = call.reply.send(Err("The run's lead was deleted.".into()));
+        }
+        for session in stopped.into_iter().chain(workers) {
+            if let Some(view) = self.sessions.get(&session) {
+                view.update(cx, |v, cx| {
+                    v.stop_if_busy(cx);
+                    v.set_managed_by(None, cx);
+                    v.set_orchestration_progress(None, cx);
+                });
+            }
+        }
+        self.orchestration_summaries.remove(&lead);
+        self.orchestration_control.boards.remove(&lead);
+        self.invalidate_chrome(cx);
+        self.sync_swarm(cx);
+    }
+
     fn resume_orchestration(&mut self, lead: i64, cx: &mut Context<Self>) {
         self.ensure_session(lead, cx);
         let busy = self
@@ -1463,17 +1493,24 @@ impl Shell {
         );
         // A refusal may come at once or after the run's checks and its chat
         // are made; a started run opens its board.
-        let answer = cx.background_executor().spawn(async move {
-            result
-                .recv_timeout(std::time::Duration::from_secs(120))
-                .ok()
-        });
+        // Polled, so no thread waits on it; a dropped reply ends the wait.
         cx.spawn(async move |this, cx| {
-            if let Some(Err(refusal)) = answer.await {
-                let _ = this.update(cx, |this, cx| {
-                    this.error = Some(refusal);
-                    cx.notify();
-                });
+            loop {
+                match result.try_recv() {
+                    Ok(Err(refusal)) => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.error = Some(refusal);
+                            cx.notify();
+                        });
+                        return;
+                    }
+                    Ok(Ok(_)) | Err(std::sync::mpsc::TryRecvError::Disconnected) => return,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {
+                        cx.background_executor()
+                            .timer(std::time::Duration::from_millis(100))
+                            .await
+                    }
+                }
             }
         })
         .detach();
@@ -1968,17 +2005,24 @@ impl Shell {
             .find(|(_, live)| live.run.worker(id).is_some() || live.run.requester == Some(id))
             .map(|(lead, _)| *lead)
             .or_else(|| {
-                // An ended run: its workers, and the chat that handed Chief
-                // the work, still show its board.
                 self.orchestration_summaries
                     .iter()
-                    .filter(|(_, summary)| {
-                        summary.requester == Some(id)
-                            || summary.tasks.iter().any(|t| t.session == Some(id))
-                    })
+                    .find(|(_, summary)| summary.tasks.iter().any(|t| t.session == Some(id)))
                     .map(|(lead, _)| *lead)
-                    .max()
             })
+    }
+
+    /// The board the chat in view shows: its run's, or once a Chief run it
+    /// asked for has ended, that run's, the latest. Only for showing it: an
+    /// ended run does not make the chat part of one (`swarm_lead`).
+    fn board_lead(&self, id: i64) -> Option<i64> {
+        self.swarm_lead(id).or_else(|| {
+            self.orchestration_summaries
+                .iter()
+                .filter(|(_, summary)| summary.requester == Some(id))
+                .map(|(lead, _)| *lead)
+                .max()
+        })
     }
 
     /// In a Chief run, the members that are monos: Chief as the
@@ -2056,7 +2100,7 @@ impl Shell {
         let Some(panel) = self.right_panel.clone() else {
             return;
         };
-        let lead = self.workspace.active.and_then(|id| self.swarm_lead(id));
+        let lead = self.workspace.active.and_then(|id| self.board_lead(id));
         let board = lead.and_then(|lead| match self.orchestration_control.boards.get(&lead) {
             Some(board) => board.clone(),
             None => {

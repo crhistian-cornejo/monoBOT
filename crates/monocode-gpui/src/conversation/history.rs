@@ -4,7 +4,7 @@ use super::*;
 pub(super) type HistoryAction = Box<dyn FnOnce(&mut Conversation, &mut Context<Conversation>)>;
 
 impl Conversation {
-    pub(super) fn history_ready(&self) -> bool {
+    pub(crate) fn history_ready(&self) -> bool {
         self.loaded && !self.history_unloaded && !self.loading
     }
     pub(crate) fn needs_history_restore(&self) -> bool {

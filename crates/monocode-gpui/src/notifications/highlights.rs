@@ -85,9 +85,34 @@ const V0_0_8: [Highlight; 7] = [
     },
 ];
 
+const V0_0_9: [Highlight; 3] = [
+    Highlight {
+        tag: Tag::Fixed,
+        title: "Captain chats read in order",
+        body: "A message that reached the agent and then failed no longer shows twice, once with its error and again at the bottom as \"Not sent\". Copies saved that way are cleaned up when the chat opens.",
+        icon: "message-multiple",
+        image: None,
+    },
+    Highlight {
+        tag: Tag::Improved,
+        title: "Max moves the corner everywhere",
+        body: "The model card's dithered corner moves for Max and every Ultra effort, wherever they sit in a model's list, and for a provider's own effort control.",
+        icon: "sparkles",
+        image: None,
+    },
+    Highlight {
+        tag: Tag::Fixed,
+        title: "Crews and Captains behave",
+        body: "Captains made with their own instructions keep them, a chat whose Chief run ended can start a swarm again, deleting Chief's chat forgets its run, and Chief's crew shows under Monos in every project.",
+        icon: "users",
+        image: None,
+    },
+];
+
 /// The highlights of `version`, newest release first in the source.
 pub(crate) fn of(version: &str) -> &'static [Highlight] {
     match version.trim().trim_start_matches('v') {
+        "0.0.9" => &V0_0_9,
         "0.0.8" => &V0_0_8,
         _ => &[],
     }
@@ -100,9 +125,7 @@ mod tests {
 
     #[test]
     fn each_release_names_its_highlights_with_icons_that_exist() {
-        let highlights = of("v0.0.8");
-        assert!(!highlights.is_empty());
-        for highlight in highlights {
+        for highlight in of("v0.0.8").iter().chain(of("0.0.9")) {
             assert!(!highlight.title.is_empty() && !highlight.body.is_empty());
             assert!(
                 crate::assets::Assets

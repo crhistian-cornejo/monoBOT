@@ -99,3 +99,16 @@ Hecho:
 - Chief y los monos de código del crew salen en la sección Monos del rail.
 - «View Captain» recarga los archivos y da el foco a los ajustes.
 - Los agentes personales se llaman Captains en toda la interfaz: «New Captain», «Delete Captain…», «Captain name» y la ficha al pasar el puntero. Los monos de código siguen siendo monos.
+
+## Correcciones tras publicar 0.0.8 (18 nov)
+
+- Un mensaje a un Captain cuyo turno llegó al agente y luego falló (por ejemplo, Codex rechaza el modelo) ya no queda también en la bandeja de salida como «Not sent». Salía dos veces: con su error en su sitio y otra vez al final, con Retry/Discard. Al cargar el chat se limpian los que ya se guardaron así (`Conversation::mono_reached`).
+- El tramado de la esquina se mueve con Max y con cualquier esfuerzo Ultra (Ultrathink, Ultracode), estén donde estén en la lista del modelo. También cuenta el control de esfuerzo propio del proveedor (la variante de OpenCode, el razonamiento de un agente ACP).
+- Un bot que el Principal crea con instrucciones propias conserva su alma: el alma de serie que esperaba guardarse ya no la pisa (`Roster::set_new_soul`). Los ajustes de un bot recién creado escriben su alma antes de cargar sus archivos.
+- Un run de Chief terminado sigue mostrando su tablero al chat que lo pidió, pero ya no hace de ese chat un trabajador que no puede abrir un swarm (`board_lead` aparte de `swarm_lead`).
+- Borrar el chat de Chief olvida su run sin volver a guardar sus registros (`forget_run`).
+- Chief y los programadores del crew salen en los Monos de cada proyecto, y ya no también en Bots.
+- En el selector agrupado por fabricante, un proveedor que carga o falló muestra su estado y Retry al final.
+- Arrastrar el pomo fuera de la tarjeta ya no la cierra a medio arrastre ni deja el arrastre colgado.
+- Un `opencode serve` privado que no imprime contraseña sigue a los 3 s en vez de esperar 30 s.
+- «Hand to your crew» espera la respuesta sin ocupar un hilo.

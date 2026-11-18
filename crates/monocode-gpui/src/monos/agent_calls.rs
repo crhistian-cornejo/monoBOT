@@ -7,7 +7,6 @@ use monocode_core::mono::{
     agents::{self, Messaging},
     bridge::Call,
     delegations::{self, Delegation},
-    files,
 };
 use monocode_core::time::now_ms;
 use serde_json::{Value, json};
@@ -51,6 +50,12 @@ pub(super) struct AgentCalls {
 }
 
 impl AgentCalls {
+    /// The outbox message carries another agent's request, whose asker
+    /// waits on a retry.
+    pub(super) fn routes(&self, message: &str) -> bool {
+        self.routes.contains_key(message)
+    }
+
     /// Whether a live route is still waiting on this delegation's answer:
     /// the panel's "awaiting reply" mark. Routes live in memory, so a
     /// restart drops them and a stale entry shows nothing rather than
@@ -226,7 +231,8 @@ impl Monos {
             bot.normalize();
         }
         if made.instructions != role.instructions {
-            files::save(&root, &id, None, "SOUL.md", &made.instructions, None)?;
+            // Replaces the role's stock soul waiting for the save below.
+            self.roster.set_new_soul(&root, &id, &made.instructions)?;
         }
         self.save(cx);
         self.changed(cx);
