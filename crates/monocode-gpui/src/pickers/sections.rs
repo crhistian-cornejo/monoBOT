@@ -86,10 +86,12 @@ fn inside_corners(x: f32, y: f32, w: f32, h: f32, radius: f32, round: [bool; 4])
     })
 }
 
-/// Crisp dither cells: `CELL` squares on a `PITCH` grid with a gap between,
-/// snapped to device pixels so they stay sharp, as Capy draws them.
-const CELL: f32 = 3.;
-const PITCH: f32 = 4.;
+/// Crisp dither cells, snapped to device pixels so they stay sharp, as
+/// Capy draws them: 2 px squares, touching on the slider (the Bayer
+/// pattern makes the checker) and apart in the corner.
+const CELL: f32 = 2.;
+const SLIDER_PITCH: f32 = 2.;
+const CORNER_PITCH: f32 = 3.;
 
 fn snap(value: f32, scale: f32) -> f32 {
     (value * scale).round() / scale
@@ -100,8 +102,8 @@ fn snap(value: f32, scale: f32) -> f32 {
 fn crisp_cells(
     window: &mut Window,
     origin: gpui::Point<gpui::Pixels>,
-    w: f32,
-    h: f32,
+    (w, h): (f32, f32),
+    pitch: f32,
     mut ink: impl FnMut(f32, f32, i32, i32) -> Option<gpui::Hsla>,
 ) {
     let scale = window.scale_factor();
@@ -109,10 +111,10 @@ fn crisp_cells(
         snap(f32::from(origin.x), scale),
         snap(f32::from(origin.y), scale),
     );
-    let (cols, rows) = ((w / PITCH).floor() as i32, (h / PITCH).floor() as i32);
+    let (cols, rows) = ((w / pitch).floor() as i32, (h / pitch).floor() as i32);
     for row in 0..rows {
         for col in 0..cols {
-            let (x, y) = (col as f32 * PITCH, row as f32 * PITCH);
+            let (x, y) = (col as f32 * pitch, row as f32 * pitch);
             let Some(color) = ink(x + CELL / 2., y + CELL / 2., col, row) else {
                 continue;
             };
@@ -151,28 +153,35 @@ fn corner_dither(moving: bool) -> impl IntoElement {
             };
             let ink = accent_color();
             let (w, h) = (f32::from(bounds.size.width), f32::from(bounds.size.height));
-            crisp_cells(window, bounds.origin, w, h, |x, y, col, row| {
-                // The card's own corner, less its 1px rule.
-                if !inside_corners(x, y, w, h, 11., [false, true, false, false]) {
-                    return None;
-                }
-                let (dx, dy) = ((w - x) / w, y / h);
-                let reach = (dx * dx * 0.7 + dy * dy).sqrt();
-                let mut tone = (1. - reach).max(0.).powf(1.5);
-                if !still {
-                    // A diagonal wave travelling out of the corner.
-                    let along = dx * 0.6 + dy * 0.4;
-                    let wave = ((along * 7. - phase * 2.6) * std::f32::consts::TAU / 2.).sin();
-                    tone = (tone * (0.7 + 0.45 * wave)).clamp(0., 1.);
-                }
-                if !dither::inked(col, row, tone) {
-                    return None;
-                }
-                // Denser cells read darker, as in Capy's corner.
-                let mut color = ink;
-                color.a *= 0.35 + 0.55 * tone;
-                Some(color)
-            });
+            crisp_cells(
+                window,
+                bounds.origin,
+                (w, h),
+                CORNER_PITCH,
+                |x, y, col, row| {
+                    // The card's own corner, less its 1px rule.
+                    if !inside_corners(x, y, w, h, 11., [false, true, false, false]) {
+                        return None;
+                    }
+                    let (dx, dy) = ((w - x) / w, y / h);
+                    let reach = (dx * dx * 0.7 + dy * dy).sqrt();
+                    // Never solid: the corner itself is dense dots.
+                    let mut tone = (1. - reach).max(0.).powf(1.4) * 0.85;
+                    if !still {
+                        // A diagonal wave travelling out of the corner.
+                        let along = dx * 0.6 + dy * 0.4;
+                        let wave = ((along * 7. - phase * 2.6) * std::f32::consts::TAU / 2.).sin();
+                        tone = (tone * (0.7 + 0.45 * wave)).clamp(0., 1.);
+                    }
+                    if !dither::inked(col, row, tone) {
+                        return None;
+                    }
+                    // A light tint, a little deeper where the dots are dense.
+                    let mut color = ink;
+                    color.a *= 0.22 + 0.4 * tone;
+                    Some(color)
+                },
+            );
         },
     )
     .absolute()
@@ -242,8 +251,10 @@ fn effort_track(steps: usize, at: Option<usize>, drag: Option<f32>) -> gpui::Can
             let fill_w = centre - TRACK_INSET;
             let fill_h = h - TRACK_INSET * 2.;
             let origin = bounds.origin + gpui::point(px(TRACK_INSET), px(TRACK_INSET));
+            // A light tint under the dots, then dots that thin out
+            // continuously from the left to the knob; nothing solid.
             let mut under = accent;
-            under.a *= 0.28;
+            under.a *= 0.16;
             window.paint_quad(
                 gpui::fill(
                     gpui::Bounds::new(origin, gpui::size(px(fill_w), px(fill_h))),
@@ -251,30 +262,20 @@ fn effort_track(steps: usize, at: Option<usize>, drag: Option<f32>) -> gpui::Can
                 )
                 .corner_radii(px(6.)),
             );
-            // Solid from the left, then crisp dots thinning toward the knob.
-            let solid = (fill_w * 0.3).max(0.);
-            window.paint_quad(
-                gpui::fill(
-                    gpui::Bounds::new(origin, gpui::size(px(solid), px(fill_h))),
-                    accent,
-                )
-                .corner_radii(gpui::Corners {
-                    top_left: px(6.),
-                    bottom_left: px(6.),
-                    top_right: px(0.),
-                    bottom_right: px(0.),
-                }),
-            );
-            let dots = gpui::point(px(solid), px(0.));
+            let mut dots = accent;
+            dots.a *= 0.9;
             crisp_cells(
                 window,
-                origin + dots,
-                fill_w - solid,
-                fill_h,
-                |x, _, col, row| {
-                    let t = x / (fill_w - solid).max(1.);
-                    let tone = 1. - t.powf(0.85) * 0.92;
-                    dither::inked(col, row, tone).then_some(accent)
+                origin,
+                (fill_w, fill_h),
+                SLIDER_PITCH,
+                |x, y, col, row| {
+                    if !inside_corners(x, y, fill_w, fill_h, 5., [true, false, false, true]) {
+                        return None;
+                    }
+                    let t = x / fill_w.max(1.);
+                    let tone = 0.92 - t.powf(0.9) * 0.78;
+                    dither::inked(col, row, tone).then_some(dots)
                 },
             );
             let knob = centre - KNOB / 2.;

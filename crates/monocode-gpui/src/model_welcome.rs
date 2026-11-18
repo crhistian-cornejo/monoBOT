@@ -563,7 +563,8 @@ fn opus(t: f32, w: f32, h: f32, stage: (f32, f32), light: bool) -> Vec<Shape> {
                     color: tint(clay, base),
                 });
             }
-            if p.0 < clear_from {
+            // The first point has no segment behind it to fade.
+            if i > 0 && p.0 < clear_from {
                 let prior = at(i - 1);
                 let mid = (p.0 + prior.0) / 2.;
                 let edge = 1. - (mid - solid_until) / (clear_from - solid_until);
