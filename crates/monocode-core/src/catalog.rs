@@ -373,18 +373,21 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
         }
     }
     if kind == Kind::Antigravity && !models.iter().any(|m| m.id == "gemini-4-hydrogen") {
-        models.insert(0, Model {
-            id: "gemini-4-hydrogen".into(),
-            name: "Gemini 4 Hydrogen".into(),
-            alias_target: None,
-            efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
-            default_effort: Some("high".into()),
-            fast: false,
-            thinking: true,
-            default: true,
-            tiers: Vec::new(),
-            controls: Vec::new(),
-        });
+        models.insert(
+            0,
+            Model {
+                id: "gemini-4-hydrogen".into(),
+                name: "Gemini 4 Hydrogen".into(),
+                alias_target: None,
+                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
+                default_effort: Some("high".into()),
+                fast: false,
+                thinking: true,
+                default: true,
+                tiers: Vec::new(),
+                controls: Vec::new(),
+            },
+        );
     }
     if models.is_empty() {
         if kind == Kind::Droid {
@@ -572,7 +575,9 @@ fn acp_models(value: &Value) -> Vec<Model> {
                 .and_then(|o| o["currentValue"].as_str())
                 .map(str::to_owned)
                 .or(model.default_effort);
-            if model.efforts.is_empty() && (id == "gemini-4-hydrogen" || id.ends_with(":gemini-4-hydrogen")) {
+            if model.efforts.is_empty()
+                && (id == "gemini-4-hydrogen" || id.ends_with(":gemini-4-hydrogen"))
+            {
                 model.efforts = vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()];
                 model.default_effort = Some("high".into());
                 model.thinking = true;
