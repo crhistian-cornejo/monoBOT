@@ -221,6 +221,17 @@ impl Notch {
             .flex_col()
             .gap(px(6.))
             .bg(ink(0.07))
+            .when(!editing, |cell| {
+                // A right-click arranges this one widget without the pencil.
+                let widget = widget.clone();
+                cell.on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.widget_menu(widget.clone(), event.position, window, cx);
+                    }),
+                )
+            })
             .when(editing, |cell| {
                 // Arranging: pick a widget up and drop it on another to put
                 // it there; the one under it lights up.

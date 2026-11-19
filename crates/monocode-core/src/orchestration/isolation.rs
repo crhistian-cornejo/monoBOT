@@ -26,9 +26,20 @@ pub struct Worker {
 pub const BRANCH_PREFIX: &str = "monobot/swarm/";
 /// Worker worktree folders start with this.
 const FOLDER_PREFIX: &str = "mc-worker-";
-/// A leftover worker worktree with changes is kept this long for the user
-/// to inspect, then swept.
-const KEEP_CHANGED: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+const SWEEP_GRACE: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+fn base_ref(branch: &str) -> Option<String> {
+    let name = branch.strip_prefix(BRANCH_PREFIX)?;
+    (!name.is_empty()
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
+    .then(|| format!("refs/monobot/swarm-base/{name}"))
+}
+
+fn revision(cwd: &Path, reference: &str) -> Result<String, String> {
+    git(cwd, None, &["rev-parse", "--verify", reference]).map(|hash| hash.trim().to_owned())
+}
 
 fn git(cwd: &Path, index: Option<&Path>, args: &[&str]) -> Result<String, String> {
     if crate::files::remote::is_remote(cwd) {
@@ -162,7 +173,9 @@ pub fn create(lead: &Path, name: &str) -> Result<Worker, String> {
         ));
     }
     let branch = format!("{BRANCH_PREFIX}{name}");
-    git(
+    let anchor = base_ref(&branch).ok_or("Invalid worker branch")?;
+    git(lead, None, &["update-ref", &anchor, &base, ""])?;
+    if let Err(error) = git(
         lead,
         None,
         &[
@@ -174,7 +187,10 @@ pub fn create(lead: &Path, name: &str) -> Result<Worker, String> {
             &path.to_string_lossy(),
             &base,
         ],
-    )?;
+    ) {
+        let _ = git(lead, None, &["update-ref", "-d", &anchor, &base]);
+        return Err(error);
+    }
     // A project opened at a subfolder works in the same subfolder.
     let checkout = path
         .canonicalize()
@@ -280,13 +296,46 @@ pub fn remove(lead: &Path, worker: &Worker) -> Result<(), String> {
 
 /// Delete one of our temporary branches; anything else is left alone.
 fn delete_branch(lead: &Path, branch: &str) {
-    if branch.starts_with(BRANCH_PREFIX)
-        && branch
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b"-_/".contains(&b))
-    {
-        let _ = git(lead, None, &["branch", "-D", branch]);
+    if let Some(anchor) = base_ref(branch) {
+        if git(lead, None, &["branch", "-D", branch]).is_ok() {
+            let _ = git(lead, None, &["update-ref", "-d", &anchor]);
+        }
     }
+}
+
+fn delete_unused_base_branch(lead: &Path, branch: &str, base: &str) -> bool {
+    let Some(anchor) = base_ref(branch) else {
+        return false;
+    };
+    if revision(lead, &format!("refs/heads/{branch}")).as_deref() != Ok(base)
+        || git(lead, None, &["branch", "-D", "--", branch]).is_err()
+    {
+        return false;
+    }
+    let _ = git(lead, None, &["update-ref", "-d", &anchor, base]);
+    true
+}
+
+fn remove_unchanged_checkout(lead: &Path, checkout: &Path, base: &str) -> bool {
+    if revision(checkout, "HEAD").as_deref() != Ok(base) {
+        return false;
+    }
+    let Ok(top) = git(checkout, None, &["rev-parse", "--show-toplevel"]) else {
+        return false;
+    };
+    let top = top.trim();
+    if git(lead, None, &["worktree", "remove", "--", top]).is_err() {
+        return false;
+    }
+    crate::provider::discard_worktree(Path::new(top));
+    true
+}
+
+pub fn remove_unreviewed_if_unchanged(lead: &Path, worker: &Worker) -> bool {
+    if !remove_unchanged_checkout(lead, Path::new(&worker.checkout), &worker.base) {
+        return false;
+    }
+    worker.branch.is_empty() || delete_unused_base_branch(lead, &worker.branch, &worker.base)
 }
 
 /// What `sweep` removed.
@@ -298,9 +347,13 @@ pub struct Swept {
 
 /// Clear what interrupted runs left behind in the lead's repository: worker
 /// worktrees no run still uses (`keep`, their checkouts) once they hold no
-/// changes, or once they are a week old, and worker branches no worktree
-/// has checked out. Returns how much went.
+/// changes or commits since their recorded base and are past the creation
+/// grace period. Unknown bases and branches without worktrees are retained.
 pub fn sweep(lead: &Path, keep: &[String]) -> Result<Swept, String> {
+    sweep_after(lead, keep, SWEEP_GRACE)
+}
+
+fn sweep_after(lead: &Path, keep: &[String], grace: std::time::Duration) -> Result<Swept, String> {
     if !available(lead) {
         return Ok(Swept::default());
     }
@@ -316,52 +369,37 @@ pub fn sweep(lead: &Path, keep: &[String]) -> Result<Swept, String> {
     };
     let kept: Vec<String> = keep.iter().filter_map(|k| folder(k)).collect();
     let mut swept = Swept::default();
-    let mut used = Vec::new();
     for tree in crate::git::worktrees(lead)? {
         let path = Path::new(&tree.path);
-        let ours = path
-            .file_name()
-            .is_some_and(|n| n.to_string_lossy().starts_with(FOLDER_PREFIX));
-        let in_use = folder(&tree.path).is_some_and(|f| kept.contains(&f));
-        if !ours || in_use || tree.main {
-            used.extend(tree.branch);
+        let Some(branch) = tree.branch.as_deref() else {
+            continue;
+        };
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if tree.main
+            || !name.starts_with(FOLDER_PREFIX)
+            || name.strip_prefix(FOLDER_PREFIX) != branch.strip_prefix(BRANCH_PREFIX)
+            || kept.iter().any(|keep| keep == name)
+        {
             continue;
         }
-        // HEAD is the worker's starting snapshot: any status is its work.
-        let clean = git(path, None, &["status", "--porcelain"]).is_ok_and(|s| s.trim().is_empty());
-        let old = std::fs::metadata(path.join(".git"))
+        let old_enough = std::fs::metadata(path.join(".git"))
             .and_then(|m| m.modified())
             .ok()
             .and_then(|t| t.elapsed().ok())
-            .is_some_and(|age| age > KEEP_CHANGED);
-        if clean || old {
-            crate::provider::discard_worktree(path);
-            if git(
-                lead,
-                None,
-                &["worktree", "remove", "--force", "--", &tree.path],
-            )
-            .is_ok()
-            {
-                swept.worktrees += 1;
-                continue;
-            }
+            .is_some_and(|age| age >= grace);
+        if !old_enough {
+            continue;
         }
-        used.extend(tree.branch);
-    }
-    let branches = git(
-        lead,
-        None,
-        &[
-            "for-each-ref",
-            "--format=%(refname:short)",
-            &format!("refs/heads/{}", BRANCH_PREFIX.trim_end_matches('/')),
-        ],
-    )?;
-    for branch in branches.lines().map(str::trim).filter(|b| !b.is_empty()) {
-        if branch.starts_with(BRANCH_PREFIX) && !used.iter().any(|u| u == branch) {
-            delete_branch(lead, branch);
-            swept.branches += 1;
+        let Some(base) = base_ref(branch).and_then(|anchor| revision(lead, &anchor).ok()) else {
+            continue;
+        };
+        if remove_unchanged_checkout(lead, path, &base) {
+            swept.worktrees += 1;
+            if delete_unused_base_branch(lead, branch, &base) {
+                swept.branches += 1;
+            }
         }
     }
     Ok(swept)
@@ -458,28 +496,54 @@ mod tests {
         let busy = create(&lead, "busy").unwrap();
         std::fs::write(Path::new(&busy.checkout).join("src/lib.rs"), "work\n").unwrap();
         // A branch whose worktree is long gone.
-        super::git(&lead, None, &["branch", "monobot/swarm/orphan", "HEAD"]).unwrap();
+        let orphan = create(&lead, "orphan").unwrap();
+        super::git(&lead, None, &["worktree", "remove", "--", &orphan.checkout]).unwrap();
+        let committed = create(&lead, "committed").unwrap();
+        let checkout = Path::new(&committed.checkout);
+        std::fs::write(checkout.join("README"), "committed work\n").unwrap();
+        super::git(checkout, None, &["commit", "-am", "Keep this work"]).unwrap();
+        let detached = create(&lead, "committed-orphan").unwrap();
+        let checkout = Path::new(&detached.checkout);
+        std::fs::write(checkout.join("README"), "committed orphan work\n").unwrap();
+        super::git(checkout, None, &["commit", "-am", "Keep the branch"]).unwrap();
+        super::git(
+            &lead,
+            None,
+            &["worktree", "remove", "--", &detached.checkout],
+        )
+        .unwrap();
         // A branch of the user's is never touched.
         super::git(&lead, None, &["branch", "feature", "HEAD"]).unwrap();
-        let swept = sweep(&lead, std::slice::from_ref(&live.checkout)).unwrap();
+        assert_eq!(sweep(&lead, &[]).unwrap(), Swept::default());
+        let swept = sweep_after(
+            &lead,
+            std::slice::from_ref(&live.checkout),
+            std::time::Duration::ZERO,
+        )
+        .unwrap();
         assert_eq!(
             swept,
             Swept {
                 worktrees: 1,
-                branches: 2
+                branches: 1
             }
         );
         assert!(Path::new(&live.checkout).exists());
         assert!(!Path::new(&idle.checkout).exists());
         assert!(
             Path::new(&busy.checkout).exists(),
-            "work is kept for a week"
+            "uncommitted work is kept"
+        );
+        assert!(
+            Path::new(&committed.checkout).exists(),
+            "committed work is kept"
         );
         let branches = super::git(&lead, None, &["branch", "--list"]).unwrap();
         assert!(branches.contains("feature"));
         assert!(branches.contains(&live.branch));
         assert!(branches.contains(&busy.branch));
-        assert!(!branches.contains("orphan"));
+        assert!(branches.contains(&orphan.branch));
+        assert!(branches.contains(&detached.branch));
         assert!(!branches.contains(&idle.branch));
         remove(&lead, &live).unwrap();
         remove(&lead, &busy).unwrap();

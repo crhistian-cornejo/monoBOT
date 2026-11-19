@@ -2,6 +2,7 @@
 //! worker chat: the request it is blocked on, steering and answers from the
 //! lead, and a composer that stays closed while the lead manages it.
 use super::*;
+use gpui::App;
 use monocode_core::orchestration::{
     Plan,
     control::{NeedsInput, Question, QuestionOption},
@@ -277,9 +278,27 @@ impl Conversation {
         receive
     }
 
-    #[cfg(test)]
+    /// The lead whose run manages this worker, if any.
     pub(crate) fn managed_by(&self) -> Option<i64> {
         self.managed_by
+    }
+    pub(crate) fn delegation_target<'a>(&'a self, cx: &'a App) -> (&'a str, Option<&'a str>) {
+        let transcript = self.transcript.read(cx);
+        if self.busy
+            && let Some(turn) = transcript
+                .active_turn()
+                .and_then(|id| transcript.turns.get(&id))
+            && !turn.provider.is_empty()
+        {
+            return (&turn.provider, turn.model_id.as_deref());
+        }
+        (
+            &self.summary.provider,
+            self.model
+                .as_deref()
+                .or(self.resolved_model.as_deref())
+                .or_else(|| self.model_info().map(|model| model.id.as_str())),
+        )
     }
     #[cfg(test)]
     pub(crate) fn orchestration_paused(&self) -> bool {
@@ -868,6 +887,11 @@ impl Conversation {
     /// The agent turned this chat into a swarm's coordinator mid-turn.
     pub(crate) fn swarm_opened_by_agent(&mut self, cx: &mut Context<Self>) {
         self.status = "The agent started a swarm; its board is in the Swarm tab.".into();
+        cx.notify();
+    }
+    /// `control worker` opened this chat's run for a temporary worker.
+    pub(crate) fn worker_opened_by_agent(&mut self, cx: &mut Context<Self>) {
+        self.status = "The agent started a temporary worker; follow it in the Swarm tab.".into();
         cx.notify();
     }
     /// The run could not start: the message goes back to the composer.

@@ -109,8 +109,9 @@ impl Conversation {
         // Once the agent has answered and only background work is left, which
         // may never end (a dev server), queuing would park the message behind
         // it, so hand it to the agent now.
-        (prefers_steer != invert || !self.background.tasks.is_empty())
-            && Kind::from_id(&self.summary.provider).can_steer()
+        let kind = Kind::from_id(&self.summary.provider);
+        (prefers_steer != invert && kind.can_steer())
+            || (!self.background.tasks.is_empty() && kind.steers_while_waiting())
     }
     /// `invert` flips the follow-up preference for this message (Cmd+Enter).
     pub(super) fn enqueue_follow_up_inverted(
@@ -346,7 +347,7 @@ impl Conversation {
                 return;
             }
             if !message.steer
-                || !Kind::from_id(&self.summary.provider).can_steer()
+                || !self.provider_steers()
                 || !message.can_steer()
                 || !self.follow_ups.ready
                 || (!requested
@@ -544,7 +545,7 @@ impl Conversation {
                         let sends = message.send_at.map(|at| format!("Sends {}", monocode_core::scheduled_send::format_scheduled_send(at, &chrono::Local::now())));
                         row.child(div().flex_1().min_w_0().py_1().child(div().id("queued-message-text").role(Role::Label).aria_label(message.label()).truncate().text_color(content(0.75)).child(message.label())).when_some(sends.clone(), |d, sends| d.child(div().id("queue-sends-at").text_size(px(11.)).text_color(content(0.45)).child(sends))).when_some(message.error.clone(), |d, error| d.child(div().id("queue-error").role(Role::Alert).text_color(crate::theme::danger()).child(error))))
                             .when(sends.is_some(), |d| d.child(queue_button("queue-send-now", "Send now", "send").w_auto().px_2().gap(px(6.)).child("Send now").on_click(cx.listener(move |this, _, _, cx| this.send_scheduled_now(&now_id, cx)))))
-                            .when(sends.is_none() && Kind::from_id(&self.summary.provider).can_steer(), |d| d.child(queue_button("queue-steer", "Steer queued message", "queue-steer").w_auto().px_2().gap(px(6.)).opacity(if sending { 0.4 } else { 1. }).child("Steer").on_click(cx.listener(move |this, _, _, cx| {
+                            .when(sends.is_none() && self.provider_steers(), |d| d.child(queue_button("queue-steer", "Steer queued message", "queue-steer").w_auto().px_2().gap(px(6.)).opacity(if sending { 0.4 } else { 1. }).child("Steer").on_click(cx.listener(move |this, _, _, cx| {
                                 if !sending && let Some(message) = this.follow_ups.state.messages.iter_mut().find(|m| m.id == steer) {
                                     if !message.can_steer() && this.busy { return; }
                                     message.steer = true;

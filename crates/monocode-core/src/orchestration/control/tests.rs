@@ -664,3 +664,83 @@ fn chief_defaults_to_opus_at_medium_from_the_catalog() {
     let defaults = Defaults::chief(&[model("claude-sonnet-5", None, &["medium"])]);
     assert_eq!((defaults.model, defaults.effort), (None, None));
 }
+
+#[test]
+fn a_temporary_worker_is_a_delegate_on_the_chats_harness() {
+    let delegate = worker_delegate(
+        &json!({"title":"Fix login","task":"Fix it in src/auth and run its tests"}),
+        "codex",
+        Some("gpt-5.5"),
+    )
+    .unwrap();
+    assert_eq!(delegate["harness"], "codex");
+    assert_eq!(delegate["model"], "gpt-5.5");
+    assert_eq!(delegate["prompt"], "Fix it in src/auth and run its tests");
+    assert_eq!(
+        delegate["files"],
+        json!(["."]),
+        "the whole checkout by default"
+    );
+    check_fields("delegate", &delegate).unwrap();
+    // A chat's default model is left to the harness.
+    let plain = worker_delegate(
+        &json!({"title":"T","task":"Do","files":["src"]}),
+        "claude",
+        None,
+    )
+    .unwrap();
+    assert!(plain.get("model").is_none());
+    assert_eq!(plain["files"], json!(["src"]));
+    // Unknown fields, a missing task and scopes outside the project fail.
+    assert!(worker_delegate(&json!({"title":"T","task":"D","mono":"Ada"}), "codex", None).is_err());
+    assert!(worker_delegate(&json!({"title":"T"}), "codex", None)
+        .unwrap_err()
+        .contains("task"));
+    assert!(worker_delegate(
+        &json!({"title":"T","task":"D","files":["../x"]}),
+        "codex",
+        None
+    )
+    .is_err());
+    let started = worker_started(json!({"taskId":"task-1","status":"queued"}), "/bin/monobot");
+    assert_eq!(started["temporary"], true);
+    let instructions = started["instructions"].as_str().unwrap();
+    assert!(instructions.contains("control review") && instructions.contains("keeps no memory"));
+}
+
+#[test]
+fn a_retried_mono_handoff_gets_its_first_answer() {
+    let mut handoffs = Handoffs::default();
+    assert!(handoffs.receipt(7, "r1", "f").is_none());
+    handoffs.record(7, "r1", "f", &json!({"queued": true}));
+    assert_eq!(
+        handoffs.receipt(7, "r1", "f").unwrap().unwrap()["queued"],
+        true
+    );
+    assert!(handoffs.receipt(7, "r1", "other").unwrap().is_err());
+    // Another chat's request with the same ID is its own.
+    assert!(handoffs.receipt(8, "r1", "f").is_none());
+    for ix in 0..MAX_REQUESTS {
+        handoffs.record(9, &format!("x{ix}"), "f", &json!(ix));
+    }
+    assert!(
+        handoffs.receipt(7, "r1", "f").is_none(),
+        "the oldest go first"
+    );
+    assert!(handoffs.receipt(9, "x1", "f").is_some());
+}
+
+#[test]
+fn the_offer_names_the_temporary_worker_and_never_invents_monos() {
+    let alone = chief_offer("/bin/monobot", &[]);
+    assert!(alone.contains("control worker") && alone.contains("Never invent monos"));
+    let monos = [CrewMember {
+        id: "m1".into(),
+        name: "Ghost".into(),
+        specialty: String::new(),
+    }];
+    let offer = chief_offer("/bin/monobot", &monos);
+    assert!(offer.contains("A busy mono refuses") && offer.contains("control worker"));
+    check_fields("worker", &json!({"title":"A","task":"B","files":["."]})).unwrap();
+    assert!(ACTIONS.contains(&"worker") && HELP.contains("  worker "));
+}

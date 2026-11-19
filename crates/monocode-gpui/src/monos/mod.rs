@@ -1001,11 +1001,13 @@ impl Monos {
     /// mono's own chat, where it works with its memory and the user can
     /// follow it. Returns the mono's name and the queued message's ID, whose
     /// answer [`MonoTaskDone`] reports.
+    /// `busy` says whether a run already has the mono at work.
     pub(crate) fn hand_task(
         &mut self,
         name: &str,
         from: &str,
         task: &str,
+        busy: &dyn Fn(&str) -> bool,
         cx: &mut Context<Self>,
     ) -> Result<(String, String), String> {
         let wanted = name.trim();
@@ -1021,7 +1023,7 @@ impl Monos {
         else {
             let names: Vec<&str> = crew.iter().map(|m| m.name.as_str()).collect();
             return Err(if names.is_empty() {
-                "The user has no code monos. Only the user creates them, in the sidebar; do the work here.".into()
+                "The user has no code monos. Only the user creates them, in the sidebar; do the work here, or start a temporary worker with control worker.".into()
             } else {
                 format!(
                     "No mono is named \"{wanted}\". The user's monos: {}.",
@@ -1030,6 +1032,12 @@ impl Monos {
             });
         };
         let (id, label) = (mono.id.clone(), mono.label());
+        // One task at a time: a queued or running message, or a run's task.
+        if busy(&id) || self.is_busy(&id, cx) {
+            return Err(format!(
+                "{label} is busy with another task. Give this one to another mono, or start a temporary worker with control worker."
+            ));
+        }
         let text = format!(
             "<handoff from=\"{from}\">\n{task}\n</handoff>\nDo this in your project. Save to your memory what you learn that will matter next time, then reply with what you did and how you checked it."
         );
@@ -1039,6 +1047,13 @@ impl Monos {
             .ok_or("The mono could not take the task")?;
         self.handoffs.insert(message.clone());
         Ok((label, message))
+    }
+
+    /// The mono has a message waiting or in flight, or its chat is working.
+    pub(crate) fn is_busy(&self, id: &str, cx: &App) -> bool {
+        self.inflight.contains_key(id)
+            || self.roster.get(id).is_some_and(|m| !m.outbox.is_empty())
+            || self.chats.get(id).is_some_and(|chat| chat.read(cx).busy)
     }
 
     /// A crew mono and the folder its files live in, to read its identity

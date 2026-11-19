@@ -432,7 +432,7 @@ mod tests {
         assert_eq!(history.rows[1].sent_at, None);
         let tool: ToolCall = serde_json::from_str(&history.rows[2].text).unwrap();
         assert_eq!(tool.state, ToolState::Failed);
-        assert!(tool.output.starts_with("… earlier output omitted …\n"));
+        assert!(tool.output.contains("… middle output omitted …"));
         let answer: Vec<_> = history
             .rows
             .iter()

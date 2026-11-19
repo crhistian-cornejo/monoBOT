@@ -1072,3 +1072,461 @@ fn a_new_request_is_told_the_chats_earlier_chief_run_is_still_open(cx: &mut Test
         })
         .unwrap();
 }
+
+/// A Tester code mono in the user's roster.
+fn tester(window: &WindowHandle<Shell>, cx: &mut TestAppContext) -> String {
+    let id = window
+        .update(cx, |shell, _, cx| {
+            shell.monos.clone().unwrap().update(cx, |m, _| {
+                let id = m.roster.create(Vec::new()).id.clone();
+                let mono = m.roster.get_mut(&id).unwrap();
+                mono.name = "Tester".into();
+                mono.specialty = Some("Writes and runs the tests".into());
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
+    id
+}
+
+#[gpui::test]
+fn a_chat_gives_monos_tasks_only_when_one_is_free_and_never_from_a_worker(cx: &mut TestAppContext) {
+    let (window, chat, _dir) = shell(cx);
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    let task = json!({"mono": "Tester", "task": "Run the tests in src"});
+    // No monos: nothing is invented, and the temporary worker is named.
+    let none = window
+        .update(cx, |shell, _, cx| {
+            call(shell, chat, "mono", "m1", task.clone(), cx)
+        })
+        .unwrap();
+    let error = none.try_recv().unwrap().unwrap_err();
+    assert!(
+        error.contains("no code monos") && error.contains("control worker"),
+        "{error}"
+    );
+    let mono = tester(&window, cx);
+    window
+        .update(cx, |shell, _, cx| {
+            // A bad request ID, an unknown mono and a stray field are refused.
+            let bad = call(shell, chat, "mono", "bad id", task.clone(), cx);
+            assert!(bad.try_recv().unwrap().unwrap_err().contains("request ID"));
+            let unknown = call(
+                shell,
+                chat,
+                "mono",
+                "m2",
+                json!({"mono": "Ghost", "task": "x"}),
+                cx,
+            );
+            assert!(unknown.try_recv().unwrap().unwrap_err().contains("Tester"));
+            let stray = call(
+                shell,
+                chat,
+                "mono",
+                "m3",
+                json!({"mono": "Tester", "task": "x", "files": ["src"]}),
+                cx,
+            );
+            assert!(stray.try_recv().unwrap().is_err());
+            // A mono with a message waiting is busy: it refuses, and the
+            // chat's task is not queued behind it.
+            shell.monos.clone().unwrap().update(cx, |m, _| {
+                m.roster
+                    .get_mut(&mono)
+                    .unwrap()
+                    .outbox
+                    .push(monocode_core::mono::Message {
+                        id: "waiting".into(),
+                        text: "Earlier work".into(),
+                        sent_at: None,
+                        internal: false,
+                        error: None,
+                        attachments: Vec::new(),
+                    });
+            });
+            let busy = call(shell, chat, "mono", "m4", task.clone(), cx);
+            let error = busy.try_recv().unwrap().unwrap_err();
+            assert!(
+                error.contains("busy") && error.contains("control worker"),
+                "{error}"
+            );
+            let outbox = &shell.monos.as_ref().unwrap().read(cx).roster;
+            assert_eq!(outbox.get(&mono).unwrap().outbox.len(), 1);
+            assert!(shell.mono_handoffs.is_empty());
+            // A retry of an accepted handoff gets its first answer and
+            // queues nothing; other input under the same ID is refused.
+            let fingerprint = app::fingerprint("mono", &task);
+            shell.orchestration_control.handoffs.record(
+                chat,
+                "m5",
+                &fingerprint,
+                &json!({"queued": true, "mono": "Tester"}),
+            );
+            let retried = call(shell, chat, "mono", "m5", task.clone(), cx);
+            assert_eq!(retried.try_recv().unwrap().unwrap()["queued"], true);
+            let reused = call(
+                shell,
+                chat,
+                "mono",
+                "m5",
+                json!({"mono": "Tester", "task": "Other"}),
+                cx,
+            );
+            assert!(
+                reused
+                    .try_recv()
+                    .unwrap()
+                    .unwrap_err()
+                    .contains("different input")
+            );
+            let outbox = &shell.monos.as_ref().unwrap().read(cx).roster;
+            assert_eq!(outbox.get(&mono).unwrap().outbox.len(), 1);
+            // A chat the shell does not run (a mono's own chat) cannot hand
+            // work on, so a mono never delegates back in a loop.
+            let stranger = call(shell, chat + 999, "mono", "m6", task.clone(), cx);
+            assert!(
+                stranger
+                    .try_recv()
+                    .unwrap()
+                    .unwrap_err()
+                    .contains("not available")
+            );
+        })
+        .unwrap();
+    // With the user's switch off, nothing is handed out.
+    cx.update(|cx| {
+        cx.set_global(crate::settings::Preferences {
+            chief_offer: false,
+            ..Default::default()
+        })
+    });
+    let off = window
+        .update(cx, |shell, _, cx| {
+            call(shell, chat, "mono", "m7", task.clone(), cx)
+        })
+        .unwrap();
+    assert!(
+        off.try_recv()
+            .unwrap()
+            .unwrap_err()
+            .contains("Settings > Chat")
+    );
+}
+
+#[gpui::test]
+fn a_finished_mono_task_reaches_the_chat_that_gave_it_once(cx: &mut TestAppContext) {
+    let (window, chat, _dir) = shell(cx);
+    window
+        .update(cx, |shell, _, cx| {
+            hold_lead(shell, chat, cx);
+            shell.mono_handoffs.insert("msg-1".into(), chat);
+            let done = crate::monos::MonoTaskDone {
+                message: "msg-1".into(),
+                mono: "Tester".into(),
+                reply: "All green".into(),
+                ok: true,
+            };
+            shell.mono_task_done(&done, cx);
+            // A repeated completion (or another mono's) delivers nothing more.
+            shell.mono_task_done(&done, cx);
+            let reports = &shell.chief_reports[&chat];
+            assert_eq!(reports.len(), 1);
+            assert!(reports[0].contains("Tester finished") && reports[0].contains("All green"));
+            assert!(shell.mono_handoffs.is_empty());
+            // A failed task reports why, once.
+            shell.mono_handoffs.insert("msg-2".into(), chat);
+            shell.mono_task_done(
+                &crate::monos::MonoTaskDone {
+                    message: "msg-2".into(),
+                    mono: "Tester".into(),
+                    reply: "Cancelled".into(),
+                    ok: false,
+                },
+                cx,
+            );
+            let reports = &shell.chief_reports[&chat];
+            assert_eq!(reports.len(), 2);
+            assert!(reports[1].contains("could not finish") && reports[1].contains("Cancelled"));
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn a_temporary_worker_never_uses_a_shared_checkout(cx: &mut TestAppContext) {
+    let (window, chat, dir) = shell(cx);
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    let input = json!({"title": "Fix README", "task": "Fix the README"});
+    let folder = dir.path().to_string_lossy().into_owned();
+    let reply = window
+        .update(cx, |shell, _, cx| {
+            shell.sessions[&chat].update(cx, |view, _| {
+                view.settings.worktree_cwd = Some(folder.clone());
+            });
+            call(shell, chat, "worker", "w1", input.clone(), cx)
+        })
+        .unwrap();
+    cx.run_until_parked();
+    assert!(reply.try_recv().unwrap().unwrap_err().contains("worktree"));
+    window
+        .update(cx, |shell, _, cx| {
+            assert!(!shell.orchestrations.contains_key(&chat));
+            let project = shell.sessions[&chat].read(cx).summary.cwd.clone();
+            let shared = Run::swarm(chat, &project, &folder, false, "Shared", Vec::new(), 1);
+            shell.orchestrations.insert(chat, Live::new(shared));
+            let reply = call(shell, chat, "worker", "w2", input, cx);
+            assert!(reply.try_recv().unwrap().unwrap_err().contains("worktree"));
+            assert!(shell.orchestrations[&chat].run.tasks.is_empty());
+        })
+        .unwrap();
+}
+
+#[gpui::test]
+fn a_temporary_worker_belongs_to_its_chat_and_never_joins_the_roster(cx: &mut TestAppContext) {
+    let (window, chat, _dir) = shell(cx);
+    cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    let input = json!({"title": "Fix README", "task": "Fix the README and say how you checked"});
+    let started = window
+        .update(cx, |shell, window, cx| {
+            shell.ensure_right_panel(window, cx);
+            // The chat keeps a draft until the worker is done, so its result
+            // waits for it instead of landing mid-way.
+            hold_lead(shell, chat, cx);
+            let view = shell.sessions[&chat].clone();
+            view.update(cx, |view, cx| {
+                view.busy = true;
+                view.settings.model = Some("stale-model".into());
+                view.transcript.update(cx, |transcript, cx| {
+                    transcript.patch(
+                        0,
+                        vec![monocode_core::transcript::Row {
+                            role: "user".into(),
+                            text: "Delegate the README fix".into(),
+                            first: true,
+                            sent_at: None,
+                        }],
+                        cx,
+                    );
+                    let turn = transcript.active_turn().unwrap();
+                    transcript.turns.insert(
+                        turn,
+                        monocode_core::agent::TurnInfo {
+                            provider: "fixture".into(),
+                            model_id: Some("active-model".into()),
+                            ..Default::default()
+                        },
+                    );
+                });
+            });
+            let started = call(shell, chat, "worker", "w1", input.clone(), cx);
+            view.update(cx, |view, _| view.busy = false);
+            started
+        })
+        .unwrap();
+    cx.run_until_parked();
+    let value = started.try_recv().unwrap().unwrap();
+    assert_eq!(value["temporary"], true);
+    assert!(
+        value["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("control review")
+    );
+    let task = value["taskId"].as_str().unwrap().to_owned();
+    let worker = window
+        .update(cx, |shell, _, cx| {
+            let live = &shell.orchestrations[&chat];
+            assert_eq!(live.run.requester, None, "the chat itself leads it");
+            assert_eq!(live.run.tasks.len(), 1);
+            let t = live.run.task(&task).unwrap();
+            assert_eq!(t.mono, None, "no mono is bound or made");
+            assert_eq!(t.files, vec![".".to_owned()]);
+            assert_eq!(t.provider, "fixture", "the chat's own harness");
+            assert_eq!(t.model.as_deref(), Some("active-model"));
+            assert_ne!(t.workspace.as_ref().unwrap().checkout, live.run.checkout);
+            let worker = t.session.expect("a session of its own");
+            assert!(
+                shell.sessions[&worker]
+                    .read(cx)
+                    .summary
+                    .title
+                    .starts_with("Agent · ")
+            );
+            assert_eq!(shell.sessions[&worker].read(cx).managed_by(), Some(chat));
+            let monos = shell.monos.as_ref().unwrap().read(cx);
+            assert!(monos.roster.monos.is_empty(), "the roster stays as it was");
+            assert!(
+                !shell
+                    .monos
+                    .as_ref()
+                    .unwrap()
+                    .read(cx)
+                    .roster
+                    .hidden_sessions
+                    .contains(&worker)
+            );
+            // The Swarm tab of this chat shows it.
+            assert!(shell.right_panel.clone().unwrap().read(cx).swarm_tab());
+            // A retry gets the same task; other input under its ID is refused.
+            let again = call(shell, chat, "worker", "w1", input.clone(), cx);
+            assert_eq!(again.try_recv().unwrap().unwrap()["taskId"], task.as_str());
+            let reused = call(
+                shell,
+                chat,
+                "worker",
+                "w1",
+                json!({"title": "Other", "task": "Other"}),
+                cx,
+            );
+            assert!(reused.try_recv().unwrap().is_err());
+            assert_eq!(shell.orchestrations[&chat].run.tasks.len(), 1);
+            worker
+        })
+        .unwrap();
+    // The worker cannot hand work on: not to a mono, not to another worker,
+    // not to Chief.
+    window
+        .update(cx, |shell, _, cx| {
+            for action in ["worker", "mono"] {
+                let input = if action == "mono" {
+                    json!({"mono": "Tester", "task": "x"})
+                } else {
+                    json!({"title": "Loop", "task": "x"})
+                };
+                let refused = call(shell, worker, action, "loop", input, cx);
+                let error = refused.try_recv().unwrap().unwrap_err();
+                assert!(error.contains("cannot hand work on"), "{error}");
+            }
+            let chief = call(
+                shell,
+                worker,
+                "chief",
+                "loop",
+                json!({"title": "Loop", "brief": "x"}),
+                cx,
+            );
+            assert!(chief.try_recv().unwrap().is_err());
+        })
+        .unwrap();
+    cx.run_until_parked();
+    // The prompts of the chat that carry this worker's result.
+    let reports = |shell: &Shell, cx: &App| {
+        shell.sessions[&chat]
+            .read(cx)
+            .transcript
+            .read(cx)
+            .source_rows()
+            .iter()
+            .filter(|row| row.is_prompt() && row.text.contains("Worker results are ready"))
+            .map(|row| row.text.clone())
+            .collect::<Vec<_>>()
+    };
+    // The fixture harness ends the worker's turn at once, with an error as
+    // its result. The chat still holds its draft: nothing has reached it.
+    window
+        .update(cx, |shell, _, cx| {
+            let t = shell.orchestrations[&chat].run.task(&task).unwrap();
+            assert_eq!(t.status, Status::Failed);
+            assert!(!t.delivered);
+            assert!(reports(shell, cx).is_empty());
+            // The chat's own turn (the one that called control worker) ends,
+            // as a real turn would; the fixture cannot finish one, so its
+            // lead is set idle, and the user's draft is cleared.
+            shell.orchestrations.get_mut(&chat).unwrap().lead_busy = false;
+            shell.sessions[&chat].update(cx, |v, cx| {
+                v.input.update(cx, |i, cx| i.set_text(String::new(), cx))
+            });
+            shell.pump_orchestration(chat, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            let delivered = reports(shell, cx);
+            assert_eq!(delivered.len(), 1, "one result for the chat");
+            let report = &delivered[0];
+            assert!(
+                report.contains(&format!("{task} — Fix README: failed"))
+                    && report.contains("Unknown provider: fixture"),
+                "{report}"
+            );
+            assert!(
+                shell.orchestrations[&chat]
+                    .run
+                    .task(&task)
+                    .unwrap()
+                    .delivered
+            );
+            // The fixture's lead turn fails and pauses the run; active and
+            // idle again, the run has nothing more to hand the chat.
+            let live = shell.orchestrations.get_mut(&chat).unwrap();
+            live.run.status = RunStatus::Active;
+            live.run.error = None;
+            live.lead_busy = false;
+            shell.pump_orchestration(chat, cx);
+        })
+        .unwrap();
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            assert_eq!(reports(shell, cx).len(), 1, "never delivered twice");
+            let live = shell.orchestrations.get_mut(&chat).unwrap();
+            live.run.status = RunStatus::Active;
+            live.run.error = None;
+            // Another worker, then cancelled: the chat stays its lead.
+            live.lead_busy = false;
+            hold_lead(shell, chat, cx);
+            let second = call(
+                shell,
+                chat,
+                "worker",
+                "w2",
+                json!({"title": "Docs", "task": "Write docs", "files": ["src"]}),
+                cx,
+            );
+            let second = second.try_recv().unwrap().unwrap()["taskId"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let cancelled = call(shell, chat, "cancel", "x2", json!({"taskId": second}), cx);
+            assert!(cancelled.try_recv().unwrap().is_ok());
+            assert_eq!(
+                shell.orchestrations[&chat]
+                    .run
+                    .task(&second)
+                    .unwrap()
+                    .status,
+                Status::Cancelled
+            );
+        })
+        .unwrap();
+    // Another chat in view does not show this chat's workers.
+    cx.run_until_parked();
+    window
+        .update(cx, |shell, _, cx| {
+            assert!(
+                locked(&shell.store)
+                    .unwrap()
+                    .sessions()
+                    .unwrap()
+                    .iter()
+                    .all(|s| s.title != "Agent · Docs")
+            );
+            let project = shell.sessions[&chat].read(cx).summary.cwd.clone();
+            let other = locked(&shell.store)
+                .unwrap()
+                .create("codex", &project)
+                .unwrap();
+            let other_id = other.id;
+            shell.add(other, cx);
+            shell.workspace.active = Some(other_id);
+            shell.sync_swarm(cx);
+            assert!(!shell.right_panel.clone().unwrap().read(cx).swarm_tab());
+            assert_eq!(shell.board_lead(other_id), None);
+            shell.workspace.active = Some(chat);
+            shell.sync_swarm(cx);
+            assert!(shell.right_panel.clone().unwrap().read(cx).swarm_tab());
+        })
+        .unwrap();
+}

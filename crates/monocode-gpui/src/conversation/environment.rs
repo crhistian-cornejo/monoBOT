@@ -2,13 +2,13 @@
 //! view and says where it works, its Git branch and changes, and how full
 //! its context window is. It sits in the chat's margin when the margin fits
 //! it, pushes the chat left when the chat still fits beside it, and covers
-//! the chat in a narrow pane. Cmd/Ctrl+I, the composer's Environment button
-//! or a click on the context ring toggles it; Esc closes it.
+//! the chat in a narrow pane. Cmd/Ctrl+I or the composer's Environment
+//! control (the context ring, one button) toggles it; Esc closes it.
 use super::*;
 use crate::pane_motion::PaneSlide;
 use crate::popover::AnchorSlot;
-use crate::right_panel::{DIFF_ADD, DIFF_DEL, format_integer};
-use gpui::{App, FontWeight, KeyBinding, actions, rgb};
+use crate::right_panel::format_integer;
+use gpui::{App, FontWeight, KeyBinding, actions};
 use std::collections::HashSet;
 
 actions!(environment, [Toggle]);
@@ -32,9 +32,12 @@ const CHAT_MIN: f32 = 520.;
 const MIN: f32 = 220.;
 /// The frame's distance from the pane's edges.
 const EDGE: f32 = 8.;
-/// Context fill that turns the bar amber, then red.
-const WARN: f32 = 0.8;
-const FULL: f32 = 0.95;
+/// The shortcut the control's tip names, as `bind` binds it.
+const SHORTCUT: &str = if cfg!(target_os = "macos") {
+    "⌘I"
+} else {
+    "Ctrl+I"
+};
 
 /// Where the frame goes in a pane `available` wide whose chat column is
 /// `column` wide: its distance from the right edge, the room it takes from
@@ -75,13 +78,29 @@ pub(super) fn room(available: f32, column: f32) -> Room {
 
 /// The bar's colour for a context window this full.
 fn fill_color(ratio: f32) -> gpui::Hsla {
-    if ratio >= FULL {
-        crate::theme::danger()
-    } else if ratio >= WARN {
-        crate::theme::warning()
-    } else {
-        accent_color()
-    }
+    crate::context_meter::level_color(ratio, accent_color())
+}
+
+/// The context window in words: the share used, then the tokens when known.
+fn context_words(usage: Option<monocode_core::context::Usage>) -> (String, Option<String>) {
+    let headline = match (usage, usage.and_then(|usage| usage.ratio())) {
+        (_, Some(r)) => format!("{:.0}% context used", r * 100.),
+        // Tokens, but not the window's size: no share to give.
+        (Some(_), None) => "Context used".into(),
+        (None, None) => "No context used yet".into(),
+    };
+    let detail = usage.map(|usage| match usage.window {
+        Some(window) => format!(
+            "{} / {} tokens",
+            monocode_core::context::format_tokens(usage.used),
+            monocode_core::context::format_tokens(window)
+        ),
+        None => format!(
+            "{} tokens",
+            monocode_core::context::format_tokens(usage.used)
+        ),
+    });
+    (headline, detail)
 }
 
 #[derive(Default)]
@@ -142,24 +161,94 @@ impl Conversation {
         true
     }
 
-    /// The composer bar's button that opens the frame.
-    pub(super) fn environment_button(&self, cx: &mut Context<Self>) -> AnyElement {
-        let open = self.environment.open;
-        icon_button(
-            "environment-toggle",
-            if open {
-                "Hide environment"
-            } else {
-                "Show environment"
-            },
-            "sidebar-right",
-        )
-        .aria_expanded(open)
-        .size(px(22.))
-        .rounded_md()
-        .when(open, |d| d.bg(content(0.08)))
-        .on_click(cx.listener(|this, _, _, cx| this.toggle_environment(cx)))
-        .into_any_element()
+    /// The composer bar's Environment control: the context ring, which
+    /// says how full the window is and, on a click (or Cmd/Ctrl+I), shows
+    /// the frame with the rest. One control, so the bar has no second door
+    /// to the same frame. A new chat has no frame yet, so there the ring
+    /// only reports.
+    pub(super) fn environment_control(&self, cx: &mut Context<Self>) -> AnyElement {
+        let opens = self.summary.has_messages;
+        let open = opens && self.environment.open;
+        let ratio = self.context.and_then(|usage| usage.ratio());
+        let (headline, detail) = context_words(self.context);
+        let spoken = match &detail {
+            Some(detail) => format!("{headline}, {detail}"),
+            None => headline.clone(),
+        };
+        div()
+            .id("environment-toggle")
+            .debug_selector(|| "environment-toggle".into())
+            .when(opens, |d| {
+                d.role(Role::Button)
+                    .aria_label(format!("Environment, {spoken}"))
+                    .aria_expanded(open)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(content(0.08)))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.context_hovered = false;
+                        this.toggle_environment(cx);
+                    }))
+            })
+            .when(!opens, |d| d.role(Role::Image).aria_label(spoken.clone()))
+            .flex_shrink_0()
+            .size(px(22.))
+            .rounded_md()
+            .flex()
+            .items_center()
+            .justify_center()
+            .when(open, |d| d.bg(content(0.08)))
+            .child(self.context_anchor.probe())
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                this.context_hovered = *hovered;
+                cx.notify();
+            }))
+            .child(crate::context_meter::ring(ratio.unwrap_or(0.)))
+            // The open frame already says all of this.
+            .when(self.context_hovered && !open, |d| {
+                d.child(
+                    popover("context-tooltip", Anchor::Slot(self.context_anchor.clone()))
+                        .side(Side::Top)
+                        .solid(rail_color())
+                        .align(Align::End)
+                        .max_width(240.)
+                        .padding(10.)
+                        .child(
+                            div()
+                                .debug_selector(|| "context-tooltip".into())
+                                .flex()
+                                .flex_col()
+                                .gap_0p5()
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .text_color(content(1.))
+                                .child(headline)
+                                .when_some(detail, |d, detail| {
+                                    d.child(
+                                        div()
+                                            .text_size(px(11.))
+                                            .font_features(crate::right_panel::tabular())
+                                            .text_color(content(0.5))
+                                            .child(detail),
+                                    )
+                                })
+                                .when(opens, |d| {
+                                    d.child(
+                                        div()
+                                            .debug_selector(|| "context-tooltip-environment".into())
+                                            .mt_1()
+                                            .flex()
+                                            .items_center()
+                                            .gap_1p5()
+                                            .text_size(px(11.))
+                                            .text_color(content(0.5))
+                                            .child("Show environment")
+                                            .child(div().text_color(content(0.4)).child(SHORTCUT)),
+                                    )
+                                }),
+                        ),
+                )
+            })
+            .into_any_element()
     }
 
     /// The pane's probe, the room the chat gives the frame (its right
@@ -204,7 +293,7 @@ impl Conversation {
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(self.environment_header(cx))
             .child(self.workspace_section(cx))
-            .children(self.version_section(cx))
+            .child(self.version_section(cx))
             .child(self.context_section(cx))
             .into_any_element();
         // Painted after the chat it sits beside: when the pane is too narrow
@@ -347,15 +436,22 @@ impl Conversation {
         } else {
             "Show in Explorer"
         };
+        let project = project_name(&self.summary.cwd);
         let place = Self::env_row(
             "environment-place",
             if linked { "folder-tree" } else { "folder" },
-            label.into(),
-            None,
+            project.clone(),
+            Some(
+                div()
+                    .flex_shrink_0()
+                    .text_size(px(11.))
+                    .text_color(content(0.45))
+                    .child(label)
+                    .into_any_element(),
+            ),
         )
         .role(Role::Label)
-        .aria_label(format!("{label}: {dir}"))
-        .text_color(content(0.6))
+        .aria_label(format!("{project}, {label}: {dir}"))
         .tooltip(crate::theme::chrome_tip(dir.clone(), None));
         let open = Self::env_row("environment-reveal", "folder-open", reveal.into(), None)
             .role(Role::Button)
@@ -378,7 +474,7 @@ impl Conversation {
                     .truncate()
                     .text_size(px(11.))
                     .text_color(content(0.4))
-                    .child(label)
+                    .child(project)
                     .into_any_element(),
             ),
             vec![place.into_any_element(), open.into_any_element()],
@@ -388,11 +484,27 @@ impl Conversation {
 
     /// The branch, which opens the branch picker, and the changes, which
     /// open the diff. Only in a Git folder.
-    fn version_section(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let branch = self
+    fn version_section(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(branch) = self
             .branch
             .clone()
-            .or_else(|| self.git.as_ref().and_then(|git| git.current.clone()))?;
+            .or_else(|| self.git.as_ref().and_then(|git| git.current.clone()))
+        else {
+            // Still reading Git or not a Git folder (nothing tells the two
+            // apart yet): say so rather than drop the section.
+            let words = "No Git branch";
+            let row = Self::env_row("environment-branch", "git-branch", words.into(), None)
+                .role(Role::Label)
+                .aria_label(words)
+                .text_color(content(0.45));
+            return self.env_section(
+                "version",
+                "Version control",
+                None,
+                vec![row.into_any_element()],
+                cx,
+            );
+        };
         let detached = self.git.as_ref().is_some_and(|git| git.detached);
         let enabled = !self.busy && !self.preparing_worktree && self.git.is_some();
         let label = if detached {
@@ -462,13 +574,13 @@ impl Conversation {
             .text_color(content(0.4))
             .child(branch)
             .into_any_element();
-        Some(self.env_section(
+        self.env_section(
             "version",
             "Version control",
             Some(summary),
             vec![branch_row.into_any_element(), changes.into_any_element()],
             cx,
-        ))
+        )
     }
 
     /// How full the context window is: the tokens, the share and a bar that
@@ -590,6 +702,17 @@ impl Conversation {
     }
 }
 
+/// The project's folder name, for a path like `/work/monoBOT/`.
+fn project_name(cwd: &str) -> String {
+    let trimmed = cwd.trim_end_matches(['/', '\\']);
+    trimmed
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or(cwd)
+        .to_owned()
+}
+
 /// "+12 −3" in the diff colours.
 fn diff_counts(additions: i64, deletions: i64) -> AnyElement {
     div()
@@ -602,12 +725,12 @@ fn diff_counts(additions: i64, deletions: i64) -> AnyElement {
         .font_features(crate::right_panel::tabular())
         .child(
             div()
-                .text_color(rgb(DIFF_ADD))
+                .text_color(crate::theme::diff_foreground(true))
                 .child(format!("+{}", format_integer(additions))),
         )
         .child(
             div()
-                .text_color(rgb(DIFF_DEL))
+                .text_color(crate::theme::diff_foreground(false))
                 .child(format!("−{}", format_integer(deletions))),
         )
         .into_any_element()
@@ -622,10 +745,12 @@ mod tests {
     use monocode_core::store::Store;
     use std::sync::Mutex;
 
-    #[gpui::test]
-    fn the_shortcut_opens_the_frame_beside_a_chat_that_moves_left_and_esc_closes_it(
+    /// A chat in a window too narrow for the margin but wide enough to keep
+    /// the chat beside the frame, with the shortcut and Esc bound.
+    fn open_chat(
         cx: &mut TestAppContext,
-    ) {
+        has_messages: bool,
+    ) -> (gpui::WindowHandle<Conversation>, VisualTestContext) {
         let store = Store::open(Path::new(":memory:")).unwrap();
         let summary = store
             .create("codex", "/missing/environment-project")
@@ -648,7 +773,7 @@ mod tests {
                     cx.new(|cx| {
                         let mut view = Conversation::new(summary, Arc::new(Mutex::new(store)), cx);
                         view.loaded = true;
-                        view.summary.has_messages = true;
+                        view.summary.has_messages = has_messages;
                         window.focus(&view.input.focus_handle(cx), cx);
                         view
                     })
@@ -656,10 +781,22 @@ mod tests {
             )
             .unwrap()
         });
-        let visual = &mut VisualTestContext::from_window(window.into(), cx);
+        let visual = VisualTestContext::from_window(window.into(), cx);
+        (window, visual)
+    }
+
+    #[gpui::test]
+    fn the_shortcut_opens_the_frame_beside_a_chat_that_moves_left_and_esc_closes_it(
+        cx: &mut TestAppContext,
+    ) {
+        let (_, mut visual) = open_chat(cx, true);
+        let visual = &mut visual;
         visual.refresh().unwrap();
         visual.run_until_parked();
         assert!(visual.debug_bounds("environment").is_none());
+        // One control, the ring, where there used to be a button and a ring.
+        assert!(visual.debug_bounds("environment-toggle").is_some());
+        assert!(visual.debug_bounds("context-meter").is_none());
         let before = visual.debug_bounds("composer-toolbar").unwrap();
 
         visual.simulate_keystrokes(if cfg!(target_os = "macos") {
@@ -697,6 +834,115 @@ mod tests {
         visual.simulate_click(button.center(), Default::default());
         visual.refresh().unwrap();
         assert!(visual.debug_bounds("environment").is_some());
+
+        visual.simulate_resize(size(px(600.), px(490.)));
+        visual.refresh().unwrap();
+        visual.run_until_parked();
+        let frame = visual.debug_bounds("environment").unwrap();
+        let toolbar = visual.debug_bounds("composer-toolbar").unwrap();
+        assert_eq!(frame.size.width, px(WIDTH));
+        assert!(frame.right() <= px(600. - EDGE));
+        assert!(
+            frame.left() < toolbar.right(),
+            "the frame overlays the chat"
+        );
+        assert!(visual.debug_bounds("environment-branch").is_some());
+        assert!(visual.debug_bounds("environment-context").is_some());
+        visual.simulate_keystrokes("escape");
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("environment").is_none());
+    }
+
+    #[gpui::test]
+    fn the_ring_tells_its_shortcut_opens_the_frame_and_closes_it_again(cx: &mut TestAppContext) {
+        let (window, mut visual) = open_chat(cx, true);
+        let visual = &mut visual;
+        visual.refresh().unwrap();
+        visual.run_until_parked();
+        let ring = visual.debug_bounds("environment-toggle").unwrap();
+
+        // Hover: how full the window is, and that a click shows the rest.
+        visual.simulate_mouse_move(ring.center(), None, Default::default());
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("context-tooltip").is_some());
+        assert!(visual.debug_bounds("context-tooltip-environment").is_some());
+
+        visual.simulate_click(ring.center(), Default::default());
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("environment").is_some());
+        assert!(
+            visual.debug_bounds("context-tooltip").is_none(),
+            "the open frame says it all"
+        );
+        // Without metrics or Git, the frame still says something.
+        assert!(visual.debug_bounds("environment-branch").is_some());
+        assert!(visual.debug_bounds("environment-place").is_some());
+        window
+            .update(visual, |view, _, _| {
+                assert!(view.environment.open);
+                assert!(view.context.is_none());
+            })
+            .unwrap();
+
+        // The same control closes it.
+        let ring = visual.debug_bounds("environment-toggle").unwrap();
+        visual.simulate_click(ring.center(), Default::default());
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("environment").is_none());
+    }
+
+    #[gpui::test]
+    fn a_new_chat_shows_the_ring_but_has_no_frame_to_open(cx: &mut TestAppContext) {
+        let (window, mut visual) = open_chat(cx, false);
+        let visual = &mut visual;
+        visual.refresh().unwrap();
+        visual.run_until_parked();
+        let ring = visual
+            .debug_bounds("environment-toggle")
+            .expect("the meter shows in a new chat");
+        visual.simulate_mouse_move(ring.center(), None, Default::default());
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("context-tooltip").is_some());
+        assert!(
+            visual.debug_bounds("context-tooltip-environment").is_none(),
+            "nothing to show yet"
+        );
+        visual.simulate_click(ring.center(), Default::default());
+        visual.run_until_parked();
+        window
+            .update(visual, |view, _, _| assert!(!view.environment.open))
+            .unwrap();
+    }
+
+    #[test]
+    fn the_project_is_its_folder_name() {
+        assert_eq!(project_name("/work/monoBOT"), "monoBOT");
+        assert_eq!(project_name("/work/monoBOT/"), "monoBOT");
+        assert_eq!(project_name("C:\\work\\app"), "app");
+        assert_eq!(project_name("/"), "/");
+    }
+
+    #[test]
+    fn the_context_reads_as_a_share_and_tokens() {
+        use monocode_core::context::Usage;
+        assert_eq!(context_words(None), ("No context used yet".into(), None));
+        let (headline, detail) = context_words(Some(Usage {
+            used: 50_000,
+            window: Some(200_000),
+        }));
+        assert_eq!(headline, "25% context used");
+        assert!(detail.unwrap().contains(" / "));
+        // No window: the tokens alone, never "of 0".
+        let (headline, detail) = context_words(Some(Usage {
+            used: 1_000,
+            window: None,
+        }));
+        assert_eq!(headline, "Context used");
+        assert!(!detail.unwrap().contains('/'));
     }
 
     #[test]

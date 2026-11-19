@@ -22,6 +22,7 @@ pub use commands::{
     NativeCommand, NativeSubcommand,
 };
 mod attachments;
+mod batch;
 mod compaction;
 pub(crate) mod devin;
 mod discovery;
@@ -130,7 +131,11 @@ pub struct BackgroundTask {
     pub command: Option<String>,
     /// Unix milliseconds.
     pub started_at: u64,
+    /// The last lines it printed, when its provider keeps a log of it.
+    pub output: Vec<String>,
 }
+/// How many lines of a background command's output [`BackgroundTask`] keeps.
+pub const OUTPUT_LINES: usize = 8;
 
 fn codex_error(error: &Value, fallback: &str) -> String {
     let message = error["message"].as_str().unwrap_or(fallback);
@@ -708,10 +713,7 @@ impl Protocol {
                     }
                     "item/commandExecution/outputDelta" => {
                         let id = p["itemId"].as_str().unwrap_or("");
-                        let tool = self
-                            .tools
-                            .entry(id.into())
-                            .or_insert_with(|| ToolCall::new(id, "commandExecution"));
+                        let tool = self.codex_command(id);
                         tool.append_output(p["delta"].as_str().unwrap_or(""));
                         events.push(Event::Tool(tool.clone()));
                     }
@@ -1203,6 +1205,12 @@ impl Protocol {
             write_json(stdin, json!({"id":wire,"result":result}))
         }
     }
+    fn codex_command(&mut self, id: &str) -> &mut ToolCall {
+        self.tools
+            .entry(id.to_owned())
+            .or_insert_with(|| ToolCall::new(id, "commandExecution"))
+    }
+
     fn codex_tool(&mut self, item: &Value, completed: bool, events: &mut Vec<Event>) {
         let name = item["type"].as_str().unwrap_or("");
         if matches!(name, "plan" | "imageGeneration")
@@ -1795,12 +1803,13 @@ fn run_operation(
     let rx = &wire.rx;
     let tail = &wire.tail;
     let mut stdin = &mut wire.stdin;
-    let mut pending = Vec::new();
+    let mut pending = batch::Batch::default();
     if let Some(id) = claude_new_session {
         protocol.request.provider_id = Some(id.clone());
         pending.push(Event::SessionId(id));
     }
     let mut stop_confirmed = false;
+    let mut command_output = CommandOutput::default();
     let result = (|| {
         protocol.probe = probe;
         protocol.compact = compact;
@@ -1835,13 +1844,13 @@ fn run_operation(
                 json!({"type":"control_request","request_id":"native-init","request":{"subtype":"initialize"}}),
             )?;
         }
-        let mut pending_bytes = 0;
         let mut last_emit = Instant::now();
         let started = Instant::now();
         let mut ready_emitted = false;
         let mut interrupted = false;
         loop {
             if cancel.load(Ordering::Relaxed) && !interrupted {
+                command_output.flush(&mut protocol, &mut pending);
                 interrupted = true;
                 if !protocol.interrupt(&mut stdin)? {
                     return Err("Stopped".into());
@@ -1853,6 +1862,7 @@ fn run_operation(
             if !interrupted {
                 if let Some(controls) = &controls {
                     while let Ok(control) = controls.try_recv() {
+                        command_output.flush(&mut protocol, &mut pending);
                         if let Decision::Steer(message) = control.decision {
                             let id = message.id.clone();
                             match protocol.steer(message, &mut stdin) {
@@ -1882,7 +1892,7 @@ fn run_operation(
                 return Err("Background text request timed out".into());
             }
             // Batched events go out within a tick; otherwise wait longer.
-            let wait = if pending.is_empty() && !interrupted {
+            let wait = if pending.is_empty() && command_output.id.is_none() && !interrupted {
                 IDLE_WAIT
             } else {
                 TICK
@@ -1947,10 +1957,17 @@ fn run_operation(
                             return Err("Stopped".into());
                         }
                     }
-                    let events = match protocol.frame(value, &mut stdin) {
-                        Ok(events) => events,
-                        Err(_) if interrupted => return Err("Stopped".into()),
-                        Err(error) => return Err(error),
+                    let events = if !interrupted
+                        && command_output.ingest(&value, &mut protocol, &mut pending)
+                    {
+                        Vec::new()
+                    } else {
+                        command_output.flush(&mut protocol, &mut pending);
+                        match protocol.frame(value, &mut stdin) {
+                            Ok(events) => events,
+                            Err(_) if interrupted => return Err("Stopped".into()),
+                            Err(error) => return Err(error),
+                        }
                     };
                     for event in events {
                         if controls.is_none() || interrupted {
@@ -1976,17 +1993,6 @@ fn run_operation(
                         if interrupted {
                             continue;
                         }
-                        pending_bytes += match &event {
-                            Event::Text(text) | Event::Reasoning(text) | Event::Status(text) => {
-                                text.len()
-                            }
-                            Event::Tool(tool) => tool.input.len() + tool.output.len(),
-                            Event::Approval(approval) => approval.detail.len(),
-                            Event::Question(question) => {
-                                question.items.iter().map(|q| q.prompt.len()).sum()
-                            }
-                            _ => 64,
-                        };
                         if let Event::SessionId(id) = &event {
                             protocol.request.provider_id = Some(id.clone());
                         }
@@ -2005,12 +2011,12 @@ fn run_operation(
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
-            if !pending.is_empty()
-                && (last_emit.elapsed() >= TICK || pending_bytes >= BATCH_BYTES || protocol.done)
-            {
-                emit(std::mem::take(&mut pending))?;
-                pending_bytes = 0;
-                last_emit = Instant::now();
+            if last_emit.elapsed() >= TICK || pending.full(BATCH_BYTES) || protocol.done {
+                command_output.flush(&mut protocol, &mut pending);
+                if !pending.is_empty() {
+                    emit(pending.take())?;
+                    last_emit = Instant::now();
+                }
             }
             // A visual publication may arrive while the provider is waiting
             // for its tool result and therefore emits no stream events.
@@ -2055,8 +2061,9 @@ fn run_operation(
             pending.push(Event::UsageLimited(limit));
         }
     }
+    command_output.flush(&mut protocol, &mut pending);
     if !pending.is_empty() {
-        let _ = emit(std::mem::take(&mut pending));
+        let _ = emit(pending.take());
     }
     if eligible
         && cancel.load(Ordering::Relaxed)
@@ -2074,10 +2081,59 @@ fn run_operation(
     result
 }
 
+#[derive(Default)]
+struct CommandOutput {
+    id: Option<String>,
+}
+
+impl CommandOutput {
+    fn ingest(
+        &mut self,
+        frame: &Value,
+        protocol: &mut Protocol,
+        pending: &mut batch::Batch,
+    ) -> bool {
+        if protocol.request.kind != Kind::Codex
+            || frame["method"] != "item/commandExecution/outputDelta"
+            || frame.get("id").is_some()
+        {
+            return false;
+        }
+        let params = &frame["params"];
+        if let Some(turn) = params["turnId"]
+            .as_str()
+            .or_else(|| params["turn"]["id"].as_str())
+        {
+            if protocol.previous_turn.as_deref() == Some(turn) {
+                return true;
+            }
+        }
+        let id = params["itemId"].as_str().unwrap_or("");
+        if self.id.as_deref() != Some(id) {
+            self.flush(protocol, pending);
+            self.id = Some(id.to_owned());
+        }
+        let tool = protocol.codex_command(id);
+        tool.output.push_str(params["delta"].as_str().unwrap_or(""));
+        if tool.output.len() >= 2 * BATCH_BYTES {
+            tool.bound_output();
+        }
+        true
+    }
+
+    fn flush(&mut self, protocol: &mut Protocol, pending: &mut batch::Batch) {
+        if let Some(id) = self.id.take() {
+            let tool = protocol.codex_command(&id);
+            tool.bound_output();
+            pending.push(Event::Tool(tool.clone()));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn protocol(kind: Kind) -> Protocol {
+    pub(super) fn protocol(kind: Kind) -> Protocol {
         Protocol::new(Request {
             kind,
             binary: "unused".into(),

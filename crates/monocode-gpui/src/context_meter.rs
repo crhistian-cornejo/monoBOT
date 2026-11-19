@@ -1,15 +1,25 @@
 use crate::theme::*;
 use gpui::{Bounds, PathBuilder, canvas, div, fill, point, prelude::*, px, size};
 
-/// ContextMeter.tsx: 14px, 2px stroke, 25% track, clockwise from twelve.
-pub(crate) fn ring(ratio: f32) -> impl IntoElement {
-    let color = if ratio >= 0.9 {
+/// Context fill that turns the meter amber, then red. The composer's ring
+/// and the Environment's bar share them, so both warn at the same point.
+pub(crate) const WARN: f32 = 0.8;
+pub(crate) const FULL: f32 = 0.95;
+
+/// The colour for a context window this full: `rest` until it nears full.
+pub(crate) fn level_color(ratio: f32, rest: gpui::Hsla) -> gpui::Hsla {
+    if ratio >= FULL {
         crate::theme::danger()
-    } else if ratio >= 0.75 {
+    } else if ratio >= WARN {
         crate::theme::warning()
     } else {
-        content(0.45)
-    };
+        rest
+    }
+}
+
+/// ContextMeter.tsx: 14px, 2px stroke, 25% track, clockwise from twelve.
+pub(crate) fn ring(ratio: f32) -> impl IntoElement {
+    let color = level_color(ratio, content(0.45));
     div().size(px(14.)).child(
         canvas(
             |_, _, _| (),
@@ -57,4 +67,19 @@ pub(crate) fn ring(ratio: f32) -> impl IntoElement {
         )
         .size_full(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_meter_warns_then_alarms_at_the_shared_thresholds() {
+        let rest = content(0.45);
+        assert_eq!(level_color(0., rest), rest);
+        assert_eq!(level_color(WARN - 0.01, rest), rest);
+        assert_eq!(level_color(WARN, rest), crate::theme::warning());
+        assert_eq!(level_color(FULL, rest), crate::theme::danger());
+        assert_eq!(level_color(1.2, rest), crate::theme::danger());
+    }
 }

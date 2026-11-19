@@ -60,14 +60,20 @@ impl ToolCall {
         self.bound_output();
     }
     pub fn bound_output(&mut self) {
-        // Keep a useful tail without retaining unbounded command output in the UI.
+        // Keep early diagnostics and the tail without retaining unbounded output.
         const LIMIT: usize = 64 * 1024;
+        const HEAD: usize = 4 * 1024;
+        const MARK: &str = "\n… middle output omitted …\n";
         if self.output.len() > LIMIT {
-            let mut at = self.output.len() - LIMIT;
-            while !self.output.is_char_boundary(at) {
-                at += 1;
+            let mut head = HEAD;
+            while !self.output.is_char_boundary(head) {
+                head += 1;
             }
-            self.output = format!("… earlier output omitted …\n{}", &self.output[at..]);
+            let mut tail = self.output.len() - (LIMIT - head - MARK.len());
+            while !self.output.is_char_boundary(tail) {
+                tail += 1;
+            }
+            self.output = format!("{}{MARK}{}", &self.output[..head], &self.output[tail..]);
         }
     }
     /// One of monoBOT's own visual tools, under any provider's naming.
@@ -115,4 +121,23 @@ impl ToolCall {
 /// Strip a recognized shell launcher for display without executing its script.
 pub fn shell_command(command: &str) -> String {
     presentation::shell_command(command)
+}
+
+#[cfg(test)]
+mod output_tests {
+    use super::*;
+
+    #[test]
+    fn long_streams_keep_early_diagnostics_and_the_latest_utf8_tail() {
+        let mut call = ToolCall::new("cmd", "commandExecution");
+        call.append_output("error: first failure\n");
+        for _ in 0..4 {
+            call.append_output(&"é🙂\n".repeat(12_000));
+        }
+        call.append_output("result: última línea\n");
+        assert!(call.output.starts_with("error: first failure\n"));
+        assert!(call.output.ends_with("result: última línea\n"));
+        assert!(call.output.len() <= 64 * 1024);
+        assert_eq!(call.output.matches("… middle output omitted …").count(), 1);
+    }
 }

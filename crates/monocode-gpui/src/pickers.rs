@@ -105,6 +105,60 @@ pub(crate) fn model_display_name(kind: Kind, id: &str, name: &str) -> SharedStri
         name.to_owned().into()
     }
 }
+
+pub(crate) fn catalog_model_name(kind: Kind, model: &Model) -> SharedString {
+    let label = model_display_name(kind, &model.id, &model.name);
+    let name = label.trim_end();
+    let mut base = name;
+    let mut strip = |effort: &str| {
+        let wrapped = name
+            .strip_suffix(')')
+            .and_then(|s| s.rsplit_once(" ("))
+            .filter(|(_, suffix)| suffix.eq_ignore_ascii_case(effort))
+            .map(|(prefix, _)| prefix);
+        let unwrapped = || {
+            if effort.eq_ignore_ascii_case("max") {
+                return None;
+            }
+            let i = name.len().checked_sub(effort.len())?;
+            name.get(i..)?
+                .eq_ignore_ascii_case(effort)
+                .then(|| name.get(..i)?.strip_suffix(' '))?
+        };
+        if let Some(prefix) = wrapped.or_else(unwrapped).map(str::trim_end)
+            && !prefix.is_empty()
+            && prefix.len() < base.len()
+        {
+            base = prefix;
+        }
+    };
+    for effort in &model.efforts {
+        strip(&crate::conversation::effort_name(effort));
+    }
+    for control in &model.controls {
+        if matches!(
+            control.id.as_str(),
+            "effort"
+                | "reasoning"
+                | "reasoningEffort"
+                | "reasoning_effort"
+                | "thinking"
+                | "variant"
+        ) && !crate::conversation::model_control_toggle(control)
+        {
+            for (value, label) in &control.choices {
+                if !value.is_empty() && !label.trim().is_empty() {
+                    strip(label.trim());
+                }
+            }
+        }
+    }
+    if base == name {
+        label
+    } else {
+        base.to_owned().into()
+    }
+}
 /// A model's name from a cached catalog, else its friendly fallback.
 pub(crate) fn cached_model_name(kind: Kind, id: Option<&str>) -> SharedString {
     id.and_then(|id| catalog::cached_name(kind, id).map(|name| model_display_name(kind, id, &name)))
@@ -850,7 +904,7 @@ impl ModelList {
                 .map(|model| ModelEntry {
                     kind,
                     id: Some(model.id.clone()),
-                    name: model_display_name(kind, &model.id, &model.name),
+                    name: catalog_model_name(kind, model),
                     enabled,
                 })
                 .collect();
@@ -938,7 +992,7 @@ impl ModelList {
                     Some(model.id.as_str()) == stripped || Some(model.id.as_str()) == id
                 })
             })
-            .map(|model| model_display_name(kind, &model.id, &model.name))
+            .map(|model| catalog_model_name(kind, model))
             .unwrap_or_else(|| model_name(kind, id))
     }
     fn current_index(&self, cx: &gpui::App) -> usize {

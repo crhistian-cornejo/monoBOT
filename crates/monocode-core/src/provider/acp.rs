@@ -19,6 +19,10 @@ enum Stage {
     ThoughtProbe,
     DeleteProbe,
 }
+/// How long Antigravity stays quiet before a reply it started by itself, once
+/// its commands finish, counts as over. Its replies can pause about ten seconds
+/// between steps without a frame.
+const ANTIGRAVITY_QUIET: Duration = Duration::from_secs(20);
 struct BackgroundDispatch {
     call_id: String,
     delegation_id: String,
@@ -40,6 +44,12 @@ pub(super) struct State {
     cancelling: bool,
     background: HashMap<String, BackgroundDispatch>,
     background_poll: Option<Instant>,
+    /// Antigravity commands that may go async (`WaitMsBeforeAsync`), with
+    /// when they started, in start order.
+    commands: Vec<(String, u64)>,
+    /// What the UI was last told the yielded turn waits on.
+    published: Vec<BackgroundTask>,
+    last_update: Option<Instant>,
     spent_effort: bool,
     probe_models: VecDeque<String>,
     probe_budget: Option<Instant>,
@@ -142,6 +152,7 @@ impl Protocol {
         self.acp.cancelling = true;
         self.acp.deadline = None;
         self.acp.background.clear();
+        self.acp.commands.clear();
         if matches!(self.request.kind, Kind::Antigravity | Kind::Devin) {
             for (_, (wire, _, _)) in self.approvals.drain() {
                 write_json(
@@ -191,6 +202,20 @@ impl Protocol {
                 true,
                 stdin,
             )?;
+        }
+        if self.acp.stage == Stage::Background && self.request.kind == Kind::Antigravity {
+            let mut events = Vec::new();
+            if self.antigravity_settled() {
+                self.done = true;
+                self.acp.commands.clear();
+                self.publish_waiting(&mut events);
+                events.push(Event::Done);
+            } else {
+                // Their logs grow between frames.
+                self.publish_waiting(&mut events);
+            }
+            events.append(&mut self.acp.notices);
+            return Ok(events);
         }
         if self.acp.stage == Stage::Background
             && self
@@ -1002,7 +1027,16 @@ impl Protocol {
                         result["stopReason"].as_str().unwrap_or("")
                     ));
                 }
-                if self.request.kind == Kind::Hermes
+                if self.request.kind == Kind::Antigravity && !self.antigravity_waiting().is_empty()
+                {
+                    // It answered with commands still running. It wakes up by
+                    // itself when they finish, so keep listening: its next
+                    // words are a new reply in this turn.
+                    self.acp.stage = Stage::Background;
+                    self.acp.message += 1;
+                    self.acp.last_update = Some(Instant::now());
+                    self.publish_waiting(&mut events);
+                } else if self.request.kind == Kind::Hermes
                     && !self.acp.background.is_empty()
                     && !self.acp.cancelling
                 {
@@ -1037,7 +1071,78 @@ impl Protocol {
         events.append(&mut self.acp.notices);
         Ok(events)
     }
+    /// Antigravity's commands still running, oldest first.
+    fn antigravity_waiting(&self) -> Vec<BackgroundTask> {
+        self.acp
+            .commands
+            .iter()
+            .filter_map(|(id, started_at)| {
+                let tool = self.tools.get(id)?;
+                if tool.state != ToolState::Running {
+                    return None;
+                }
+                let input = serde_json::from_str::<Value>(&tool.input).unwrap_or_default();
+                let command = input["CommandLine"]
+                    .as_str()
+                    .filter(|command| !command.trim().is_empty())
+                    .map(str::to_owned);
+                Some(BackgroundTask {
+                    id: id.clone(),
+                    description: input["toolSummary"]
+                        .as_str()
+                        .filter(|summary| !summary.trim().is_empty())
+                        .unwrap_or("Background command")
+                        .into(),
+                    agent: false,
+                    command,
+                    started_at: *started_at,
+                    output: Vec::new(),
+                })
+            })
+            .collect()
+    }
+    /// Its commands are done and it has said nothing for a while. ACP has no
+    /// frame for the end of a reply it started by itself.
+    fn antigravity_settled(&self) -> bool {
+        self.antigravity_waiting().is_empty()
+            && self
+                .acp
+                .last_update
+                .is_none_or(|at| at.elapsed() >= ANTIGRAVITY_QUIET)
+    }
+    /// While the turn waits, the UI lists what it waits on.
+    fn publish_waiting(&mut self, events: &mut Vec<Event>) {
+        let waiting = if self.acp.stage == Stage::Background && !self.done {
+            let waiting = self.antigravity_waiting();
+            self.with_output(waiting)
+        } else {
+            Vec::new()
+        };
+        if waiting != self.acp.published {
+            self.acp.published = waiting.clone();
+            events.push(Event::Background(waiting));
+        }
+    }
+    /// A message sent while Antigravity waits on its commands is a new prompt:
+    /// it is idle then, and the commands keep running.
+    pub(super) fn antigravity_steer(
+        &mut self,
+        request: &Request,
+        stdin: &mut impl Write,
+    ) -> Result<Vec<Event>, String> {
+        if self.acp.stage != Stage::Background || self.done {
+            return Err("Antigravity takes a new message once it has answered.".into());
+        }
+        let params = json!({"sessionId":self.acp.session,"prompt":request.acp_content()?});
+        self.acp_send(Stage::Prompt, "session/prompt", params, stdin)?;
+        self.acp.message += 1;
+        self.text_key = None;
+        let mut events = Vec::new();
+        self.publish_waiting(&mut events);
+        Ok(events)
+    }
     fn acp_update(&mut self, update: &Value, events: &mut Vec<Event>) {
+        self.acp.last_update = Some(Instant::now());
         if self.request.kind == Kind::Hermes {
             if let Some(dispatch) = background_dispatch(update) {
                 self.acp
@@ -1155,10 +1260,19 @@ impl Protocol {
                 {
                     call.state = ToolState::Running;
                 }
+                let async_command = self.request.kind == Kind::Antigravity
+                    && tool
+                        .get("rawInput")
+                        .or_else(|| tool.get("args"))
+                        .is_some_and(|input| input.get("WaitMsBeforeAsync").is_some());
                 events.push(Event::Tool(call.clone()));
                 if is_new {
                     self.acp.message += 1;
                 }
+                if async_command && !self.acp.commands.iter().any(|(known, _)| known == id) {
+                    self.acp.commands.push((id.into(), crate::time::now_ms()));
+                }
+                self.publish_waiting(events);
             }
             "usage_update" => {
                 usage_events(update, events);
@@ -1547,6 +1661,7 @@ pub(super) fn respond(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::follow_up::Message;
     fn protocol(kind: Kind) -> Protocol {
         Protocol::new(Request {
             kind,
@@ -1875,5 +1990,112 @@ mod tests {
             p.acp_options(&modes).unwrap();
             assert_eq!(p.acp.mode, Some(mode));
         }
+    }
+    /// The frames `agy acp` 1.5.12 sends for `sleep 20 && echo finished-ok`
+    /// run with a 500 ms wait before going async.
+    fn antigravity_waiting_on_a_command(out: &mut Vec<u8>) -> Protocol {
+        let mut p = protocol(Kind::Antigravity);
+        p.acp.session = "s".into();
+        p.acp_send(Stage::Prompt, "session/prompt", json!({}), out)
+            .unwrap();
+        let prompt = last(out)["id"].clone();
+        let started = p.frame(json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"call_1","name":"run_command","args":{"CommandLine":"sleep 20 && echo finished-ok","WaitMsBeforeAsync":500,"toolSummary":"Background sleep command"},"status":"in_progress","kind":"execute","title":"sleep 20 && echo finished-ok","rawInput":{"CommandLine":"sleep 20 && echo finished-ok","IsDaemon":false,"WaitMsBeforeAsync":500,"toolSummary":"Background sleep command"}}}}), out).unwrap();
+        assert!(
+            !started.iter().any(|e| matches!(e, Event::Background(_))),
+            "a command still inside its turn is not background work yet"
+        );
+        p.frame(json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Started the command in the background."}}}}), out).unwrap();
+        let yielded = p
+            .frame(
+                json!({"jsonrpc":"2.0","id":prompt,"result":{"stopReason":"end_turn"}}),
+                out,
+            )
+            .unwrap();
+        assert!(!p.done, "the turn waits for the command");
+        assert!(!yielded.contains(&Event::Done));
+        let Some(Event::Background(tasks)) = yielded.last() else {
+            panic!("expected the waiting list, got {yielded:?}")
+        };
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].id, "call_1");
+        assert_eq!(tasks[0].description, "Background sleep command");
+        assert_eq!(
+            tasks[0].command.as_deref(),
+            Some("sleep 20 && echo finished-ok")
+        );
+        assert!(!tasks[0].agent);
+        p
+    }
+    #[test]
+    fn antigravity_keeps_the_turn_while_its_commands_run_and_shows_what_follows() {
+        let mut out = Vec::new();
+        let mut p = antigravity_waiting_on_a_command(&mut out);
+        let finished = p.frame(json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call_update","toolCallId":"call_1","status":"completed","kind":"execute","title":"sleep 20 && echo finished-ok","rawInput":{"CommandLine":"sleep 20 && echo finished-ok","WaitMsBeforeAsync":500,"toolSummary":"Background sleep command"},"rawOutput":{"output":"Command exited with code 0.\n\nCommand output:\nfinished-ok\r\n","exit_code":0},"content":[{"type":"content","content":{"type":"text","text":"Command exited with code 0.\n\nCommand output:\nfinished-ok\r\n"}}]}}}), &mut out).unwrap();
+        assert!(finished.iter().any(|e| matches!(e, Event::Tool(tool) if tool.state == ToolState::Completed && tool.output.contains("finished-ok"))));
+        assert!(finished.contains(&Event::Background(Vec::new())));
+        // It picks the thread back up by itself: a new reply, not more of the old one.
+        let woke = p.frame(json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"done"}}}}), &mut out).unwrap();
+        assert_eq!(
+            woke,
+            vec![Event::BeginAssistant, Event::Text("done".into())]
+        );
+        assert!(
+            p.acp_tick(&mut out).unwrap().is_empty(),
+            "still within the quiet window"
+        );
+        p.acp.last_update = Some(Instant::now() - ANTIGRAVITY_QUIET);
+        assert_eq!(p.acp_tick(&mut out).unwrap(), vec![Event::Done]);
+        assert!(p.done);
+    }
+    #[test]
+    fn a_message_sent_while_antigravity_waits_is_a_new_prompt() {
+        let mut out = Vec::new();
+        let mut p = antigravity_waiting_on_a_command(&mut out);
+        let message = Message {
+            id: "next".into(),
+            text: "Is it done?".into(),
+            ..Default::default()
+        };
+        let events = p.steer(message.clone(), &mut out).unwrap();
+        assert_eq!(
+            events,
+            vec![Event::Background(Vec::new()), Event::FollowUp(message)]
+        );
+        let prompt = last(&mut out);
+        assert_eq!(prompt["method"], "session/prompt");
+        assert_eq!(prompt["params"]["prompt"][0]["text"], "Is it done?");
+        // The command still runs: its answer ends in waiting again.
+        let again = p
+            .frame(
+                json!({"jsonrpc":"2.0","id":prompt["id"],"result":{"stopReason":"end_turn"}}),
+                &mut out,
+            )
+            .unwrap();
+        assert!(matches!(again.last(), Some(Event::Background(tasks)) if tasks.len() == 1));
+        assert!(!p.done);
+    }
+    #[test]
+    fn antigravity_refuses_a_message_mid_prompt_and_stop_ends_the_wait() {
+        let mut p = protocol(Kind::Antigravity);
+        p.acp.session = "s".into();
+        let mut out = Vec::new();
+        p.acp_send(Stage::Prompt, "session/prompt", json!({}), &mut out)
+            .unwrap();
+        let events = p
+            .steer(
+                Message {
+                    id: "early".into(),
+                    text: "wait".into(),
+                    ..Default::default()
+                },
+                &mut out,
+            )
+            .unwrap();
+        assert!(matches!(&events[..], [Event::FollowUpFailed { id, .. }] if id == "early"));
+
+        let mut p = antigravity_waiting_on_a_command(&mut out);
+        p.acp_cancel(&mut out).unwrap();
+        assert!(p.done);
+        assert_eq!(last(&mut out)["method"], "session/cancel");
     }
 }

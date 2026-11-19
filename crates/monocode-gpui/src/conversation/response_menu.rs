@@ -327,10 +327,7 @@ impl Conversation {
                 })
                 .unwrap()
             };
-            let mut option = MenuAction::new(
-                target(None),
-                model_display_name(provider, &model.id, &model.name),
-            );
+            let mut option = MenuAction::new(target(None), catalog_model_name(provider, &model));
             if !model.efforts.is_empty() {
                 let mut efforts = vec![MenuAction::new(target(None), "Default")];
                 efforts.extend(model.efforts.iter().map(|effort| {

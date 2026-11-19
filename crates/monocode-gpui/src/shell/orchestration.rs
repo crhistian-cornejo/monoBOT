@@ -25,9 +25,12 @@ use monocode_core::{
 use serde_json::{Value, json};
 use std::sync::Arc;
 
+const WORKER_WORKTREE_REQUIRED: &str = "A temporary worker needs its own worktree. Use a local Git checkout with a commit, or do the work in this chat.";
+
 /// A run the app is executing, with what only lives in memory.
 pub(super) struct Live {
     run: Run,
+    generation: Arc<()>,
     /// `wait` calls blocked until the run changes or they time out.
     waiters: Vec<(u64, Call)>,
     /// Running workers: the dispatch whose turn was submitted, and whether
@@ -50,6 +53,7 @@ impl Live {
         Self {
             board: Board::new(&run.request),
             run,
+            generation: Arc::new(()),
             waiters: Vec::new(),
             turns: HashMap::new(),
             lead_busy: false,
@@ -81,6 +85,8 @@ pub(super) struct Control {
     boards: HashMap<i64, Option<Arc<Board>>>,
     /// Leads whose saved board is being read.
     loading: HashSet<i64>,
+    /// `control mono` answers by caller and request ID, so a retry queues once.
+    handoffs: control::Handoffs,
 }
 
 /// Runs saved as active were interrupted when the app closed: their workers
@@ -335,9 +341,10 @@ impl Shell {
         cx.background_executor()
             .spawn(async move {
                 for worker in unreviewed {
-                    if isolation::changed(&worker).is_ok_and(|files| files.is_empty()) {
-                        let _ = isolation::remove(std::path::Path::new(&checkout), &worker);
-                    }
+                    isolation::remove_unreviewed_if_unchanged(
+                        std::path::Path::new(&checkout),
+                        &worker,
+                    );
                 }
             })
             .detach();
@@ -631,6 +638,7 @@ impl Shell {
         let Some(task) = live.run.task(&id).cloned() else {
             return;
         };
+        let generation = live.generation.clone();
         let (checkout, isolated, project) = (
             live.run.checkout.clone(),
             live.run.isolated,
@@ -686,6 +694,8 @@ impl Shell {
             None => format!("Agent · {}", task.title),
         };
         let first_turn = existing.is_none();
+        let original_checkout = checkout.clone();
+        let previous_worktree = task.workspace.clone();
         let work = cx.background_executor().spawn(async move {
             let identity = member
                 .filter(|_| first_turn)
@@ -735,6 +745,35 @@ impl Shell {
             let _ = this.update(cx, |this, cx| {
                 match result {
                     Ok((created, settings, workspace, identity)) => {
+                        let session = created
+                            .as_ref()
+                            .map(|s| s.id)
+                            .or(existing)
+                            .unwrap_or_default();
+                        let prepared = this.orchestrations.get_mut(&lead).is_some_and(|live| {
+                            Arc::ptr_eq(&live.generation, &generation)
+                                && live.run.prepared(&id, dispatch, session, workspace.clone())
+                        });
+                        if !prepared {
+                            let unpublished_session = created.map(|s| s.id);
+                            let unpublished_worktree =
+                                workspace.filter(|w| previous_worktree.as_ref() != Some(w));
+                            let store = this.store.clone();
+                            cx.background_executor()
+                                .spawn(async move {
+                                    if let Some(id) = unpublished_session {
+                                        let _ = locked(&store).and_then(|mut s| s.delete(id));
+                                    }
+                                    if let Some(worker) = unpublished_worktree {
+                                        let _ = isolation::remove(
+                                            std::path::Path::new(&original_checkout),
+                                            &worker,
+                                        );
+                                    }
+                                })
+                                .detach();
+                            return;
+                        }
                         let prompt = match identity {
                             Some(identity) => format!(
                                 "{identity}
@@ -743,22 +782,12 @@ impl Shell {
                             ),
                             None => prompt,
                         };
-                        let session = match created {
-                            Some(summary) => {
-                                let session = summary.id;
-                                this.session_worktrees
-                                    .insert(session, settings.worktree_cwd.clone());
-                                this.add(summary, cx);
-                                session
-                            }
-                            None => existing.unwrap_or_default(),
-                        };
-                        let prepared = this.orchestrations.get_mut(&lead).is_some_and(|live| {
-                            live.run.prepared(&id, dispatch, session, workspace)
-                        });
-                        if prepared && let Some(view) = this.sessions.get(&session) {
-                            this.session_worktrees
-                                .insert(session, settings.worktree_cwd.clone());
+                        this.session_worktrees
+                            .insert(session, settings.worktree_cwd.clone());
+                        if let Some(summary) = created {
+                            this.add(summary, cx);
+                        }
+                        if let Some(view) = this.sessions.get(&session) {
                             view.update(cx, |v, cx| {
                                 v.set_managed_by(Some(lead), cx);
                                 v.install_transfer(settings, Some(prompt), cx);
@@ -770,7 +799,9 @@ impl Shell {
                         }
                     }
                     Err(error) => {
-                        if let Some(live) = this.orchestrations.get_mut(&lead) {
+                        if let Some(live) = this.orchestrations.get_mut(&lead)
+                            && Arc::ptr_eq(&live.generation, &generation)
+                        {
                             live.run.settle(&id, dispatch, false, "", Some(error));
                         }
                     }
@@ -973,10 +1004,37 @@ impl Shell {
             .strip_prefix("control.")
             .unwrap_or_default()
             .to_owned();
-        if action == "mono" {
-            self.hand_to_mono(call, cx);
+        // Handing work out is for the chat the user talks to: never a
+        // worker, a mono or Chief, so delegation cannot loop back.
+        if matches!(action.as_str(), "mono" | "worker") {
+            if !valid_request_id(&call.request_id) {
+                let _ = call.reply.send(Err(
+                    "request ID must use letters, digits, underscores or hyphens".into(),
+                ));
+                return;
+            }
+            if let Some(refusal) = self.delegation_refusal(call.session, cx) {
+                let _ = call.reply.send(Err(refusal.into()));
+                return;
+            }
+            if action == "mono" {
+                self.hand_to_mono(call, cx);
+            } else {
+                self.temporary_worker(call, cx);
+            }
             return;
         }
+        let fingerprint = app::fingerprint(&action, &call.input);
+        self.handle_run_control(call, &action, fingerprint, cx);
+    }
+
+    fn handle_run_control(
+        &mut self,
+        call: Call,
+        action: &str,
+        fingerprint: String,
+        cx: &mut Context<Self>,
+    ) {
         // A lead's own `chief` call falls through to its run, which refuses it.
         if action == "swarm"
             || (action == "chief" && !self.orchestrations.contains_key(&call.session))
@@ -1015,7 +1073,7 @@ impl Shell {
             ));
             return;
         };
-        if worker.is_some() && !control::WORKER_ACTIONS.contains(&action.as_str()) {
+        if worker.is_some() && !control::WORKER_ACTIONS.contains(&action) {
             let _ = call.reply.send(Err(
                 "Workers can only use post and board. Ask @coordinator on the board for anything else."
                     .into(),
@@ -1028,13 +1086,12 @@ impl Shell {
             ));
             return;
         }
-        if matches!(action.as_str(), "post" | "board") {
+        if matches!(action, "post" | "board") {
             let from = worker.unwrap_or_else(|| board::COORDINATOR.to_owned());
-            self.board_call(lead, from, &action, call, cx);
+            self.board_call(lead, from, action, call, cx);
             return;
         }
-        let mutating = !matches!(action.as_str(), "list" | "get" | "wait");
-        let fingerprint = app::fingerprint(&action, &call.input);
+        let mutating = !matches!(action, "list" | "get" | "wait");
         let needs = self.needs(lead, cx);
         let needs = |t: &control::Task| needs.get(&t.id).cloned();
         let live = self.orchestrations.get_mut(&lead).unwrap();
@@ -1042,7 +1099,7 @@ impl Shell {
             let _ = call.reply.send(result);
             return;
         }
-        let (mut value, effect) = match live.run.execute(&action, &call.input, &needs) {
+        let (mut value, effect) = match live.run.execute(action, &call.input, &needs) {
             Ok(done) => done,
             Err(error) => {
                 let _ = call.reply.send(Err(error));
@@ -1233,9 +1290,7 @@ impl Shell {
                         }
                     }
                     for worker in unreviewed {
-                        let unchanged =
-                            isolation::changed(&worker).is_ok_and(|files| files.is_empty());
-                        if !unchanged || isolation::remove(lead, &worker).is_err() {
+                        if !isolation::remove_unreviewed_if_unchanged(lead, &worker) {
                             kept.push(worker.checkout);
                         }
                     }
@@ -1353,7 +1408,7 @@ impl Shell {
         message: monocode_core::follow_up::Message,
         cx: &mut Context<Self>,
     ) {
-        self.open_swarm(lead, request, roles, cx, move |this, opened, cx| {
+        self.open_swarm(lead, request, roles, false, cx, move |this, opened, cx| {
             let Some(view) = this.sessions.get(&lead).cloned() else {
                 return;
             };
@@ -1429,6 +1484,7 @@ impl Shell {
             session,
             title.clone(),
             Vec::new(),
+            false,
             cx,
             move |this, opened, cx| {
                 let _ = reply.send(opened.map(|()| control::swarm_started(&title, &cli, &[])));
@@ -1510,11 +1566,143 @@ impl Shell {
         cx.notify();
     }
 
+    /// Why chat `session` may not hand work to a mono or a temporary worker:
+    /// only an ordinary local chat the user talks to may, while the user
+    /// allows it.
+    fn delegation_refusal(&self, session: i64, cx: &App) -> Option<&'static str> {
+        if self
+            .orchestrations
+            .values()
+            .any(|live| live.run.worker(session).is_some())
+        {
+            return Some("A worker cannot hand work on. Ask @coordinator on the board instead.");
+        }
+        if self
+            .orchestrations
+            .get(&session)
+            .is_some_and(|live| live.run.requester.is_some())
+        {
+            return Some("Chief gives tasks to monos with delegate, within its run.");
+        }
+        if !cx
+            .try_global::<crate::settings::Preferences>()
+            .is_some_and(|p| p.chief_offer)
+        {
+            return Some(
+                "The user has turned off handing work to monos (Settings > Chat). Work on the task here.",
+            );
+        }
+        let eligible = self.sessions.get(&session).is_some_and(|view| {
+            let view = view.read(cx);
+            view.settings.mono.is_none()
+                && view.managed_by().is_none()
+                && !view.is_remote()
+                && !view.settings.worktree_removed
+        });
+        (!eligible).then_some("Handing work to monos is not available in this chat.")
+    }
+
+    /// `control worker` from a coding chat no mono fits: a temporary agent
+    /// for this chat only, delegated in the chat's own run (opened for it
+    /// when there is none), so it gets its own worktree, its approvals go
+    /// to the chat and its result comes back once. It is never one of the
+    /// user's monos and keeps no memory.
+    fn temporary_worker(&mut self, call: Call, cx: &mut Context<Self>) {
+        let session = call.session;
+        let fingerprint = app::fingerprint("worker", &call.input);
+        let view = self.sessions[&session].read(cx);
+        let (provider, model) = view.delegation_target(cx);
+        let delegate = match control::worker_delegate(&call.input, provider, model) {
+            Ok(delegate) => delegate,
+            Err(error) => {
+                let _ = call.reply.send(Err(error));
+                return;
+            }
+        };
+        let title = delegate["title"].as_str().unwrap_or_default().to_owned();
+        let Call {
+            request_id, reply, ..
+        } = call;
+        // Delegate in the chat's run, or answer why the run could not open.
+        let forward = move |this: &mut Self, refused: Option<String>, cx: &mut Context<Self>| {
+            let refused = refused
+                .or_else(|| this.delegation_refusal(session, cx).map(str::to_owned))
+                .or_else(|| {
+                    this.orchestrations
+                        .get(&session)
+                        .is_some_and(|live| !live.run.isolated)
+                        .then(|| WORKER_WORKTREE_REQUIRED.to_owned())
+                });
+            if let Some(error) = refused {
+                let _ = reply.send(Err(error));
+                return;
+            }
+            let (inner, answer) = std::sync::mpsc::channel();
+            this.handle_run_control(
+                Call {
+                    session,
+                    request_id,
+                    action: "control.delegate".into(),
+                    input: delegate,
+                    reply: inner,
+                },
+                "delegate",
+                fingerprint,
+                cx,
+            );
+            // delegate settles at once: it has no effect to wait on.
+            let result = match answer.try_recv() {
+                Ok(answer) => answer.map(|value| control::worker_started(value, &cli())),
+                Err(_) => {
+                    Err("The worker could not be queued; retry with the same request ID.".into())
+                }
+            };
+            if result.is_ok() && this.workspace.active == Some(session) {
+                this.reveal_swarm(cx);
+            }
+            let _ = reply.send(result);
+        };
+        if self.orchestrations.contains_key(&session) {
+            forward(self, None, cx);
+            return;
+        }
+        self.open_swarm(
+            session,
+            title,
+            Vec::new(),
+            true,
+            cx,
+            move |this, opened, cx| {
+                match opened {
+                    Ok(()) => {
+                        if let Some(view) = this.sessions.get(&session) {
+                            view.update(cx, |v, cx| v.worker_opened_by_agent(cx));
+                        }
+                        forward(this, None, cx);
+                    }
+                    // A retry that raced the first call finds the run it opened,
+                    // whose receipt answers it.
+                    Err(_) if this.orchestrations.contains_key(&session) => forward(this, None, cx),
+                    Err(error) => forward(this, Some(error), cx),
+                }
+            },
+        );
+    }
+
     /// `control mono` from a coding chat: one of the user's code monos takes
-    /// the task in its own chat; its answer comes back as a message.
+    /// the task in its own chat; its answer comes back once, as a message.
     fn hand_to_mono(&mut self, call: Call, cx: &mut Context<Self>) {
         if let Err(error) = control::check_fields("mono", &call.input) {
             let _ = call.reply.send(Err(error));
+            return;
+        }
+        let fingerprint = app::fingerprint("mono", &call.input);
+        if let Some(answer) = self.orchestration_control.handoffs.receipt(
+            call.session,
+            &call.request_id,
+            &fingerprint,
+        ) {
+            let _ = call.reply.send(answer);
             return;
         }
         let text = |key: &str| {
@@ -1539,14 +1727,30 @@ impl Shell {
         };
         let from = self.session_metadata(call.session, cx).display_title();
         let task: String = task.chars().take(30_000).collect();
-        match monos.update(cx, |m, cx| m.hand_task(&name, &from, &task, cx)) {
+        // A mono at work in any run (Chief's) does one task at a time.
+        let running: HashSet<String> = self
+            .orchestrations
+            .values()
+            .flat_map(|live| live.run.tasks.iter())
+            .filter(|t| matches!(t.status, Status::Queued | Status::Running))
+            .filter_map(|t| t.mono.clone())
+            .collect();
+        let busy = |id: &str| running.contains(id);
+        match monos.update(cx, |m, cx| m.hand_task(&name, &from, &task, &busy, cx)) {
             Ok((mono, message)) => {
                 self.mono_handoffs.insert(message, call.session);
-                let _ = call.reply.send(Ok(json!({
+                let answer = json!({
                     "queued": true,
                     "mono": mono,
-                    "instructions": "The mono works on it in its own chat, where the user can follow it. Its answer reaches this chat as a message when it is done; keep working on other things meanwhile, and do not edit the files it works on.",
-                })));
+                    "instructions": "The mono works on it in its own chat, where the user can follow it. Its answer reaches this chat once, as a message, when it is done; keep working on other things meanwhile, and do not edit the files it works on.",
+                });
+                self.orchestration_control.handoffs.record(
+                    call.session,
+                    &call.request_id,
+                    &fingerprint,
+                    &answer,
+                );
+                let _ = call.reply.send(Ok(answer));
             }
             Err(error) => {
                 let _ = call.reply.send(Err(error));
@@ -1845,6 +2049,7 @@ impl Shell {
         lead: i64,
         request: String,
         roles: Vec<control::Role>,
+        require_isolation: bool,
         cx: &mut Context<Self>,
         done: impl FnOnce(&mut Self, Result<(), String>, &mut Context<Self>) + 'static,
     ) {
@@ -1866,7 +2071,7 @@ impl Shell {
             );
         }
         let Some(view) = self.sessions.get(&lead) else {
-            return;
+            return done(self, Err("This chat is no longer open.".into()), cx);
         };
         let conversation = view.read(cx);
         let project = conversation.summary.cwd.clone();
@@ -1885,10 +2090,9 @@ impl Shell {
                 cx,
             );
         }
-        let provider = conversation.summary.provider.clone();
-        let model = conversation.settings.model.clone();
+        let (provider, model) = conversation.delegation_target(cx);
         let profiles = self.run_profiles(&project, cx);
-        let assigned = vec![(provider.clone(), model.clone())];
+        let assigned = vec![(provider.to_owned(), model.map(str::to_owned))];
         let path = checkout.clone();
         let work = cx.background_executor().spawn(async move {
             let isolated = isolation::available(std::path::Path::new(&path));
@@ -1899,6 +2103,24 @@ impl Shell {
             let _ = this.update(cx, |this, cx| {
                 if this.orchestrations.contains_key(&lead) {
                     return done(this, Err("This chat already has a run.".into()), cx);
+                }
+                if require_isolation {
+                    if !isolated {
+                        return done(this, Err(WORKER_WORKTREE_REQUIRED.into()), cx);
+                    }
+                    if let Some(reason) = this.delegation_refusal(lead, cx) {
+                        return done(this, Err(reason.into()), cx);
+                    }
+                }
+                if this.orchestrations.values().any(|live| {
+                    monocode_core::files::path_key(live.checkout())
+                        == monocode_core::files::path_key(&checkout)
+                }) {
+                    return done(
+                        this,
+                        Err("Another run is already using this checkout.".into()),
+                        cx,
+                    );
                 }
                 let mut run = Run::swarm(
                     lead,
@@ -1919,7 +2141,9 @@ impl Shell {
                 this.orchestrations.insert(lead, live);
                 done(this, Ok(()), cx);
                 this.pump_orchestration(lead, cx);
-                this.reveal_swarm(cx);
+                if !require_isolation {
+                    this.reveal_swarm(cx);
+                }
             });
         })
         .detach();

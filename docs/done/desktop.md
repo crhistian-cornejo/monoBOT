@@ -167,18 +167,24 @@ moves when its mark changes (`Section` in `monocode-core/src/session_groups.rs`,
 ## Environment
 
 **Environment** is a frame that floats beside the chat in view, as IVY's
-«Entorno» card does (`conversation/environment.rs`). Cmd/Ctrl+I, the
-Environment button at the end of the composer's bar or a click on the context
-ring toggles it; Esc closes it. It slides in from the pane's edge (drawn in
-place under reduced motion) and has three sections, each folding under its
-title with a summary:
+«Entorno» card does (`conversation/environment.rs`). The composer's bar has
+one Environment control, the context ring: hovering it says how full the
+window is (the share and the tokens) and that a click or Cmd/Ctrl+I shows
+the rest; a click toggles the frame, and Esc closes it. In a new chat there
+is no frame yet, so the ring only reports. It slides in from the pane's edge
+(drawn in place under reduced motion) and has three sections, each folding
+under its title with a summary:
 
-- **Workspace:** the local folder or worktree, its path on hover, and Show
-  in Finder/Explorer.
+- **Workspace:** the project's folder name, whether it runs in the local
+  folder or a worktree, its path on hover, and Show in Finder/Explorer.
 - **Version control:** the branch, which opens the branch picker, and the
-  turn's changes (`+added −removed`), which open the diff.
+  turn's changes (`+added −removed`, in the theme's diff colours), which
+  open the diff. Without a branch (Git still loading, or no Git) it says
+  «No Git branch».
 - **Context:** the tokens used of the window, the share and a bar that turns
-  amber at 80% and red at 95%, and Compact the conversation.
+  amber at 80% and red at 95% (the ring warns at the same points,
+  `context_meter::level_color`), and Compact the conversation. Before the
+  first reply it says «No context used yet».
 
 Where it goes is IVY's `sessionRoom`, ported as `environment::room`: in the
 chat's margin when the margin fits it (the chat stays put); otherwise beside
@@ -199,6 +205,29 @@ never wears one (`transcript/subagent_mark.rs`).
 Commands and subagents still running after the reply sit in the chat too, as
 a card under it ("2 tasks running in background · Claude Code continues when
 they finish"), not over the composer (`transcript/background.rs`).
+
+A command whose provider keeps a log shows it like a terminal. Closed, its row
+shows the last line it printed. Clicking the row (or the card's header, when
+it is the only task) opens the command and its last 8 lines. The provider's
+thread reads only the end of the log, at most every half second
+(`provider/tasks/output_tail.rs`), with colours and `\r` progress redraws
+removed. When only the log changed, the card is remeasured instead of the turn
+being rebuilt. Claude names the log in its backgrounded Bash result ("Output is
+being written to: …/tasks/<id>.output"). Antigravity writes
+`brain/<session>/.system_generated/tasks/task-N.log`, and its `transcript.jsonl`
+says which command each log belongs to ("Task Description: …"). Subagents have
+no log here; they have their own card.
+
+Antigravity works the same way. Its `run_command` can go async
+(`WaitMsBeforeAsync`): it answers with the command still running, and once
+the command ends it picks the thread back up by itself. While that command
+runs, the turn stays open (`provider/acp.rs`, `antigravity_waiting`): the card
+shows the command, the turn keeps listening, and what the agent does next comes
+in as a new reply in the same turn. ACP has no frame for the end of a reply the
+agent started by itself, so the turn ends 20 s after the last frame, once
+nothing is running. A message sent while it waits goes out as a new
+`session/prompt` instead of queuing. Before this, the command showed as failed
+("No completion result…") and the agent's work after it never reached the chat.
 
 ## Agents tab
 

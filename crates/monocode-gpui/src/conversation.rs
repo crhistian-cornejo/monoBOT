@@ -35,7 +35,7 @@ use crate::{
     git_picker::{GitPicker, Mode as GitMode, Picked as GitPicked},
     input,
     pickers::{
-        ModelList, ModelPicked, cached_model_name, model_display_name, model_name, remember_model,
+        ModelList, ModelPicked, cached_model_name, catalog_model_name, model_name, remember_model,
     },
     popover::{
         Align, Anchor, AnchorSlot, Flyout, Menu, MenuAction, MenuEvent, MenuItem, MenuStyle, Side,
@@ -331,12 +331,7 @@ impl Conversation {
             .map(|model| {
                 (
                     model.id.clone(),
-                    model_display_name(
-                        Kind::from_id(&self.summary.provider),
-                        &model.id,
-                        &model.name,
-                    )
-                    .to_string(),
+                    catalog_model_name(Kind::from_id(&self.summary.provider), model).to_string(),
                 )
             })
             .collect()
@@ -398,7 +393,7 @@ impl Conversation {
             .catalog
             .iter()
             .find(|entry| Some(entry.id.as_str()) == model)
-            .map(|entry| model_display_name(kind, &entry.id, &entry.name))
+            .map(|entry| catalog_model_name(kind, entry))
             .unwrap_or_else(|| model_name(kind, model));
         let cwd = self
             .settings
@@ -1408,11 +1403,8 @@ impl Conversation {
                                 .iter()
                                 .find(|entry| source_selected && entry.id == model)
                                 .map(|entry| {
-                                    let name = model_display_name(
-                                        Kind::from_id(&source_provider),
-                                        &entry.id,
-                                        &entry.name,
-                                    );
+                                    let name =
+                                        catalog_model_name(Kind::from_id(&source_provider), entry);
                                     name.strip_prefix("Claude ")
                                         .unwrap_or(&name)
                                         .to_owned()
@@ -2326,42 +2318,6 @@ impl Conversation {
             })
             .filter(|value| !value.is_empty() && *value != "default")
     }
-    /// Combined ModelPicker trigger; beside mode renders these as separate pills.
-    fn trigger_effort_label(&self) -> Option<SharedString> {
-        if let Some(model) = self.model_info() {
-            if let Some(control) = model.controls.iter().find(|control| {
-                !model_control_toggle(control)
-                    && matches!(
-                        control.id.as_str(),
-                        "effort"
-                            | "reasoning"
-                            | "reasoningEffort"
-                            | "reasoning_effort"
-                            | "thinking"
-                            | "variant"
-                    )
-            }) {
-                let selected = self
-                    .settings
-                    .model_settings
-                    .get(&control.id)
-                    .unwrap_or(&control.current);
-                return Some(
-                    control
-                        .choices
-                        .iter()
-                        .find(|(value, _)| value == selected)
-                        .map(|(_, label)| label)
-                        .unwrap_or(selected)
-                        .clone()
-                        .into(),
-                );
-            }
-            return (!model.efforts.is_empty()).then(|| self.effort_label());
-        }
-        // Keep the saved effort visible while the live catalog is loading.
-        self.settings.effort.as_ref().map(|_| self.effort_label())
-    }
     fn effort_items(&self) -> Vec<MenuAction> {
         self.model_info().map_or_else(Vec::new, |model| {
             model
@@ -2378,7 +2334,7 @@ impl Conversation {
     fn model_label(&self) -> SharedString {
         let name = self
             .model_info()
-            .map(|m| model_display_name(Kind::from_id(&self.summary.provider), &m.id, &m.name))
+            .map(|m| catalog_model_name(Kind::from_id(&self.summary.provider), m))
             .unwrap_or_else(|| {
                 model_name(
                     Kind::from_id(&self.summary.provider),
@@ -2999,7 +2955,6 @@ impl Conversation {
         let beside = cx
             .try_global::<crate::settings::Preferences>()
             .is_some_and(|p| p.model_controls == "beside");
-        let trigger_effort = (!beside).then(|| self.trigger_effort_label()).flatten();
         let controls = if beside {
             self.model_controls(cx)
         } else {
@@ -3183,13 +3138,9 @@ impl Conversation {
                                             .max_w(px(220.))
                                             .flex_shrink(1.)
                                             .aria_label(format!(
-                                                "{}, {}{}",
+                                                "{}, {}",
                                                 kind.label(),
-                                                self.model_label(),
-                                                trigger_effort
-                                                    .as_ref()
-                                                    .map(|effort| format!(", effort {effort}"))
-                                                    .unwrap_or_default()
+                                                self.model_label()
                                             ))
                                             .child(self.model_anchor.probe())
                                             .aria_expanded(self.menu_is(ComposerMenu::Model) || self.menu_is(ComposerMenu::Recent) || self.mono_ui.models.is_some())
@@ -3205,16 +3156,6 @@ impl Conversation {
                                             )
                                             .child(provider_icon(&self.summary.provider, 16.))
                                             .child(pill_label(self.model_label()))
-                                            .when_some(trigger_effort, |d, effort| {
-                                                d.child(
-                                                    div()
-                                                        .debug_selector(|| "composer-model-effort".into())
-                                                        .flex_shrink_0()
-                                                        .text_size(px(11.))
-                                                        .text_color(content(0.5))
-                                                        .child(effort),
-                                                )
-                                            })
                                             .child(icon("chevron-down", 12.)),
                                     )
                                     .children(controls)
@@ -3332,18 +3273,6 @@ impl Conversation {
         } else {
             self.branch.clone()
         };
-        let ratio = self.context.and_then(|usage| usage.ratio());
-        let show_context = ratio.is_some() || draft;
-        let headline = ratio
-            .map(|r| format!("{:.0}% context used", r * 100.))
-            .unwrap_or_else(|| "No context used yet".into());
-        let detail = self.context.map(|usage| {
-            format!(
-                "{} / {} tokens",
-                monocode_core::context::format_tokens(usage.used),
-                monocode_core::context::format_tokens(usage.window.unwrap_or(0))
-            )
-        });
         div()
             .min_w_0()
             .flex()
@@ -3421,63 +3350,8 @@ impl Conversation {
                             )
                         },
                     )
-                    .when(!draft && self.summary.has_messages, |d| {
-                        d.child(self.environment_button(cx))
-                    })
-                    .when(show_context, |d| {
-                        d.child(
-                            div()
-                                .id("context-meter")
-                                .role(Role::Image)
-                                .aria_label(format!(
-                                    "{headline}{}",
-                                    detail
-                                        .as_ref()
-                                        .map(|s| format!(", {s}"))
-                                        .unwrap_or_default()
-                                ))
-                                .child(self.context_anchor.probe())
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.toggle_environment(cx);
-                                }))
-                                .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                                    this.context_hovered = *hovered;
-                                    cx.notify();
-                                }))
-                                .child(crate::context_meter::ring(ratio.unwrap_or(0.)))
-                                .when(self.context_hovered, |d| {
-                                    d.child(
-                                        popover(
-                                            "context-tooltip",
-                                            Anchor::Slot(self.context_anchor.clone()),
-                                        )
-                                        .side(Side::Top)
-                                        .solid(rail_color())
-                                        .align(Align::End)
-                                        .max_width(240.)
-                                        .padding(10.)
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .flex_col()
-                                                .text_size(px(12.))
-                                                .line_height(px(16.))
-                                                .text_color(content(1.))
-                                                .child(headline)
-                                                .when_some(detail, |d, detail| {
-                                                    d.child(
-                                                        div()
-                                                            .text_size(px(11.))
-                                                            .text_color(content(0.5))
-                                                            .child(detail),
-                                                    )
-                                                }),
-                                        ),
-                                    )
-                                }),
-                        )
-                    }),
+                    // The context ring, which also opens the Environment.
+                    .child(self.environment_control(cx)),
             )
     }
 
@@ -4333,7 +4207,7 @@ mod menu_tests {
     use monocode_core::store::Store;
     use std::sync::Mutex;
     #[gpui::test]
-    fn combined_picker_paints_effort_and_beside_mode_moves_it_to_its_own_control(
+    fn model_trigger_shows_only_the_name_and_beside_keeps_its_effort_control(
         cx: &mut TestAppContext,
     ) {
         let window = conversation(cx);
@@ -4345,8 +4219,8 @@ mod menu_tests {
                 view.catalog = vec![Model {
                     alias_target: None,
                     id: "gpt-6.1-sol".into(),
-                    name: "GPT-6.1 Sol".into(),
-                    efforts: vec!["high".into(), "xhigh".into()],
+                    name: "GPT-6.1 Sol Medium".into(),
+                    efforts: vec!["medium".into(), "high".into(), "xhigh".into()],
                     default_effort: Some("high".into()),
                     fast: false,
                     thinking: false,
@@ -4360,13 +4234,13 @@ mod menu_tests {
             .unwrap();
         let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
         visual.refresh().unwrap();
-        let effort = visual
-            .debug_bounds("composer-model-effort")
-            .expect("combined model picker includes effort");
-        let model = window
-            .update(visual, |view, _, _| view.model_anchor.get().unwrap())
+        assert!(visual.debug_bounds("composer-model-effort").is_none());
+        window
+            .update(visual, |view, _, _| {
+                assert_eq!(view.model_label(), "GPT-6.1 Sol");
+                assert_eq!(view.selected_effort(), Some("xhigh"));
+            })
             .unwrap();
-        assert!(effort.left() > model.left() && effort.right() < model.right());
         window
             .update(visual, |_, _, cx| {
                 cx.global_mut::<crate::settings::Preferences>()
@@ -4396,7 +4270,7 @@ mod menu_tests {
                 view.settings.effort = Some("xhigh".into());
                 view.catalog.clear();
                 assert_eq!(view.model_label(), "GPT-6.1-Sol");
-                assert_eq!(view.trigger_effort_label().as_deref(), Some("Extra High"));
+                assert_eq!(view.selected_effort(), Some("xhigh"));
                 view.catalog.push(Model {
                     alias_target: None,
                     id: "gpt-6.1-sol".into(),
@@ -4410,18 +4284,18 @@ mod menu_tests {
                     controls: Vec::new(),
                 });
                 assert_eq!(view.model_label(), "GPT-6.1 Sol");
-                assert_eq!(view.trigger_effort_label().as_deref(), Some("Extra High"));
+                assert_eq!(view.selected_effort(), Some("xhigh"));
                 view.model = None;
                 view.settings.effort = None;
                 assert_eq!(view.model_label(), "GPT-6.1 Sol");
-                assert_eq!(view.trigger_effort_label().as_deref(), Some("High"));
+                assert_eq!(view.selected_effort(), Some("high"));
                 view.model = Some("gpt-custom-model".into());
                 assert_eq!(view.model_label(), "GPT-custom-model");
                 assert!(
                     view.model_info().is_none(),
                     "unknown saved models must not inherit a different model's controls"
                 );
-                assert!(view.trigger_effort_label().is_none());
+                assert!(view.selected_effort().is_none());
             })
             .unwrap();
     }

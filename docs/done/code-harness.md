@@ -35,6 +35,28 @@ path, which the message gives. The agent reads the part it needs, and the rest
 does not fill the conversation (`composer::attachment_excerpt`). Files over
 128 KB still go by path only, as before.
 
+## Stream batches
+
+A turn's loop hands the app its events every 16 ms or at the 64 KB limit
+(`provider::batch`); a single running tool snapshot can wait for the tick.
+Within a batch, an event that only supersedes the one before it is folded into it:
+
+- **Text and reasoning:** consecutive pieces of the same kind join.
+- **Status lines:** a status repeated with only text in between is dropped.
+- **Tool updates:** consecutive snapshots of the same running tool call and
+  metadata fold into one. Codex sends a command's output as a
+  full copy of the call (up to 64 KB) per delta, so in a fixture of 2,000 output
+  lines the app applies 85 events instead of 2,402.
+
+A change of state, an approval, a question or an error is never folded, and
+the order between kinds is kept. This saves the app's work, not tokens:
+nothing in a batch goes to the provider.
+
+A failed call's open details show its first 20 and last 60 lines and, between
+them, up to 40 lines that name an error, with **Show all** for the rest. The
+stored output is unchanged. See
+[t3code-comparison.md](../in-progress/t3code-comparison.md).
+
 ## Loops
 
 `monocode_core::loop_guard` watches every turn:

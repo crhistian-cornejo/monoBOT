@@ -1,6 +1,8 @@
 //! LiveFoldTitle's "running in background", in the chat: once the agent has
 //! answered with commands or subagents still going, a card under its reply
-//! lists them until they finish or the agent picks the thread back up.
+//! lists them until they finish or the agent picks the thread back up. A
+//! command whose log the provider keeps shows its latest line, and opens to
+//! its last lines like a terminal (T3 Code's command output panel).
 use super::*;
 use gpui::AnyElement;
 use monocode_core::provider::{BackgroundTask, Kind};
@@ -9,6 +11,7 @@ const ROW_HEIGHT: f32 = 38.;
 /// More rows than this scroll inside the card.
 const VISIBLE_ROWS: f32 = 4.;
 const LIVE: u32 = 0x4ade80;
+const OUTPUT_LINE: f32 = 16.;
 /// The card's row key: after every turn, before nothing.
 pub(super) const BACKGROUND_START: usize = usize::MAX - 2;
 
@@ -16,6 +19,8 @@ pub(super) const BACKGROUND_START: usize = usize::MAX - 2;
 pub(super) struct Background {
     pub tasks: Vec<BackgroundTask>,
     pub collapsed: bool,
+    /// Commands showing their output.
+    pub open: HashSet<String>,
 }
 
 impl TranscriptView {
@@ -25,6 +30,20 @@ impl TranscriptView {
     }
     pub(crate) fn set_background(&mut self, tasks: Vec<BackgroundTask>, cx: &mut Context<Self>) {
         if self.background.tasks == tasks {
+            return;
+        }
+        let same_tasks = self.background.tasks.len() == tasks.len()
+            && self.background.tasks.iter().zip(&tasks).all(|(old, new)| {
+                (&old.id, &old.description, &old.command)
+                    == (&new.id, &new.description, &new.command)
+            });
+        self.background
+            .open
+            .retain(|id| tasks.iter().any(|task| &task.id == id));
+        if same_tasks {
+            // Only their logs moved: repaint the card, not the turn.
+            self.background.tasks = tasks;
+            self.remeasure_background(cx);
             return;
         }
         let appeared = self.background.tasks.is_empty() && !tasks.is_empty();
@@ -38,6 +57,27 @@ impl TranscriptView {
             self.list.scroll_to_end();
         }
         cx.notify();
+    }
+
+    fn remeasure_background(&mut self, cx: &mut Context<Self>) {
+        if let Some(ix) = self
+            .rows
+            .iter()
+            .position(|row| matches!(row.body, Body::Background))
+        {
+            self.list.remeasure_items(ix..ix + 1);
+            if self.list.is_following_tail() {
+                self.list.scroll_to_end();
+            }
+        }
+        cx.notify();
+    }
+
+    fn toggle_output(&mut self, id: &str, cx: &mut Context<Self>) {
+        if !self.background.open.remove(id) {
+            self.background.open.insert(id.to_owned());
+        }
+        self.remeasure_background(cx);
     }
 
     /// The card goes last, before a saved draft.
@@ -80,6 +120,8 @@ impl TranscriptView {
         // A lone task folds into the header: its title takes the subtitle's
         // place and its clock sits at the end, so the card stays one row.
         let single = (count == 1).then(|| &tasks[0]);
+        let single_output = single.filter(|task| !task.output.is_empty());
+        let single_open = single_output.is_some_and(|task| self.background.open.contains(&task.id));
         let collapsible = count > 1;
         let collapsed = collapsible && self.background.collapsed;
         let title = if count == 1 {
@@ -94,6 +136,7 @@ impl TranscriptView {
             .role(Role::Button)
             .aria_label(title.clone())
             .when(collapsible, |d| d.aria_expanded(!collapsed))
+            .when(single_output.is_some(), |d| d.aria_expanded(single_open))
             .h(px(36.))
             .px_3()
             .flex()
@@ -107,6 +150,11 @@ impl TranscriptView {
                     this.rebuild(from, cx);
                     cx.notify();
                 }))
+            })
+            .when_some(single_output, |d, task| {
+                let id = task.id.clone();
+                d.cursor_pointer()
+                    .on_click(cx.listener(move |this, _, _, cx| this.toggle_output(&id, cx)))
             })
             .child(
                 div()
@@ -146,6 +194,9 @@ impl TranscriptView {
                     }),
             )
             .when_some(single, |d, task| d.child(live_clock(task)))
+            .when(single_output.is_some(), |d| {
+                d.child(disclosure(single_open))
+            })
             .when(collapsible, |d| {
                 d.child(
                     div()
@@ -167,12 +218,28 @@ impl TranscriptView {
                         )),
                 )
             });
+        let any_open = tasks
+            .iter()
+            .any(|task| self.background.open.contains(&task.id));
         let rows = div()
             .id("background-tasks-rows")
-            .max_h(px(ROW_HEIGHT * VISIBLE_ROWS))
+            .max_h(px(ROW_HEIGHT * VISIBLE_ROWS
+                + if any_open {
+                    output_height(monocode_core::provider::OUTPUT_LINES)
+                } else {
+                    0.
+                }))
             .overflow_y_scroll()
             .px_3()
-            .children(tasks.iter().map(background_task));
+            .children(tasks.iter().map(|task| {
+                let open = self.background.open.contains(&task.id);
+                let row = background_task(task, open);
+                if task.output.is_empty() {
+                    return row;
+                }
+                let id = task.id.clone();
+                row.on_click(cx.listener(move |this, _, _, cx| this.toggle_output(&id, cx)))
+            }));
         // The same card as the files a turn changed (`calm.rs`).
         let card = div()
             .id("background-tasks-card")
@@ -187,6 +254,9 @@ impl TranscriptView {
             .text_size(px(13.))
             .line_height(px(18.))
             .child(header)
+            .when_some(single_output.filter(|_| single_open), |d, task| {
+                d.child(div().px_3().child(output_box(task)))
+            })
             .when(!collapsed && single.is_none(), |d| d.child(rows));
         div()
             .w_full()
@@ -205,21 +275,28 @@ impl TranscriptView {
     }
 }
 
-fn background_task(task: &BackgroundTask) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(SharedString::from(format!("background-{}", task.id)))
-        .debug_selector({
-            let id = task.id.clone();
-            move || format!("background-task-{id}")
-        })
-        .role(Role::Group)
-        .aria_label(format!("Background task: {}", task.description))
+fn background_task(task: &BackgroundTask, open: bool) -> gpui::Stateful<gpui::Div> {
+    let has_output = !task.output.is_empty();
+    // Closed, a command shows what it printed last, like a terminal's last line.
+    let subtitle = if open {
+        task.command
+            .as_deref()
+            .map(|command| format!("$ {}", first_line(command)))
+    } else {
+        task.output
+            .last()
+            .map(|line| line.trim().to_owned())
+            .or_else(|| {
+                task.command
+                    .as_deref()
+                    .map(|command| format!("$ {}", first_line(command)))
+            })
+    };
+    let line = div()
         .min_h(px(ROW_HEIGHT))
         .flex()
         .items_center()
         .gap(px(10.))
-        .border_t_1()
-        .border_color(content(0.05))
         .child(
             div()
                 .size(px(24.))
@@ -244,18 +321,94 @@ fn background_task(task: &BackgroundTask) -> gpui::Stateful<gpui::Div> {
                         .text_color(content(0.8))
                         .child(task.description.clone()),
                 )
-                .when_some(task.command.clone(), |d, command| {
+                .when_some(subtitle, |d, subtitle| {
                     d.child(
                         div()
                             .truncate()
                             .font_family(crate::fonts::mono())
                             .text_size(px(11.))
                             .text_color(content(0.4))
-                            .child(format!("$ {}", first_line(&command))),
+                            .child(subtitle),
                     )
                 }),
         )
         .child(live_clock(task))
+        .when(has_output, |d| d.child(disclosure(open)));
+    div()
+        .id(SharedString::from(format!("background-{}", task.id)))
+        .debug_selector({
+            let id = task.id.clone();
+            move || format!("background-task-{id}")
+        })
+        .role(if has_output {
+            Role::Button
+        } else {
+            Role::Group
+        })
+        .aria_label(format!("Background task: {}", task.description))
+        .when(has_output, |d| {
+            d.aria_expanded(open)
+                .cursor_pointer()
+                .hover(|s| s.bg(content(0.02)))
+        })
+        .border_t_1()
+        .border_color(content(0.05))
+        .child(line)
+        .when(open && has_output, |d| d.child(output_box(task)))
+}
+
+/// The chevron of a command that opens to its output.
+fn disclosure(open: bool) -> impl IntoElement {
+    div()
+        .size(px(20.))
+        .flex_shrink_0()
+        .rounded_md()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(content(0.45))
+        .child(icon(
+            if open {
+                "chevron-down-2"
+            } else {
+                "chevron-right"
+            },
+            12.,
+        ))
+}
+
+fn output_height(lines: usize) -> f32 {
+    // The command line, the output lines and the box's padding and margin.
+    (lines as f32 + 1.) * OUTPUT_LINE + 12. + 8.
+}
+
+/// The command and its last lines, as a terminal shows them.
+fn output_box(task: &BackgroundTask) -> impl IntoElement {
+    let id = task.id.clone();
+    div()
+        .debug_selector(move || format!("background-output-{id}"))
+        .mb_2()
+        .px(px(10.))
+        .py(px(6.))
+        .rounded(px(8.))
+        .bg(content(0.04))
+        .font_family(crate::fonts::mono())
+        .text_size(px(11.))
+        .line_height(px(OUTPUT_LINE))
+        .when_some(task.command.as_deref(), |d, command| {
+            d.child(
+                div()
+                    .truncate()
+                    .text_color(content(0.45))
+                    .child(format!("$ {}", first_line(command))),
+            )
+        })
+        .children(task.output.iter().map(|line| {
+            div()
+                .truncate()
+                .text_color(content(0.72))
+                .child(line.clone())
+        }))
 }
 
 /// Elapsed time beside a breathing green dot.
@@ -333,6 +486,7 @@ mod tests {
             agent,
             command: (!agent).then(|| "npm run dev".into()),
             started_at: monocode_core::time::now_ms(),
+            output: Vec::new(),
         }
     }
 
@@ -412,6 +566,98 @@ mod tests {
         visual.refresh().unwrap();
         assert!(visual.debug_bounds("background-tasks-header").is_some());
         assert!(visual.debug_bounds("background-task-dev").is_none());
+    }
+
+    fn printing(id: &str) -> BackgroundTask {
+        BackgroundTask {
+            command: Some("cargo clippy --workspace".into()),
+            output: vec!["Checking aitrack-ai".into(), "Checking aitrack-app".into()],
+            ..task(id, false)
+        }
+    }
+
+    fn open_card(
+        cx: &mut TestAppContext,
+        tasks: Vec<BackgroundTask>,
+    ) -> gpui::WindowHandle<TranscriptView> {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|cx| {
+                    let mut view = TranscriptView::new();
+                    let mut transcript = monocode_core::transcript::Transcript::default();
+                    transcript.begin("user");
+                    transcript.append("Run clippy and the dev server");
+                    view.patch(0, transcript.rows, cx);
+                    view.set_background(tasks, cx);
+                    view
+                })
+            })
+            .unwrap()
+        })
+    }
+
+    #[gpui::test]
+    fn a_command_opens_to_its_output_and_follows_its_log(cx: &mut TestAppContext) {
+        let window = open_card(cx, vec![printing("clippy"), task("dev", false)]);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("background-output-clippy").is_none());
+        let rebuilds = window
+            .update(visual, |view, _, _| view.rebuild_passes)
+            .unwrap();
+
+        let row = visual.debug_bounds("background-task-clippy").unwrap();
+        visual.simulate_click(row.center(), Default::default());
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("background-output-clippy").is_some());
+        assert!(
+            visual.debug_bounds("background-output-dev").is_none(),
+            "a command without a log has nothing to open"
+        );
+
+        // The log grows: the card repaints without rebuilding the turn.
+        let mut grown = printing("clippy");
+        grown.output.push("Finished `dev` profile".into());
+        window
+            .update(visual, |view, _, cx| {
+                view.set_background(vec![grown, task("dev", false)], cx)
+            })
+            .unwrap();
+        visual.refresh().unwrap();
+        window
+            .update(visual, |view, _, _| {
+                assert_eq!(view.rebuild_passes, rebuilds);
+                assert!(view.background.open.contains("clippy"));
+            })
+            .unwrap();
+        assert!(visual.debug_bounds("background-output-clippy").is_some());
+
+        let row = visual.debug_bounds("background-task-clippy").unwrap();
+        visual.simulate_click(row.center(), Default::default());
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("background-output-clippy").is_none());
+
+        // A finished command forgets that it was open.
+        window
+            .update(visual, |view, _, cx| {
+                view.background.open.insert("clippy".into());
+                view.set_background(vec![task("dev", false)], cx);
+                assert!(view.background.open.is_empty());
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn a_lone_command_opens_from_the_header(cx: &mut TestAppContext) {
+        let window = open_card(cx, vec![printing("clippy")]);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("background-output-clippy").is_none());
+        let header = visual.debug_bounds("background-tasks-header").unwrap();
+        visual.simulate_click(header.center(), Default::default());
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("background-output-clippy").is_some());
     }
 
     #[test]

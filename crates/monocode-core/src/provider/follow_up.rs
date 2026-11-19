@@ -17,6 +17,11 @@ impl Kind {
                 | Self::OpenCode
         )
     }
+    /// Whether a message reaches the agent while it waits on work it left
+    /// running. Antigravity only takes one then, as a new prompt.
+    pub fn steers_while_waiting(self) -> bool {
+        self.can_steer() || self == Self::Antigravity
+    }
 }
 
 impl Protocol {
@@ -32,6 +37,26 @@ impl Protocol {
         message: Message,
         stdin: &mut impl Write,
     ) -> Result<Vec<Event>, String> {
+        if self.request.kind == Kind::Antigravity && !self.done {
+            let mut request = self.request.clone();
+            request.settings.attachments = message.attachments.clone();
+            request.prompt = super::commands::prepare_prompt(
+                request.kind,
+                message.prepared_prompt.as_deref().unwrap_or(&message.text),
+                &request.cwd.to_string_lossy(),
+                &message.attachments,
+            )?;
+            return match self.antigravity_steer(&request, stdin) {
+                Ok(mut events) => {
+                    events.push(Event::FollowUp(message));
+                    Ok(events)
+                }
+                Err(error) => Ok(vec![Event::FollowUpFailed {
+                    id: message.id,
+                    error,
+                }]),
+            };
+        }
         if !self.request.kind.can_steer() || !self.ready() || self.done {
             return Ok(vec![Event::FollowUpFailed {
                 id: message.id,

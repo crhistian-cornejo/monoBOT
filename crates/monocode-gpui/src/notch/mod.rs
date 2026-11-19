@@ -15,6 +15,7 @@ mod face;
 pub(crate) mod levels;
 mod live;
 mod media;
+mod menus;
 mod pages;
 mod platform;
 mod queue;
@@ -342,6 +343,11 @@ pub(crate) struct Notch {
     clip_shown: Option<u64>,
     /// Kept pictures as drawn.
     thumbnails: clips::Thumbnails,
+    /// The Clipboard page's search, and what is typed in it.
+    pub(crate) clip_search: Entity<Input>,
+    clip_query: String,
+    /// An AppKit menu is up: the pointer on it is not leaving the notch.
+    menu_up: bool,
     /// The agent the notch chats with, and the field to answer it.
     talk: Option<talk::Talking>,
     pub(crate) talk_field: Entity<Input>,
@@ -459,6 +465,21 @@ impl Notch {
         let told = cx.subscribe(&talk_field, |this, _, _: &input::Submitted, cx| {
             this.tell(cx)
         });
+        let clip_search = cx.new(|cx| {
+            Input::field(
+                "Search the clipboard",
+                "Search copies or #tags",
+                ink(0.4),
+                cx,
+            )
+        });
+        let searched = cx.observe(&clip_search, |this, field, cx| {
+            let query = field.read(cx).content.to_string();
+            if query != this.clip_query {
+                this.clip_query = query;
+                cx.notify();
+            }
+        });
         let spotify_field = cx.new(|cx| {
             let mut field = Input::field(
                 "Spotify Client ID",
@@ -505,7 +526,7 @@ impl Notch {
             _pointer: None,
             screen_island: None,
             responsive: None,
-            _subscriptions: vec![submitted, told],
+            _subscriptions: vec![submitted, told, searched],
             level: None,
             level_clear: None,
             level_at: None,
@@ -534,6 +555,9 @@ impl Notch {
             clip_copied: None,
             clip_shown: None,
             thumbnails: Vec::new(),
+            clip_search,
+            clip_query: String::new(),
+            menu_up: false,
             talk: None,
             talk_field,
             queue: Default::default(),
@@ -813,6 +837,8 @@ impl Notch {
                     if this.pointer_over() {
                         // Still there: whatever said it left was wrong.
                         this.hovered = true;
+                    } else if this.menu_up {
+                        // On the menu: `menu_closed` looks again.
                     } else {
                         this.set_open(false, cx);
                     }

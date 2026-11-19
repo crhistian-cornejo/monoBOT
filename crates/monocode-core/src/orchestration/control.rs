@@ -17,9 +17,9 @@ const MAX_REQUESTS: usize = 512;
 pub const MAX_CONTINUATIONS: u32 = 20;
 const RESULT_CHARS: usize = 20_000;
 
-pub const ACTIONS: [&str; 17] = [
+pub const ACTIONS: [&str; 18] = [
     "list", "delegate", "get", "wait", "steer", "message", "retry", "cancel", "respond", "answer",
-    "review", "finish", "post", "board", "swarm", "chief", "mono",
+    "review", "finish", "post", "board", "swarm", "chief", "mono", "worker",
 ];
 /// The persistent monos a Chief run may create, at most, beyond those it
 /// reuses: each one stays as a personal agent.
@@ -96,6 +96,20 @@ Actions, with the JSON object each one takes:
             parallel parts to Chief, a mono that coordinates your monos in
             its own chat. End your turn after it starts; Chief's summary
             comes back to this chat as a message when the work is done.
+  mono      {"mono":"Name","task":"What to do, where, and how to verify"}
+            From an ordinary coding chat: give one of the user's code monos
+            a task in its own chat, with its memory. A busy mono refuses;
+            pick another or start a temporary worker. Its answer comes back
+            to this chat once, as a message.
+  worker    {"title":"Short title","task":"Self-contained instructions",
+             "files":["src/feature"]}
+            From an ordinary coding chat, when no mono fits: start a
+            temporary worker for this chat only, in its own worktree, on
+            this chat's harness and model. Requires a local Git checkout
+            with a commit. It is never one of the user's
+            monos and keeps no memory. This chat becomes its lead: its
+            result comes back once, then review applies it here and finish
+            ends the run. "files" defaults to ["."].
 
 Usual loop: list -> delegate ... -> wait or get -> steer an agent that drifts,
 unblock one with respond or answer -> inspect the changes yourself -> message
@@ -516,6 +530,7 @@ fn fields(action: &str) -> Option<&'static [&'static str]> {
         "swarm" => &["title"],
         "chief" => &["title", "brief"],
         "mono" => &["mono", "task"],
+        "worker" => &["title", "task", "files"],
         "get" | "cancel" | "review" => &["taskId"],
         "wait" => &["timeoutSeconds"],
         "steer" | "message" => &["taskId", "text"],
@@ -660,7 +675,7 @@ pub fn chief_offer(cli: &str, monos: &[CrewMember]) -> String {
         String::new()
     } else {
         format!(
-            " The user's code monos: {}. To give one a self-contained task in its own chat, where it works with its own memory and the user can follow it, run `{cli} control mono --json '{{\"mono\":\"Name\",\"task\":\"What to do, where, and how to verify\"}}'`; pick the mono whose specialty fits. Its answer reaches you as a message when it is done.",
+            " The user's code monos: {}. To give one a self-contained task in its own chat, where it works with its own memory and the user can follow it, run `{cli} control mono --json '{{\"mono\":\"Name\",\"task\":\"What to do, where, and how to verify\"}}'`; pick the mono whose specialty fits. A busy mono refuses the task. Its answer reaches you once, as a message, when it is done.",
             monos
                 .iter()
                 .map(|m| if m.specialty.is_empty() {
@@ -672,8 +687,11 @@ pub fn chief_offer(cli: &str, monos: &[CrewMember]) -> String {
                 .join(", ")
         )
     };
+    let temporary = format!(
+        " When no mono fits, or the user has none, you may instead start a temporary worker for this chat only: run `{cli} control worker --json '{{\"title\":\"Short title\",\"task\":\"Self-contained instructions\",\"files\":[\"src/feature\"]}}'`. It works in its own worktree on this chat's harness, is never added to the user's monos and keeps no memory; this chat becomes its lead and reviews its result. Never invent monos."
+    );
     format!(
-        "<monocode_monos>\nThe user's monos can work for you.{direct} For a large task that splits into independent parts (several areas of the code, or building and verifying in parallel), hand it to Chief: run `{cli} control chief --json '{{\"title\":\"Short task title\",\"brief\":\"Self-contained request: goal, constraints, where the code is, how to verify\"}}'`. Chief coordinates monos in their own chats and worktrees, which the user watches in the right panel, reviews their work into this checkout and sends you one summary as a message when it is done. After it starts, end your turn and do not edit the files it works on. A small or sequential task stays here, and your own subagents remain fine for quick reading and research. Credentials are already in your environment; never print them.\n</monocode_monos>"
+        "<monocode_monos>\nThe user's monos can work for you.{direct}{temporary} For a large task that splits into independent parts (several areas of the code, or building and verifying in parallel), hand it to Chief: run `{cli} control chief --json '{{\"title\":\"Short task title\",\"brief\":\"Self-contained request: goal, constraints, where the code is, how to verify\"}}'`. Chief coordinates monos in their own chats and worktrees, which the user watches in the right panel, reviews their work into this checkout and sends you one summary as a message when it is done. After it starts, end your turn and do not edit the files it works on. A small or sequential task stays here, and your own subagents remain fine for quick reading and research. Credentials are already in your environment; never print them.\n</monocode_monos>"
     )
 }
 
@@ -708,6 +726,83 @@ pub fn chief_started(title: &str, chief: i64) -> Value {
         "chief": chief,
         "instructions": "Chief is coordinating the monos in its own chat; the user watches them in the right panel. End your turn now with one short line for the user. Chief's summary reaches this chat as a message when the work is done; then review the changes and continue. Until then, do not edit the files Chief works on.",
     })
+}
+
+/// `control worker` as the `delegate` the chat's own run executes: a
+/// temporary agent on the chat's harness and model, with the task as its
+/// prompt and the whole checkout as its scope unless files narrow it.
+pub fn worker_delegate(input: &Value, harness: &str, model: Option<&str>) -> Result<Value, String> {
+    check_fields("worker", input)?;
+    let title = text(input, "title", 160)?;
+    let task = text(input, "task", 30_000)?;
+    let mut files = strings(input, "files", 64)?;
+    if files.is_empty() {
+        files.push(".".into());
+    }
+    check_scopes(&files)?;
+    let mut delegate = json!({
+        "title": title,
+        "harness": harness,
+        "prompt": task,
+        "files": files,
+    });
+    if let Some(model) = model {
+        delegate["model"] = model.into();
+    }
+    Ok(delegate)
+}
+
+/// What `control worker` answers: the delegated task, and how this chat
+/// leads it from here.
+pub fn worker_started(mut delegated: Value, cli: &str) -> Value {
+    let cli = shell_path(cli);
+    delegated["temporary"] = true.into();
+    delegated["instructions"] = format!(
+        "A temporary worker for this chat only took the task in its own worktree; the user follows it in this chat's Swarm tab. It is not one of the user's monos and keeps no memory. This chat is now its lead: its result reaches you once, as a message, when it stops. Then inspect its changes, `{cli} control review --json '{{\"taskId\":\"...\"}}'` applies them here, and `{cli} control finish` ends the run once every task is reviewed or cancelled. `{cli} control cancel --json '{{\"taskId\":\"...\"}}'` stops it. Run `{cli} control --help` for the other actions. Until then, do not edit the files it works on."
+    )
+    .into();
+    delegated
+}
+
+/// Results of `control mono` handoffs by caller and request ID, so a
+/// retried call queues its task once. Recent ones only: the oldest go
+/// first past [`MAX_REQUESTS`].
+#[derive(Clone, Debug, Default)]
+pub struct Handoffs {
+    receipts: std::collections::VecDeque<(String, Receipt)>,
+}
+impl Handoffs {
+    fn key(session: i64, request_id: &str) -> String {
+        format!("{session}:{request_id}")
+    }
+    /// The answer an earlier call with this ID got; Err when the same ID
+    /// came with other input.
+    pub fn receipt(
+        &self,
+        session: i64,
+        request_id: &str,
+        fingerprint: &str,
+    ) -> Option<Result<Value, String>> {
+        let key = Self::key(session, request_id);
+        let (_, receipt) = self.receipts.iter().find(|(k, _)| *k == key)?;
+        Some(if receipt.fingerprint == fingerprint {
+            Ok(receipt.result.clone())
+        } else {
+            Err("Request ID was already used with different input".into())
+        })
+    }
+    pub fn record(&mut self, session: i64, request_id: &str, fingerprint: &str, result: &Value) {
+        if self.receipts.len() >= MAX_REQUESTS {
+            self.receipts.pop_front();
+        }
+        self.receipts.push_back((
+            Self::key(session, request_id),
+            Receipt {
+                fingerprint: fingerprint.into(),
+                result: result.clone(),
+            },
+        ));
+    }
 }
 
 /// Quote the executable for a POSIX shell only when needed.

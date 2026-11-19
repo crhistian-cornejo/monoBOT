@@ -2,6 +2,7 @@
 //! the assistant's answer or allowing a child completion to finish the turn.
 use super::*;
 use crate::tool::tasks::{AgentRun, AgentStep, Panel, TaskList};
+mod output_tail;
 
 #[derive(Default)]
 pub(super) struct Activities {
@@ -16,6 +17,8 @@ pub(super) struct Activities {
     pub(super) claude_tasks: Vec<BackgroundTask>,
     /// What the UI was last told the yielded turn is waiting on.
     pub(super) published: Vec<BackgroundTask>,
+    /// The logs of the commands still running.
+    tails: output_tail::Tails,
 }
 fn text(value: &Value) -> Option<&str> {
     value.as_str().filter(|s| !s.trim().is_empty())
@@ -576,6 +579,13 @@ impl Protocol {
         let tasks = &mut self.activities.claude_tasks;
         match subtype {
             "task_started" if !tasks.iter().any(|task| task.id == id) => {
+                if let Some(tool) = text(&value["tool_use_id"]) {
+                    self.activities.tails.set_source(id, tool);
+                }
+                if let Some(path) = text(&value["output_file"]) {
+                    self.activities.tails.set_path(id, path.into());
+                }
+                let tasks = &mut self.activities.claude_tasks;
                 let source = text(&value["tool_use_id"]).and_then(|id| self.tools.get(id));
                 let command = source
                     .filter(|tool| tool.name == "Bash")
@@ -593,6 +603,7 @@ impl Protocol {
                     agent: is_agent_task(value["task_type"].as_str()),
                     command,
                     started_at: crate::time::now_ms(),
+                    output: Vec::new(),
                 });
             }
             "task_updated" => {
@@ -639,6 +650,7 @@ impl Protocol {
                     agent: is_agent_task(row["task_type"].as_str()),
                     command: None,
                     started_at: crate::time::now_ms(),
+                    output: Vec::new(),
                 });
             }
         }
@@ -647,13 +659,60 @@ impl Protocol {
     /// on, and clear the list when Claude picks the thread back up.
     pub(super) fn sync_background(&mut self, events: &mut Vec<Event>) {
         let waiting = if self.claude_result_seen && !self.done {
-            self.activities.claude_tasks.clone()
+            self.with_output(self.activities.claude_tasks.clone())
         } else {
             Vec::new()
         };
         if waiting != self.activities.published {
             self.activities.published = waiting.clone();
             events.push(Event::Background(waiting));
+        }
+    }
+    /// Each running command with the last lines its log shows.
+    pub(super) fn with_output(&mut self, mut tasks: Vec<BackgroundTask>) -> Vec<BackgroundTask> {
+        if tasks.is_empty() {
+            return tasks;
+        }
+        if self.activities.tails.due() {
+            let running: Vec<String> = tasks
+                .iter()
+                .filter(|task| !task.agent)
+                .map(|task| task.id.clone())
+                .collect();
+            for task in tasks.iter().filter(|task| !task.agent) {
+                if self.activities.tails.has_path(&task.id) {
+                    continue;
+                }
+                if let Some(path) = self.output_file(task) {
+                    self.activities.tails.set_path(&task.id, path);
+                }
+            }
+            self.activities.tails.refresh(&running);
+        }
+        for task in &mut tasks {
+            task.output = self.activities.tails.lines(&task.id);
+        }
+        tasks
+    }
+    /// Where the provider writes a background command's output.
+    fn output_file(&self, task: &BackgroundTask) -> Option<std::path::PathBuf> {
+        match self.request.kind {
+            Kind::Claude => {
+                let tool = self.tools.get(self.activities.tails.source(&task.id)?)?;
+                output_tail::claude_output_file(&tool.output)
+            }
+            Kind::Antigravity => {
+                let transcript = crate::accounts::home()?
+                    .join(crate::images::BRAIN_DIR)
+                    .join(self.acp_active_session()?)
+                    .join(".system_generated/logs/transcript.jsonl");
+                output_tail::antigravity_log(
+                    &transcript,
+                    task.command.as_deref()?,
+                    &self.activities.tails.paths(),
+                )
+            }
+            _ => None,
         }
     }
     fn claude_progress(&mut self, value: &Value, parent: &str, events: &mut Vec<Event>) {
@@ -1011,5 +1070,32 @@ mod tests {
         )
         .unwrap();
         assert_eq!(tick(&mut p), Some(Vec::new()));
+    }
+    #[test]
+    fn a_claude_background_command_shows_the_end_of_its_log() {
+        let dir = std::env::temp_dir().join(format!("monocode-claude-tail-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = dir.join("bdev.output");
+        std::fs::write(
+            &log,
+            "> vite\r\n\n  \u{1b}[32mVITE\u{1b}[0m ready in 312 ms\n",
+        )
+        .unwrap();
+        let mut p = protocol(Kind::Claude);
+        p.frame(json!({"type":"assistant","message":{"content":[{"type":"tool_use","id":"dev-call","name":"Bash","input":{"command":"npm run dev","run_in_background":true}}]}}), &mut Vec::new()).unwrap();
+        p.frame(json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"dev-call","content":format!("Command running in background with ID: bdev. Output is being written to: {}. You will be notified when it completes", log.display())}]}}), &mut Vec::new()).unwrap();
+        p.frame(json!({"type":"system","subtype":"task_started","task_id":"bdev","tool_use_id":"dev-call","description":"Start dev server","task_type":"local_bash","is_backgrounded":true}), &mut Vec::new()).unwrap();
+        p.frame(
+            json!({"type":"result","result":"Started it."}),
+            &mut Vec::new(),
+        )
+        .unwrap();
+        let mut events = Vec::new();
+        p.sync_background(&mut events);
+        let Some(Event::Background(tasks)) = events.pop() else {
+            panic!("expected the waiting list")
+        };
+        assert_eq!(tasks[0].output, ["> vite", "  VITE ready in 312 ms"]);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 }

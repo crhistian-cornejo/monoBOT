@@ -3,13 +3,14 @@
 //! app. The system's clipboard is read elsewhere; this is only the list.
 use std::sync::Arc;
 
-/// How many copies the history keeps.
-pub const KEPT: usize = 30;
+/// How many copies the history keeps: enough to find this morning's copy
+/// by searching, and still a few megabytes at most.
+pub const KEPT: usize = 200;
 /// A copy larger than this is not kept: the history is for snippets, not
-/// for a whole file's text held thirty times over.
+/// for a whole file's text held two hundred times over.
 pub const LARGEST: usize = 64 * 1024;
 /// How many of the copies may be pictures, and how large each may be.
-pub const PICTURES: usize = 4;
+pub const PICTURES: usize = 8;
 pub const LARGEST_PICTURE: usize = 8 * 1024 * 1024;
 
 /// What a copy is, for its mark and how it is shown.
@@ -168,6 +169,64 @@ impl Clip {
             .map(|line| line.get(shared..).unwrap_or("").to_owned())
             .collect();
         (shown, lines.len().saturating_sub(most))
+    }
+
+    /// Words to find the copy by besides its text, lowercase: its kind, a
+    /// snippet's language, where a link or an address goes, a file's
+    /// extension.
+    pub fn tags(&self) -> Vec<String> {
+        let text = self.text.trim();
+        let mut tags = vec![self.kind.label().to_lowercase()];
+        let mut add = |tag: &str| {
+            let tag = tag.trim().to_lowercase();
+            if !tag.is_empty() && !tags.contains(&tag) {
+                tags.push(tag);
+            }
+        };
+        match self.kind {
+            Kind::Code => {
+                if let Some(language) = language(text) {
+                    add(language);
+                }
+            }
+            Kind::Link => {
+                if let Some(host) = host(text) {
+                    add(host.strip_prefix("www.").unwrap_or(host));
+                }
+            }
+            Kind::Email => {
+                if let Some((_, domain)) = text.split_once('@') {
+                    add(domain);
+                }
+            }
+            Kind::Path => {
+                let (name, _) = path_parts(text);
+                match name.rsplit_once('.') {
+                    Some((stem, extension)) if !stem.is_empty() && extension.len() <= 8 => {
+                        add(extension)
+                    }
+                    _ => {}
+                }
+            }
+            Kind::Text | Kind::Color(_) | Kind::Image(..) => {}
+        }
+        tags
+    }
+
+    /// Whether the copy answers a search: every word of `query` is in its
+    /// text or begins one of its tags, and a word written `#tag` names a
+    /// tag. Case is ignored; an empty search finds everything.
+    pub fn matches(&self, query: &str) -> bool {
+        let tags = self.tags();
+        let text = self.text.to_lowercase();
+        query.split_whitespace().all(|word| {
+            let word = word.to_lowercase();
+            match word.strip_prefix('#') {
+                Some("") => true,
+                Some(tag) => tags.iter().any(|kept| kept.starts_with(tag)),
+                None => text.contains(&word) || tags.iter().any(|kept| kept.starts_with(&word)),
+            }
+        })
     }
 }
 
@@ -561,11 +620,103 @@ impl History {
     pub fn clear(&mut self) {
         self.clips.clear();
     }
+
+    /// Where the copies that answer `query` are, newest first.
+    pub fn find(&self, query: &str) -> Vec<usize> {
+        self.clips
+            .iter()
+            .enumerate()
+            .filter(|(_, clip)| clip.matches(query))
+            .map(|(at, _)| at)
+            .collect()
+    }
+
+    /// The tags the kept copies share most, each with how many wear it,
+    /// at most `most` of them. Ties keep the order they were first seen in,
+    /// newest first, so the row does not shuffle as copies come in.
+    pub fn common_tags(&self, most: usize) -> Vec<(String, usize)> {
+        let mut counted: Vec<(String, usize)> = Vec::new();
+        for clip in &self.clips {
+            for tag in clip.tags() {
+                match counted.iter_mut().find(|(kept, _)| *kept == tag) {
+                    Some((_, count)) => *count += 1,
+                    None => counted.push((tag, 1)),
+                }
+            }
+        }
+        // A stable sort: equal counts stay in the order first seen.
+        counted.sort_by_key(|(_, count)| std::cmp::Reverse(*count));
+        counted.truncate(most);
+        counted
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_history_keeps_two_hundred_copies_and_finds_them_by_text_and_tag() {
+        let mut history = History::default();
+        for n in 0..KEPT + 20 {
+            history.push(&format!("note {n}"), n as u64);
+        }
+        assert_eq!(history.clips().len(), KEPT, "the oldest twenty went");
+        assert_eq!(history.clips()[0].text, format!("note {}", KEPT + 19));
+
+        let mut history = History::default();
+        history.push("fn main() {\n    run();\n}", 1);
+        history.push("https://www.github.com/zed-industries/zed", 2);
+        history.push("/Users/me/Notes/plan.md", 3);
+        history.push("Ship the Mac build on Friday", 4);
+        let texts = |found: Vec<usize>| -> Vec<String> {
+            found
+                .into_iter()
+                .map(|at| history.clips()[at].text.clone())
+                .collect()
+        };
+        // Words are found in the text, whatever their case.
+        assert_eq!(
+            texts(history.find("friday")),
+            ["Ship the Mac build on Friday"]
+        );
+        // A tag is found by `#` or by the start of its name.
+        assert_eq!(
+            texts(history.find("#link")),
+            ["https://www.github.com/zed-industries/zed"]
+        );
+        assert_eq!(
+            texts(history.find("github")),
+            ["https://www.github.com/zed-industries/zed"]
+        );
+        assert_eq!(texts(history.find("#rust")), ["fn main() {\n    run();\n}"]);
+        assert_eq!(texts(history.find("#md")), ["/Users/me/Notes/plan.md"]);
+        // Every word must answer; a lone `#` asks nothing.
+        assert!(history.find("#link friday").is_empty());
+        assert_eq!(history.find("# ").len(), 4);
+        assert_eq!(history.find("").len(), 4);
+        // The link's tag drops `www.`; the text still has it.
+        assert_eq!(history.clips()[2].tags(), ["link", "github.com"]);
+    }
+
+    #[test]
+    fn the_common_tags_are_counted_and_keep_their_order_on_ties() {
+        let mut history = History::default();
+        history.push("https://docs.rs/gpui", 1);
+        history.push("plain words", 2);
+        history.push("https://crates.io", 3);
+        history.push("more words", 4);
+        let tags = history.common_tags(3);
+        assert_eq!(
+            tags,
+            [
+                ("text".into(), 2),
+                ("link".into(), 2),
+                ("crates.io".into(), 1)
+            ],
+            "newest first among equals"
+        );
+    }
 
     #[test]
     fn copies_made_in_the_same_millisecond_keep_their_own_time() {

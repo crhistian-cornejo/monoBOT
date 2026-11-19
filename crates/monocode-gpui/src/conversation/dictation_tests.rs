@@ -10,6 +10,7 @@ fn conversation(fake: &Arc<Fake>, cx: &mut TestAppContext) -> WindowHandle<Conve
     let summary = store.create("codex", "/missing/dictation-project").unwrap();
     cx.update(|cx| {
         input::bind(cx);
+        cx.set_reduce_motion(true);
         cx.set_global(crate::dictation::Engines(fake.clone()));
         cx.open_window(Default::default(), |_, cx| {
             cx.new(|cx| {
@@ -39,6 +40,7 @@ fn the_mic_sits_before_send_and_dictates_into_the_draft(cx: &mut TestAppContext)
         })
         .unwrap();
     let visual = &mut VisualTestContext::from_window(window.into(), cx);
+    visual.run_until_parked();
     visual.refresh().unwrap();
     let mic = visual
         .debug_bounds("dictation-mic")
@@ -56,7 +58,12 @@ fn the_mic_sits_before_send_and_dictates_into_the_draft(cx: &mut TestAppContext)
 
     visual.simulate_click(mic.center(), Default::default());
     visual.run_until_parked();
-    assert_eq!(phase(window, visual), Phase::Listening);
+    assert_eq!(
+        phase(window, visual),
+        Phase::Listening,
+        "{:?}",
+        fake.calls()
+    );
     visual.refresh().unwrap();
     let bar = visual
         .debug_bounds("dictation-bar")

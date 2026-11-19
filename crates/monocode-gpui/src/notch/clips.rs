@@ -11,12 +11,23 @@
 //! wraps; a link leads with where it goes; a color shows itself and how it
 //! is written. Beside it, a few facts and what can be done with it: copy it
 //! again, open a link, show a path in its folder, write to an address.
+//!
+//! The history keeps the last `clipboard::KEPT` copies. The header's field
+//! searches their text and tags (`#link`, `#rust`, `#github.com`), and the
+//! tags most copies share sit under it, a click from filtering. A
+//! right-click on a row opens its native menu (`menus`).
 use super::*;
 use monocode_core::notch::clipboard::{self as clipboard, Clip, Kind, LARGEST, LARGEST_PICTURE};
 use std::sync::Arc;
 
-/// The page's own header: its caption and Clear.
-const CLIPS_HEADER: f32 = 28.;
+/// The page's own header: the search and Clear.
+const CLIPS_HEADER: f32 = 30.;
+/// The row of common tags under the header, when there are some to pick.
+const CLIPS_TAGS: f32 = 24.;
+/// How many common tags the row offers.
+const TAGS_SHOWN: usize = 6;
+/// The line that says nothing answers the search.
+const NO_MATCH: f32 = 26.;
 /// The page with nothing copied yet.
 const CLIPS_EMPTY: f32 = 64.;
 /// How long a row says it was copied.
@@ -103,7 +114,7 @@ impl Notch {
 
     /// Copies a kept clip again; it becomes the newest and says so for a
     /// moment.
-    fn copy_clip(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(super) fn copy_clip(&mut self, index: usize, cx: &mut Context<Self>) {
         let Some(clip) = self.clips.clips().get(index).cloned() else {
             return;
         };
@@ -123,7 +134,7 @@ impl Notch {
 
     /// Copies `text` as one way of writing what a clip holds (a color's
     /// `rgb()`); the clipboard's watch adds it to the list by itself.
-    fn copy_text(&mut self, text: String, cx: &mut Context<Self>) {
+    pub(super) fn copy_text(&mut self, text: String, cx: &mut Context<Self>) {
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text));
         self.said_copied(cx);
     }
@@ -141,19 +152,72 @@ impl Notch {
     }
 
     pub(super) fn clips_height(&self) -> f32 {
-        match self.clips.clips().len() {
-            0 => CLIPS_EMPTY,
-            count => (CLIPS_HEADER + CARD + CARD_GAP + ROW * count as f32 + 4.).min(AGENTS_MAX),
+        if self.clips.clips().is_empty() {
+            return CLIPS_EMPTY;
         }
+        let tags = if self.clip_tags().is_empty() {
+            0.
+        } else {
+            CLIPS_TAGS
+        };
+        let found = self.found_clips().len();
+        let body = match found {
+            0 => NO_MATCH,
+            count => CARD + CARD_GAP + ROW * count as f32,
+        };
+        (CLIPS_HEADER + tags + body + 4.).min(AGENTS_MAX)
+    }
+
+    /// The copies that answer the search, newest first.
+    pub(super) fn found_clips(&self) -> Vec<usize> {
+        self.clips.find(&self.clip_query)
+    }
+
+    /// The tags offered under the search: worth a row only when they tell
+    /// copies apart.
+    fn clip_tags(&self) -> Vec<(String, usize)> {
+        let tags = self.clips.common_tags(TAGS_SHOWN);
+        if tags.len() < 2 { Vec::new() } else { tags }
     }
 
     /// Which copy the card shows: the one last pointed at while it is still
-    /// kept, or the newest.
+    /// kept and answers the search, or the newest that does.
     pub(super) fn shown_clip(&self) -> Option<usize> {
         let clips = self.clips.clips();
+        let found = self.found_clips();
         self.clip_shown
             .and_then(|at| clips.iter().position(|clip| clip.at == at))
-            .or((!clips.is_empty()).then_some(0))
+            .filter(|index| found.contains(index))
+            .or(found.first().copied())
+    }
+
+    /// Puts `query` in the search, as a tag's click or a menu does.
+    pub(super) fn search_clips(&mut self, query: String, cx: &mut Context<Self>) {
+        self.clip_query = query.clone();
+        self.clip_shown = None;
+        self.clip_search
+            .update(cx, |field, cx| field.set_text(query, cx));
+        cx.notify();
+    }
+
+    /// A tag's click: adds `#tag` to the search, or takes it out again.
+    fn toggle_tag(&mut self, tag: &str, cx: &mut Context<Self>) {
+        let word = format!("#{tag}");
+        let mut words: Vec<&str> = self.clip_query.split_whitespace().collect();
+        if words.contains(&word.as_str()) {
+            words.retain(|kept| *kept != word);
+        } else {
+            words.push(&word);
+        }
+        let query = words.join(" ");
+        self.search_clips(query, cx);
+    }
+
+    pub(super) fn clear_clips(&mut self, cx: &mut Context<Self>) {
+        self.clips.clear();
+        self.clip_copied = None;
+        self.clip_shown = None;
+        self.search_clips(String::new(), cx);
     }
 
     /// The copy itself, as large as the card allows.
@@ -400,35 +464,115 @@ impl Notch {
                     .is_some_and(|kept| Arc::ptr_eq(kept, bytes))
             })
         });
+        let found = self.found_clips();
         let shown = self.shown_clip();
         let card = shown.and_then(|index| {
             let clip = clips.get(index)?.clone();
             Some(self.clip_card(index, &clip, cx))
+        });
+        let header = if clips.is_empty() {
+            div()
+                .h(px(CLIPS_HEADER))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .child(pages::caption("Copied lately").h_auto().pt_0())
+        } else {
+            let search = div()
+                .debug_selector(|| "notch-clips-search".into())
+                .h(px(24.))
+                .min_w_0()
+                .flex_1()
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .bg(ink(0.07))
+                .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
+                    platform::take_keys(window)
+                })
+                .child(icon("search-01", 11.).text_color(ink(0.45)))
+                .child(div().min_w_0().flex_1().child(self.clip_search.clone()));
+            let count = div()
+                .flex_shrink_0()
+                .text_size(px(10.5))
+                .text_color(ink(0.4))
+                .child(if self.clip_query.trim().is_empty() {
+                    format!("{}", clips.len())
+                } else {
+                    format!("{} of {}", found.len(), clips.len())
+                });
+            div()
+                .h(px(CLIPS_HEADER))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .pb(px(6.))
+                .child(search)
+                .child(count)
+                .child(
+                    pill("notch-clips-clear", "Clear", false)
+                        .on_click(cx.listener(|this, _, _, cx| this.clear_clips(cx))),
+                )
+        };
+        let tags = self.clip_tags();
+        let picked: Vec<String> = self
+            .clip_query
+            .split_whitespace()
+            .filter_map(|word| word.strip_prefix('#'))
+            .map(str::to_lowercase)
+            .collect();
+        let tag_row = (!tags.is_empty()).then(|| {
+            div()
+                .h(px(CLIPS_TAGS))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .gap(px(4.))
+                .overflow_hidden()
+                .children(tags.into_iter().map(|(tag, count)| {
+                    let on = picked.contains(&tag);
+                    let key = tag.clone();
+                    div()
+                        .id(gpui::SharedString::from(format!("notch-clip-tag-{tag}")))
+                        .debug_selector({
+                            let tag = tag.clone();
+                            move || format!("notch-clip-tag-{tag}")
+                        })
+                        .role(Role::Button)
+                        .aria_label(format!("Show copies tagged {tag}"))
+                        .h(px(18.))
+                        .px(px(7.))
+                        .flex_shrink_0()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .text_size(px(10.5))
+                        .cursor_pointer()
+                        .when(on, |chip| chip.bg(accent_color()).text_color(white(1.)))
+                        .when(!on, |chip| {
+                            chip.bg(ink(0.07))
+                                .text_color(ink(0.7))
+                                .hover(|style| style.bg(ink(0.12)))
+                        })
+                        .child(format!("#{tag}"))
+                        .child(
+                            div()
+                                .when(on, |n| n.text_color(white(0.75)))
+                                .when(!on, |n| n.text_color(ink(0.4)))
+                                .child(count.to_string()),
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.toggle_tag(&key, cx)))
+                }))
         });
         let page = div()
             .debug_selector(|| "notch-clips-page".into())
             .h(px(self.clips_height()))
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .h(px(CLIPS_HEADER))
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(pages::caption("Copied lately").h_auto().pt_0())
-                    .when(!clips.is_empty(), |header| {
-                        header.child(pill("notch-clips-clear", "Clear", false).on_click(
-                            cx.listener(|this, _, _, cx| {
-                                this.clips.clear();
-                                this.clip_copied = None;
-                                this.clip_shown = None;
-                                cx.notify();
-                            }),
-                        ))
-                    }),
-            )
+            .child(header)
+            .children(tag_row)
             .children(card);
         // The rows scroll under the card, which stays where it is.
         let mut list = div()
@@ -446,9 +590,21 @@ impl Notch {
                     .text_color(ink(0.4))
                     .child("Nothing copied yet. What you copy shows here, in memory only."),
             );
+        } else if found.is_empty() {
+            list = list.child(
+                div()
+                    .debug_selector(|| "notch-clips-no-match".into())
+                    .px(px(6.))
+                    .text_size(px(11.5))
+                    .text_color(ink(0.4))
+                    .child("No copy matches. Try other words or a #tag."),
+            );
         }
         let now = now_ms();
         for (index, clip) in clips.into_iter().enumerate() {
+            if !found.contains(&index) {
+                continue;
+            }
             let mark = self.clip_mark(&clip);
             let at = clip.at;
             // A copied row is always the newest.
@@ -517,6 +673,13 @@ impl Notch {
                     )
                 })
                 .on_click(cx.listener(move |this, _, _, cx| this.copy_clip(index, cx)))
+                .on_mouse_down(
+                    gpui::MouseButton::Right,
+                    cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                        cx.stop_propagation();
+                        this.clip_menu(index, event.position, window, cx);
+                    }),
+                )
                 .child(remove),
             );
         }

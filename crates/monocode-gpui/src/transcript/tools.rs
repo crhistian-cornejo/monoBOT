@@ -49,6 +49,65 @@ fn search_pill() -> Div {
 /// Lines an inline diff shows before pointing at the file.
 const DIFF_LINES: usize = 80;
 
+/// A failure's output keeps its first and last lines whole. Between them it
+/// keeps only the lines that name an error, up to `ERROR_MARKS`, and says how
+/// many it left out. **Show all** lifts the fold.
+const ERROR_HEAD: usize = 20;
+const ERROR_TAIL: usize = 60;
+const ERROR_MARKS: usize = 40;
+
+/// What to paint of a failed call's output, and how many lines it leaves out.
+fn fold_error_output(output: &str) -> (String, usize) {
+    let lines: Vec<&str> = output.lines().collect();
+    if lines.len() <= ERROR_HEAD + ERROR_TAIL + ERROR_MARKS {
+        return (output.to_owned(), 0);
+    }
+    let names_error = |line: &str| {
+        let line = line.to_ascii_lowercase();
+        [
+            "error",
+            "panicked",
+            "fatal",
+            "exception",
+            "traceback",
+            "fail",
+        ]
+        .iter()
+        .any(|mark| line.contains(mark))
+    };
+    let mut shown: Vec<String> = lines[..ERROR_HEAD]
+        .iter()
+        .map(|l| (*l).to_owned())
+        .collect();
+    let (mut hidden, mut skipped, mut marks) = (0, 0, 0);
+    let mut omit = |shown: &mut Vec<String>, skipped: &mut usize| {
+        if *skipped > 0 {
+            shown.push(format!(
+                "… {skipped} {} omitted …",
+                if *skipped == 1 { "line" } else { "lines" }
+            ));
+            hidden += *skipped;
+            *skipped = 0;
+        }
+    };
+    for line in &lines[ERROR_HEAD..lines.len() - ERROR_TAIL] {
+        if marks < ERROR_MARKS && names_error(line) {
+            omit(&mut shown, &mut skipped);
+            shown.push((*line).to_owned());
+            marks += 1;
+        } else {
+            skipped += 1;
+        }
+    }
+    omit(&mut shown, &mut skipped);
+    shown.extend(
+        lines[lines.len() - ERROR_TAIL..]
+            .iter()
+            .map(|l| (*l).to_owned()),
+    );
+    (shown.join("\n"), hidden)
+}
+
 /// The edit's change under its row: what it is, its counts, then its lines.
 fn diff_block(
     start: usize,
@@ -384,7 +443,15 @@ impl TranscriptView {
         } else {
             Vec::new()
         };
-        let error_detail = tool.output.clone();
+        // Only an open failure pays for its output, folded unless asked.
+        let all_key = format!("tool-detail-all:{start}:{}", tool.id);
+        let error_detail = (has_error && error_open).then(|| {
+            if self.agent_panels.part_open(&all_key, false) {
+                (tool.output.clone(), 0)
+            } else {
+                fold_error_output(&tool.output)
+            }
+        });
         let summary = div()
             .id(gpui::SharedString::from(format!("tool:{identity}")))
             .debug_selector(move || format!("tool-{start}"))
@@ -736,17 +803,38 @@ impl TranscriptView {
             .when_some(preview, |d, preview| {
                 d.child(diff_block(start, &preview, &diff_state, diff_path))
             })
-            .when(has_error && error_open, |d| {
+            .when_some(error_detail, |d, (text, hidden)| {
                 d.child(
                     div()
+                        .debug_selector(move || format!("tool-error-{start}"))
                         .min_w_0()
                         .pb_2()
                         .font_family(crate::fonts::mono())
                         .text_size(px(12.))
                         .line_height(px(20.))
                         .text_color(crate::theme::danger())
-                        .child(error_detail),
+                        .child(text),
                 )
+                .when(hidden > 0, |d| {
+                    let label = format!("Show all {} lines", tool.output.lines().count());
+                    d.child(
+                        div()
+                            .id(("tool-error-all", start))
+                            .debug_selector(move || format!("tool-error-all-{start}"))
+                            .role(Role::Button)
+                            .aria_label(label.clone())
+                            .pb_2()
+                            .text_size(px(11.))
+                            .text_color(content(0.5))
+                            .cursor_pointer()
+                            .hover(|s| s.text_color(content(0.8)))
+                            .child(label)
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                cx.stop_propagation();
+                                this.toggle_agent_part(all_key.clone(), true, start, cx);
+                            })),
+                    )
+                })
             })
             .into_any_element()
     }
@@ -922,6 +1010,113 @@ mod tests {
         visual.run_until_parked();
         let steps = visual.debug_bounds("tool-steps-1").expect("expanded steps");
         assert!(steps.size.height >= px(100.));
+    }
+
+    /// 1,500 lines of a failed build with three errors in the middle.
+    fn long_failure() -> String {
+        let mut lines: Vec<String> = (0..1500)
+            .map(|i| format!("   Compiling crate-{i:04} v0.1.0"))
+            .collect();
+        lines[400] = "error[E0308]: mismatched types".into();
+        lines[700] = "thread 'main' panicked at src/lib.rs:7".into();
+        lines[1100] = "warning: unused import (not an error marker? it is: Error)".into();
+        lines[1499] = "error: could not compile `app`".into();
+        lines.join("\n")
+    }
+
+    #[test]
+    fn a_long_failure_keeps_its_ends_and_every_error_line() {
+        let output = long_failure();
+        let (shown, hidden) = fold_error_output(&output);
+        let painted = shown.lines().count();
+        // Measured: 1,500 lines → 87 painted (20 + 3 errors + 4 notes + 60).
+        assert_eq!(painted, 87);
+        assert_eq!(hidden, 1500 - 20 - 60 - 3);
+        for kept in [
+            "   Compiling crate-0000 v0.1.0",
+            "error[E0308]: mismatched types",
+            "thread 'main' panicked at src/lib.rs:7",
+            "warning: unused import (not an error marker? it is: Error)",
+            "error: could not compile `app`",
+        ] {
+            assert!(shown.lines().any(|line| line == kept), "{kept}");
+        }
+        assert!(shown.contains("… 380 lines omitted …"));
+        // Short output is painted as it came.
+        assert_eq!(
+            fold_error_output("Build failed"),
+            ("Build failed".into(), 0)
+        );
+    }
+
+    #[gpui::test]
+    fn an_open_failure_paints_its_folded_output_until_show_all(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let window = cx.update(|cx| {
+            cx.open_window(Default::default(), |_, cx| {
+                cx.new(|_| TranscriptView::new())
+            })
+            .unwrap()
+        });
+        window
+            .update(cx, |view, _, cx| {
+                let mut failed = ToolCall::new("run", "Bash");
+                failed.input = r#"{"command":"cargo build"}"#.into();
+                failed.output = long_failure();
+                failed.state = ToolState::Failed;
+                let row = |role: &str, text: String| Row {
+                    role: role.into(),
+                    text,
+                    first: true,
+                    sent_at: None,
+                };
+                view.patch(
+                    0,
+                    vec![
+                        row("user", "Build it".into()),
+                        row("tool", serde_json::to_string(&failed).unwrap()),
+                    ],
+                    cx,
+                );
+                view.work_folds.insert(1, true);
+                view.phases.insert(1, true);
+                view.rebuild(0, cx);
+            })
+            .unwrap();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.run_until_parked();
+        assert!(
+            visual.debug_bounds("tool-error-1").is_none(),
+            "closed pays nothing"
+        );
+        window
+            .update(visual, |view, _, cx| {
+                view.toggle_agent_part("tool-detail:1:run".into(), true, 1, cx);
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let folded = visual.debug_bounds("tool-error-1").expect("open failure");
+        // 87 lines at 20 px; all 1,500 would be 30,000 px.
+        assert!(
+            folded.size.height <= px(87. * 20. + 8.),
+            "{:?}",
+            folded.size
+        );
+        assert!(
+            visual.debug_bounds("tool-error-all-1").is_some(),
+            "show all"
+        );
+        // The button sits below the fold, out of the test window: open the
+        // part it opens.
+        window
+            .update(visual, |view, _, cx| {
+                view.toggle_agent_part("tool-detail-all:1:run".into(), true, 1, cx);
+            })
+            .unwrap();
+        visual.run_until_parked();
+        let whole = visual.debug_bounds("tool-error-1").expect("whole output");
+        assert!(whole.size.height >= px(1500. * 20.), "{:?}", whole.size);
+        assert!(visual.debug_bounds("tool-error-all-1").is_none());
     }
 
     #[gpui::test]

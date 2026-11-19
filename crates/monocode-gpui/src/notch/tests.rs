@@ -2637,3 +2637,207 @@ fn the_notch_opens_rounder_with_each_corner_choice() {
     assert!(radius("subtle") < radius("rounded"));
     assert!(radius("rounded") < radius("soft"));
 }
+
+/// The Clipboard page searches what was copied by its words and its tags,
+/// typed or picked from the row of common tags.
+#[gpui::test]
+fn the_clipboard_is_searched_by_its_text_and_its_tags(cx: &mut TestAppContext) {
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.copied("https://docs.rs/gpui/latest", cx);
+            notch.copied("Ship the Mac build on Friday", cx);
+            notch.copied("https://github.com/zed-industries/zed", cx);
+            notch.copied("Lunch with the team", cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    click(visual, "notch-tab-clips");
+    let drawn = |visual: &mut VisualTestContext| {
+        visual.run_until_parked();
+        (0..4)
+            .filter(|index| {
+                let selector: &'static str = Box::leak(format!("notch-clip-{index}").into());
+                visual.debug_bounds(selector).is_some()
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(drawn(visual), [0, 1, 2, 3]);
+    // Typed words find the copies that hold them, whatever their case.
+    click(visual, "notch-clips-search");
+    visual.simulate_input("FRIDAY");
+    assert_eq!(drawn(visual), [2], "only the Friday note");
+    // A tag from the row filters by itself, and a second click lets go.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.search_clips(String::new(), cx))
+        .unwrap();
+    click(visual, "notch-clip-tag-link");
+    assert_eq!(drawn(visual), [1, 3], "the two links");
+    let query = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.clip_search.read(cx).content.to_string()
+        })
+        .unwrap();
+    assert_eq!(query, "#link", "the field shows what filters");
+    // The card follows the search: it shows the newest copy that answers.
+    let shown = opened
+        .window
+        .update(visual, |notch, _, _| notch.shown_clip())
+        .unwrap();
+    assert_eq!(shown, Some(1));
+    click(visual, "notch-clip-tag-link");
+    assert_eq!(drawn(visual), [0, 1, 2, 3]);
+    // Nothing answers: the page says so instead of an empty list.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.search_clips("#email".into(), cx)
+        })
+        .unwrap();
+    assert!(drawn(visual).is_empty());
+    assert!(visual.debug_bounds("notch-clips-no-match").is_some());
+    assert!(visual.debug_bounds("notch-clip-card").is_none());
+    // Clear empties the history and the search with it.
+    click(visual, "notch-clips-clear");
+    let cleared = opened
+        .window
+        .update(visual, |notch, _, cx| {
+            (
+                notch.clips.clips().len(),
+                notch.clip_search.read(cx).content.to_string(),
+            )
+        })
+        .unwrap();
+    assert_eq!(cleared, (0, String::new()));
+}
+
+/// A copy's native menu offers what the copy allows, and each pick does it.
+#[gpui::test]
+fn a_copys_menu_offers_what_it_allows_and_runs_the_pick(cx: &mut TestAppContext) {
+    use crate::popover::MenuItem;
+    let ids = |items: &[MenuItem]| -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action(action) => Some(action.id.to_string()),
+                _ => None,
+            })
+            .collect()
+    };
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.copied("#3366cc", cx);
+            notch.copied("https://docs.rs/gpui", cx);
+            notch.copied("plain words", cx);
+            notch.set_open(true, cx);
+        })
+        .unwrap();
+    let clips = opened
+        .window
+        .update(visual, |notch, _, _| notch.clips.clips().to_vec())
+        .unwrap();
+    let words = menus::clip_items(&clips[0]);
+    assert_eq!(ids(&words), ["copy", "tagged", "remove", "clear"]);
+    let link = menus::clip_items(&clips[1]);
+    assert_eq!(ids(&link), ["copy", "open", "tagged", "remove", "clear"]);
+    let color = menus::clip_items(&clips[2]);
+    let MenuItem::Action(copy_as) = &color[1] else {
+        panic!("a color is copied as one of its ways of writing");
+    };
+    assert_eq!(copy_as.submenu.len(), 3);
+    assert_eq!(copy_as.submenu[1].label.as_ref(), "rgb(51, 102, 204)");
+    // Picked: the rgb() writing goes to the clipboard.
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.clip_action(2, "format-1", cx))
+        .unwrap();
+    assert_eq!(
+        visual.read_from_clipboard().and_then(|item| item.text()),
+        Some("rgb(51, 102, 204)".into())
+    );
+    // A tag finds the copies that share it.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.clip_action(1, "tag:docs.rs", cx);
+            assert_eq!(notch.found_clips(), [1]);
+            notch.clip_action(0, "remove", cx);
+            assert_eq!(notch.clips.clips().len(), 2);
+        })
+        .unwrap();
+    // While a native menu is up the pointer may be on it, off the island:
+    // the notch waits for the menu before it closes.
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            notch.menu_up = true;
+            notch.hover_changed(false, cx);
+        })
+        .unwrap();
+    visual.executor().advance_clock(CLOSE_DELAY * 3);
+    visual.run_until_parked();
+    assert!(opened.window.update(visual, |n, _, _| n.open).unwrap());
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.menu_closed(cx))
+        .unwrap();
+    visual.executor().advance_clock(CLOSE_DELAY * 3);
+    visual.run_until_parked();
+    assert!(!opened.window.update(visual, |n, _, _| n.open).unwrap());
+}
+
+/// A widget's native menu arranges that one widget without the pencil.
+#[gpui::test]
+fn a_widgets_menu_arranges_it_without_the_pencil(cx: &mut TestAppContext) {
+    use crate::popover::MenuItem;
+    use monocode_core::notch::Widget;
+    let look = Look {
+        shelf: vec![Widget::new("clock", 1), Widget::new("agents", 1)],
+        ..Look::default()
+    };
+    let opened = open_notch(look, cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    let enabled = |notch: &Notch, widget: &str| -> Vec<String> {
+        let widget = notch
+            .look
+            .shelf
+            .iter()
+            .find(|kept| kept.id == widget)
+            .unwrap()
+            .clone();
+        menus::widget_items(&notch.look, &widget)
+            .iter()
+            .filter_map(|item| match item {
+                MenuItem::Action(action) if !action.disabled => Some(action.id.to_string()),
+                _ => None,
+            })
+            .collect()
+    };
+    opened
+        .window
+        .update(visual, |notch, _, cx| {
+            // The first can only move later; the last only earlier.
+            let first = enabled(notch, "clock");
+            assert!(first.contains(&"later".to_owned()));
+            assert!(!first.contains(&"earlier".to_owned()));
+            let last = enabled(notch, "agents");
+            assert!(last.contains(&"earlier".to_owned()));
+            assert!(!last.contains(&"later".to_owned()));
+            notch.widget_action("clock", "later", cx);
+            let order: Vec<_> = notch.look.shelf.iter().map(|w| w.id.clone()).collect();
+            assert_eq!(order, ["agents", "clock"]);
+            notch.widget_action("clock", "remove", cx);
+            assert_eq!(notch.look.shelf.len(), 1);
+            notch.widget_action("agents", "arrange", cx);
+            assert!(notch.editing);
+        })
+        .unwrap();
+    assert!(!opened.saved.borrow().is_empty(), "each change is saved");
+}

@@ -80,6 +80,69 @@ hábitos, `agents.message` y herramientas por bot.
 - Las notificaciones nativas siguen siendo opt-in (Ajustes › Notificaciones),
   hasta que haya notch.
 
+### 6. Delegar desde cualquier chat de código: monos y workers temporales
+
+Con Ajustes › Chat › «hand work to monos» (`chief_offer`), un chat de código
+local aprende una vez por conversación del proveedor (`control::chief_offer`)
+que puede repartir trabajo por el CLI `monocode-gpui control`:
+
+- **`control mono {"mono","task"}`**: la tarea va al chat propio de un mono de
+  código del usuario, que trabaja con su memoria (`Monos::hand_task`). Un mono
+  ocupado (mensaje en cola o en curso, chat trabajando, o con una tarea de una
+  run de Chief) la rechaza; la tarea no se encola detrás. Sin monos, el error
+  lo dice y nombra `control worker`: nunca se inventa un mono. La respuesta
+  vuelve una sola vez al chat que la dio (`mono_task_done`, guardada hasta que
+  el chat está libre).
+- **`control worker {"title","task","files"}`**: si ningún mono encaja, el
+  chat crea explícitamente un worker temporal. Es un `delegate` en la run del
+  propio chat (se abre una si no la tiene, como `control swarm`): mismo
+  harness y modelo que inició el turno, su propio worktree y recibos por
+  request-id. Requiere un checkout Git local con al menos un commit; no
+  comparte la carpeta del lead cuando no se puede aislar. Las aprobaciones
+  van al chat. El chat pasa a ser su lead: recibe el resultado una
+  vez, lo revisa con `review` y cierra con `finish`. `files` vale `["."]` si
+  no se da.
+- El worker temporal vive en la run y en su sesión («Agent · título»). No se
+  añade al roster de monos ni de Captains, no recibe identidad de mono ni
+  escribe memoria. Se ve y se selecciona en la pestaña Swarm del panel derecho
+  **de ese chat** (en Classic, Swarm vive en la barra lateral); otro chat no
+  lo ve.
+
+Reglas comunes (`Shell::delegation_refusal`):
+
+- Solo delega el chat local que ve el usuario: no un worker de una run, ni un
+  mono, ni Chief (que delega con `delegate` dentro de su run), ni un chat
+  remoto, ni uno gestionado por otra run. Así no hay ciclos: lo delegado no
+  puede volver a delegar.
+- Request-id obligatorio y válido. Un reintento con el mismo id devuelve la
+  primera respuesta (`control::Handoffs` para `mono`, recibos de la run para
+  `worker`); el mismo id con otra entrada se rechaza.
+- Los campos desconocidos se rechazan; el mono se valida contra el roster.
+
+**Proveedores.** La oferta es texto en el turno y el CLI; el entorno del
+bridge llega a todo harness local (`run_process` pasa
+`settings.environment`; OpenCode arranca un servidor privado con esas
+credenciales). Lo que hay comprobado con tests:
+
+| Proveedor | Comprobado |
+| --- | --- |
+| Codex | El sandbox abre la red local cuando el chat llama a la app (`codex_chats_that_call_back_into_the_app_can_reach_its_bridge`). |
+| OpenCode | Servidor privado con las credenciales de la sesión (`reaches_app` en `provider/opencode.rs`). |
+| Claude, Pi y los ACP (Cursor, Grok, Antigravity, Devin, Droid, Kimi, Hermes, Fx, Omp) | Reciben la oferta y el entorno, pero ningún test prueba que su herramienta de shell llegue a 127.0.0.1. Si su sandbox corta la red, la llamada falla con el error de conexión del CLI. En modo supervisado, el usuario aprueba el comando. |
+| Chats remotos | No reciben la oferta. |
+
+El flujo del shell (`control mono`, `control worker`, rechazos, reintentos,
+cancelación, un único resultado y la visibilidad por chat) se prueba en
+`shell/orchestration/tests.rs` con el harness `fixture`, sin servicios reales.
+Límite de ese harness: no completa ningún turno con éxito. El worker temporal
+termina con el error del proveedor como resultado, y es ese resultado el que
+el test comprueba que llega al chat una sola vez y con contenido (por
+`continue_lead`, contando el turno en el transcript del chat). El fin del turno
+del chat que llamó a `control worker` se modela poniendo su lead en reposo,
+como hacen los tests de Chief. Que un worker con éxito entregue su informe lo
+cubre core (`interrupted_runs_pause_resume_from_saved_state_and_deliver_results_once`);
+de punta a punta con un proveedor real no hay test.
+
 ## No objetivos
 
 - No se cambia cómo se aprueban permisos ni lo que siempre está bloqueado
