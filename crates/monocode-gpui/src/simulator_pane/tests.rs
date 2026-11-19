@@ -328,7 +328,7 @@ fn the_log_drawer_filters_by_level(cx: &mut TestAppContext) {
 fn input_becomes_the_runner_request_it_names() {
     assert_eq!(
         Input::Tap { x: 1., y: 2. }.request(),
-        ("tap", json!({"x": 1.0, "y": 2.0}))
+        ("tap", json!({"x": 1.0, "y": 2.0, "fast": true}))
     );
     assert_eq!(Input::Key("return").request().0, "press_key");
     assert_eq!(

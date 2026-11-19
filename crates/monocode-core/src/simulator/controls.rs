@@ -72,12 +72,24 @@ impl Orientation {
     }
 }
 
+/// Runs one runner action (a touch, typing, a key, a button) on the booted
+/// device `udid` that the caller follows, without listing the devices
+/// first. The live pane's input goes this way; agents name devices loosely
+/// and go through `simulator::act`.
+pub fn act(
+    udid: &str,
+    action: &str,
+    body: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    super::input::act_known(udid, action, body, Duration::from_secs(60))
+}
+
 /// Turns the device; the runner sets the orientation through XCUIDevice.
 pub fn rotate(udid: &str, to: Orientation) -> Result<(), String> {
-    super::act(
-        Some(udid),
+    act(
+        udid,
         "rotate",
-        |_| serde_json::json!({ "orientation": to.runner_name() }),
+        &serde_json::json!({ "orientation": to.runner_name() }),
     )
     .map(|_| ())
 }

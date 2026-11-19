@@ -59,7 +59,7 @@ impl Shell {
         } else if id == monocode_core::simulator::mcp::SERVER
             && let Some(panel) = &self.right_panel
         {
-            panel.update(cx, |panel, cx| panel.set_simulator_tab(on, cx));
+            panel.update(cx, |panel, cx| panel.set_simulator_connector(on, cx));
             cx.notify();
         }
         self.sync_settings(cx);

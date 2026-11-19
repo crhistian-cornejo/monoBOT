@@ -1,42 +1,30 @@
-# monoBOT 0.0.12
+# monoBOT 0.0.13
 
 ## New
 
-- **Search your clipboard history.** The notch's Clipboard page now keeps
-  your last 200 copies (up from 30) and up to 8 pictures. Search them by
-  their words, or by tag: `#link`, `#code`, `#rust`, `#github.com`, `#md`.
-  The tags your copies share most sit under the search, one click from
-  filtering. The history still lives in memory only.
-- **Native menus in the notch.** On macOS, right-click a copy to copy it
-  again (or a color as hex, `rgb()` or `hsl()`), open a link, show a file in
-  Finder, find copies with the same tag or remove it. Right-click a widget to
-  make it narrower or wider, move it or remove it without the pencil.
-- **Any code chat can hand work off.** With **Settings → Chat → hand work to
-  monos** on, a local code chat can give a task to one of your code monos, or
-  start a temporary worker in its own worktree when no mono fits. The result
-  comes back to that chat once, and the worker shows in that chat's Swarm
-  tab.
-- **Environment in the composer.** The context ring opens one panel with the
-  workspace (folder or worktree), the branch and the turn's changes, and how
-  full the context is, with Compact. Click it or press Cmd/Ctrl+I.
-- **Background commands show their output.** A command running in the
-  background shows its last line, and its last 8 lines when you open it, for
-  Claude and Antigravity.
+- **A native-looking notch.** The notch now matches the rest of monoBOT on
+  macOS. Its pages are a segmented control whose highlight glides to the
+  page you pick. Buttons are rounded and react when pressed, settings use the
+  system's switches, and Settings has a sidebar like macOS's own. Widgets,
+  the clipboard preview and the player sit on glass cards. Everything
+  follows **Look → Corners**, and motion stops when you reduce motion in
+  System Settings.
 
 ## Improved
 
-- **Lighter streaming.** The app takes a turn's events in batches and folds
-  repeated tool updates together, so long command output costs far less to
-  draw. A failed command shows its first and last lines and the lines that
-  name an error, with **Show all** for the rest.
+- **A faster iOS Simulator.** A tap from the Simulator tab reaches the
+  device in about half the time, and an open tab no longer uses the
+  processor while nothing changes.
+- **The Simulator only where it helps.** The Simulator tab appears only in
+  projects with an Xcode project or workspace, a Swift package, or an Expo
+  or React Native app that builds for iOS. In other projects it starts
+  nothing.
 
 ## Fixed
 
-- **iOS Simulator in the right panel.** The Simulator tab now appears in
-  the default layout on macOS when **iOS Simulator** is enabled in
-  **Settings → MCP**. If no device is running, choose one and boot it without
-  leaving monoBOT. If the boot fails, retry it or refresh the device list
-  from the same tab.
+- **Live streams in the notch's player.** A live video no longer shows a
+  length of millions of hours that pushed the player's buttons onto the
+  widgets. Videos longer than an hour show their time as `1:17:55`.
 
 ## Updates
 

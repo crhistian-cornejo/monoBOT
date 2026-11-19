@@ -309,6 +309,7 @@ impl Notch {
                             .px(px(10.))
                             .flex()
                             .items_center()
+                            .rounded(px(9.))
                             .bg(background_base())
                             .text_color(crate::theme::content(0.95))
                             .border_1()

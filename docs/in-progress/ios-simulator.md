@@ -8,6 +8,7 @@ de la app de escritorio de Claude.
 ## Estado: fases 1, 2 y 3 hechas (10 nov 2026); panel nativo, bisel, historial, logs e inspector (18 nov 2026)
 
 Lo del 18 de noviembre está en [El panel del simulador](#el-panel-del-simulador-18-nov-2026).
+Lo del 19, en [Solo en proyectos iOS, y más rápido](#solo-en-proyectos-ios-y-más-rápido-19-nov-2026).
 
 El conector **iOS Simulator** (`ios_simulator`, solo macOS, experimental, apagado
 por defecto) se enciende en Ajustes › MCP. Con él, cada sesión de Claude, Codex o
@@ -244,7 +245,7 @@ y `crates/monocode-gpui/src/simulator_pane.rs` (+ `simulator_pane/`).
 ### Vista nativa sobre un hueco medido
 
 Con **iOS Simulator** activado en Ajustes › MCP, abre el panel derecho de
-un proyecto Git en la vista **Focused** (⌘⇧B). La pestaña **Simulator** tiene
+un proyecto iOS o Swift (ver abajo) en la vista **Focused** (⌘⇧B). La pestaña **Simulator** tiene
 un icono de teléfono. Si no hay un dispositivo arrancado, elige uno de la
 lista y pulsa **Boot simulator**. Si el arranque falla, puedes reintentarlo o
 actualizar la lista sin cerrar la pestaña.
@@ -406,6 +407,144 @@ panel. Si está en un campo de los cajones, escribe en el campo.
 - **Límite conocido**: lo que GPUI dibuja encima del hueco, como un menú o un
   popover del panel derecho, queda debajo de la vista nativa. Pasa igual con el
   vídeo y los artefactos HTML.
+
+## Solo en proyectos iOS, y más rápido (19 nov 2026)
+
+### La pestaña solo aparece en proyectos iOS
+
+La pestaña **Simulator** necesita ahora dos cosas: el conector encendido y que
+el proyecto activo sea un proyecto iOS o Swift. En cualquier otro proyecto no
+hay pestaña, y del simulador no existe nada: ni el `SimulatorPane`, ni
+`simctl`, ni el sondeo de dispositivos, ni el framebuffer. No había otros
+botones que abrieran el simulador: solo esta pestaña.
+
+- **Qué cuenta** (`simulator/mcp/project.rs`, `is_ios_project`): hasta tres
+  carpetas por debajo del proyecto (la misma profundidad que `find_projects`),
+  un `.xcodeproj`, un `.xcworkspace`, un `Package.swift`, o una app Expo /
+  React Native con `package.json` y, además, una carpeta `ios/`, un `app.json`
+  cuyo `expo.platforms` incluye iOS (o no dice nada, que en Expo es iOS y
+  Android), o un `app.config.js|ts` con `expo` entre las dependencias.
+  - No entra en `node_modules`, `target`, `Pods`, `build`, `DerivedData`,
+    `vendor`, `Carthage`, `dist` ni en carpetas ocultas (`.git`, `.build`…), y
+    no sigue enlaces.
+  - Se rinde tras 5000 entradas, así que una carpeta personal o un monorepo
+    enorme cuestan milisegundos.
+  - Es una función pura sobre una carpeta, con tests sobre carpetas temporales.
+  - Está declarado desde `mcp.rs` porque `simulator.rs` quedaba fuera de esta
+    tarea.
+- **Cuándo se mira** (`right_panel.rs`):
+  - Se mira en el ejecutor de fondo, nunca en el hilo de la interfaz.
+  - Se guarda la respuesta por carpeta: volver a un proyecto ya visto
+    responde en el acto.
+  - Se vuelve a mirar al cambiar de proyecto, al encender el conector y con
+    cada `GitChanged` del proyecto. Ese aviso sale del vigilante de archivos
+    que ya tenía `ProjectGit`: no hay vigilante nuevo.
+  - Con el conector apagado, no se mira.
+- **La pestaña guardada**: si era Simulator, el panel abre en Explorer y vuelve
+  a Simulator cuando llega la respuesta, si el proyecto es iOS y el usuario no
+  ha elegido otra pestaña. Si el proyecto deja de serlo con la pestaña abierta,
+  pasa a Explorer, como al apagar el conector.
+- **El pane se crea la primera vez que se muestra** (antes se creaba con el
+  panel, en todos los proyectos).
+- `set_simulator_tab` pasa a ser `set_simulator_connector` (Ajustes › MCP lo
+  llama al cambiar el interruptor).
+
+### Medido antes de tocar nada
+
+Se midió en un simulador propio, creado para esto y borrado al terminar
+(iPhone 18 Pro, iOS 27.0, Xcode 27.2), nunca en el del usuario. Se usó un
+`HOME` temporal, así que el runner se compiló y guardó su estado aparte.
+
+- **Cómo medirlo de nuevo**:
+  `MONOBOT_SIM_PERF_UDID=<udid> cargo test -p monocode-core
+  simulator::native::tests::measure -- --ignored --nocapture`.
+- **Carga del Mac**: entre 6 y 400 durante las cuatro pasadas, por las
+  compilaciones de otras sesiones. Las cifras son las de la pasada más
+  tranquila (carga entre 22 y 6). Sin carga, `simctl list` tarda unos 90 ms y
+  gasta 70 ms de CPU.
+- **CPU**: es la del proceso y la de sus hijos (`getrusage`). Con `ps -M` sobre
+  el proceso, en la fase de reposo ningún hilo sumó tiempo en 20 s: todo el
+  gasto estaba en los `simctl` que arranca, y `ps -M` no los cuenta. Tampoco
+  está contado el trabajo que cada `simctl list` le pide a
+  `CoreSimulatorService`.
+
+Lo que se encontró:
+
+1. **Cada toque, tecla o texto del panel listaba los dispositivos antes de
+   llegar al runner.** `simulator::act` llama a `simctl list` para encontrar el
+   dispositivo, aunque el panel ya lo sabe. Eso son 200 ms de los 625 ms de un
+   toque, y le pasa igual a girar, a `describe` del inspector, a la captura
+   del historial y a cada fotograma de reserva.
+2. **El panel en vivo arrancaba `simctl list` cada 3 s** para saber si el
+   dispositivo seguía arrancado: un 4,4 % de un núcleo sin que pase nada en
+   pantalla.
+3. **El toque de XCUITest se lleva casi todo lo que queda.** Un toque por
+   coordenada calcula el marco de SpringBoard y espera a que la pantalla se
+   quede quieta: unos 400 ms de los 458. El viaje al runner y vuelta son
+   28 ms.
+4. **Al abrir la pestaña**, `simctl getenv` (la escala de la pantalla, unos
+   200 ms) y dos `xcode-select` (30 ms cada uno), cada vez.
+5. **La imagen nativa ya iba bien**:
+   - 219 fotogramas durante dos deslizamientos entre páginas de la pantalla
+     de inicio, con un intervalo de 16,1 ms de mediana (60 por segundo) y
+     33 ms en el percentil 90;
+   - ninguna copia por fotograma;
+   - GPUI no se repinta por fotograma: la capa solo se marca como cambiada.
+
+   No se tocó. Con la ventana detrás de otra, el feed sigue marcando la capa,
+   porque el usuario puede estar mirando lo que hace el agente. Con otra
+   pestaña o el panel cerrado, el feed se cierra (como antes).
+
+### Lo que cambió
+
+| | Antes | Después |
+| --- | --- | --- |
+| Toque desde el panel | 625 ms, 111 ms de CPU | **298 ms**, 0,6 ms de CPU |
+| Viaje al runner (`status`) | 265 ms, 163 ms de CPU | 28 ms, 0,4 ms de CPU |
+| ¿Sigue arrancado? (cada 3 s) | 244 ms, 205 ms de CPU | 6,6 µs |
+| Panel en vivo en reposo, 30 s | 4,4 % de un núcleo | 0,01 % |
+| Fotograma de reserva del runner (`live_frame`) | 356 ms, 119 ms de CPU | 185 ms, 8 ms de CPU: de unos 2,8 a unos 5 por segundo |
+| Volver a abrir la pestaña | `getenv` + 2 × `xcode-select` | ninguno |
+
+- **`controls::act(udid, …)`** (con `input::act_known`): va directo al runner
+  del dispositivo que el llamador ya sigue. Solo si no contesta ningún runner
+  comprueba que el dispositivo está arrancado antes de arrancar otro.
+  - Lo usan las entradas del panel, girar, `inspect::describe`, la captura
+    del historial y los fotogramas de reserva (`live_frame`).
+  - Los agentes siguen con `simulator::act`, porque nombran el dispositivo por
+    nombre o no lo nombran.
+- **`ScreenFeed::booted()`**: lee el estado que CoreSimulator guarda del
+  `SimDevice` dentro del proceso. El panel lo consulta cada 3 s en lugar de
+  `simctl list`. Un test apaga el dispositivo propio con el feed abierto: el
+  estado cambió 20 µs después de que `simctl shutdown` volviera
+  (`booted_notices_a_shutdown`, ignorado por defecto).
+- **Toque rápido** (`"fast": true` en `tap`, solo desde el panel). El runner
+  sintetiza el toque con las clases de XCTest que usa XCUITest por debajo
+  (`XCPointerEventPath`, `XCSynthesizedEventRecord` y el `eventSynthesizer`
+  del dispositivo, como WebDriverAgent). Así se salta el marco de SpringBoard
+  y la espera.
+  - Esas clases no son públicas. Se buscan en tiempo de ejecución y, si falta
+    alguna, el toque va por `XCUICoordinate` como antes.
+  - Medido: 298 ms frente a 458. Un toque rápido sobre «Ajustes» abrió Ajustes.
+  - Los agentes no lo usan: su `tap` sigue volviendo con la pantalla quieta,
+    que es lo que esperan para la siguiente captura.
+  - Cambiar `Runner.swift` cambia la clave de compilación, así que la primera
+    acción tras actualizar recompila el runner (unos 40 s).
+- **Al abrir el feed**:
+  - la escala de cada dispositivo se pide una vez y se guarda;
+  - `xcode-select` solo corre al cargar los frameworks;
+  - `xcode_problem` solo se mira la primera vez, y otra vez después de un
+    fallo.
+
+### Pendiente
+
+- **Sin dispositivo arrancado**, la pestaña visible sigue buscando uno con
+  `simctl list` cada 3 s.
+- **Sin probar**:
+  - el toque rápido en horizontal: el registro se crea en vertical, como las
+    coordenadas de SpringBoard, pero no se ha medido;
+  - la app entera abierta a mano. Se midieron el core y el runner sobre el
+    simulador, y el panel con el banco de pruebas de GPUI.
 
 ### Riesgos
 

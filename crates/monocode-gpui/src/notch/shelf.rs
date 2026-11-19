@@ -220,7 +220,7 @@ impl Notch {
             .flex()
             .flex_col()
             .gap(px(6.))
-            .bg(ink(0.07))
+            .map(controls::glass)
             .when(!editing, |cell| {
                 // A right-click arranges this one widget without the pencil.
                 let widget = widget.clone();

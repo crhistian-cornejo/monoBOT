@@ -53,7 +53,8 @@ use std::{
 /// of a second in the runner, so the pane shows three or four a second.
 const FRAME_GAP: Duration = Duration::from_millis(40);
 /// How often an empty tab looks for a booted device again, and a live one
-/// checks that its device is still booted.
+/// checks that its device is still booted (from CoreSimulator's copy of its
+/// state, without starting a process).
 const LOOK_AGAIN: Duration = Duration::from_secs(3);
 /// How often an open history looks for new steps.
 const HISTORY_POLL: Duration = Duration::from_secs(1);
@@ -137,7 +138,8 @@ pub(crate) enum Input {
 impl Input {
     fn request(&self) -> (&'static str, Value) {
         match self {
-            Self::Tap { x, y } => ("tap", json!({"x": x, "y": y})),
+            // `fast`: the runner skips XCUITest's wait for the screen to settle.
+            Self::Tap { x, y } => ("tap", json!({"x": x, "y": y, "fast": true})),
             Self::Swipe { from, to } => (
                 "swipe",
                 json!({"from_x": from.0, "from_y": from.1, "to_x": to.0, "to_y": to.1}),
@@ -280,6 +282,31 @@ impl Focusable for SimulatorPane {
     }
 }
 
+/// Pixels per point on the device's screen, asked once per device: it
+/// never changes, and `simctl getenv` costs about 90 ms each time the tab
+/// opens. Runs off the interface thread.
+#[cfg(target_os = "macos")]
+fn screen_scale(udid: &str) -> f32 {
+    use std::{collections::HashMap, sync::Mutex};
+    static SCALES: Mutex<Option<HashMap<String, f32>>> = Mutex::new(None);
+    if let Some(scale) = SCALES
+        .lock()
+        .ok()
+        .and_then(|scales| scales.as_ref()?.get(udid).copied())
+    {
+        return scale;
+    }
+    let Some(scale) = simulator::screen_scale(udid) else {
+        return 3.;
+    };
+    if let Ok(mut scales) = SCALES.lock() {
+        scales
+            .get_or_insert_with(HashMap::new)
+            .insert(udid.to_owned(), scale as f32);
+    }
+    scale as f32
+}
+
 fn bgra_image(bgra: image::RgbaImage) -> Arc<RenderImage> {
     Arc::new(RenderImage::new(vec![image::Frame::new(bgra)]))
 }
@@ -311,9 +338,11 @@ impl SimulatorPane {
                     }
                 }
                 let (action, body) = input.request();
+                // Straight to the device's runner: the pane knows the device
+                // is booted, so no `simctl list` before every touch.
                 let result = cx
                     .background_executor()
-                    .spawn(async move { simulator::act(Some(&udid), action, |_| body) })
+                    .spawn(async move { controls::act(&udid, action, &body) })
                     .await;
                 if let Err(error) = result {
                     let alive = this.update(cx, |this, cx| this.say(error, true, cx));
@@ -376,6 +405,13 @@ impl SimulatorPane {
         }
     }
 
+    /// Whether the tab is on screen: only then does the pane talk to the
+    /// simulator.
+    #[cfg(test)]
+    pub(crate) fn is_shown(&self) -> bool {
+        self.shown
+    }
+
     pub(crate) fn set_shown(&mut self, shown: bool, cx: &mut Context<Self>) {
         if self.shown == shown {
             return;
@@ -434,16 +470,19 @@ impl SimulatorPane {
         #[cfg(target_os = "macos")]
         let handler = Arc::new(self.native.handler());
         self.frames = Some(cx.spawn(async move |this, cx| {
+            // Xcode is checked once, and again after it was not ready.
+            let mut xcode_ready = false;
             loop {
                 let found = cx
                     .background_executor()
-                    .spawn(async {
-                        match simulator::xcode_problem() {
+                    .spawn(async move {
+                        match (!xcode_ready).then(simulator::xcode_problem).flatten() {
                             Some(problem) => Err(problem),
                             None => simulator::devices(),
                         }
                     })
                     .await;
+                xcode_ready = found.is_ok();
                 let device = found.as_ref().ok().and_then(|devices| {
                     devices.iter().find(|device| {
                         device.booted() && preferred.as_deref().is_none_or(|id| device.udid == id)
@@ -497,7 +536,7 @@ impl SimulatorPane {
                                 simulator::native::Delivery::Main,
                                 move |event| handler(event),
                             )?;
-                            let scale = simulator::screen_scale(&feed_udid).unwrap_or(3.) as f32;
+                            let scale = screen_scale(&feed_udid);
                             Ok::<_, String>((Arc::new(feed), scale))
                         })
                         .await;
@@ -505,6 +544,7 @@ impl SimulatorPane {
                         Ok((feed, scale)) => {
                             let surface = feed.surface();
                             let (width, height) = surface.size();
+                            let watched = feed.clone();
                             let alive = this.update(cx, |this, cx| {
                                 this.points = (width as f32 / scale, height as f32 / scale);
                                 this.native.set_surface(Some(surface));
@@ -516,22 +556,22 @@ impl SimulatorPane {
                             if alive.is_err() {
                                 return;
                             }
-                            // Live until the device shuts down or changes.
+                            // Live until the device shuts down. Its state is
+                            // CoreSimulator's in-process copy: reading it
+                            // costs microseconds, where `simctl list` cost
+                            // 90 ms every 3 s.
                             loop {
                                 cx.background_executor().timer(LOOK_AGAIN).await;
-                                let udid = udid.clone();
+                                let feed = watched.clone();
                                 let still = cx
                                     .background_executor()
-                                    .spawn(async move {
-                                        simulator::devices().is_ok_and(|devices| {
-                                            devices.iter().any(|d| d.udid == udid && d.booted())
-                                        })
-                                    })
+                                    .spawn(async move { feed.booted() })
                                     .await;
                                 if !still {
                                     break;
                                 }
                             }
+                            drop(watched);
                             if this.update(cx, |this, cx| this.stop_feed(cx)).is_err() {
                                 return;
                             }

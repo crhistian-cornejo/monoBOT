@@ -78,6 +78,15 @@ final class Actions {
                 hold > 0 ? target.press(forDuration: hold) : target.tap()
                 return ["frame": rect(target.frame)]
             }
+            // The live pane's clicks: straight to the device, without
+            // XCUITest's wait for the screen to settle (about 0.4 s a tap).
+            // Agents leave `fast` out, so the screen has settled by the time
+            // their tap returns.
+            if body["fast"] as? Bool == true, hold == 0, (body["count"] as? Int ?? 1) == 1,
+               let x = number(body["x"]), let y = number(body["y"]),
+               FastTouch.tap(at: CGPoint(x: x, y: y)) {
+                return ["fast": true]
+            }
             let target = try point(body, "x", "y")
             if (body["count"] as? Int) == 2 {
                 target.doubleTap()
@@ -205,4 +214,73 @@ final class Actions {
 func rect(_ frame: CGRect) -> [String: Int] {
     ["x": Int(frame.minX.rounded()), "y": Int(frame.minY.rounded()),
      "width": Int(frame.width.rounded()), "height": Int(frame.height.rounded())]
+}
+
+/// A tap synthesized the way XCUITest does it underneath, with XCTest's
+/// event records (`XCPointerEventPath`, `XCSynthesizedEventRecord` and the
+/// device's event synthesizer, as WebDriverAgent uses them), but without
+/// resolving SpringBoard's frame first or waiting for the app to go idle.
+/// These classes are not public: every one is looked up at run time, and a
+/// tap that cannot be made this way answers false, so the caller falls back
+/// to XCUICoordinate.
+enum FastTouch {
+    private typealias Alloc = @convention(c) (AnyClass, Selector) -> UnsafeMutableRawPointer?
+    private typealias InitTouch = @convention(c) (UnsafeMutableRawPointer, Selector, CGPoint, Double) -> UnsafeMutableRawPointer?
+    private typealias Lift = @convention(c) (UnsafeMutableRawPointer, Selector, Double) -> Void
+    private typealias InitRecord = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeMutableRawPointer, Int) -> UnsafeMutableRawPointer?
+    private typealias AddPath = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeMutableRawPointer) -> Void
+    private typealias Synthesize = @convention(c) (UnsafeMutableRawPointer, Selector, UnsafeMutableRawPointer, @convention(block) (Bool, NSError?) -> Void) -> Void
+
+    private static func imp<T>(_ object: AnyClass, _ name: String, _: T.Type, meta: Bool = false) -> (T, Selector)? {
+        let selector = NSSelectorFromString(name)
+        let target: AnyClass = meta ? object_getClass(object)! : object
+        guard class_respondsToSelector(target, selector),
+              let imp = class_getMethodImplementation(target, selector)
+        else { return nil }
+        return (unsafeBitCast(imp, to: T.self), selector)
+    }
+
+    /// A down and up at `point`, in portrait screen points.
+    static func tap(at point: CGPoint) -> Bool {
+        guard let pathClass = NSClassFromString("XCPointerEventPath"),
+              let recordClass = NSClassFromString("XCSynthesizedEventRecord"),
+              let alloc = imp(pathClass, "alloc", Alloc.self, meta: true),
+              let initTouch = imp(pathClass, "initForTouchAtPoint:offset:", InitTouch.self),
+              let lift = imp(pathClass, "liftUpAtOffset:", Lift.self),
+              let initRecord = imp(recordClass, "initWithName:interfaceOrientation:", InitRecord.self),
+              let addPath = imp(recordClass, "addPointerEventPath:", AddPath.self),
+              let synthesizer = XCUIDevice.shared.perform(NSSelectorFromString("eventSynthesizer"))?
+                  .takeUnretainedValue(),
+              let synthesize = imp(type(of: synthesizer), "synthesizeEvent:completion:", Synthesize.self),
+              let pathMemory = alloc.0(pathClass, alloc.1),
+              let path = initTouch.0(pathMemory, initTouch.1, point, 0),
+              let recordMemory = alloc.0(recordClass, alloc.1)
+        else { return false }
+        // alloc and init answer owned objects: these take them over.
+        let pathObject = Unmanaged<AnyObject>.fromOpaque(path).takeRetainedValue()
+        lift.0(path, lift.1, 0.05)
+        let name = "monoBOT tap" as NSString
+        // UIInterfaceOrientationPortrait: the points are portrait screen
+        // points, as SpringBoard's coordinates are.
+        guard let record = initRecord.0(recordMemory, initRecord.1, Unmanaged.passUnretained(name).toOpaque(), 1)
+        else { return false }
+        let recordObject = Unmanaged<AnyObject>.fromOpaque(record).takeRetainedValue()
+        addPath.0(record, addPath.1, path)
+        var finished = false
+        var succeeded = false
+        let done: @convention(block) (Bool, NSError?) -> Void = { result, _ in
+            succeeded = result
+            finished = true
+        }
+        let synthesizerPointer = Unmanaged.passUnretained(synthesizer).toOpaque()
+        synthesize.0(synthesizerPointer, synthesize.1, record, done)
+        let deadline = Date(timeIntervalSinceNow: 5)
+        while !finished && Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date(timeIntervalSinceNow: 0.005))
+        }
+        withExtendedLifetime((pathObject, recordObject, name)) {}
+        // Still unanswered: the touch may have landed, so it is not made
+        // again the slow way.
+        return succeeded || !finished
+    }
 }

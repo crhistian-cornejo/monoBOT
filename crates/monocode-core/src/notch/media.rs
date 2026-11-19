@@ -159,6 +159,32 @@ pub struct Report {
     pub shuffle: Option<bool>,
 }
 
+/// The longest a track can be and still have a length worth showing. A
+/// live stream reports none, or a number in the millions of hours, which
+/// would push the player's controls out of their row.
+pub const LONGEST: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// A track's length as the player reports it, when it is one: neither zero
+/// nor a live stream's (`LONGEST`).
+pub fn known_length(length: Duration) -> Option<Duration> {
+    (!length.is_zero() && length <= LONGEST).then_some(length)
+}
+
+/// A place in a track as players write it: `3:07`, or `1:02:07` past an
+/// hour. An unknown length is `--:--`.
+pub fn clock(at: Option<Duration>) -> String {
+    let Some(at) = at.filter(|at| *at <= LONGEST) else {
+        return "--:--".into();
+    };
+    let seconds = at.as_secs();
+    let (hours, minutes, seconds) = (seconds / 3600, seconds / 60 % 60, seconds % 60);
+    if hours > 0 {
+        format!("{hours}:{minutes:02}:{seconds:02}")
+    } else {
+        format!("{minutes}:{seconds:02}")
+    }
+}
+
 fn seconds(value: &serde_json::Value) -> Option<Duration> {
     Duration::try_from_secs_f64(value.as_f64()?.max(0.)).ok()
 }
@@ -173,7 +199,7 @@ pub fn parse_report(line: &str) -> Option<Report> {
         title: text("title"),
         artist: text("artist"),
         album: text("album"),
-        duration: seconds(&value["duration"]).filter(|duration| !duration.is_zero()),
+        duration: seconds(&value["duration"]).and_then(known_length),
     };
     if !track.is_known() {
         return None;
@@ -696,6 +722,24 @@ mod tests {
             album: "A Night at the Opera".into(),
             duration: Some(Duration::from_secs(354)),
         }
+    }
+
+    #[test]
+    fn a_live_streams_length_is_unknown_and_long_tracks_show_hours() {
+        assert_eq!(known_length(Duration::ZERO), None);
+        assert_eq!(known_length(Duration::from_secs(5_534_023_222_112)), None);
+        assert_eq!(
+            known_length(Duration::from_secs(354)),
+            Some(Duration::from_secs(354))
+        );
+        assert_eq!(clock(Some(Duration::from_secs(187))), "3:07");
+        assert_eq!(clock(Some(Duration::from_secs(3727))), "1:02:07");
+        assert_eq!(clock(None), "--:--");
+        assert_eq!(clock(Some(Duration::from_secs(u32::MAX as u64))), "--:--");
+        let live =
+            r#"{"app":"Safari","title":"Live","artist":"A channel","duration":5534023222112.5}"#;
+        let report = parse_report(live).expect("a track");
+        assert_eq!(report.track.duration, None);
     }
 
     #[test]

@@ -10,6 +10,7 @@
 //! and the window shrinks back to the island when it settles. Its rules live
 //! in `monocode_core::notch`; this module only paints and moves.
 mod clips;
+mod controls;
 mod dictating;
 mod face;
 pub(crate) mod levels;
@@ -348,6 +349,8 @@ pub(crate) struct Notch {
     clip_query: String,
     /// An AppKit menu is up: the pointer on it is not leaving the notch.
     menu_up: bool,
+    /// Where the pages' plate glides from.
+    tab_glide: controls::Glide,
     /// The agent the notch chats with, and the field to answer it.
     talk: Option<talk::Talking>,
     pub(crate) talk_field: Entity<Input>,
@@ -558,6 +561,7 @@ impl Notch {
             clip_search,
             clip_query: String::new(),
             menu_up: false,
+            tab_glide: Default::default(),
             talk: None,
             talk_field,
             queue: Default::default(),
@@ -710,6 +714,11 @@ impl Notch {
     }
 
     pub(crate) fn set_tab(&mut self, tab: Tab, cx: &mut Context<Self>) {
+        if tab != self.tab
+            && let Some(from) = self.tabs().iter().position(|shown| *shown == self.tab)
+        {
+            self.tab_glide.moved(from);
+        }
         self.tab = tab;
         self.editing = false;
         cx.notify();
@@ -1334,60 +1343,23 @@ pub(crate) fn ink(alpha: f32) -> gpui::Hsla {
     white(alpha)
 }
 
-/// A small text button on the notch's black.
+/// A small text button on the notch's black: the notch's push button.
 pub(crate) fn pill(
     id: impl Into<gpui::ElementId>,
     label: &str,
     primary: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    let id = id.into();
-    let selector = format!("{id}");
-    div()
-        .id(id)
-        .debug_selector(move || selector.clone())
-        .role(Role::Button)
-        .aria_label(label.to_owned())
-        .h(px(22.))
-        .px(px(9.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(11.5))
-        .cursor_pointer()
-        .when(primary, |pill| {
-            pill.bg(accent_color())
-                .text_color(white(1.))
-                .hover(|style| style.opacity(0.88))
-        })
-        .when(!primary, |pill| {
-            pill.bg(ink(0.1))
-                .text_color(ink(0.85))
-                .hover(|style| style.bg(ink(0.18)))
-        })
-        // A button that changes its word (Copy to Copied) grows the letters.
-        .child(crate::text_morph::text_morph("label", label.to_owned()))
+    controls::push_button(id, label, primary)
 }
 
-/// An icon button on the notch's black.
+/// An icon button on the notch's black: the notch's borderless button.
 pub(crate) fn glyph(
     id: &'static str,
     label: &'static str,
     path: &'static str,
     on: bool,
 ) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .role(Role::Button)
-        .aria_label(label)
-        .size(px(26.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
-        .when(on, |button| button.bg(ink(0.14)))
-        .hover(|style| style.bg(ink(0.1)))
-        .child(icon(path, 14.).text_color(ink(if on { 1. } else { 0.55 })))
+    controls::icon_button(id, label, path, on)
 }
 
 /// What the agents are doing, as the sidebar marks a session: the dot
@@ -1738,6 +1710,15 @@ impl Notch {
             .into_any_element()
     }
 
+    /// The pages offered, in the header's order.
+    fn tabs(&self) -> Vec<Tab> {
+        let clips = self.keeps_clips();
+        Tab::ALL
+            .into_iter()
+            .filter(|tab| clips || *tab != Tab::Clips)
+            .collect()
+    }
+
     /// The panel's header: the page's name, what is going on, and the pages.
     fn header(&self, cx: &mut Context<Self>) -> AnyElement {
         let summary = match (self.rest.working, self.rest.asking) {
@@ -1750,17 +1731,29 @@ impl Notch {
             Tab::Home if self.editing => "Arrange widgets",
             tab => tab.name(),
         };
-        let mut tabs = div().flex().items_center().gap(px(2.));
-        let clips = self.keeps_clips();
-        for tab in Tab::ALL
-            .into_iter()
-            .filter(|tab| clips || *tab != Tab::Clips)
-        {
-            tabs = tabs.child(
-                glyph(tab.id(), tab.name(), tab.icon(), self.tab == tab)
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_tab(tab, cx))),
-            );
-        }
+        // The pages as a segmented control, its plate gliding to the page
+        // picked.
+        let shown = self.tabs();
+        let chosen = shown.iter().position(|tab| *tab == self.tab).unwrap_or(0);
+        let segments = shown
+            .iter()
+            .map(|tab| controls::Segment::icon(tab.id(), tab.name(), tab.icon()))
+            .collect();
+        let this = cx.entity().downgrade();
+        let tabs = controls::segmented(
+            "notch-tabs",
+            segments,
+            chosen,
+            self.tab_glide,
+            cx.reduce_motion(),
+            move |index, _, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    if let Some(tab) = this.tabs().get(index).copied() {
+                        this.set_tab(tab, cx);
+                    }
+                });
+            },
+        );
         div()
             .h(px(model::PANEL_HEADER))
             .flex()
@@ -1795,7 +1788,6 @@ impl Notch {
             })
             .children(self.paste_last_glyph(cx))
             .children(media::battery_chip())
-            .child(div().w(px(1.)).h(px(14.)).bg(ink(0.12)))
             .child(tabs)
             .into_any_element()
     }

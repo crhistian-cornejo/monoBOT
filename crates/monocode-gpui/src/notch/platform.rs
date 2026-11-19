@@ -1446,7 +1446,9 @@ mod win {
                 title: properties.Title()?.to_string(),
                 artist: properties.Artist()?.to_string(),
                 album: properties.AlbumTitle()?.to_string(),
-                duration: (end > start).then(|| end - start),
+                duration: (end > start)
+                    .then(|| end - start)
+                    .and_then(monocode_core::notch::media::known_length),
             };
             if !track.is_known() {
                 return Ok(None);

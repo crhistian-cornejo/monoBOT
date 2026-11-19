@@ -46,7 +46,9 @@ pub(super) fn session_row_keyed(
         .items_center()
         .gap(px(8.))
         .cursor_pointer()
+        .rounded(px(controls::ROW_RADIUS))
         .hover(|style| style.bg(ink(0.07)))
+        .active(|style| style.bg(ink(0.12)))
         .child(
             div()
                 .size(px(14.))
@@ -430,6 +432,7 @@ impl Notch {
                             .px(px(10.))
                             .flex()
                             .items_center()
+                            .rounded(px(9.))
                             .bg(background_base())
                             .text_color(crate::theme::content(0.95))
                             .border_1()

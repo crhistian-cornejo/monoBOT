@@ -357,10 +357,12 @@ pub struct LiveFrame {
 
 pub fn live_frame(udid: &str) -> Result<LiveFrame, String> {
     use base64::Engine as _;
-    let (_, result) = act(
-        Some(udid),
+    // The pane knows its device is booted: straight to the runner, without
+    // the `simctl list` that cost half of every frame.
+    let result = controls::act(
+        udid,
         "screen",
-        |_| serde_json::json!({"scale": 2, "quality": 0.7}),
+        &serde_json::json!({"scale": 2, "quality": 0.7}),
     )?;
     let jpeg = base64::engine::general_purpose::STANDARD
         .decode(result["jpeg"].as_str().ok_or("The runner sent no frame")?)

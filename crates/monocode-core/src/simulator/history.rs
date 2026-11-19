@@ -173,10 +173,10 @@ pub fn record(udid: &str, tool: &str, input: &Value) {
     let udid = udid.to_owned();
     std::thread::spawn(move || {
         std::thread::sleep(SETTLE);
-        if let Ok((_, result)) = super::act(
-            Some(&udid),
+        if let Ok(result) = super::controls::act(
+            &udid,
             "screen",
-            |_| serde_json::json!({"scale": 1, "quality": 0.6}),
+            &serde_json::json!({"scale": 1, "quality": 0.6}),
         ) {
             use base64::Engine as _;
             if let Some(jpeg) = result["jpeg"]

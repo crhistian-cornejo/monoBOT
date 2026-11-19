@@ -386,6 +386,29 @@ fn start(udid: &str, key: &str) -> Result<Runner, String> {
     Ok(runner)
 }
 
+/// Runs `action` on a device the caller already follows, such as the live
+/// pane's: straight to its runner when one answers, without listing the
+/// devices first (`simctl list` costs about 90 ms, a tenth of a tap). Only
+/// when no runner answers does it check that the device is booted, before
+/// starting one.
+pub fn act_known(
+    udid: &str,
+    action: &str,
+    body: &Value,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let key = current_key()?;
+    if let Some(runner) = Runner::saved(udid).filter(|runner| runner.key == key) {
+        match runner.call(action, body, timeout) {
+            Ok(result) => return Ok(result),
+            Err(Failure::Said(error)) => return Err(error),
+            Err(Failure::Unreachable) => {}
+        }
+    }
+    super::booted(Some(udid))?;
+    act(udid, action, body, timeout)
+}
+
 /// Runs `action` on the device's runner, starting one when none answers.
 pub fn act(udid: &str, action: &str, body: &Value, timeout: Duration) -> Result<Value, String> {
     let key = current_key()?;

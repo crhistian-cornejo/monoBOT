@@ -420,7 +420,7 @@ impl Notch {
             .px(px(7.))
             .flex()
             .items_center()
-            .rounded(px(2.))
+            .rounded_full()
             .text_size(px(10.5))
             .when(on, |pill| pill.bg(accent).text_color(black(0.9)))
             .when(!on, |pill| pill.bg(ink(0.1)).text_color(ink(0.55)))
@@ -688,7 +688,7 @@ fn cover_of(
         .size(px(side))
         .flex_shrink_0()
         .overflow_hidden()
-        .rounded(px(if side > 40. { 4. } else { 2. }))
+        .rounded(px(if side > 40. { 10. } else { 4. }))
         .bg(ink(0.1))
         .child(match image {
             Some(image) => gpui::img(image.clone())
@@ -866,7 +866,7 @@ impl Notch {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .rounded(px(2.))
+                    .rounded(px(controls::ROW_RADIUS))
                     .tooltip(chrome_tip(label, None))
                     .when(state.is_some(), |button| {
                         button
@@ -1045,9 +1045,9 @@ impl Notch {
                             .flex()
                             .items_center()
                             .gap(px(8.))
-                            .child(time_label(position))
+                            .child(time_label(Some(position)))
                             .child(self.scrubber(progress, media.track.duration, accent, cx))
-                            .child(time_label(media.track.duration.unwrap_or_default())),
+                            .child(time_label(media.track.duration)),
                     )
                     .child(
                         div()
@@ -1252,10 +1252,10 @@ impl Notch {
             .min_w_0()
             .h_full()
             .p(px(DUO_PAD))
-            .rounded(px(4.))
+            .rounded(px(controls::CARD_RADIUS))
             .flex()
             .flex_col()
-            .when(lead, |column| column.bg(ink(0.07)))
+            .when(lead, controls::glass)
             .when(!lead, |column| {
                 let app = player.track.app.clone();
                 column
@@ -1349,7 +1349,7 @@ impl Notch {
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(time_label(position))
+                    .child(time_label(Some(position)))
                     .child(
                         div()
                             .flex()
@@ -1406,7 +1406,7 @@ impl Notch {
                         div()
                             .flex()
                             .justify_end()
-                            .child(time_label(player.track.duration.unwrap_or_default())),
+                            .child(time_label(player.track.duration)),
                     ),
             )
             .into_any_element()
@@ -1450,7 +1450,7 @@ fn control(
         .items_center()
         .justify_center()
         .cursor_pointer()
-        .rounded(px(2.))
+        .rounded_full()
         .when(big, |button| button.bg(ink(0.12)))
         .hover(|style| style.bg(ink(0.18)))
         .active(|style| style.bg(ink(0.24)))
@@ -1497,14 +1497,15 @@ fn redraw(notch: &WeakEntity<Notch>, cx: &mut App) {
     let _ = notch.update(cx, |_, cx| cx.notify());
 }
 
-fn time_label(at: Duration) -> impl IntoElement {
-    let seconds = at.as_secs();
+/// A place in the track, on one line however long the track is.
+fn time_label(at: Option<Duration>) -> impl IntoElement {
     div()
         .flex_shrink_0()
-        .w(px(30.))
+        .min_w(px(30.))
+        .whitespace_nowrap()
         .text_size(px(10.))
         .text_color(ink(0.5))
-        .child(format!("{}:{:02}", seconds / 60, seconds % 60))
+        .child(monocode_core::notch::media::clock(at))
 }
 
 /// The app's mark on the cover: Spotify's own, a globe for a browser, a
@@ -1978,7 +1979,7 @@ pub(super) fn calendar_widget(span: u32) -> AnyElement {
                         .flex()
                         .items_center()
                         .justify_center()
-                        .rounded(px(2.))
+                        .rounded(px(controls::ROW_RADIUS))
                         .text_size(px(12.))
                         .font_weight(if is_today {
                             gpui::FontWeight::SEMIBOLD

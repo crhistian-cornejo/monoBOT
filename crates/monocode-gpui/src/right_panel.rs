@@ -3,7 +3,8 @@
 //! Terminal tab when the terminal lives in the panel, a trailing Swarm
 //! tab while the chat in view has an orchestration board, an Agents tab
 //! while its Claude chat has subagents or workflows, and a Simulator tab on
-//! a Mac while the iOS Simulator connector is on.
+//! a Mac while the iOS Simulator connector is on and the project is an iOS
+//! or Swift project.
 use crate::{
     agents_pane::AgentsPane,
     changes::Changes,
@@ -18,10 +19,10 @@ use crate::{
 use gpui::{
     AnyElement, App, Bounds, Context, Entity, EventEmitter, FocusHandle, Focusable, FontFeatures,
     FontWeight, Hsla, MouseButton, MouseDownEvent, MouseMoveEvent, Pixels, Role, SharedString,
-    Stateful, StyleRefinement, Subscription, WeakEntity, Window, div, prelude::*, px,
+    Stateful, StyleRefinement, Subscription, Task, WeakEntity, Window, div, prelude::*, px,
 };
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 pub(crate) const WIDTH_MIN: f32 = 220.;
 /// Files, History and the rest read as a column beside the chat; wider,
@@ -75,8 +76,8 @@ pub(crate) enum RightTab {
     /// The board of the chat in view's swarm, while it has one. Always last
     /// and never part of the saved order.
     Swarm,
-    /// The booted iOS simulator, live, while its connector is on (macOS).
-    /// Never part of the saved order.
+    /// The booted iOS simulator, live, while its connector is on and the
+    /// project is an iOS one (macOS). Never part of the saved order.
     Simulator,
     /// The Claude chat in view's subagents and workflows, live, while it has
     /// any. Never part of the saved order.
@@ -127,10 +128,10 @@ pub(crate) enum PanelEvent {
     },
 }
 
-/// Whether the Simulator tab is offered: on a Mac, with the iOS Simulator
-/// connector switched on in Settings › MCP. Reads the session defaults the
-/// app keeps in memory, no disk.
-fn simulator_tab() -> bool {
+/// Whether the iOS Simulator connector is on: on a Mac, switched on in
+/// Settings › MCP. Reads the session defaults the app keeps in memory, no
+/// disk. The tab also needs an iOS project ([`RightPanel::check_ios_project`]).
+fn simulator_connector() -> bool {
     cfg!(target_os = "macos")
         && monocode_core::connectors::connector(monocode_core::simulator::mcp::SERVER).is_some_and(
             |connector| {
@@ -316,13 +317,29 @@ pub(crate) struct RightPanel {
     /// Whether the Terminal tab follows the others; the shell draws its pane.
     terminal_tab: bool,
     pub(crate) swarm: Entity<SwarmPanel>,
-    simulator: Entity<SimulatorPane>,
+    /// Made the first time its tab is shown: elsewhere nothing of the
+    /// simulator exists.
+    simulator: Option<Entity<SimulatorPane>>,
+    git: Entity<ProjectGit>,
     pub(crate) agents: Entity<AgentsPane>,
     /// Whether the Swarm tab ends the strip.
     swarm_tab: bool,
     /// Whether the Agents tab follows it: the chat in view has agents.
     agents_tab: bool,
+    /// Whether the Simulator tab is offered: the connector is on and the
+    /// project is an iOS project.
     simulator_tab: bool,
+    simulator_connector: bool,
+    /// The project the Simulator answer is for, and the answers so far, by
+    /// project folder.
+    project: String,
+    ios_projects: HashMap<String, bool>,
+    /// The check under way, and whether the files changed while it ran.
+    ios_check: Option<(String, Task<()>)>,
+    ios_check_again: bool,
+    /// The saved tab was the Simulator: it comes back once the project's
+    /// answer arrives, unless the user picked another tab first.
+    restore_simulator: bool,
     /// Classic reserves the title bar's height; rounded content starts at
     /// the card's top edge, below the window-wide title bar.
     top_inset: f32,
@@ -352,21 +369,13 @@ impl RightPanel {
         let changes = cx.new(|cx| Changes::new(git.clone(), window, cx));
         let history = cx.new(|cx| History::new(git.clone(), window, cx));
         let swarm = cx.new(SwarmPanel::new);
-        let simulator = cx.new(SimulatorPane::new);
         let agents = cx.new(AgentsPane::new);
         let subscriptions = vec![
-            cx.subscribe(
-                &simulator,
-                |_, _, event: &crate::simulator_pane::SimulatorEvent, cx| {
-                    let crate::simulator_pane::SimulatorEvent::AddToChat { text, image } = event;
-                    cx.emit(PanelEvent::AddToChat {
-                        text: text.clone(),
-                        image: image.clone(),
-                    });
-                },
-            ),
             cx.observe(&git, |_, _, cx| cx.notify()),
-            cx.subscribe(&git, |_, _, _: &GitChanged, cx| cx.notify()),
+            cx.subscribe(&git, |this, _, _: &GitChanged, cx| {
+                this.project_changed(cx);
+                cx.notify();
+            }),
             cx.subscribe(
                 &agents,
                 |this, agents, _: &crate::agents_pane::AgentsChanged, cx| {
@@ -380,24 +389,33 @@ impl RightPanel {
             panel: panel.downgrade(),
             _subscription: cx.observe(&panel, |_, _, cx| cx.notify()),
         });
-        let simulator_tab = simulator_tab();
-        Self {
+        let simulator_connector = simulator_connector();
+        let project = git.read(cx).project().to_owned();
+        let mut panel = Self {
             tabs,
             focus: cx.focus_handle(),
             explorer,
             changes,
             history,
             swarm,
-            simulator,
+            simulator: None,
+            git,
             agents,
             swarm_tab: false,
             agents_tab: false,
-            simulator_tab,
-            // The board or agents that were in view may be gone; Explorer
-            // stands in.
-            tab: if matches!(tab, RightTab::Swarm | RightTab::Agents)
-                || (tab == RightTab::Simulator && !simulator_tab)
-            {
+            simulator_tab: false,
+            simulator_connector,
+            project,
+            ios_projects: HashMap::new(),
+            ios_check: None,
+            ios_check_again: false,
+            restore_simulator: tab == RightTab::Simulator && simulator_connector,
+            // The board or agents that were in view may be gone, and whether
+            // the project is an iOS one is not known yet; Explorer stands in.
+            tab: if matches!(
+                tab,
+                RightTab::Swarm | RightTab::Agents | RightTab::Simulator
+            ) {
                 RightTab::Files
             } else {
                 tab
@@ -413,7 +431,9 @@ impl RightPanel {
             skip_click: false,
             tab_bounds: (0..7).map(|_| Default::default()).collect(),
             _subscriptions: subscriptions,
-        }
+        };
+        panel.check_ios_project(cx);
+        panel
     }
     pub(crate) fn tab(&self) -> RightTab {
         self.tab
@@ -457,16 +477,120 @@ impl RightPanel {
         };
         (id, label, path)
     }
-    pub(crate) fn set_simulator_tab(&mut self, enabled: bool, cx: &mut Context<Self>) {
-        let enabled = enabled && cfg!(target_os = "macos");
-        if self.simulator_tab != enabled {
-            self.simulator_tab = enabled;
-            if !enabled && self.tab == RightTab::Simulator {
-                self.select(RightTab::Files, cx);
-            } else {
-                cx.notify();
-            }
+    /// The iOS Simulator connector was switched on or off in Settings.
+    pub(crate) fn set_simulator_connector(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.simulator_connector == on {
+            return;
         }
+        self.simulator_connector = on;
+        if !on {
+            self.restore_simulator = false;
+        }
+        self.sync_simulator_tab(cx);
+        self.check_ios_project(cx);
+    }
+    #[cfg(test)]
+    pub(crate) fn simulator_tab(&self) -> bool {
+        self.simulator_tab
+    }
+    /// The SimulatorPane, if its tab has ever been shown.
+    #[cfg(test)]
+    pub(crate) fn simulator_pane(&self) -> Option<&Entity<SimulatorPane>> {
+        self.simulator.as_ref()
+    }
+    /// The checkout in view changed, or its files did.
+    fn project_changed(&mut self, cx: &mut Context<Self>) {
+        let project = self.git.read(cx).project().to_owned();
+        if project != self.project {
+            self.project = project;
+            // Another project's answer, or none until its check returns.
+            self.restore_simulator = false;
+            self.sync_simulator_tab(cx);
+        }
+        // A cheap, shallow look again: a project may have gained (or lost)
+        // its Xcode project since the last one.
+        self.check_ios_project(cx);
+    }
+    /// Looks, off the interface thread, whether the project in view is an
+    /// iOS or Swift project. Only while the connector is on: otherwise the
+    /// tab is not offered whatever the answer.
+    fn check_ios_project(&mut self, cx: &mut Context<Self>) {
+        if !cfg!(target_os = "macos") || !self.simulator_connector {
+            return;
+        }
+        let project = self.project.clone();
+        if project.is_empty() || project == "~" {
+            return;
+        }
+        if let Some((checking, _)) = &self.ios_check
+            && *checking == project
+        {
+            self.ios_check_again = true;
+            return;
+        }
+        self.ios_check_again = false;
+        let work = cx.background_executor().spawn({
+            let project = project.clone();
+            async move {
+                monocode_core::simulator::mcp::project::is_ios_project(std::path::Path::new(
+                    &project,
+                ))
+            }
+        });
+        let checking = project.clone();
+        let task = cx.spawn(async move |this, cx| {
+            let ios = work.await;
+            let _ = this.update(cx, |this, cx| {
+                this.ios_check = None;
+                this.ios_projects.insert(project.clone(), ios);
+                if this.project == project {
+                    this.sync_simulator_tab(cx);
+                    this.restore_simulator = false;
+                }
+                if std::mem::take(&mut this.ios_check_again) {
+                    this.check_ios_project(cx);
+                }
+            });
+        });
+        self.ios_check = Some((checking, task));
+    }
+    /// Offers the tab, or takes it away (Explorer takes over), from the
+    /// connector and the project's last answer.
+    fn sync_simulator_tab(&mut self, cx: &mut Context<Self>) {
+        let enabled = cfg!(target_os = "macos")
+            && self.simulator_connector
+            && self.ios_projects.get(&self.project) == Some(&true);
+        if self.simulator_tab == enabled {
+            return;
+        }
+        self.simulator_tab = enabled;
+        if enabled && self.restore_simulator && self.tab == RightTab::Files {
+            self.restore_simulator = false;
+            self.select(RightTab::Simulator, cx);
+        } else if !enabled && self.tab == RightTab::Simulator {
+            self.select(RightTab::Files, cx);
+        } else {
+            cx.notify();
+        }
+    }
+    /// The pane, made the first time it is shown.
+    fn simulator(&mut self, cx: &mut Context<Self>) -> Entity<SimulatorPane> {
+        if let Some(simulator) = &self.simulator {
+            return simulator.clone();
+        }
+        let simulator = cx.new(SimulatorPane::new);
+        self._subscriptions.push(cx.subscribe(
+            &simulator,
+            |_, _, event: &crate::simulator_pane::SimulatorEvent, cx| {
+                let crate::simulator_pane::SimulatorEvent::AddToChat { text, image } = event;
+                cx.emit(PanelEvent::AddToChat {
+                    text: text.clone(),
+                    image: image.clone(),
+                });
+            },
+        ));
+        self.simulator = Some(simulator.clone());
+        simulator
     }
     pub(crate) fn swarm_tab(&self) -> bool {
         self.swarm_tab
@@ -536,6 +660,7 @@ impl RightPanel {
         self.sync_panes(cx);
     }
     pub(crate) fn select(&mut self, tab: RightTab, cx: &mut Context<Self>) {
+        self.restore_simulator = false;
         if self.tab != tab {
             self.reveal = Some(TabReveal::new(tab, self.tab));
         }
@@ -566,9 +691,12 @@ impl RightPanel {
         });
         self.swarm
             .update(cx, |s, cx| s.set_shown(shown && tab == RightTab::Swarm, cx));
+        // Not an iOS project, or never opened: nothing to make or stop.
         let simulator = shown && tab == RightTab::Simulator && self.simulator_tab;
-        self.simulator
-            .update(cx, |s, cx| s.set_shown(simulator, cx));
+        if simulator || self.simulator.is_some() {
+            self.simulator(cx)
+                .update(cx, |s, cx| s.set_shown(simulator, cx));
+        }
         self.agents.update(cx, |a, cx| {
             a.set_shown(shown && tab == RightTab::Agents, cx)
         });
@@ -577,7 +705,10 @@ impl RightPanel {
         let focus = match (self.shown, self.tab) {
             (true, RightTab::Files) => self.explorer.focus_handle(cx),
             (true, RightTab::Graph) => self.history.focus_handle(cx),
-            (true, RightTab::Simulator) => self.simulator.focus_handle(cx),
+            (true, RightTab::Simulator) if self.simulator_tab => self
+                .simulator
+                .as_ref()
+                .map_or_else(|| self.focus.clone(), |s| s.focus_handle(cx)),
             (true, RightTab::Agents) => self.agents.focus_handle(cx),
             _ => self.focus.clone(),
         };
@@ -765,7 +896,7 @@ impl RightPanel {
 }
 
 impl Render for RightPanel {
-    fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let pane: AnyElement = match self.tab {
             RightTab::Files => self
                 .explorer
@@ -788,8 +919,9 @@ impl Render for RightPanel {
                 .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
                 .into_any_element(),
             RightTab::Agents => self.agents.clone().into_any_element(),
-            RightTab::Simulator if self.simulator_tab => self.simulator.clone().into_any_element(),
-            // The connector was switched off while its tab was open.
+            RightTab::Simulator if self.simulator_tab => self.simulator(cx).into_any_element(),
+            // The connector was switched off, or the project is not an iOS
+            // one, while its tab was open.
             RightTab::Simulator => self
                 .explorer
                 .clone()

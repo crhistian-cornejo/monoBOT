@@ -398,7 +398,8 @@ fn the_widgets_page_shows_hides_and_widens_each_widget(cx: &mut TestAppContext) 
     assert_eq!(today.span, 2);
     assert!(look.shelf.iter().all(|w| w.id != "clock"), "hidden");
     click(visual, "notch-page-look");
-    click(visual, "notch-edge-off");
+    // The edge line is a switch, on by default: a click turns it off.
+    click(visual, "notch-edge");
     click(visual, "notch-page-general");
     click(visual, "notch-width-wide");
     let look = opened
@@ -2840,4 +2841,36 @@ fn a_widgets_menu_arranges_it_without_the_pencil(cx: &mut TestAppContext) {
         })
         .unwrap();
     assert!(!opened.saved.borrow().is_empty(), "each change is saved");
+}
+
+/// The pages are a segmented control: a click on a segment opens its page
+/// and the segment says it is the one picked; the settings use the system's
+/// switch, which flips its setting each click.
+#[gpui::test]
+fn the_pages_are_a_segmented_control_and_settings_use_switches(cx: &mut TestAppContext) {
+    let opened = open_notch(Look::default(), cx);
+    let visual = &mut VisualTestContext::from_window(opened.window.into(), cx);
+    opened
+        .window
+        .update(visual, |notch, _, cx| notch.set_open(true, cx))
+        .unwrap();
+    visual.run_until_parked();
+    let track = visual
+        .debug_bounds("notch-tab-home")
+        .expect("the pages show");
+    click(visual, "notch-tab-settings");
+    let tab = opened.window.update(visual, |n, _, _| n.tab).unwrap();
+    assert_eq!(tab, Tab::Settings);
+    let settings = visual.debug_bounds("notch-tab-settings").unwrap();
+    assert_eq!(track.origin.y, settings.origin.y, "one row of segments");
+    assert!(settings.origin.x > track.origin.x);
+    click(visual, "notch-page-look");
+    let face = |visual: &mut VisualTestContext| {
+        opened.window.update(visual, |n, _, _| n.look.face).unwrap()
+    };
+    let before = face(visual);
+    click(visual, "notch-face");
+    assert_eq!(face(visual), !before);
+    click(visual, "notch-face");
+    assert_eq!(face(visual), before);
 }

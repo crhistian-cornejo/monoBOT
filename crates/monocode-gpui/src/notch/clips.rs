@@ -248,6 +248,8 @@ impl Notch {
                 .flex()
                 .items_center()
                 .justify_center()
+                .rounded(px(controls::BUTTON_RADIUS))
+                .overflow_hidden()
                 .bg(ink(0.05))
                 .child(
                     gpui::img(self.thumbnail(bytes))
@@ -262,6 +264,7 @@ impl Notch {
                 .w(px(PICTURE.1))
                 .h(px(PICTURE.1))
                 .flex_shrink_0()
+                .rounded(px(controls::BUTTON_RADIUS))
                 .border_1()
                 .border_color(ink(0.2))
                 .bg(gpui::rgb(color))
@@ -396,7 +399,7 @@ impl Notch {
             .flex()
             .gap(px(12.))
             .overflow_hidden()
-            .bg(ink(0.07))
+            .map(controls::glass)
             .child(preview)
             .child(
                 div()
@@ -487,6 +490,7 @@ impl Notch {
                 .flex()
                 .items_center()
                 .gap(px(6.))
+                .rounded(px(controls::BUTTON_RADIUS))
                 .bg(ink(0.07))
                 .on_mouse_down(gpui::MouseButton::Left, |_, window, _| {
                     platform::take_keys(window)
@@ -549,6 +553,7 @@ impl Notch {
                         .items_center()
                         .gap(px(4.))
                         .text_size(px(10.5))
+                        .rounded_full()
                         .cursor_pointer()
                         .when(on, |chip| chip.bg(accent_color()).text_color(white(1.)))
                         .when(!on, |chip| {
@@ -627,6 +632,7 @@ impl Notch {
                 .flex()
                 .items_center()
                 .justify_center()
+                .rounded(px(5.))
                 .hover(|style| style.bg(ink(0.14)))
                 .child(icon("cancel-01", 10.).text_color(ink(0.45)))
                 .on_click(cx.listener(move |this, _, _, cx| {

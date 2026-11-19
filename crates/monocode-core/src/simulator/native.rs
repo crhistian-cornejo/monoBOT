@@ -157,6 +157,7 @@ pub enum Delivery {
 
 /// The device's main screen, followed frame by frame until dropped.
 pub struct ScreenFeed {
+    device: Retained<AnyObject>,
     screen: Retained<AnyObject>,
     token: Retained<AnyObject>,
     surface: Arc<Mutex<Surface>>,
@@ -167,9 +168,10 @@ pub struct ScreenFeed {
 unsafe impl Send for ScreenFeed {}
 unsafe impl Sync for ScreenFeed {}
 
-/// The frameworks, loaded once. The error says what was missing.
-fn load() -> Result<(), String> {
-    static LOADED: OnceLock<Result<(), String>> = OnceLock::new();
+/// The frameworks, loaded once, and the developer folder they came from.
+/// The error says what was missing.
+fn load() -> Result<String, String> {
+    static LOADED: OnceLock<Result<String, String>> = OnceLock::new();
     LOADED
         .get_or_init(|| {
             let developer = super::run(
@@ -186,7 +188,7 @@ fn load() -> Result<(), String> {
                     return Err(format!("{} could not be loaded", path.to_string_lossy()));
                 }
             }
-            Ok(())
+            Ok(developer.trim().to_owned())
         })
         .clone()
 }
@@ -273,17 +275,13 @@ fn conforms(object: &AnyObject, protocol: &AnyProtocol) -> bool {
 
 /// The `SimDevice` with this UDID in the default device set.
 fn device(udid: &str) -> Result<Retained<AnyObject>, String> {
-    load()?;
-    guarded("finding the device", || find_device(udid))
+    // The frameworks loaded are this developer folder's: the service
+    // context asks for the same one, without running xcode-select again.
+    let developer = load()?;
+    guarded("finding the device", || find_device(udid, &developer))
 }
 
-fn find_device(udid: &str) -> Result<Retained<AnyObject>, String> {
-    let developer = super::run(
-        super::XCODE_SELECT,
-        &["-p"],
-        std::time::Duration::from_secs(10),
-    )?
-    .ok("xcode-select")?;
+fn find_device(udid: &str, developer: &str) -> Result<Retained<AnyObject>, String> {
     let class = |name: &CStr| {
         AnyClass::get(name).ok_or_else(|| format!("This Xcode has no {}", name.to_string_lossy()))
     };
@@ -291,7 +289,7 @@ fn find_device(udid: &str) -> Result<Retained<AnyObject>, String> {
     let uuid_class = class(c"NSUUID")?;
     unsafe {
         let mut error: *mut AnyObject = std::ptr::null_mut();
-        let developer = NSString::from_str(developer.trim());
+        let developer = NSString::from_str(developer);
         let context: Option<Retained<AnyObject>> = msg_send![
             context_class,
             sharedServiceContextForDeveloperDir: &*developer,
@@ -437,11 +435,30 @@ impl ScreenFeed {
                 &properties,
             );
             Ok(Self {
+                device,
                 screen,
                 token,
                 surface,
             })
         })
+    }
+
+    /// Whether the device is still booted, from CoreSimulator's own copy of
+    /// its state, which its service keeps current: no process to start, as
+    /// `simctl list` (90 ms) would. A device whose state cannot be read
+    /// counts as booted; the feed's frames stop if it is not.
+    pub fn booted(&self) -> bool {
+        /// `SimDeviceState`: creating, shutdown, booting, booted, shutting down.
+        const BOOTED: u64 = 3;
+        guarded("reading the device's state", || unsafe {
+            let responds: Bool = msg_send![&self.device, respondsToSelector: sel!(state)];
+            if !responds.as_bool() {
+                return Ok(true);
+            }
+            let state: u64 = msg_send![&self.device, state];
+            Ok(state == BOOTED)
+        })
+        .unwrap_or(true)
     }
 
     /// The surface the device draws into now.
@@ -506,7 +523,8 @@ mod tests {
         assert!(protocol(c"NoSuchProtocol", &[]).is_err());
     }
 
-    /// Needs a booted simulator; passes without one.
+    /// Needs a booted simulator; passes without one. It also reads the
+    /// device's state the cheap way.
     #[test]
     fn the_booted_device_feeds_its_framebuffer() {
         let Ok(Some(device)) = super::super::booted_device() else {
@@ -520,6 +538,7 @@ mod tests {
             }
         })
         .expect("a feed from the booted device");
+        assert!(feed.booted());
         let surface = feed.surface();
         let (width, height) = surface.size();
         assert!(width > 0 && height > width, "{width}×{height}");
@@ -535,5 +554,279 @@ mod tests {
         );
         assert!(frames.load(Ordering::Relaxed) > 0, "no frames arrived");
         drop(feed);
+    }
+
+    /// The numbers in docs/in-progress/ios-simulator.md, before and after,
+    /// on a device of its own (never the user's):
+    /// `MONOBOT_SIM_PERF_UDID=<udid> cargo test -p monocode-core
+    /// simulator::native::tests::measure -- --ignored --nocapture`.
+    #[test]
+    #[ignore = "measures a booted simulator named by MONOBOT_SIM_PERF_UDID"]
+    fn measure() {
+        use std::time::{Duration, Instant};
+        let Ok(udid) = std::env::var("MONOBOT_SIM_PERF_UDID") else {
+            return;
+        };
+        let udid = udid.as_str();
+        fn cpu() -> Duration {
+            let mut total = Duration::ZERO;
+            for who in [libc::RUSAGE_SELF, libc::RUSAGE_CHILDREN] {
+                let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+                unsafe { libc::getrusage(who, &mut usage) };
+                for t in [usage.ru_utime, usage.ru_stime] {
+                    total += Duration::from_secs(t.tv_sec as u64)
+                        + Duration::from_micros(t.tv_usec as u64);
+                }
+            }
+            total
+        }
+        let time = |label: &str, n: u32, mut work: Box<dyn FnMut() + '_>| {
+            work();
+            let (start, cpu_start) = (Instant::now(), cpu());
+            for _ in 0..n {
+                work();
+            }
+            let (wall, used) = (start.elapsed() / n, (cpu() - cpu_start) / n);
+            println!("{label}: {wall:.2?} wall, {used:.2?} CPU (this process and its children), mean of {n}");
+        };
+        let body = serde_json::json!({});
+        let tap = serde_json::json!({"x": 300, "y": 8});
+        // Starts the runner if it is not up yet.
+        super::super::controls::act(udid, "status", &body).unwrap();
+        time(
+            "simctl list devices",
+            10,
+            Box::new(|| {
+                super::super::devices().unwrap();
+            }),
+        );
+        time(
+            "screen scale (simctl getenv)",
+            5,
+            Box::new(|| {
+                super::super::screen_scale(udid).unwrap();
+            }),
+        );
+        time(
+            "xcode_problem (xcode-select)",
+            5,
+            Box::new(|| {
+                assert!(super::super::xcode_problem().is_none());
+            }),
+        );
+        time(
+            "runner status, before (simulator::act)",
+            10,
+            Box::new(|| {
+                super::super::act(Some(udid), "status", |_| body.clone()).unwrap();
+            }),
+        );
+        time(
+            "runner status, after (controls::act)",
+            10,
+            Box::new(|| {
+                super::super::controls::act(udid, "status", &body).unwrap();
+            }),
+        );
+        time(
+            "tap, before (simulator::act)",
+            8,
+            Box::new(|| {
+                super::super::act(Some(udid), "tap", |_| tap.clone()).unwrap();
+            }),
+        );
+        time(
+            "tap, after (controls::act)",
+            8,
+            Box::new(|| {
+                super::super::controls::act(udid, "tap", &tap).unwrap();
+            }),
+        );
+        let fast_tap = serde_json::json!({"x": 300, "y": 8, "fast": true});
+        let answer = super::super::controls::act(udid, "tap", &fast_tap).unwrap();
+        println!("fast tap answered {answer}");
+        time(
+            "tap, after (controls::act, fast)",
+            8,
+            Box::new(|| {
+                super::super::controls::act(udid, "tap", &fast_tap).unwrap();
+            }),
+        );
+        let frame = serde_json::json!({"scale": 2, "quality": 0.7});
+        time(
+            "fallback frame from the runner, before (simulator::act)",
+            8,
+            Box::new(|| {
+                super::super::act(Some(udid), "screen", |_| frame.clone()).unwrap();
+            }),
+        );
+        time(
+            "fallback frame from the runner, after (controls::act)",
+            8,
+            Box::new(|| {
+                super::super::controls::act(udid, "screen", &frame).unwrap();
+            }),
+        );
+        // What the pane's fallback calls: the same request, decoded to BGRA.
+        time(
+            "fallback frame, live_frame (controls::act + decode)",
+            8,
+            Box::new(|| {
+                super::super::live_frame(udid).unwrap();
+            }),
+        );
+        // A fast tap lands: Settings opens from the home screen.
+        let _ = super::super::controls::act(
+            udid,
+            "press_button",
+            &serde_json::json!({"button": "home"}),
+        );
+        std::thread::sleep(Duration::from_millis(800));
+        let home = super::super::inspect::describe(udid, None).unwrap();
+        let settings = home
+            .iter()
+            .find(|e| matches!(e.label.as_deref(), Some("Settings" | "Ajustes")))
+            .cloned();
+        if settings.is_none() {
+            let labels: Vec<_> = home
+                .iter()
+                .filter_map(|e| e.label.clone())
+                .take(30)
+                .collect();
+            println!("home screen labels: {labels:?}");
+        }
+        if let Some(icon) = settings {
+            let (x, y) = (
+                icon.frame.0 + icon.frame.2 / 2.,
+                icon.frame.1 + icon.frame.3 / 2.,
+            );
+            let tapped = Instant::now();
+            super::super::controls::act(
+                udid,
+                "tap",
+                &serde_json::json!({"x": x, "y": y, "fast": true}),
+            )
+            .unwrap();
+            println!(
+                "fast tap on Settings returned after {:.2?}",
+                tapped.elapsed()
+            );
+            std::thread::sleep(Duration::from_millis(1500));
+            let tree =
+                super::super::inspect::describe(udid, Some("com.apple.Preferences")).unwrap();
+            let opened = tree.iter().any(|e| e.label.as_deref() == Some("General"));
+            println!("Settings opened by the fast tap: {opened}");
+            let _ = super::super::controls::act(
+                udid,
+                "press_button",
+                &serde_json::json!({"button": "home"}),
+            );
+            std::thread::sleep(Duration::from_millis(800));
+        } else {
+            println!("no Settings icon on the home screen to check the fast tap with");
+        }
+
+        let opened = Instant::now();
+        let stamps = Arc::new(Mutex::new(Vec::<Instant>::new()));
+        let marks = stamps.clone();
+        let feed = ScreenFeed::open(udid, Delivery::Private, move |event| {
+            if matches!(event, FeedEvent::Frame) {
+                marks.lock().unwrap().push(Instant::now());
+            }
+        })
+        .unwrap();
+        println!("feed open: {:.2?}", opened.elapsed());
+        time(
+            "liveness, before (simctl list)",
+            10,
+            Box::new(|| {
+                assert!(super::super::devices()
+                    .unwrap()
+                    .iter()
+                    .any(|d| d.udid == udid && d.booted()));
+            }),
+        );
+        time(
+            "liveness, after (ScreenFeed::booted)",
+            200,
+            Box::new(|| {
+                assert!(feed.booted());
+            }),
+        );
+        // An animation: to the next home screen page and back.
+        stamps.lock().unwrap().clear();
+        let animated = Instant::now();
+        for (from, to) in [(350., 50.), (50., 350.)] {
+            super::super::controls::act(
+                udid,
+                "swipe",
+                &serde_json::json!({"from_x": from, "from_y": 500, "to_x": to, "to_y": 500}),
+            )
+            .unwrap();
+            std::thread::sleep(Duration::from_millis(700));
+        }
+        let animated = animated.elapsed();
+        let stamps = stamps.lock().unwrap().clone();
+        let mut gaps: Vec<f64> = stamps
+            .windows(2)
+            .map(|w| (w[1] - w[0]).as_secs_f64() * 1000.)
+            .collect();
+        gaps.sort_by(f64::total_cmp);
+        if !gaps.is_empty() {
+            println!(
+                "feed frames during two home screen swipes ({animated:.2?}): {} frames, interval median {:.1} ms, p90 {:.1} ms, min {:.1} ms",
+                stamps.len(),
+                gaps[gaps.len() / 2],
+                gaps[gaps.len() * 9 / 10],
+                gaps[0]
+            );
+        }
+        // The live pane's loop while nothing changes on screen: a liveness
+        // check every 3 s, for 30 s, the old way and the new.
+        for (label, old) in [("before", true), ("after", false)] {
+            let (start, cpu_start) = (Instant::now(), cpu());
+            while start.elapsed() < Duration::from_secs(30) {
+                if old {
+                    let _ = super::super::devices();
+                } else {
+                    let _ = feed.booted();
+                }
+                std::thread::sleep(Duration::from_secs(3));
+            }
+            let used = cpu() - cpu_start;
+            println!(
+                "idle live pane, {label}: {used:.2?} CPU in 30 s = {:.2} % of a core (this process and its children)",
+                used.as_secs_f64() / 30. * 100.
+            );
+        }
+        drop(feed);
+    }
+
+    /// That `booted` notices a shutdown, which the live pane relies on to
+    /// leave a device that is gone. Shuts the device down and boots it
+    /// again: only on a device of its own (MONOBOT_SIM_PERF_UDID).
+    #[test]
+    #[ignore = "shuts down the simulator named by MONOBOT_SIM_PERF_UDID"]
+    fn booted_notices_a_shutdown() {
+        use std::time::{Duration, Instant};
+        let Ok(udid) = std::env::var("MONOBOT_SIM_PERF_UDID") else {
+            return;
+        };
+        let feed = ScreenFeed::open(&udid, Delivery::Private, |_| {}).unwrap();
+        assert!(feed.booted());
+        let run = |args: &[&str]| {
+            super::super::run(super::super::XCRUN, args, Duration::from_secs(120)).unwrap()
+        };
+        run(&["simctl", "shutdown", &udid]);
+        let start = Instant::now();
+        while feed.booted() && start.elapsed() < Duration::from_secs(20) {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let noticed = start.elapsed();
+        drop(feed);
+        run(&["simctl", "boot", &udid]);
+        run(&["simctl", "bootstatus", &udid, "-b"]);
+        assert!(noticed < Duration::from_secs(20), "the state stayed booted");
+        println!("shutdown noticed {noticed:.2?} after simctl shutdown returned");
     }
 }

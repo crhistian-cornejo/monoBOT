@@ -954,40 +954,73 @@ mod tests {
         (window, manager, id, session)
     }
 
-    #[gpui::test]
+    /// A Swift package and a Rust crate on disk, for the sessions' folders.
     #[cfg(target_os = "macos")]
-    fn the_default_project_panel_opens_the_simulator_when_enabled(cx: &mut TestAppContext) {
+    fn swift_and_rust_projects(name: &str) -> (std::path::PathBuf, String, String) {
+        let root = std::env::temp_dir().join(format!("monobot-{name}-{}", std::process::id()));
+        let swift = root.join("swift-app");
+        let rust = root.join("rust-crate");
+        std::fs::create_dir_all(swift.join("Sources/App")).unwrap();
+        std::fs::write(swift.join("Package.swift"), "// swift-tools-version:6.0\n").unwrap();
+        std::fs::create_dir_all(rust.join("src")).unwrap();
+        std::fs::write(rust.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        let path = |p: std::path::PathBuf| p.to_string_lossy().into_owned();
+        (root, path(swift), path(rust))
+    }
+
+    /// The window with session `swift` in the Swift package and `rust` in the
+    /// Rust crate, `active` in view, its project panel open and the iOS
+    /// Simulator connector on.
+    #[cfg(target_os = "macos")]
+    fn simulator_window(
+        cx: &mut TestAppContext,
+        projects: (&str, &str),
+        swift_active: bool,
+    ) -> (WindowHandle<Shell>, Entity<RightPanel>, i64, i64) {
         cx.update(|cx| cx.set_reduce_motion(true));
-        let (window, _, _) = window(cx);
+        let (window, rust, swift) = window(cx);
         let panel = window
             .update(cx, |shell, w, cx| {
-                assert!(shell.workspace.boxy_layout());
+                shell.sessions[&swift].update(cx, |s, _| s.summary.cwd = projects.0.into());
+                shell.sessions[&rust].update(cx, |s, _| s.summary.cwd = projects.1.into());
+                shell.activate_session(if swift_active { swift } else { rust }, w, cx);
                 shell.set_right_panel_open(true, w, cx);
                 shell.workspace.right_panel_width = crate::right_panel::WIDTH_MIN;
-                shell.right_panel.clone().unwrap()
+                let panel = shell.right_panel.clone().unwrap();
+                panel.update(cx, |panel, cx| panel.set_simulator_connector(true, cx));
+                panel
             })
             .unwrap();
-        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
-        visual.refresh().unwrap();
-        assert!(visual.debug_bounds("right-panel-tab-Simulator").is_none());
+        cx.run_until_parked();
+        (window, panel, swift, rust)
+    }
 
-        window
-            .update(visual, |_, _, cx| {
-                panel.update(cx, |panel, cx| panel.set_simulator_tab(true, cx));
-                cx.notify();
-            })
-            .unwrap();
+    #[gpui::test]
+    #[cfg(target_os = "macos")]
+    fn a_swift_project_offers_the_simulator_and_the_connector_switch_takes_it_away(
+        cx: &mut TestAppContext,
+    ) {
+        let (root, swift, rust) = swift_and_rust_projects("simulator-swift");
+        let (window, panel, _, _) = simulator_window(cx, (&swift, &rust), true);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
         visual.refresh().unwrap();
         let tab = visual.debug_bounds("right-panel-tab-Simulator").unwrap();
         let search = visual.debug_bounds("titlebar-file-search").unwrap();
         assert!(tab.right() <= search.left());
+        // Nothing of the simulator exists until its tab is opened.
+        window
+            .update(visual, |_, _, cx| {
+                assert!(panel.read(cx).simulator_pane().is_none())
+            })
+            .unwrap();
         visual.simulate_click(tab.center(), Default::default());
         visual.refresh().unwrap();
         assert!(visual.debug_bounds("simulator-header").is_some());
         window
             .update(visual, |_, _, cx| {
                 assert_eq!(panel.read(cx).tab(), RightTab::Simulator);
-                panel.update(cx, |panel, cx| panel.set_simulator_tab(false, cx));
+                assert!(panel.read(cx).simulator_pane().is_some());
+                panel.update(cx, |panel, cx| panel.set_simulator_connector(false, cx));
                 assert_eq!(panel.read(cx).tab(), RightTab::Files);
                 cx.notify();
             })
@@ -995,6 +1028,70 @@ mod tests {
         visual.refresh().unwrap();
         assert!(visual.debug_bounds("right-panel-tab-Simulator").is_none());
         assert!(visual.debug_bounds("simulator-header").is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[gpui::test]
+    #[cfg(target_os = "macos")]
+    fn a_rust_project_offers_no_simulator_and_starts_none(cx: &mut TestAppContext) {
+        let (root, swift, rust) = swift_and_rust_projects("simulator-rust");
+        let (window, panel, _, _) = simulator_window(cx, (&swift, &rust), false);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("right-panel-tab-Simulator").is_none());
+        window
+            .update(visual, |_, _, cx| {
+                let panel = panel.read(cx);
+                assert!(panel.tabs().contains(&RightTab::Files));
+                assert!(!panel.simulator_tab());
+                assert!(!panel.tabs().contains(&RightTab::Simulator));
+                // No pane, so no simctl, device polling or framebuffer.
+                assert!(panel.simulator_pane().is_none());
+            })
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[gpui::test]
+    #[cfg(target_os = "macos")]
+    fn switching_projects_brings_the_simulator_tab_and_takes_it_away(cx: &mut TestAppContext) {
+        let (root, swift_dir, rust_dir) = swift_and_rust_projects("simulator-switch");
+        let (window, panel, swift, rust) = simulator_window(cx, (&swift_dir, &rust_dir), true);
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        let tab = visual.debug_bounds("right-panel-tab-Simulator").unwrap();
+        visual.simulate_click(tab.center(), Default::default());
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("simulator-header").is_some());
+
+        // To the Rust crate: the tab goes, Explorer takes over, and the pane
+        // that was open stops.
+        window
+            .update(visual, |shell, w, cx| shell.activate_session(rust, w, cx))
+            .unwrap();
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("right-panel-tab-Simulator").is_none());
+        assert!(visual.debug_bounds("simulator-header").is_none());
+        window
+            .update(visual, |_, _, cx| {
+                assert_eq!(panel.read(cx).tab(), RightTab::Files);
+                let pane = panel.read(cx).simulator_pane().unwrap().clone();
+                assert!(!pane.read(cx).is_shown());
+            })
+            .unwrap();
+
+        // Back to the Swift package: its answer is remembered.
+        window
+            .update(visual, |shell, w, cx| shell.activate_session(swift, w, cx))
+            .unwrap();
+        visual.run_until_parked();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("right-panel-tab-Simulator").is_some());
+        window
+            .update(visual, |_, _, cx| assert!(panel.read(cx).simulator_tab()))
+            .unwrap();
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[gpui::test]

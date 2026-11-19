@@ -105,14 +105,12 @@ pub fn stack_at(elements: &[Element], x: f32, y: f32) -> Vec<usize> {
 /// The tree of what is on screen: the app `bundle` when it is in front,
 /// else the home screen.
 pub fn describe(udid: &str, bundle: Option<&str>) -> Result<Vec<Element>, String> {
-    let (_, result) = super::act(Some(udid), "describe", |_| {
-        let mut body = serde_json::json!({"max_lines": 3000});
-        if let Some(bundle) = bundle {
-            body["bundle_id"] = bundle.into();
-            body["guessed"] = true.into();
-        }
-        body
-    })?;
+    let mut body = serde_json::json!({"max_lines": 3000});
+    if let Some(bundle) = bundle {
+        body["bundle_id"] = bundle.into();
+        body["guessed"] = true.into();
+    }
+    let result = super::controls::act(udid, "describe", &body)?;
     Ok(parse(result["text"].as_str().unwrap_or_default()))
 }
 

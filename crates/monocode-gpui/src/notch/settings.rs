@@ -77,7 +77,8 @@ fn row(name: &'static str, hint: &'static str, choices: impl IntoElement) -> gpu
         .child(div().flex_shrink_0().child(choices))
 }
 
-/// A segmented choice; the chosen one is lit in the accent.
+/// One choice of a segmented control (`controls`' look): the chosen one
+/// sits on a raised plate in the sunken track `segments` draws.
 fn segment(
     id: impl Into<gpui::ElementId>,
     label: &'static str,
@@ -90,9 +91,10 @@ fn segment(
         .debug_selector(move || selector.clone())
         .role(Role::RadioButton)
         .aria_label(label)
+        .aria_selected(chosen)
         .h(px(22.))
-        .min_w(px(22.))
-        .px(px(8.))
+        .min_w(px(26.))
+        .px(px(9.))
         // Scaled by the notch's corner choice like the rest of it.
         .rounded(px(6.))
         .flex()
@@ -101,19 +103,27 @@ fn segment(
         .text_size(px(11.5))
         .cursor_pointer()
         .when(chosen, |segment| {
-            segment.bg(accent_color()).text_color(white(1.))
+            segment.bg(ink(0.2)).text_color(ink(1.)).shadow(vec![
+                gpui::BoxShadow::new(px(0.), px(1.), black(0.35)).blur_radius(px(2.)),
+            ])
         })
         .when(!chosen, |segment| {
             segment
-                .bg(ink(0.07))
-                .text_color(ink(0.65))
-                .hover(|style| style.bg(ink(0.14)).text_color(ink(0.9)))
+                .text_color(ink(0.6))
+                .hover(|style| style.text_color(ink(0.92)))
         })
         .child(label)
 }
 
+/// The sunken track around a row of [`segment`]s.
 fn segments(children: impl IntoIterator<Item = gpui::Stateful<gpui::Div>>) -> gpui::Div {
-    div().flex().gap(px(2.)).children(children)
+    div()
+        .p(px(2.))
+        .flex()
+        .gap(px(2.))
+        .rounded(px(8.))
+        .bg(ink(0.07))
+        .children(children)
 }
 
 /// A click that changes the look.
@@ -124,33 +134,31 @@ fn choose(
     cx.listener(move |this: &mut Notch, _: &gpui::ClickEvent, _, cx| this.change_look(&change, cx))
 }
 
-/// An on and off switch as two segments.
+/// The system's switch for a setting that is on or off.
 fn toggle(
     cx: &mut Context<Notch>,
+    label: &'static str,
     id: &'static str,
     on: bool,
     set: fn(&mut Look, bool),
-) -> gpui::Div {
-    segments([
-        segment(gpui::SharedString::from(format!("{id}-on")), "On", on)
-            .on_click(choose(cx, move |look| set(look, true))),
-        segment(gpui::SharedString::from(format!("{id}-off")), "Off", !on)
-            .on_click(choose(cx, move |look| set(look, false))),
-    ])
+) -> gpui::Stateful<gpui::Div> {
+    controls::switch(id, label, on).on_click(choose(cx, move |look| set(look, !on)))
 }
 
 impl Notch {
     pub(super) fn settings_view(&mut self, cx: &mut Context<Self>) -> AnyElement {
+        // A source list, as a macOS settings window's sidebar: rounded rows,
+        // the page shown on the accent.
         let mut sidebar = div()
-            .w(px(108.))
+            .w(px(112.))
             .flex_shrink_0()
-            .pr(px(8.))
-            .mr(px(10.))
-            .border_r_1()
-            .border_color(ink(0.08))
+            .mr(px(12.))
+            .p(px(4.))
             .flex()
             .flex_col()
-            .gap(px(2.));
+            .gap(px(1.))
+            .rounded(px(controls::CARD_RADIUS))
+            .bg(ink(0.04));
         for page in Page::ALL {
             let chosen = self.settings_page == page;
             sidebar = sidebar.child(
@@ -159,19 +167,28 @@ impl Notch {
                     .debug_selector(move || page.id().into())
                     .role(Role::Tab)
                     .aria_label(page.name())
-                    .h(px(28.))
+                    .aria_selected(chosen)
+                    .h(px(26.))
                     .px(px(8.))
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(px(7.))
+                    .rounded(px(controls::ROW_RADIUS))
                     .cursor_pointer()
-                    .when(chosen, |item| item.bg(ink(0.1)))
-                    .when(!chosen, |item| item.hover(|style| style.bg(ink(0.05))))
-                    .child(icon(page.icon(), 13.).text_color(ink(if chosen { 0.95 } else { 0.5 })))
+                    .when(chosen, |item| item.bg(accent_color()))
+                    .when(!chosen, |item| {
+                        item.hover(|style| style.bg(ink(0.07)))
+                            .active(|style| style.bg(ink(0.12)))
+                    })
+                    .child(icon(page.icon(), 13.).text_color(if chosen {
+                        white(1.)
+                    } else {
+                        ink(0.55)
+                    }))
                     .child(
                         div()
                             .text_size(px(12.))
-                            .text_color(ink(if chosen { 0.95 } else { 0.6 }))
+                            .text_color(if chosen { white(1.) } else { ink(0.75) })
                             .child(page.name()),
                     )
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -192,10 +209,14 @@ impl Notch {
             .h(px(SETTINGS_HEIGHT))
             .pt(px(6.))
             .flex()
+            // The source list keeps to its rows instead of reaching the
+            // island's rounded foot.
+            .items_start()
             .child(sidebar)
             .child(
                 div()
                     .id("notch-settings-body")
+                    .self_stretch()
                     .flex_1()
                     .min_w_0()
                     .h_full()
@@ -250,9 +271,13 @@ impl Notch {
                 page.child(row(
                     "Clipboard history",
                     "Text you copy, kept in memory only",
-                    toggle(cx, "notch-clipboard", look.clipboard, |look, on| {
-                        look.clipboard = on
-                    }),
+                    toggle(
+                        cx,
+                        "Clipboard history",
+                        "notch-clipboard",
+                        look.clipboard,
+                        |look, on| look.clipboard = on,
+                    ),
                 ))
             })
             .into_any_element()
@@ -311,12 +336,16 @@ impl Notch {
             .child(row(
                 "Face at rest",
                 "Eyes that blink and follow the pointer",
-                toggle(cx, "notch-face", look.face, |look, on| look.face = on),
+                toggle(cx, "Face at rest", "notch-face", look.face, |look, on| {
+                    look.face = on
+                }),
             ))
             .child(row(
                 "Edge line",
                 "A hairline while it shows something",
-                toggle(cx, "notch-edge", look.edge, |look, on| look.edge = on),
+                toggle(cx, "Edge line", "notch-edge", look.edge, |look, on| {
+                    look.edge = on
+                }),
             ))
             .child(row(
                 "Volume and brightness",
@@ -335,9 +364,13 @@ impl Notch {
             .child(row(
                 "Count at rest",
                 "How many agents work, by the camera",
-                toggle(cx, "notch-count", look.show_count, |look, on| {
-                    look.show_count = on
-                }),
+                toggle(
+                    cx,
+                    "Count at rest",
+                    "notch-count",
+                    look.show_count,
+                    |look, on| look.show_count = on,
+                ),
             ))
             .child(row(
                 "Corners",

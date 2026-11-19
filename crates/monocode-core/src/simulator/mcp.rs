@@ -1,6 +1,9 @@
 //! The `ios_simulator` connector's MCP server (`monocode-gpui
 //! ios-simulator-mcp`): newline-delimited JSON-RPC on stdio, one process per
 //! agent session, so a build started in one call is still known to the next.
+//! [`project`] tells the app where the connector is of use at all.
+pub mod project;
+
 use super::{build_status, find_projects, schemes, start_build, Device};
 use base64::Engine as _;
 use serde_json::{json, Value};
