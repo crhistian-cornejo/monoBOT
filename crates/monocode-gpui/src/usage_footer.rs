@@ -25,12 +25,13 @@ pub(crate) fn bind(cx: &mut App) {
 
 use crate::accounts::{Cached as CachedUsage, Key};
 
-pub(crate) const RATE_LIMIT_PROVIDERS: [Kind; 5] = [
+pub(crate) const RATE_LIMIT_PROVIDERS: [Kind; 6] = [
     Kind::Claude,
     Kind::Codex,
     Kind::Devin,
     Kind::OpenCode,
     Kind::Kimi,
+    Kind::Antigravity,
 ];
 
 /// The plans the footer shows: the one in view first, then every other
@@ -1292,5 +1293,31 @@ mod tests {
             footer_usage_providers(Some(Kind::Droid), installed, |k| k == Kind::Codex),
             vec![Kind::Claude, Kind::Devin, Kind::Kimi]
         );
+        assert_eq!(
+            footer_usage_providers(Some(Kind::Antigravity), installed, |_| false),
+            vec![
+                Kind::Antigravity,
+                Kind::Claude,
+                Kind::Codex,
+                Kind::Devin,
+                Kind::Kimi
+            ]
+        );
+    }
+
+    #[test]
+    fn antigravity_usage_follows_the_model_in_use() {
+        let key = |model| Key::new(Kind::Antigravity, Default::default(), model);
+        assert_eq!(
+            key(Some("gemini-4-neon")).model().as_deref(),
+            Some("gemini")
+        );
+        assert_eq!(key(Some("claude-opus-5-5")).model().as_deref(), Some("3p"));
+        assert_eq!(
+            key(Some("gemini-4-argon")).model().as_deref(),
+            Some("gemini-argon")
+        );
+        assert_eq!(key(None).model().as_deref(), Some("gemini"));
+        assert_ne!(key(Some("gemini-4-neon")), key(Some("claude-opus-5-5")));
     }
 }

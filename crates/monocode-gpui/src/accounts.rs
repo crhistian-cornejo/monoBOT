@@ -68,6 +68,8 @@ impl Key {
                 .next()
                 .unwrap_or("")
                 .into()
+        } else if kind == Kind::Antigravity {
+            monocode_core::usage::antigravity::group_for(model.unwrap_or("")).into()
         } else {
             String::new()
         };
@@ -77,7 +79,10 @@ impl Key {
             billing,
         }
     }
-    fn model(&self) -> Option<String> {
+    pub(crate) fn model(&self) -> Option<String> {
+        if self.kind == Kind::Antigravity {
+            return Some(self.billing.clone());
+        }
         (!self.billing.is_empty()).then(|| format!("{}/", self.billing))
     }
 }

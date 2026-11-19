@@ -140,6 +140,10 @@ them.
   - **Off.**
 - **Usage footer.** The usage details list Claude's resets under "Limit
   resets", like Codex's banked resets, each with its uses left and its expiry.
+  Antigravity's usage comes from `agy -p /quota --output-format json`
+  (`monocode_core::usage::antigravity`). It shows the five-hour and weekly
+  limits of the group the chat's model draws from: Gemini, Claude and GPT,
+  or Argon.
 
 ## Not done yet
 

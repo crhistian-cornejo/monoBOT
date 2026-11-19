@@ -163,6 +163,12 @@ pub fn resolve_auto(kind: Kind) -> Option<PathBuf> {
 pub(crate) fn antigravity_cli(binary: &Path) -> bool {
     binary.file_stem().is_some_and(|name| name == "agy")
 }
+/// The `agy` CLI itself, for commands the standalone ACP wrapper lacks.
+pub(crate) fn resolve_agy() -> Option<PathBuf> {
+    resolve(Kind::Antigravity)
+        .filter(|p| antigravity_cli(p))
+        .or_else(|| resolve_named(Kind::Antigravity, "agy"))
+}
 fn resolve_named(kind: Kind, name: &str) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Some(std::ffi::OsString::from(
         crate::scm::shell::gui_search_path(),

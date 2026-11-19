@@ -544,7 +544,7 @@ impl MailReply {
             .unwrap_or_default();
         let (chosen, candidates) = if let Some(center) = crate::accounts::get(cx) {
             center.update(cx, |center, cx| {
-                for kind in crate::usage_footer::RATE_LIMIT_PROVIDERS {
+                for kind in monocode_core::inbox::mail::RATE_LIMIT_PROVIDERS {
                     let profile = center.selected(kind, &home);
                     center.refresh(crate::accounts::Key::new(kind, profile, None), false, cx);
                 }
