@@ -58,6 +58,10 @@ quick-xml = "0.42"
 lopdf = { version = "0.45", default-features = false }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# The iOS Simulator's framebuffer and keyboard, through CoreSimulator (`simulator/native.rs`).
+objc2 = { version = "0.6", features = ["exception"] }
+block2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString"] }
 keyring = { version = "3.6", default-features = false, features = ["apple-native"] }
 
 [target.'cfg(windows)'.dependencies]
