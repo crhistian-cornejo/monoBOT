@@ -117,6 +117,12 @@ pub(crate) enum PanelEvent {
     Reordered(Vec<RightTab>),
     /// The Agents tab came or went.
     AgentsTab,
+    /// The Simulator inspector's "Add to chat": text for the active chat's
+    /// draft and an image to attach.
+    AddToChat {
+        text: String,
+        image: std::path::PathBuf,
+    },
 }
 
 /// Whether the Simulator tab is offered: on a Mac, with the iOS Simulator
@@ -346,6 +352,16 @@ impl RightPanel {
         let simulator = cx.new(SimulatorPane::new);
         let agents = cx.new(AgentsPane::new);
         let subscriptions = vec![
+            cx.subscribe(
+                &simulator,
+                |_, _, event: &crate::simulator_pane::SimulatorEvent, cx| {
+                    let crate::simulator_pane::SimulatorEvent::AddToChat { text, image } = event;
+                    cx.emit(PanelEvent::AddToChat {
+                        text: text.clone(),
+                        image: image.clone(),
+                    });
+                },
+            ),
             cx.observe(&git, |_, _, cx| cx.notify()),
             cx.subscribe(&git, |_, _, _: &GitChanged, cx| cx.notify()),
             cx.subscribe(

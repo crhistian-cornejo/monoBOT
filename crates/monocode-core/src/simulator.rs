@@ -185,6 +185,17 @@ pub struct Device {
 }
 
 impl Device {
+    /// A booted device, as a view that has no simulator shows one.
+    pub fn booted_named(udid: &str, name: &str, runtime: &str) -> Self {
+        Self {
+            udid: udid.into(),
+            name: name.into(),
+            state: "Booted".into(),
+            runtime: runtime.into(),
+            version: Vec::new(),
+        }
+    }
+
     pub fn booted(&self) -> bool {
         self.state == "Booted"
     }

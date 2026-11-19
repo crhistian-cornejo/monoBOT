@@ -210,6 +210,7 @@ pub(crate) struct ActivateTab(pub isize);
 pub(crate) fn bind_keys(cx: &mut App) {
     session_groups::bind(cx);
     session_folders::bind(cx);
+    crate::simulator_pane::bind(cx);
     let modifier = if cfg!(target_os = "macos") {
         "cmd"
     } else {
@@ -2051,6 +2052,17 @@ impl Shell {
                     PanelEvent::Reordered(order) => this.workspace.right_panel_tabs = order.clone(),
                     PanelEvent::AgentsTab => {
                         this.agents_tab_changed(cx);
+                        return;
+                    }
+                    PanelEvent::AddToChat { text, image } => {
+                        if let Some(id) = this.workspace.active {
+                            this.add_to_chat(id, text, cx);
+                            if let Some(view) = this.ensure_session(id, cx) {
+                                view.update(cx, |view, cx| {
+                                    view.quick_attach(vec![image.clone()], cx)
+                                });
+                            }
+                        }
                         return;
                     }
                 }
