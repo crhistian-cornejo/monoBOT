@@ -191,9 +191,11 @@ pub(crate) enum Drawer {
 struct Still {
     /// Turned like the device, BGRA, for drawing.
     shown: Arc<RenderImage>,
-    /// Portrait, BGRA, for crops.
+    /// Portrait, BGRA, for crops of portrait frames.
     portrait: Arc<image::RgbaImage>,
-    /// Pixels per point in `portrait`.
+    /// Turned like `shown`, BGRA, for crops of a turned interface's frames.
+    upright: Arc<image::RgbaImage>,
+    /// Pixels per point in both.
     scale: f32,
 }
 
@@ -204,6 +206,8 @@ struct Inspector {
     /// Which of `stack` is chosen.
     index: usize,
     still: Option<Still>,
+    /// The coordinates the tree's frames are in.
+    space: geometry::Space,
     note: Entity<text_input::Input>,
     loading: bool,
     error: Option<String>,
@@ -807,13 +811,13 @@ impl SimulatorPane {
         let Some(start) = self.press.take() else {
             return;
         };
+        if self.drawer == Drawer::Inspector {
+            self.pick(start, cx);
+            return;
+        }
         let Some(from) = self.device_point(start) else {
             return;
         };
-        if self.drawer == Drawer::Inspector {
-            self.pick(from, cx);
-            return;
-        }
         let moved = (f32::from(event.position.x) - f32::from(start.x))
             .hypot(f32::from(event.position.y) - f32::from(start.y));
         if moved < DRAG_SLOP {
@@ -1000,6 +1004,7 @@ impl SimulatorPane {
             stack: Vec::new(),
             index: 0,
             still: None,
+            space: geometry::Space::Portrait,
             note,
             loading: true,
             error: None,
@@ -1033,6 +1038,7 @@ impl SimulatorPane {
                     let still = portrait.zip(turned).map(|(portrait, shown)| Still {
                         scale: portrait.width() as f32 / points.0.max(1.),
                         portrait: Arc::new(portrait),
+                        upright: Arc::new(shown.clone()),
                         shown: bgra_image(shown),
                     });
                     (elements, still)
@@ -1044,7 +1050,11 @@ impl SimulatorPane {
                 };
                 inspector.loading = false;
                 match read.0 {
-                    Ok(elements) => inspector.elements = elements,
+                    Ok(elements) => {
+                        let root = elements.first().map(|e| e.frame);
+                        inspector.space = geometry::Space::of(root, orientation);
+                        inspector.elements = elements;
+                    }
                     Err(error) => inspector.error = Some(error),
                 }
                 if let Some(old) = std::mem::replace(&mut inspector.still, read.1) {
@@ -1056,8 +1066,20 @@ impl SimulatorPane {
         .detach();
     }
 
-    fn pick(&mut self, point: (f32, f32), cx: &mut Context<Self>) {
+    /// Picks the elements under `position`, in the tree's coordinates.
+    fn pick(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let (points, orientation) = self.view();
+        let Some(rect) = self
+            .screen
+            .get()
+            .and_then(|slot| geometry::screen_rect(slot, points, orientation, self.zoom))
+        else {
+            return;
+        };
         let Some(inspector) = self.inspector.as_mut() else {
+            return;
+        };
+        let Some(point) = inspector.space.point(position, rect, points, orientation) else {
             return;
         };
         inspector.stack = inspect::stack_at(&inspector.elements, point.0, point.1);
@@ -1088,7 +1110,11 @@ impl SimulatorPane {
         let Some(still) = inspector.still.as_ref() else {
             return;
         };
-        let (portrait, scale) = (still.portrait.clone(), still.scale);
+        let picture = match inspector.space {
+            geometry::Space::Portrait => still.portrait.clone(),
+            geometry::Space::Upright => still.upright.clone(),
+        };
+        let scale = still.scale;
         let note = inspector.note.read(cx).content.to_string();
         let device = self
             .device
@@ -1100,7 +1126,7 @@ impl SimulatorPane {
             let saved = cx
                 .background_executor()
                 .spawn(async move {
-                    let crop = inspect::crop(&portrait, element.frame, scale)
+                    let crop = inspect::crop(&picture, element.frame, scale)
                         .ok_or("The element is off the screen")?;
                     inspect::save_crop(&crop)
                 })
@@ -1209,6 +1235,7 @@ impl SimulatorPane {
         let inspecting = self.inspector.as_ref();
         let still = inspecting.and_then(|i| i.still.as_ref().map(|s| s.shown.clone()));
         let outline = inspecting.and_then(|i| i.chosen().map(|e| e.frame));
+        let space = inspecting.map(|i| i.space).unwrap_or_default();
         let others: Vec<(f32, f32, f32, f32)> = inspecting
             .map(|i| {
                 i.stack
@@ -1256,7 +1283,7 @@ impl SimulatorPane {
                         window.paint_image(rect, rect, Corners::all(px(corner)), picture, 0, false);
                 }
                 for frame in &others {
-                    let shown = geometry::view_rect(*frame, rect, points, orientation);
+                    let shown = space.rect(*frame, rect, points, orientation);
                     window.paint_quad(gpui::outline(
                         shown,
                         accent.opacity(0.35),
@@ -1264,7 +1291,7 @@ impl SimulatorPane {
                     ));
                 }
                 if let Some(frame) = outline {
-                    let shown = geometry::view_rect(frame, rect, points, orientation);
+                    let shown = space.rect(frame, rect, points, orientation);
                     window.paint_quad(gpui::quad(
                         shown,
                         Corners::all(px(2.)),

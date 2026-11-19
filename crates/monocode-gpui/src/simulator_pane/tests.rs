@@ -160,8 +160,10 @@ fn the_inspector_picks_steps_through_the_stack_and_adds_to_chat(cx: &mut TestApp
                 elements: inspect::parse(TREE),
                 stack: Vec::new(),
                 index: 0,
+                space: geometry::Space::Portrait,
                 still: Some(Still {
                     shown: bgra_image(portrait.clone()),
+                    upright: Arc::new(portrait.clone()),
                     portrait: Arc::new(portrait),
                     scale: 1.,
                 }),

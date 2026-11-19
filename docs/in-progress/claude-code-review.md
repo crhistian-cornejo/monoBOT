@@ -53,6 +53,10 @@ aquí: el formato del helper, Indigo/DTUHID, Seatbelt e IOSurface.
 
 ## Diez cosas que monoBOT no tiene, por valor
 
+Los puntos 1 a 4 ya están en la rama `ios-simulator-live` (18 nov 2026). Lo
+que se hizo y lo que falta está en
+[ios-simulator.md](ios-simulator.md#el-panel-del-simulador-18-nov-2026).
+
 1. **Inspector del simulador → chat.** Elegir un elemento, añadir una nota y
    adjuntarlo con su recorte.
 2. **Historial de acciones del simulador**, con la miniatura de cada paso y

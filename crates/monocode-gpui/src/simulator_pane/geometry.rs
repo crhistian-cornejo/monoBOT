@@ -122,6 +122,69 @@ pub(crate) fn view_rect(
     )
 }
 
+/// Which coordinates a frame from the accessibility tree is in. Touches
+/// always take the portrait screen's points, but an app whose interface
+/// turned with the device reports its elements in its own, turned points.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum Space {
+    /// The portrait screen's points.
+    #[default]
+    Portrait,
+    /// The turned interface's points: the picture as drawn, upright.
+    Upright,
+}
+
+impl Space {
+    /// The space a tree is in: upright when the device is on its side and
+    /// the app's root frame is too. The home screen does not turn.
+    pub(crate) fn of(root: Option<(f32, f32, f32, f32)>, orientation: Orientation) -> Self {
+        match root {
+            Some((_, _, width, height)) if orientation.landscape() && width > height => {
+                Self::Upright
+            }
+            _ => Self::Portrait,
+        }
+    }
+
+    /// The point in this space under `position`.
+    pub(crate) fn point(
+        self,
+        position: Point<Pixels>,
+        rect: Bounds<Pixels>,
+        points: (f32, f32),
+        orientation: Orientation,
+    ) -> Option<(f32, f32)> {
+        match self {
+            Self::Portrait => device_point(position, rect, points, orientation),
+            Self::Upright => device_point(
+                position,
+                rect,
+                turned(points, orientation),
+                Orientation::Portrait,
+            ),
+        }
+    }
+
+    /// Where a frame in this space is drawn.
+    pub(crate) fn rect(
+        self,
+        frame: (f32, f32, f32, f32),
+        rect: Bounds<Pixels>,
+        points: (f32, f32),
+        orientation: Orientation,
+    ) -> Bounds<Pixels> {
+        match self {
+            Self::Portrait => view_rect(frame, rect, points, orientation),
+            Self::Upright => view_rect(
+                frame,
+                rect,
+                turned(points, orientation),
+                Orientation::Portrait,
+            ),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -195,6 +258,41 @@ mod tests {
                 assert_eq!(device_point(shown, rect, PHONE, o), Some(device), "{o:?}");
             }
         }
+    }
+
+    #[test]
+    fn a_turned_interface_reports_frames_in_its_own_points() {
+        // Safari on its side: a root frame wider than tall.
+        let landscape = Orientation::LandscapeRight;
+        assert_eq!(
+            Space::of(Some((0., 0., 874., 402.)), landscape),
+            Space::Upright
+        );
+        // The home screen stays portrait on a turned device.
+        assert_eq!(
+            Space::of(Some((0., 0., 402., 874.)), landscape),
+            Space::Portrait
+        );
+        assert_eq!(
+            Space::of(Some((0., 0., 874., 402.)), Orientation::Portrait),
+            Space::Portrait
+        );
+        let rect = screen_rect(slot(), PHONE, landscape, Zoom::Actual).unwrap();
+        // Safari's tab button: (780, 32) in its points, drawn where it is.
+        let button = view_point((780., 32.), rect, (874., 402.), Orientation::Portrait);
+        assert_eq!(
+            Space::Upright.point(button, rect, PHONE, landscape),
+            Some((780., 32.))
+        );
+        // The same spot is (32, 94) on the portrait screen, which taps take:
+        // measured on an iPhone 18 Pro simulator, this tap opens the tabs.
+        assert_eq!(
+            Space::Portrait.point(button, rect, PHONE, landscape),
+            Some((32., 94.))
+        );
+        let outline = Space::Upright.rect((758., 10., 44., 44.), rect, PHONE, landscape);
+        assert_eq!(outline.size, size(px(44.), px(44.)));
+        assert!(outline.contains(&button));
     }
 
     #[test]
