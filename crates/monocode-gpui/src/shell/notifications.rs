@@ -285,6 +285,11 @@ impl Shell {
                     }
                 },
             ));
+            self.observations.push(
+                cx.subscribe(&monos, |this, _, event: &crate::monos::MonoTaskDone, cx| {
+                    this.mono_task_done(event, cx)
+                }),
+            );
             self.observations.push(cx.subscribe(
                 &monos,
                 |this, _, event: &crate::monos::NotificationPosted, cx| {

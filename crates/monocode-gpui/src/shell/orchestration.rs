@@ -795,7 +795,6 @@ impl Shell {
         let live = self.orchestrations.get(&lead)?;
         live.run.requester?;
         let task = live.run.task(id)?.clone();
-        let may_create = live.run.new_monos < control::MAX_NEW_MONOS;
         // Busy in any run: a mono does one task at a time.
         let busy: HashSet<String> = self
             .orchestrations
@@ -809,26 +808,16 @@ impl Shell {
             .filter_map(|t| t.mono.clone())
             .collect();
         let monos = self.monos.clone()?;
-        let (mono, made) = monos.update(cx, |m, cx| {
-            m.crew_for_task(
-                task.mono.as_deref(),
-                task.handle.as_deref(),
-                &task.title,
-                &|mono| busy.contains(mono),
-                may_create,
-                cx,
-            )
-        })?;
+        // Only the user's own monos: with none free, the task runs as an
+        // agent of this run, and no mono is made for it.
+        let mono = monos.read(cx).crew_for_task(
+            task.mono.as_deref(),
+            task.handle.as_deref(),
+            &task.title,
+            &|mono| busy.contains(mono),
+        )?;
         let member = monos.read(cx).crew_member(&mono)?;
         let live = self.orchestrations.get_mut(&lead)?;
-        if made {
-            live.run.new_monos += 1;
-            live.run.crew.push(control::CrewMember {
-                id: mono.clone(),
-                name: member.1.name.clone(),
-                specialty: member.1.specialty.clone().unwrap_or_default(),
-            });
-        }
         if let Some(task) = live.run.task_mut(id) {
             task.mono = Some(mono);
         }
@@ -984,6 +973,10 @@ impl Shell {
             .strip_prefix("control.")
             .unwrap_or_default()
             .to_owned();
+        if action == "mono" {
+            self.hand_to_mono(call, cx);
+            return;
+        }
         // A lead's own `chief` call falls through to its run, which refuses it.
         if action == "swarm"
             || (action == "chief" && !self.orchestrations.contains_key(&call.session))
@@ -1515,6 +1508,74 @@ impl Shell {
         })
         .detach();
         cx.notify();
+    }
+
+    /// `control mono` from a coding chat: one of the user's code monos takes
+    /// the task in its own chat; its answer comes back as a message.
+    fn hand_to_mono(&mut self, call: Call, cx: &mut Context<Self>) {
+        if let Err(error) = control::check_fields("mono", &call.input) {
+            let _ = call.reply.send(Err(error));
+            return;
+        }
+        let text = |key: &str| {
+            call.input
+                .get(key)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(str::to_owned)
+        };
+        let (Some(name), Some(task)) = (text("mono"), text("task")) else {
+            let _ = call.reply.send(Err(
+                "Name the \"mono\" and give it a self-contained \"task\".".into(),
+            ));
+            return;
+        };
+        let Some(monos) = self.monos.clone() else {
+            let _ = call.reply.send(Err(
+                "Your monos are still loading; try again in a moment.".into()
+            ));
+            return;
+        };
+        let from = self.session_metadata(call.session, cx).display_title();
+        let task: String = task.chars().take(30_000).collect();
+        match monos.update(cx, |m, cx| m.hand_task(&name, &from, &task, cx)) {
+            Ok((mono, message)) => {
+                self.mono_handoffs.insert(message, call.session);
+                let _ = call.reply.send(Ok(json!({
+                    "queued": true,
+                    "mono": mono,
+                    "instructions": "The mono works on it in its own chat, where the user can follow it. Its answer reaches this chat as a message when it is done; keep working on other things meanwhile, and do not edit the files it works on.",
+                })));
+            }
+            Err(error) => {
+                let _ = call.reply.send(Err(error));
+            }
+        }
+    }
+
+    /// A mono finished a task a session gave it: its answer goes to that
+    /// session, saved until it lands, as Chief's summaries do.
+    pub(super) fn mono_task_done(
+        &mut self,
+        done: &crate::monos::MonoTaskDone,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(requester) = self.mono_handoffs.remove(&done.message) else {
+            return;
+        };
+        let report = if done.ok {
+            format!(
+                "{} finished the task you gave it:\n\n{}",
+                done.mono, done.reply
+            )
+        } else {
+            format!(
+                "{} could not finish the task you gave it: {}",
+                done.mono, done.reply
+            )
+        };
+        self.queue_chief_report(requester, report, cx);
     }
 
     fn agent_chief(&mut self, call: Call, cx: &mut Context<Self>) {

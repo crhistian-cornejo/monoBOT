@@ -109,9 +109,41 @@ const V0_0_9: [Highlight; 3] = [
     },
 ];
 
+const V0_0_10: [Highlight; 4] = [
+    Highlight {
+        tag: Tag::New,
+        title: "Gemini 4 Neon",
+        body: "Google's new model leads Antigravity's list and is its default. Antigravity's per-effort models fold into one per family, so the effort slider picks the variant.",
+        icon: "sparkles",
+        image: None,
+    },
+    Highlight {
+        tag: Tag::New,
+        title: "Hand a task to one of your monos",
+        body: "Any coding chat knows your code monos by name and specialty and can give one a task. The mono works in its own chat and memory, and its answer comes back to the chat.",
+        icon: "rocket",
+        image: None,
+    },
+    Highlight {
+        tag: Tag::New,
+        title: "Groups, and a Principal that leads",
+        body: "Group chats have their own section under the Captains. The Principal reaches every project open in monoBOT: it reads code, follows sessions and hands parts to Captains and monos.",
+        icon: "users",
+        image: None,
+    },
+    Highlight {
+        tag: Tag::Improved,
+        title: "Monos are yours",
+        body: "Only you create monos, in the sidebar, and they save what they're told to their memory. Chief and swarms use them when one fits and never make their own.",
+        icon: "smile",
+        image: None,
+    },
+];
+
 /// The highlights of `version`, newest release first in the source.
 pub(crate) fn of(version: &str) -> &'static [Highlight] {
     match version.trim().trim_start_matches('v') {
+        "0.0.10" => &V0_0_10,
         "0.0.9" => &V0_0_9,
         "0.0.8" => &V0_0_8,
         _ => &[],
@@ -125,7 +157,7 @@ mod tests {
 
     #[test]
     fn each_release_names_its_highlights_with_icons_that_exist() {
-        for highlight in of("v0.0.8").iter().chain(of("0.0.9")) {
+        for highlight in of("v0.0.8").iter().chain(of("0.0.9")).chain(of("0.0.10")) {
             assert!(!highlight.title.is_empty() && !highlight.body.is_empty());
             assert!(
                 crate::assets::Assets

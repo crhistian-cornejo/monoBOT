@@ -1,27 +1,33 @@
-# monoBOT 0.0.9
+# monoBOT 0.0.10
 
-## Fixed
+## New
 
-- **Captain chats read in order.** A message whose turn reached the agent and
-  then failed (for example, a model the account can't use) no longer shows
-  twice, once with its error and again at the bottom as "Not sent". Copies
-  saved that way are cleaned up when the chat opens.
-- **The Max effect wherever a model has it.** The model card's corner moves for
-  Max and every Ultra effort (Ultrathink, Ultracode), wherever they sit in a
-  model's list, and for a provider's own effort control.
-- A bot the Principal creates with its own instructions keeps them; a new
-  bot's settings open with its soul.
-- A chat whose Chief run ended still shows that run's board, and can start a
-  swarm again.
-- Deleting Chief's chat forgets its run for good.
-- Chief and the crew's coders show under Monos in every project, and only
-  there.
-- Grouped by maker, the model picker still shows a provider that is loading,
-  or whose models failed, with Retry.
-- Dragging the effort knob outside the card no longer closes the card or
-  leaves the drag stuck.
-- OpenCode chats that call the app start without waiting when their private
-  server prints no password.
+- **Gemini 4 Neon in Antigravity.** Google's new model is in the picker, first
+  and as Antigravity's default. Antigravity lists one model per effort; they
+  now fold into one model per family (Neon, Argon, Hydrogen, 3.8 Flash), and
+  the effort slider picks the variant.
+- **Give a task to one of your monos from any session.** A coding chat on any
+  provider knows your code monos by name and specialty, and can give one a
+  task. The mono works on it in its own chat and memory, where you can follow
+  it, and its answer comes back to the session.
+- **Groups under Captains.** Group chats, with their calls, have their own
+  section under the Captains, and the New Captain dialog can make a group
+  instead.
+- **The Principal leads the whole app.** It reaches every project open in
+  monoBOT: it can read code, see how sessions are going, start work, and give
+  parts to other Captains or to your monos.
+
+## Changed
+
+- Monos are yours: only you create them, in the sidebar. Chief and swarms work
+  with your monos when one fits, and otherwise run the task as an agent for
+  that run only; they no longer make monos of their own.
+- Code monos save to their memory what you or another agent tells them about
+  their projects, without being asked.
+- A mono's page says what it is ("View mono", a code mono's line), not
+  "View Captain".
+- The right panel (Files, History…) stops at 420 px, or 35% of the window.
+- What's new lists all changes as bullets, in order.
 
 ## Updates
 

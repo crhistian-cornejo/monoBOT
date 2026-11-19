@@ -159,6 +159,9 @@ pub struct Settings {
     /// user's monos (Settings › Chat); introduced once per conversation.
     #[serde(skip)]
     pub chief_offer: bool,
+    /// The user's code monos the chat may give tasks to, named in the offer.
+    #[serde(skip)]
+    pub offered_monos: Vec<crate::orchestration::control::CrewMember>,
     pub new_worktree: bool,
     pub worktree_base: Option<String>,
     pub worktree_cwd: Option<String>,

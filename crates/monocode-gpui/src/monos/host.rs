@@ -53,6 +53,7 @@ impl Monos {
                     .and_then(|(_, member)| self.roster.get(&member))
             })
             .cloned()
+            .map(|mono| self.with_reach(mono))
             .ok_or("This Mono no longer owns an active app capability")?;
         if (call.action.starts_with("habits.") || call.action == "wakes.add")
             && call.action != "habits.list"

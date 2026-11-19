@@ -24,7 +24,9 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
 pub(crate) const WIDTH_MIN: f32 = 220.;
-pub(crate) const WIDTH_MAX: f32 = 640.;
+/// Files, History and the rest read as a column beside the chat; wider,
+/// they took room the chat needs, so it stops here.
+pub(crate) const WIDTH_MAX: f32 = 420.;
 pub(crate) const WIDTH_DEFAULT: f32 = 288.;
 /// `count` 26px icon tabs, one unfolded label with 4px extra padding, and the gaps.
 pub(crate) fn tabs_width(count: usize) -> f32 {

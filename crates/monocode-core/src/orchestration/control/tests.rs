@@ -613,8 +613,19 @@ fn the_chief_prompts_carry_the_crew_and_the_rules() {
     assert!(prompt.starts_with("Migrate auth"));
     assert!(prompt.contains("Ada (Rust backends)"));
     assert!(prompt.contains("finish with {\"summary\""));
-    assert!(chief_prompt("X", "/bin/monobot", &[]).contains("no monos yet"));
-    assert!(chief_offer("/bin/monobot").contains("control chief"));
+    // With no monos, tasks run as agents of the run; none is ever made.
+    let alone = chief_prompt("X", "/bin/monobot", &[]);
+    assert!(alone.contains("has no code monos") && alone.contains("for this run only"));
+    assert!(prompt.contains("never created for a run"));
+    assert!(chief_offer("/bin/monobot", &[]).contains("control chief"));
+    assert!(!chief_offer("/bin/monobot", &[]).contains("control mono"));
+    let monos = [CrewMember {
+        id: "m1".into(),
+        name: "Ghost".into(),
+        specialty: "Rust audio engine".into(),
+    }];
+    let offer = chief_offer("/bin/monobot", &monos);
+    assert!(offer.contains("Ghost (Rust audio engine)") && offer.contains("control mono"));
     assert_eq!(chief_started("Auth", 12)["chief"], 12);
     check_fields("chief", &json!({"title":"A","brief":"B"})).unwrap();
     assert!(check_fields("chief", &json!({"title":"A","model":"x"})).is_err());

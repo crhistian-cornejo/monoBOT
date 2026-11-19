@@ -225,6 +225,13 @@ fn context_shows_how_to_delegate_without_running_help() {
     assert!(rules.contains(start));
     assert!(rules.contains("## Be quick"));
     assert!(rules.contains("- /repo"));
+    // A code mono saves what it is told without being asked; a bot decides.
+    assert_eq!(
+        rules.contains("save without being asked"),
+        mono.is_coding(),
+        "kind {:?}",
+        mono.kind
+    );
     // Without system instructions, the rules ride along in the message.
     let inline = context(&mono, &files, executable, false);
     assert!(inline.contains(&rules));

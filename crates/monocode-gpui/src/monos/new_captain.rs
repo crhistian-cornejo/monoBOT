@@ -199,7 +199,33 @@ impl Monos {
                     .border_t_1()
                     .border_color(content(0.07))
                     .flex()
-                    .justify_end()
+                    .items_center()
+                    .justify_between()
+                    // A group of Captains, with its own chat and calls,
+                    // instead of one Captain.
+                    .child(
+                        div()
+                            .id("new-captain-group")
+                            .debug_selector(|| "new-captain-group".into())
+                            .role(Role::Button)
+                            .aria_label("New group of Captains")
+                            .h(px(30.))
+                            .px(px(10.))
+                            .rounded(px(8.))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .text_size(px(13.))
+                            .text_color(content(0.7))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(content(0.06)).text_color(content(1.)))
+                            .child(icon("users", 14.))
+                            .child("New group instead")
+                            .on_click(cx.listener(|this, _, w, cx| {
+                                this.new_captain = None;
+                                this.open_group_dialog(None, w, cx);
+                            })),
+                    )
                     .child(
                         crate::modal::primary_button("new-captain-create", "Create Captain")
                             .debug_selector(|| "new-captain-create".into())

@@ -456,16 +456,45 @@ impl Render for WhatsNew {
                     .child("Release notes for this version are not available in this build."),
             );
         }
-        for (ix, row) in self.rows.iter().enumerate() {
-            body = body.child(div().pt(px(if ix == 0 { 0. } else { row.gap })).child(
-                markdown::body(
-                    row,
-                    format!("whats-new-row-{ix}").into(),
-                    Tone::Normal,
-                    None,
-                    Instant::now(),
-                ),
-            ));
+        // The notes' own title repeats the dialog's ("monoBOT 0.0.9").
+        let skip = self
+            .rows
+            .first()
+            .is_some_and(|row| matches!(row.part, markdown::Part::Text { heading: 1, .. }));
+        for (ix, row) in self.rows.iter().enumerate().skip(usize::from(skip)) {
+            let first = ix == usize::from(skip);
+            let text = markdown::body(
+                row,
+                format!("whats-new-row-{ix}").into(),
+                Tone::Normal,
+                None,
+                Instant::now(),
+            );
+            // Lists keep their bullets and indent, one item per line.
+            // A list item's later paragraphs line up under its text.
+            let hang = if row.marker.is_none() && row.indent > 0 {
+                18.
+            } else {
+                0.
+            };
+            let line = div()
+                .pl(px(row.indent.saturating_sub(1) as f32 * 18. + hang))
+                .flex()
+                .items_start()
+                .gap(px(8.))
+                .when_some(row.marker.clone(), |d, marker| {
+                    d.child(
+                        div()
+                            .flex_shrink_0()
+                            .min_w(px(10.))
+                            .text_size(px(14.))
+                            .line_height(px(24.))
+                            .text_color(content(0.5))
+                            .child(marker),
+                    )
+                })
+                .child(div().flex_1().min_w_0().child(text));
+            body = body.child(div().pt(px(if first { 0. } else { row.gap })).child(line));
         }
         div()
             .id("whats-new-dialog")

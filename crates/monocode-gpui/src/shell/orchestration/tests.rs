@@ -765,6 +765,19 @@ fn a_role_pinned_to_a_harness_the_run_lacks_sends_swarm_back(cx: &mut TestAppCon
 fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut TestAppContext) {
     let (window, requester, _dir) = shell(cx);
     cx.update(|cx| cx.set_global(crate::settings::Preferences::default()));
+    // The user's own code mono, the only kind a run gives work to.
+    let tester = window
+        .update(cx, |shell, _, cx| {
+            shell.monos.clone().unwrap().update(cx, |m, _| {
+                let id = m.roster.create(Vec::new()).id.clone();
+                let mono = m.roster.get_mut(&id).unwrap();
+                mono.name = "Tester".into();
+                mono.specialty = Some("Writes and runs the tests".into());
+                id
+            })
+        })
+        .unwrap();
+    cx.run_until_parked();
     let missing = window
         .update(cx, |shell, window, cx| {
             shell.ensure_right_panel(window, cx);
@@ -874,7 +887,8 @@ fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut Test
         .update(cx, |shell, _, cx| {
             let live = &shell.orchestrations[&chief];
             let mono = live.run.task(&task).unwrap().mono.clone().expect("a mono");
-            assert_eq!(live.run.new_monos, 1);
+            assert_eq!(mono, tester, "the user's mono whose name fits");
+            assert_eq!(live.run.new_monos, 0, "a run never makes monos");
             assert!(
                 live.run
                     .crew
@@ -882,8 +896,14 @@ fn a_chat_hands_a_large_task_to_chief_whose_monos_report_back_once(cx: &mut Test
                     .any(|m| m.id == mono && m.name == "Tester")
             );
             let monos = shell.monos.as_ref().unwrap().read(cx);
-            let made = monos.roster.monos.iter().find(|m| m.id == mono).unwrap();
-            assert!(monocode_core::mono::crew::is_coder(made));
+            assert!(
+                !monos
+                    .roster
+                    .monos
+                    .iter()
+                    .any(monocode_core::mono::crew::is_coder),
+                "no coder bot was made"
+            );
             let worker = live.run.task(&task).unwrap().session.expect("a session");
             assert!(
                 shell.sessions[&worker]

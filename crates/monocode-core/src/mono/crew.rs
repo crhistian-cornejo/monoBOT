@@ -21,12 +21,18 @@ pub fn is_chief(mono: &Mono) -> bool {
     has_role(mono, CHIEF)
 }
 
+/// A code mono the user made in the sidebar: the only monos a run or a
+/// session gives work to. Runs never make monos of their own.
+pub fn is_crew(mono: &Mono) -> bool {
+    mono.is_coding()
+}
+
 /// The crew Chief sees: every code mono, by name and specialty.
 pub fn members(roster: &Roster) -> Vec<CrewMember> {
     roster
         .monos
         .iter()
-        .filter(|m| is_coder(m))
+        .filter(|m| is_crew(m))
         .map(|m| CrewMember {
             id: m.id.clone(),
             name: m.name.clone(),
@@ -65,7 +71,7 @@ pub fn pick(
     let free: Vec<&Mono> = roster
         .monos
         .iter()
-        .filter(|m| is_coder(m) && !busy(&m.id))
+        .filter(|m| is_crew(m) && !busy(&m.id))
         .collect();
     if let Some(handle) = handle {
         if let Some(named) = free.iter().find(|m| m.name.eq_ignore_ascii_case(handle)) {
@@ -194,12 +200,19 @@ mod tests {
     }
 
     #[test]
-    fn a_task_goes_to_a_free_mono_that_fits_before_a_new_one_is_made() {
-        let (mut roster, root) = roster();
+    fn a_task_goes_to_the_users_free_mono_that_fits() {
+        let (mut roster, _root) = roster();
         let none = |_: &str| false;
         assert_eq!(pick(&roster, Some("tester"), "Add tests", &none), None);
-        let tester = create(&mut roster, root.path(), Some("tester"), "Add auth tests").unwrap();
-        let docs = create(&mut roster, root.path(), Some("writer"), "Write the docs").unwrap();
+        let mut mono = |name: &str, specialty: &str| {
+            let id = roster.create(Vec::new()).id.clone();
+            let made = roster.monos.iter_mut().find(|m| m.id == id).unwrap();
+            made.name = name.into();
+            made.specialty = Some(specialty.into());
+            id
+        };
+        let tester = mono("Tester", "Adds auth tests");
+        let docs = mono("Writer", "Writes the docs");
         let names: Vec<_> = members(&roster).into_iter().map(|m| m.name).collect();
         assert_eq!(names, ["Tester", "Writer"]);
         assert_eq!(
@@ -218,12 +231,10 @@ mod tests {
             Some(docs.as_str())
         );
         assert_eq!(pick(&roster, None, "x", &|_| true), None);
-        // The same handle again gets a numbered name.
-        create(&mut roster, root.path(), Some("tester"), "Fuzz").unwrap();
-        assert!(roster.monos.iter().any(|m| m.name == "Tester 2"));
-        // A generic worker handle is a plain Coder.
-        create(&mut roster, root.path(), Some("worker-3"), "Fix").unwrap();
-        assert!(roster.monos.iter().any(|m| m.name == "Coder"));
+        // Bots made for a run in earlier versions are no crew.
+        let root = tempfile::tempdir().unwrap();
+        create(&mut roster, root.path(), Some("fuzzer"), "Fuzz").unwrap();
+        assert_eq!(members(&roster).len(), 2);
     }
 
     #[test]

@@ -790,6 +790,19 @@ impl Conversation {
         // A group's agents come with their own models: its line keeps attach,
         // emoji and how full the thread is.
         let group = mono.is_group();
+        // A personal agent is a Captain; a code mono (and Chief's crew) is a
+        // mono, which works on code only.
+        let captain = mono.is_personal()
+            && !group
+            && !monocode_core::mono::crew::is_coder(&mono)
+            && !monocode_core::mono::crew::is_chief(&mono);
+        let view_label = if captain {
+            "View Captain"
+        } else if group {
+            "View group"
+        } else {
+            "View mono"
+        };
         // MonoHeader's greeting: it shows only before the first message.
         let body = if !self.summary.has_messages {
             // A Captain's page, as Capy's: its face, its name and a way to
@@ -817,7 +830,7 @@ impl Conversation {
                         .id("view-captain")
                         .debug_selector(|| "view-captain".into())
                         .role(Role::Button)
-                        .aria_label("View Captain")
+                        .aria_label(view_label)
                         .mt_2()
                         .px_2()
                         .py_0p5()
@@ -826,7 +839,7 @@ impl Conversation {
                         .text_color(accent_color())
                         .cursor_pointer()
                         .hover(|s| s.bg(accent_color().opacity(0.1)))
-                        .child("View Captain")
+                        .child(view_label)
                         .on_click(cx.listener(|_, _, _, cx| cx.emit(ViewCaptain))),
                 )
                 .child(
@@ -837,7 +850,14 @@ impl Conversation {
                         .text_size(px(13.))
                         .line_height(px(21.))
                         .text_color(content(0.5))
-                        .child(if mono.projects.is_empty() {
+                        .child(if !captain && !group {
+                            match mono.specialty.as_deref().filter(|s| !s.trim().is_empty()) {
+                                Some(specialty) => format!(
+                                    "A code mono: {specialty}. Hand me coding work here or from any session; I keep what I learn in my memory."
+                                ),
+                                None => "A code mono. Hand me coding work here or from any session; I keep what I learn in my memory.".into(),
+                            }
+                        } else if mono.projects.is_empty() {
                             "Add the projects I should work on in my settings, or just ask me something.".into()
                         } else {
                             format!(

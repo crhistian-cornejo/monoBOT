@@ -462,6 +462,26 @@ impl Protocol {
                 let (model, spent) = super::devin::model_value(setup, model, settings);
                 self.acp.spent_effort = spent;
                 model
+            } else if kind == Kind::Antigravity {
+                // Antigravity's ids carry the effort (gemini-4-neon-xhigh):
+                // the picker's family and effort go back to that variant.
+                let model = model
+                    .strip_prefix(&format!("{}:", kind.id()))
+                    .unwrap_or(model);
+                let mut offered = Vec::new();
+                if let Some(option) = config.iter().find(|o| config_id(o) == "model") {
+                    let mut choices = Vec::new();
+                    config_choices(&option["options"], &mut choices);
+                    offered = choices;
+                }
+                if let Some(available) = setup["models"]["availableModels"].as_array() {
+                    offered.extend(
+                        available
+                            .iter()
+                            .filter_map(|m| m["modelId"].as_str().map(str::to_owned)),
+                    );
+                }
+                crate::catalog::effort_model_id(model, settings.effort.as_deref(), &offered)
             } else {
                 model
                     .strip_prefix(&format!("{}:", kind.id()))

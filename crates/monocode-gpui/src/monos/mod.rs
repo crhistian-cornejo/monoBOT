@@ -116,11 +116,27 @@ struct RunningHabit {
     cards: Vec<serde_json::Value>,
     mailbox: Vec<String>,
 }
+/// The user's code monos, by name and specialty, for chats on any provider
+/// to give work to; kept current as the roster is saved.
+#[derive(Default)]
+pub(crate) struct MonoDirectory(pub Vec<monocode_core::orchestration::control::CrewMember>);
+impl gpui::Global for MonoDirectory {}
+
 /// A message the user wrote, not another agent's request or an internal
 /// note: agents' requests keep their retry, since the asker waits on it.
 fn user_message(message: &Message) -> bool {
     !message.internal && monocode_core::mono::agents::message_sender(&message.text).is_none()
 }
+
+/// A task a session gave a mono ([`Monos::hand_task`]) is done: its reply
+/// goes back to the session.
+pub(crate) struct MonoTaskDone {
+    pub message: String,
+    pub mono: String,
+    pub reply: String,
+    pub ok: bool,
+}
+impl EventEmitter<MonoTaskDone> for Monos {}
 
 pub(crate) struct Monos {
     #[cfg(all(target_os = "macos", not(test)))]
@@ -274,6 +290,10 @@ pub(crate) struct Monos {
     persisted_messages: HashSet<String>,
     failed_reports: HashSet<String>,
     inflight: HashMap<String, Message>,
+    /// Messages carrying a task a session gave a mono, until it answers.
+    handoffs: HashSet<String>,
+    /// Every project open in the app, which the Principal reaches.
+    app_projects: Vec<String>,
     card_refresh: HashMap<String, u64>,
     session_filters: filters::Filters,
     session_filter_anchor: AnchorSlot,
@@ -531,6 +551,7 @@ impl Monos {
         };
         // New bots' souls are written with the roster, off the UI thread.
         roster.defer_souls = true;
+        cx.set_global(MonoDirectory(mono::crew::members(&roster)));
         let (bridge, rx) = if cx.is_test() {
             (None, None)
         } else {
@@ -655,6 +676,8 @@ impl Monos {
             persisted_messages,
             failed_reports: HashSet::new(),
             inflight: HashMap::new(),
+            handoffs: HashSet::new(),
+            app_projects: Vec::new(),
             card_refresh: HashMap::new(),
             session_filters,
             session_filter_anchor: AnchorSlot::default(),
@@ -940,27 +963,82 @@ impl Monos {
     /// that fits, else, when `may_create`, a new one that stays with the
     /// user. Its id, and whether it was just made.
     pub(crate) fn crew_for_task(
-        &mut self,
+        &self,
         asked: Option<&str>,
         handle: Option<&str>,
         title: &str,
         busy: &dyn Fn(&str) -> bool,
-        may_create: bool,
+    ) -> Option<String> {
+        if let Some(id) = asked.filter(|id| {
+            self.roster
+                .monos
+                .iter()
+                .any(|m| m.id == *id && mono::crew::is_crew(m))
+        }) {
+            return Some(id.to_owned());
+        }
+        mono::crew::pick(&self.roster, handle, title, busy)
+    }
+
+    pub(crate) fn set_app_projects(&mut self, projects: Vec<String>) {
+        self.app_projects = projects;
+    }
+
+    /// The agent as it acts: the Principal, which leads the whole app,
+    /// reaches every project open here besides its own.
+    pub(super) fn with_reach(&self, mut mono: Mono) -> Mono {
+        if mono.is_principal() {
+            for project in &self.app_projects {
+                if !mono.works_on(project) {
+                    mono.projects.push(project.clone());
+                }
+            }
+        }
+        mono
+    }
+
+    /// A session gives one of the user's code monos a task: it goes to the
+    /// mono's own chat, where it works with its memory and the user can
+    /// follow it. Returns the mono's name and the queued message's ID, whose
+    /// answer [`MonoTaskDone`] reports.
+    pub(crate) fn hand_task(
+        &mut self,
+        name: &str,
+        from: &str,
+        task: &str,
         cx: &mut Context<Self>,
-    ) -> Option<(String, bool)> {
-        if let Some(id) = asked.filter(|id| self.roster.monos.iter().any(|m| m.id == *id)) {
-            return Some((id.to_owned(), false));
-        }
-        if let Some(id) = mono::crew::pick(&self.roster, handle, title, busy) {
-            return Some((id, false));
-        }
-        if !may_create {
-            return None;
-        }
-        let id = mono::crew::create(&mut self.roster, &self.root, handle, title)?;
-        self.save(cx);
-        self.changed(cx);
-        Some((id, true))
+    ) -> Result<(String, String), String> {
+        let wanted = name.trim();
+        let crew: Vec<&Mono> = self
+            .roster
+            .monos
+            .iter()
+            .filter(|m| mono::crew::is_crew(m))
+            .collect();
+        let Some(mono) = crew
+            .iter()
+            .find(|m| m.name.eq_ignore_ascii_case(wanted) || m.id == wanted)
+        else {
+            let names: Vec<&str> = crew.iter().map(|m| m.name.as_str()).collect();
+            return Err(if names.is_empty() {
+                "The user has no code monos. Only the user creates them, in the sidebar; do the work here.".into()
+            } else {
+                format!(
+                    "No mono is named \"{wanted}\". The user's monos: {}.",
+                    names.join(", ")
+                )
+            });
+        };
+        let (id, label) = (mono.id.clone(), mono.label());
+        let text = format!(
+            "<handoff from=\"{from}\">\n{task}\n</handoff>\nDo this in your project. Save to your memory what you learn that will matter next time, then reply with what you did and how you checked it."
+        );
+        self.ensure_chat(&id, cx);
+        let message = self
+            .enqueue(&id, text, Vec::new(), false, cx)
+            .ok_or("The mono could not take the task")?;
+        self.handoffs.insert(message.clone());
+        Ok((label, message))
     }
 
     /// A crew mono and the folder its files live in, to read its identity
@@ -972,6 +1050,7 @@ impl Monos {
 
     fn save(&mut self, cx: &mut Context<Self>) {
         self.sync_soon();
+        cx.set_global(MonoDirectory(mono::crew::members(&self.roster)));
         let souls = std::mem::take(&mut self.roster.pending_souls);
         let soul_root = self.root.clone();
         let roster = self.roster.clone();
@@ -1434,9 +1513,10 @@ impl Monos {
                 let _ = owner.update(cx, |shell, cx| shell.mono_track_sessions(launches, cx));
             });
         }
-        if let (Some(mono), Some(view)) =
-            (self.roster.get(id).cloned(), self.chats.get(id).cloned())
-        {
+        if let (Some(mono), Some(view)) = (
+            self.roster.get(id).cloned().map(|m| self.with_reach(m)),
+            self.chats.get(id).cloned(),
+        ) {
             let env = self
                 .bridge
                 .as_ref()
@@ -1608,6 +1688,28 @@ impl Monos {
             && let Some(mono) = self.roster.get_mut(id)
         {
             mono.seen_rows = row_count;
+        }
+        let handed = self
+            .inflight
+            .get(id)
+            .map(|m| m.id.clone())
+            .filter(|message| finished && self.handoffs.contains(message));
+        if let Some(message) = handed {
+            self.handoffs.remove(&message);
+            let view = self.chats[id].read(cx);
+            let (ok, status) = view.external_outcome(cx);
+            let reply = if ok {
+                view.notification_reply_body(cx)
+            } else {
+                status
+            };
+            let mono = self.roster.get(id).map(|m| m.label()).unwrap_or_default();
+            cx.emit(MonoTaskDone {
+                message,
+                mono,
+                reply,
+                ok,
+            });
         }
         if finished {
             let (mut ok, mut status) = self.chats[id].read(cx).external_outcome(cx);
@@ -1917,6 +2019,8 @@ impl Monos {
         self.rail_ids.clear();
         self.unified = true;
         let captains = self.rail_impl(None, false, false, agents::Section::Captains, cx);
+        // Captains' group chats, with their calls, under the Captains.
+        let groups = self.rail_impl(None, false, false, agents::Section::Groups, cx);
         // Workstreams have their own page, opened from the sidebar's foot.
         let monos = self.rail_impl(project, false, false, agents::Section::Coding, cx);
         self.unified = false;
@@ -1925,6 +2029,7 @@ impl Monos {
             .flex()
             .flex_col()
             .child(captains)
+            .child(groups)
             .children(self.roles_surface(cx))
             .child(monos)
             .into_any_element()
@@ -1977,14 +2082,7 @@ impl Monos {
             .monos
             .iter()
             .filter(|m| section.holds(m))
-            // Chief and its crew work on any project's checkout, as the run
-            // asks: they belong to every project's list.
-            .filter(|m| {
-                project.as_ref().is_none_or(|p| m.works_on(p))
-                    || (section == agents::Section::Coding
-                        && (monocode_core::mono::crew::is_coder(m)
-                            || monocode_core::mono::crew::is_chief(m)))
-            })
+            .filter(|m| project.as_ref().is_none_or(|p| m.works_on(p)))
             .cloned()
             .collect();
         // Every section on screen adds its rows, for dragging within it.
@@ -2035,9 +2133,10 @@ impl Monos {
             (has && section == agents::Section::Bots) || section == agents::Section::Captains,
             |d| d.child(self.new_bot_button(cx)),
         )
-        .when(has && section == agents::Section::Groups, |d| {
-            d.child(self.new_group_button(cx))
-        })
+        .when(
+            section == agents::Section::Groups && (has || self.unified),
+            |d| d.child(self.new_group_button(cx)),
+        )
         .when(workstreams, |d| d.child(self.workstream_help_button(cx)))
         .when(has && workstreams, |d| {
             d.child(self.new_workstream_button(cx))
@@ -2147,7 +2246,10 @@ impl Monos {
                 };
                 // Captains, as Capy's: a 40px face, the name and the latest
                 // thing it said under it.
-                let captain = section == agents::Section::Captains && !compact && !original;
+                let captain = (section == agents::Section::Captains
+                    || (section == agents::Section::Groups && self.unified))
+                    && !compact
+                    && !original;
                 let subtitle = captain.then(|| self.captain_subtitle(&mono, cx));
                 let id = mono.id.clone();
                 let options = id.clone();

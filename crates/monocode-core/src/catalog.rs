@@ -372,22 +372,21 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
             }
         }
     }
-    if kind == Kind::Antigravity && !models.iter().any(|m| m.id == "gemini-4-hydrogen") {
-        models.insert(
-            0,
-            Model {
-                id: "gemini-4-hydrogen".into(),
-                name: "Gemini 4 Hydrogen".into(),
-                alias_target: None,
-                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
-                default_effort: Some("high".into()),
-                fast: false,
-                thinking: true,
-                default: true,
-                tiers: Vec::new(),
-                controls: Vec::new(),
-            },
-        );
+    if kind == Kind::Antigravity {
+        models = fold_effort_variants(models);
+        // Neon leads, as the default for new conversations on the plans
+        // that have it; Hydrogen stays for the rest.
+        for (family, name) in [
+            ("gemini-4-hydrogen", "Gemini 4 Hydrogen"),
+            ("gemini-4-neon", "Gemini 4 Neon"),
+        ] {
+            if !models.iter().any(|m| m.id == family) {
+                models.insert(0, gemini_family(family, name));
+            }
+        }
+        for model in &mut models {
+            model.default = model.id == "gemini-4-neon";
+        }
     }
     if models.is_empty() {
         if kind == Kind::Droid {
@@ -404,30 +403,13 @@ pub fn models_for(kind: Kind, account: &crate::accounts::Profile) -> Result<Vec<
                 controls: Vec::new(),
             });
         } else if kind == Kind::Antigravity {
-            models.push(Model {
-                id: "gemini-4-hydrogen".into(),
-                name: "Gemini 4 Hydrogen".into(),
-                alias_target: None,
-                efforts: vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()],
-                default_effort: Some("high".into()),
-                fast: false,
-                thinking: true,
-                default: true,
-                tiers: Vec::new(),
-                controls: Vec::new(),
-            });
-            models.push(Model {
-                id: "gemini-3.8-flash-high".into(),
-                name: "Gemini 3.8 Flash (High)".into(),
-                alias_target: None,
-                efforts: Vec::new(),
-                default_effort: None,
-                fast: false,
-                thinking: false,
-                default: false,
-                tiers: Vec::new(),
-                controls: Vec::new(),
-            });
+            let mut neon = gemini_family("gemini-4-neon", "Gemini 4 Neon");
+            neon.default = true;
+            models.push(neon);
+            models.push(gemini_family("gemini-4-hydrogen", "Gemini 4 Hydrogen"));
+            let mut flash = gemini_family("gemini-3.8-flash", "Gemini 3.8 Flash");
+            flash.efforts.retain(|e| e != "xhigh");
+            models.push(flash);
         } else {
             return Err(format!("{} returned an empty model catalog", kind.label()));
         }
@@ -576,7 +558,10 @@ fn acp_models(value: &Value) -> Vec<Model> {
                 .map(str::to_owned)
                 .or(model.default_effort);
             if model.efforts.is_empty()
-                && (id == "gemini-4-hydrogen" || id.ends_with(":gemini-4-hydrogen"))
+                && (id == "gemini-4-hydrogen"
+                    || id.ends_with(":gemini-4-hydrogen")
+                    || id == "gemini-4-neon"
+                    || id.ends_with(":gemini-4-neon"))
             {
                 model.efforts = vec!["low".into(), "medium".into(), "high".into(), "xhigh".into()];
                 model.default_effort = Some("high".into());
@@ -942,6 +927,125 @@ fn query_provider(
     result
 }
 
+/// The efforts Antigravity puts in a model's id (`gemini-4-neon-xhigh`),
+/// lowest first.
+pub const ID_EFFORTS: [&str; 5] = ["low", "medium", "high", "xhigh", "max"];
+
+/// An Antigravity model id with its effort in it: the family and the effort
+/// (`gemini-4-neon-high` → `gemini-4-neon`, `high`).
+pub fn effort_variant(id: &str) -> Option<(&str, &str)> {
+    let (family, effort) = id.rsplit_once('-')?;
+    (ID_EFFORTS.contains(&effort) && !family.is_empty()).then_some((family, effort))
+}
+
+/// A Gemini family at Antigravity's four efforts, High by default.
+fn gemini_family(id: &str, name: &str) -> Model {
+    Model {
+        id: id.into(),
+        name: name.into(),
+        alias_target: None,
+        efforts: ["low", "medium", "high", "xhigh"]
+            .map(str::to_owned)
+            .to_vec(),
+        default_effort: Some("high".into()),
+        fast: false,
+        thinking: true,
+        default: false,
+        tiers: Vec::new(),
+        controls: Vec::new(),
+    }
+}
+
+/// Antigravity lists one model per effort ("Gemini 4 Neon (High)",
+/// "Gemini 4 Neon (XHigh)" …). They fold into one model per family whose
+/// efforts are those variants, so the picker's slider chooses among them;
+/// the provider sends the variant for the effort picked.
+pub fn fold_effort_variants(models: Vec<Model>) -> Vec<Model> {
+    let mut folded: Vec<Model> = Vec::new();
+    for model in models {
+        let Some((family, effort)) = effort_variant(&model.id) else {
+            folded.push(model);
+            continue;
+        };
+        let (family, effort) = (family.to_owned(), effort.to_owned());
+        match folded.iter_mut().find(|m| m.id == family) {
+            Some(existing) => {
+                if !existing.efforts.contains(&effort) {
+                    existing.efforts.push(effort);
+                }
+                existing.default |= model.default;
+            }
+            None => {
+                let name = model
+                    .name
+                    .rsplit_once(" (")
+                    .filter(|(_, tail)| tail.ends_with(')'))
+                    .map_or(model.name.as_str(), |(head, _)| head)
+                    .to_owned();
+                folded.push(Model {
+                    id: family,
+                    name,
+                    efforts: vec![effort],
+                    default_effort: None,
+                    thinking: true,
+                    ..model
+                });
+            }
+        }
+    }
+    for model in &mut folded {
+        model
+            .efforts
+            .sort_by_key(|e| ID_EFFORTS.iter().position(|known| known == e).unwrap_or(9));
+        if model.default_effort.is_none() && !model.efforts.is_empty() {
+            model.default_effort = model
+                .efforts
+                .iter()
+                .find(|e| *e == "high")
+                .or(model.efforts.last())
+                .cloned();
+        }
+    }
+    folded
+}
+
+/// The id Antigravity takes for `model` at `effort`: a family folded by
+/// [`fold_effort_variants`] goes back to its variant, the one for the effort
+/// when the server offers it, else the nearest it offers (High first). An id
+/// the server offers as is, or that is no family, is sent unchanged.
+pub fn effort_model_id(model: &str, effort: Option<&str>, offered: &[String]) -> String {
+    let family = effort_variant(model).map_or(model, |(family, _)| family);
+    let offers = |id: &str| offered.iter().any(|o| o == id);
+    let wanted = effort
+        .filter(|e| ID_EFFORTS.contains(e))
+        .map(|e| format!("{family}-{e}"));
+    if offered.is_empty() {
+        // Nothing to check against: a family the catalog folded (or one of
+        // the Gemini families it knows) takes the effort's variant.
+        let known = effort_variant(model).is_some()
+            || matches!(
+                family,
+                "gemini-4-neon" | "gemini-4-hydrogen" | "gemini-4-argon" | "gemini-3.8-flash"
+            );
+        return match wanted {
+            Some(wanted) if known => wanted,
+            _ if known && effort_variant(model).is_none() => format!("{family}-high"),
+            _ => model.to_owned(),
+        };
+    }
+    if let Some(wanted) = wanted.filter(|w| offers(w)) {
+        return wanted;
+    }
+    if offers(model) {
+        return model.to_owned();
+    }
+    ["high", "medium", "xhigh", "low", "max"]
+        .iter()
+        .map(|e| format!("{family}-{e}"))
+        .find(|id| offers(id))
+        .unwrap_or_else(|| model.to_owned())
+}
+
 /// Who makes a model, read from its id and name, for a picker that groups
 /// models by maker across the agents that run them. `None` when unknown.
 pub fn model_maker(id: &str, name: &str) -> Option<&'static str> {
@@ -1122,6 +1226,76 @@ mod tests {
         assert_eq!(rows[0].efforts, vec!["low", "medium", "high", "xhigh"]);
         assert_eq!(rows[0].default_effort.as_deref(), Some("high"));
         assert!(rows[0].thinking);
+    }
+
+    #[test]
+    fn antigravity_effort_variants_fold_into_one_model_per_family() {
+        let variant = |id: &str, name: &str| Model {
+            id: id.into(),
+            name: name.into(),
+            alias_target: None,
+            efforts: Vec::new(),
+            default_effort: None,
+            fast: false,
+            thinking: false,
+            default: false,
+            tiers: Vec::new(),
+            controls: Vec::new(),
+        };
+        let folded = fold_effort_variants(vec![
+            variant("gemini-4-neon-high", "Gemini 4 Neon (High)"),
+            variant("gemini-4-neon-xhigh", "Gemini 4 Neon (XHigh)"),
+            variant("gemini-4-neon-low", "Gemini 4 Neon (Low)"),
+            variant("gemini-4-neon-medium", "Gemini 4 Neon (Medium)"),
+            variant("gemini-3.8-flash-low", "Gemini 3.8 Flash (Low)"),
+            variant("auto", "Auto"),
+        ]);
+        let ids: Vec<_> = folded.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, ["gemini-4-neon", "gemini-3.8-flash", "auto"]);
+        assert_eq!(folded[0].name, "Gemini 4 Neon");
+        assert_eq!(folded[0].efforts, ["low", "medium", "high", "xhigh"]);
+        assert_eq!(folded[0].default_effort.as_deref(), Some("high"));
+        assert!(folded[2].efforts.is_empty());
+    }
+
+    #[test]
+    fn antigravity_sends_the_variant_for_the_effort_picked() {
+        let offered: Vec<String> = [
+            "gemini-4-neon-low",
+            "gemini-4-neon-high",
+            "gemini-4-neon-xhigh",
+            "auto",
+        ]
+        .map(str::to_owned)
+        .to_vec();
+        assert_eq!(
+            effort_model_id("gemini-4-neon", Some("xhigh"), &offered),
+            "gemini-4-neon-xhigh"
+        );
+        // An effort it does not offer takes the nearest, High first.
+        assert_eq!(
+            effort_model_id("gemini-4-neon", Some("medium"), &offered),
+            "gemini-4-neon-high"
+        );
+        // A saved variant follows the slider.
+        assert_eq!(
+            effort_model_id("gemini-4-neon-high", Some("low"), &offered),
+            "gemini-4-neon-low"
+        );
+        assert_eq!(effort_model_id("auto", Some("high"), &offered), "auto");
+        // With nothing to check, a known family still gets its variant.
+        assert_eq!(
+            effort_model_id("gemini-4-neon", Some("xhigh"), &[]),
+            "gemini-4-neon-xhigh"
+        );
+        assert_eq!(
+            effort_model_id("gemini-4-neon", None, &[]),
+            "gemini-4-neon-high"
+        );
+        assert_eq!(
+            effort_model_id("some-model", Some("high"), &[]),
+            "some-model"
+        );
     }
 
     #[test]

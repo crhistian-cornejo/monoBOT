@@ -722,8 +722,10 @@ fn run_turn_using(
         // the user's monos, once per provider conversation.
         if !raw_native_command && settings.chief_offer && !settings.orchestrator {
             let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-            let rules =
-                monocode_core::orchestration::control::chief_offer(&executable.to_string_lossy());
+            let rules = monocode_core::orchestration::control::chief_offer(
+                &executable.to_string_lossy(),
+                &settings.offered_monos,
+            );
             let introduction = monocode_core::introduction::Introduction::new(
                 format!(
                     "chief-offer:{}:{}:{}",

@@ -1230,6 +1230,14 @@ impl Conversation {
         // Any provider can hand work to Chief and the user's monos: the
         // offer is a prompt and the control CLI, not a Claude feature.
         settings.chief_offer = coding && preferences.is_some_and(|p| p.chief_offer);
+        // The user's code monos, so the chat can give one a task directly.
+        settings.offered_monos = if settings.chief_offer {
+            cx.try_global::<crate::monos::MonoDirectory>()
+                .map(|directory| directory.0.clone())
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         if settings.remote_action.as_ref().is_none_or(|action| {
             (action["type"] == "send"
                 && action["draftBlockId"].is_null()

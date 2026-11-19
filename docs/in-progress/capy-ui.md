@@ -112,3 +112,16 @@ Hecho:
 - Arrastrar el pomo fuera de la tarjeta ya no la cierra a medio arrastre ni deja el arrastre colgado.
 - Un `opencode serve` privado que no imprime contraseña sigue a los 3 s en vez de esperar 30 s.
 - «Hand to your crew» espera la respuesta sin ocupar un hilo.
+
+## Monos, Captains y el Principal (18 nov, para 0.0.10)
+
+- Los monos son del usuario: solo él los crea, en la barra lateral. Chief y los swarms dan sus tareas a los monos del usuario (`crew::is_crew`, los monos de código); si no hay uno libre que encaje, la tarea corre como agente del run y no se crea ninguno. Los bots `coder` y Chief que hacían los runs ya no salen en la barra.
+- Un chat de código de cualquier proveedor conoce los monos del usuario por nombre y especialidad (`Settings::offered_monos`, `MonoDirectory`) y puede darle una tarea a uno con `control mono {mono, task}`. La tarea va al chat del mono, que trabaja con su memoria; su respuesta vuelve al chat que la dio como mensaje (`Monos::hand_task`, `MonoTaskDone`, `mono_task_done`).
+- Los monos de código guardan en su memoria, sin que se lo pidan, lo que el usuario u otro agente les cuenta de sus proyectos.
+- La página de un mono dice «View mono» y una línea de mono de código, no «View Captain».
+- Grupos: sección propia bajo los Captains, con su botón +, y «New group instead» en el diálogo de New Captain.
+- El Principal llega a todos los proyectos abiertos en la app (`Monos::with_reach`): ve código y sesiones, arranca trabajo y reparte partes entre Captains y monos.
+- Panel derecho: como mucho 420 px o el 35 % de la ventana.
+- What's new: «All changes» con viñetas y sangría, sin repetir el título de la versión.
+- Gemini 4 Neon en Antigravity. Las variantes por esfuerzo de Antigravity (`gemini-4-neon-xhigh`…) se pliegan en un modelo por familia (`catalog::fold_effort_variants`). Al enviar, el esfuerzo vuelve a su variante (`catalog::effort_model_id`).
+

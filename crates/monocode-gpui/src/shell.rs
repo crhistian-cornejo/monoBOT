@@ -640,6 +640,9 @@ pub(crate) struct Shell {
     /// Chief's summaries waiting for the chat that handed it the work, by
     /// that chat; delivered once it is idle.
     chief_reports: HashMap<i64, Vec<String>>,
+    /// Tasks sessions gave monos (`control mono`), by the mono's message, to
+    /// the session that waits for the answer.
+    mono_handoffs: HashMap<String, i64>,
     /// Each session's sidebar section when its mark was last drawn, to
     /// rebuild the list when one moves.
     sidebar_sections: HashMap<i64, monocode_core::session_groups::Section>,
@@ -1078,6 +1081,7 @@ impl Shell {
             orchestration_control: Default::default(),
             orchestration_summaries: sidebar_metadata.orchestrations,
             chief_reports: sidebar_metadata.chief_reports,
+            mono_handoffs: HashMap::new(),
             sidebar_sections: HashMap::new(),
             started_by: sidebar_metadata.started_by,
             rails: Default::default(),
@@ -4279,7 +4283,7 @@ impl Shell {
             }
             ResizeTarget::RightPanel => {
                 let (min, max) = (self.right_panel_min, crate::right_panel::WIDTH_MAX);
-                let max = max.min((self.viewport_width * 0.5).floor()).max(min);
+                let max = max.min((self.viewport_width * 0.35).floor()).max(min);
                 (self.right_panel_width(), min, max, 1.)
             }
             ResizeTarget::Dock(project) => {
@@ -4399,6 +4403,11 @@ impl Shell {
         }
         self.workspace.worktree_focus = self.worktree_focus.clone();
         self.workspace.normalize_title_order();
+        // The Principal leads the whole app: it reaches every project open here.
+        if let Some(monos) = &self.monos {
+            let projects = self.workspace.projects.clone();
+            monos.update(cx, |m, _| m.set_app_projects(projects));
+        }
         self.sync_git(cx);
         self.update_chat_visibility(cx);
         self.update_usage_provider(cx);

@@ -17,9 +17,9 @@ const MAX_REQUESTS: usize = 512;
 pub const MAX_CONTINUATIONS: u32 = 20;
 const RESULT_CHARS: usize = 20_000;
 
-pub const ACTIONS: [&str; 16] = [
+pub const ACTIONS: [&str; 17] = [
     "list", "delegate", "get", "wait", "steer", "message", "retry", "cancel", "respond", "answer",
-    "review", "finish", "post", "board", "swarm", "chief",
+    "review", "finish", "post", "board", "swarm", "chief", "mono",
 ];
 /// The persistent monos a Chief run may create, at most, beyond those it
 /// reuses: each one stays as a personal agent.
@@ -515,6 +515,7 @@ fn fields(action: &str) -> Option<&'static [&'static str]> {
         "board" => &["since", "limit"],
         "swarm" => &["title"],
         "chief" => &["title", "brief"],
+        "mono" => &["mono", "task"],
         "get" | "cancel" | "review" => &["taskId"],
         "wait" => &["timeoutSeconds"],
         "steer" | "message" => &["taskId", "text"],
@@ -650,22 +651,39 @@ fn swarm_rules(roles: &[Role]) -> String {
     )
 }
 
-/// What a coding chat on any provider is told once: it may hand a large
-/// parallel task to Chief and the user's monos instead of doing it alone.
-pub fn chief_offer(cli: &str) -> String {
+/// What a coding chat on any provider is told once: it may give a task to
+/// one of the user's code monos, which works on it in its own chat, or hand
+/// a large parallel task to Chief and the monos instead of doing it alone.
+pub fn chief_offer(cli: &str, monos: &[CrewMember]) -> String {
     let cli = shell_path(cli);
+    let direct = if monos.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " The user's code monos: {}. To give one a self-contained task in its own chat, where it works with its own memory and the user can follow it, run `{cli} control mono --json '{{\"mono\":\"Name\",\"task\":\"What to do, where, and how to verify\"}}'`; pick the mono whose specialty fits. Its answer reaches you as a message when it is done.",
+            monos
+                .iter()
+                .map(|m| if m.specialty.is_empty() {
+                    m.name.clone()
+                } else {
+                    format!("{} ({})", m.name, m.specialty)
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
     format!(
-        "<monocode_monos>\nThe user's monos can work for you. For a large task that splits into independent parts (several areas of the code, or building and verifying in parallel), hand it to Chief: run `{cli} control chief --json '{{\"title\":\"Short task title\",\"brief\":\"Self-contained request: goal, constraints, where the code is, how to verify\"}}'`. Chief coordinates monos in their own chats and worktrees, which the user watches in the right panel, reviews their work into this checkout and sends you one summary as a message when it is done. After it starts, end your turn and do not edit the files it works on. A small or sequential task stays here, and your own subagents remain fine for quick reading and research. Credentials are already in your environment; never print them.\n</monocode_monos>"
+        "<monocode_monos>\nThe user's monos can work for you.{direct} For a large task that splits into independent parts (several areas of the code, or building and verifying in parallel), hand it to Chief: run `{cli} control chief --json '{{\"title\":\"Short task title\",\"brief\":\"Self-contained request: goal, constraints, where the code is, how to verify\"}}'`. Chief coordinates monos in their own chats and worktrees, which the user watches in the right panel, reviews their work into this checkout and sends you one summary as a message when it is done. After it starts, end your turn and do not edit the files it works on. A small or sequential task stays here, and your own subagents remain fine for quick reading and research. Credentials are already in your environment; never print them.\n</monocode_monos>"
     )
 }
 
 /// Chief's first turn: the brief, its crew and the rules of the run.
 pub fn chief_prompt(brief: &str, cli: &str, crew: &[CrewMember]) -> String {
     let crew = if crew.is_empty() {
-        "You have no monos yet; each task you delegate gets a new one, which stays with the user afterwards.".to_owned()
+        "The user has no code monos; each task you delegate runs as an agent of its own for this run only.".to_owned()
     } else {
         format!(
-            "Your crew: {}. Give a task to one with \"mono\":\"<name>\" when its specialty fits; leave mono out and the app picks or creates one (at most {MAX_NEW_MONOS} new monos per run).",
+            "Your crew, the user's code monos: {}. Give a task to one with \"mono\":\"<name>\" when its specialty fits; leave mono out and the app picks a free one, or runs the task as an agent for this run only. Monos are never created for a run.",
             crew.iter()
                 .map(|m| if m.specialty.is_empty() {
                     m.name.clone()

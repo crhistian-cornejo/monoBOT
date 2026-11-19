@@ -47,15 +47,11 @@ pub(crate) enum Section {
 impl Section {
     pub(super) fn holds(self, mono: &Mono) -> bool {
         match self {
-            // Chief and its crew's code monos are bots that do code work;
-            // they sit with the code monos rather than nowhere.
-            Self::Coding => {
-                mono.is_coding()
-                    || monocode_core::mono::crew::is_coder(mono)
-                    || monocode_core::mono::crew::is_chief(mono)
-            }
+            // Only the monos the user made: Chief and the bots earlier runs
+            // made for themselves are the app's, not the sidebar's.
+            Self::Coding => mono.is_coding(),
             Self::Principal => mono.is_principal(),
-            // Chief and the crew's coders are listed with the code monos.
+            // Chief and the bots runs made are not the user's agents.
             Self::Bots => {
                 mono.is_bot()
                     && !mono.is_principal()
@@ -64,8 +60,10 @@ impl Section {
             }
             Self::Groups => mono.is_group(),
             Self::Workstreams => mono.is_workstream(),
+            // Groups have their own section beneath.
             Self::Captains => {
                 mono.is_personal()
+                    && !mono.is_group()
                     && !monocode_core::mono::crew::is_coder(mono)
                     && !monocode_core::mono::crew::is_chief(mono)
             }

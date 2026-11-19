@@ -1961,7 +1961,7 @@ fn titlebar_divider_resizes_mono_details_and_closed_panels_keep_the_corner(
         .unwrap();
     let visual = &mut gpui::VisualTestContext::from_window(s.window.into(), cx);
     visual.run_until_parked();
-    for width in [220., 280., 400., 500.] {
+    for width in [220., 280., 340., 380.] {
         s.window
             .update(visual, |shell, _, cx| {
                 shell.workspace.right_panel_width = width;
@@ -1994,7 +1994,8 @@ fn titlebar_divider_resizes_mono_details_and_closed_panels_keep_the_corner(
     visual.run_until_parked();
     s.window
         .update(visual, |shell, _, _| {
-            assert_eq!(shell.workspace.right_panel_width, 540.);
+            // Dragged 40px wider, up to the panel's cap.
+            assert_eq!(shell.workspace.right_panel_width, 420.);
         })
         .unwrap();
     assert_eq!(

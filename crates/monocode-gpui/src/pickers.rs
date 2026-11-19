@@ -66,6 +66,7 @@ pub(crate) fn model_name(kind: Kind, model: Option<&str>) -> SharedString {
         Some("sonnet") => "Sonnet".into(),
         Some("opus") => "Opus".into(),
         Some("haiku") => "Haiku".into(),
+        Some("gemini-4-neon") => "Gemini 4 Neon".into(),
         Some("gemini-4-hydrogen") => "Gemini 4 Hydrogen".into(),
         Some("gemini-3.8-flash-high") => "Gemini 3.8 Flash (High)".into(),
         Some(id) => CLAUDE_MODELS
