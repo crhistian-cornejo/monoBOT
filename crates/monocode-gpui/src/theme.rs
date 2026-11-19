@@ -713,13 +713,17 @@ pub(crate) fn provider_icon(provider: &str, side: f32) -> Div {
 struct LabelTooltip {
     label: SharedString,
     command: Option<&'static str>,
+    keys: Option<&'static str>,
 }
 impl Render for LabelTooltip {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let keys = self.command.and_then(|command| {
-            cx.try_global::<crate::settings::Preferences>()
-                .and_then(|prefs| crate::settings::command_shortcut(prefs, command))
-        });
+        let keys = self
+            .command
+            .and_then(|command| {
+                cx.try_global::<crate::settings::Preferences>()
+                    .and_then(|prefs| crate::settings::command_shortcut(prefs, command))
+            })
+            .or_else(|| self.keys.map(str::to_owned));
         let label = self.label.clone();
         div()
             .debug_selector(|| "chrome-tooltip".into())
@@ -784,6 +788,24 @@ pub(crate) fn chrome_tip(
         cx.new(|_| LabelTooltip {
             label: label.clone(),
             command,
+            keys: None,
+        })
+        .into()
+    }
+}
+/// A chrome tip with a fixed shortcut, for a control whose keys are not in
+/// the rebindable list (the iOS Simulator's bezel, which mirrors
+/// Simulator.app's).
+pub(crate) fn chrome_tip_keys(
+    label: impl Into<SharedString>,
+    keys: &'static str,
+) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let label = label.into();
+    move |_, cx| {
+        cx.new(|_| LabelTooltip {
+            label: label.clone(),
+            command: None,
+            keys: Some(keys),
         })
         .into()
     }

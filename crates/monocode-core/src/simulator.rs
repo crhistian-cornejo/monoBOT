@@ -9,8 +9,14 @@
 //! starts, never on the app's interface thread.
 
 mod build;
+pub mod controls;
+pub mod history;
 mod input;
+pub mod inspect;
+pub mod logs;
 pub mod mcp;
+#[cfg(target_os = "macos")]
+pub mod native;
 #[cfg(test)]
 mod tests;
 
@@ -179,6 +185,17 @@ pub struct Device {
 }
 
 impl Device {
+    /// A booted device, as a view that has no simulator shows one.
+    pub fn booted_named(udid: &str, name: &str, runtime: &str) -> Self {
+        Self {
+            udid: udid.into(),
+            name: name.into(),
+            state: "Booted".into(),
+            runtime: runtime.into(),
+            version: Vec::new(),
+        }
+    }
+
     pub fn booted(&self) -> bool {
         self.state == "Booted"
     }
@@ -471,7 +488,7 @@ pub struct Screenshot {
 }
 
 /// Pixels per point on the device's main screen (3 on most iPhones).
-fn screen_scale(udid: &str) -> Option<f64> {
+pub fn screen_scale(udid: &str) -> Option<f64> {
     run(
         XCRUN,
         &["simctl", "getenv", udid, "SIMULATOR_MAINSCREEN_SCALE"],

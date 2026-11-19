@@ -5,7 +5,9 @@ con la pantalla del simulador en vivo dentro de la app (o en el Simulator.app
 nativo), capturas, toques y lectura de la interfaz, como lo hace la pestaña Code
 de la app de escritorio de Claude.
 
-## Estado: fases 1, 2 y 3 hechas (10 nov 2026)
+## Estado: fases 1, 2 y 3 hechas (10 nov 2026); panel nativo, bisel, historial, logs e inspector (18 nov 2026)
+
+Lo del 18 de noviembre está en [El panel del simulador](#el-panel-del-simulador-18-nov-2026).
 
 El conector **iOS Simulator** (`ios_simulator`, solo macOS, experimental, apagado
 por defecto) se enciende en Ajustes › MCP. Con él, cada sesión de Claude, Codex o
@@ -228,9 +230,176 @@ inferencia, se dice.
    - **Sin probar a mano en la app**: se comprobaron por separado la conversión
      de clics a puntos (tests), los fotogramas desde el core y que el runner
      sigue vivo tras cerrar su proceso.
-4. **Extras**: grabar vídeo (H.264 → MP4), fotos y contactos con el bridge que
+4. **Extras**: ~~grabar vídeo~~ (hecho: ⌘R, ver abajo), fotos y contactos con el bridge que
    corre dentro del simulador, ubicación, notificaciones push
    (`simctl push`), y un Xcode en otra máquina por SSH con H.264.
+
+## El panel del simulador (18 nov 2026)
+
+Lo que pedían los puntos 1 a 4 de la lista de
+[claude-code-review.md](claude-code-review.md). Código en
+`crates/monocode-core/src/simulator/{native,controls,history,logs,inspect}.rs`
+y `crates/monocode-gpui/src/simulator_pane.rs` (+ `simulator_pane/`).
+
+### Vista nativa sobre un hueco medido
+
+- **Core** (`simulator/native.rs`): carga `CoreSimulator` y `SimulatorKit` del
+  Xcode activo con `dlopen`, busca el `SimDevice` por UDID, recorre sus
+  `ioPorts` y se queda con el puerto `SimScreen` que tiene
+  `framebufferSurface` (los otros son pantallas externas o CarPlay). Registra
+  `registerScreenCallbacksWithUUID:callbackQueue:frameCallback:surfacesChangedCallback:propertiesChangedCallback:`
+  en la cola principal: una llamada por fotograma y otra cuando cambia el
+  IOSurface. `ScreenFeed` se desregistra al soltarse (fuera del hilo de la
+  interfaz).
+- **Medido con Xcode 27.2** en un iPhone 18 Pro con iOS 27.0: un IOSurface BGRA
+  de 1206 × 2622 y un fotograma por cada cambio de pantalla. Hay un test que lo
+  comprueba contra el dispositivo arrancado (y pasa sin hacer nada si no hay
+  ninguno): `simulator::native::tests`.
+- **Lo que hizo falta saber**:
+  - Los descriptores son proxies remotos (`ROCKRemoteProxy-…`) sin métodos
+    propios. La comprobación de `msg_send!` de objc2 los rechaza, así que esos
+    mensajes van por `objc_msgSend` directo.
+  - Antes de enviar cada selector, se comprueba que el protocolo de este Xcode
+    lo declara (`protocol_getMethodDescription`).
+  - Los bloques necesitan su firma (`v8@?0`): sin ella, el proxy lanza una
+    excepción al pasarlos por XPC.
+  - Toda llamada va dentro de `objc2::exception::catch`, porque una excepción
+    de Objective-C que cruza Rust aborta la app. Si algo falla, el panel pasa a
+    los fotogramas del runner y dice por qué («Showing snapshots: …»).
+- **Corre dentro del proceso de monoBOT**, no en un helper aparte como en
+  Claude. Si una versión de Xcode rompe esto de una forma que no lance
+  excepción (un cuelgue en XPC, por ejemplo), lo notará la app. El siguiente
+  paso sería un helper (el propio ejecutable con un subcomando) que publique el
+  IOSurface por un puerto mach.
+- **GPUI** (`simulator_pane/native.rs`): un `canvas` vacío en el hueco. En cada
+  paint, coloca encima una NSView *layer-hosting* con los límites del hueco
+  recortados a lo visible. Su capa tiene el IOSurface como `contents`. Cada
+  fotograma solo llama a `setContentsChanged`, dentro de un `CATransaction`
+  sin animaciones implícitas.
+  - La vista devuelve `nil` en `hitTest:`, así que los clics llegan a GPUI y
+    siguen siendo toques.
+  - Se oculta cuando el hueco no se pinta: otra pestaña, el panel cerrado, el
+    inspector abierto o un estado sin dispositivo.
+  - Las esquinas redondeadas salen de la capa. El bisel se dibuja en GPUI
+    alrededor.
+- **Girar**: el framebuffer mantiene la disposición vertical aunque el
+  dispositivo gire. Comprobado con Safari en `landscape_right`: la interfaz
+  está dibujada girada un cuarto a la izquierda dentro del framebuffer, así que
+  la capa la gira un cuarto a la derecha. La pantalla de inicio del iPhone no
+  gira, así que en horizontal se ve de lado, igual que en Simulator.app.
+- **Toques en horizontal (medido)**: los toques del runner por coordenada usan
+  los puntos de la pantalla en **vertical**. El toque en (32, 94) abre las
+  pestañas de Safari en `landscape_right`, y en (780, 32) no hace nada. En
+  cambio, `describe_ui` da los marcos de la app en sus puntos **girados**
+  (Safari mide 874 × 402). El panel convierte cada clic a puntos verticales y el
+  inspector usa el espacio del árbol (`geometry::Space`).
+  **Pendiente:** un agente que toca por coordenada lo que leyó en `describe_ui`
+  falla en horizontal. Tocar por etiqueta sí funciona. El arreglo va en el
+  runner (`point()` en `Runner.swift`): girar el punto cuando el marco de la
+  app es horizontal.
+- **Reserva**: los fotogramas JPEG del runner, como antes. Se dibujan tal
+  cual, sin girar.
+
+### Bisel y atajos
+
+Los botones están bajo el dispositivo, con su atajo en el tooltip
+(`chrome_tip_keys` en `theme.rs`). Los atajos funcionan mientras el panel
+tiene el foco (contexto `SimulatorPane`):
+
+| Atajo | Qué hace |
+| --- | --- |
+| ⌘⇧H | Inicio. |
+| ⌘→ / ⌘← | Girar a la derecha / a la izquierda, con la acción `rotate` del runner. |
+| ⌘⇧A | Cambia entre claro y oscuro (`simctl ui appearance`). |
+| ⌘K | Conecta o desconecta el teclado del Mac (`SimDevice setHardwareKeyboardEnabled:keyboardType:error:`). Sin él, iOS muestra su propio teclado. Se supone conectado al abrir el panel. |
+| ⌘S | Guarda una captura PNG en el Escritorio, con el nombre que usa Simulator.app. |
+| ⌘R | Graba la pantalla (`simctl io recordVideo --codec=h264`) a un `.mov` en el Escritorio; ⌘R otra vez la termina con SIGINT. Mientras graba, se ve el tiempo. |
+| ⌘0 / ⌘1 | Encajar en el hueco / tamaño real: un punto del dispositivo por píxel del panel, centrado y recortado. |
+
+Teclear sin ⌘ sigue escribiendo en el dispositivo, solo si el foco está en el
+panel. Si está en un campo de los cajones, escribe en el campo.
+
+### Historial de acciones
+
+- El servidor MCP (un proceso por sesión de agente) apunta cada `tap`,
+  `swipe`, `type_text`, `press_key`, `press_button`, `rotate`, `launch`,
+  `open_url` y `appearance` que sale bien en
+  `~/Library/Caches/com.monocode.desktop/simulator-history/<udid>/steps.jsonl`.
+- Medio segundo después guarda la pantalla como JPEG (acción `screen` del
+  runner, escala 1).
+- `launch` se apunta con el bundle id y sin `app_path`, así que repetirlo
+  reabre la app instalada.
+- Se quedan los últimos 120 pasos.
+- El cajón **Actions** muestra cada paso con su miniatura y cuándo fue.
+  Comprueba cada segundo si hay pasos nuevos, mirando el tamaño y la fecha del
+  archivo.
+- **«Again · N actions»** repite el último tramo: desde el último `launch`,
+  sin cruzar una pausa de más de 5 minutos. Llama al mismo código que usan las
+  herramientas (`mcp::perform`), con 350 ms entre pasos, y se para en el
+  primer fallo.
+- **Pendiente:**
+  - Si el proceso MCP termina en ese medio segundo, el último paso se queda sin
+    captura.
+  - Las acciones no aparecen todavía como filas en el transcript, como en
+    Claude.
+
+### Cajón de logs
+
+- `simctl spawn <udid> log stream --style ndjson --level info`, leído en un
+  hilo y entregado en tandas cada 150 ms. Con el dispositivo en uso salen unas
+  650 líneas por segundo; el cajón guarda las últimas 2000.
+- Filtros:
+  - **nivel**: All, Notice, Errors o Faults;
+  - **alcance**: Device, o App (el subsistema con el bundle id de la última app
+    lanzada);
+  - **texto**: busca en el mensaje, el proceso, el subsistema y la categoría.
+- Las más nuevas, arriba.
+- **Pendiente:**
+  - La salida de `print()` de la app no pasa por `os_log`. Para verla hay que
+    lanzarla con `simctl launch --console-pty` o `--stdout`/`--stderr` a un
+    archivo, y seguir ese archivo.
+  - «Go to crash».
+
+### Inspector → chat
+
+- **Inspect** (cabecera) congela la pantalla: una copia del IOSurface, o un
+  fotograma del runner en la reserva. La vista nativa se oculta, porque
+  taparía el contorno. A la vez, lee el árbol con la acción `describe` del
+  runner (la app lanzada la última, si está delante).
+- Un clic elige la pila de elementos bajo el punto, con el de delante primero
+  (`inspect::stack_at`). **In front** y **Behind** la recorren.
+- Se puede escribir una nota.
+- **Add to chat** escribe en el borrador del chat activo el tipo, la etiqueta,
+  el identificador, el marco en puntos y la nota. Adjunta además un PNG
+  recortado alrededor del elemento, con 8 pt de margen.
+  - Camino: `SimulatorEvent::AddToChat` → `PanelEvent::AddToChat` →
+    `Shell::add_to_chat` + `Conversation::quick_attach`.
+  - Los recortes quedan en `~/Library/Caches/com.monocode.desktop/simulator-inspector/`.
+- **Pendiente:**
+  - Ver el elemento al pasar el ratón, antes de hacer clic.
+  - Un modo que no congele la pantalla.
+
+### Probado y sin probar
+
+- **Tests**: 34 en el core (`simulator`) y 12 en el panel (`simulator_pane`).
+  Entre ellos, el test de banco de GPUI con eventos reales: atajos, botones,
+  teclear, clic y arrastre, inspector con su pila y «Add to chat», historial
+  y filtro de logs.
+- **Comprobado contra el simulador**:
+  - el feed y sus fotogramas;
+  - el teclado;
+  - el giro del framebuffer;
+  - los toques en horizontal;
+  - el historial escrito por el MCP.
+- **Sin probar a mano dentro de la app**: no se abrió la ventana para no
+  quitarle el foco al usuario. Falta comprobar:
+  - que la NSView queda alineada con el hueco (también con el zoom de
+    interfaz);
+  - el sentido del giro de la capa;
+  - que no parpadea al cambiar de pestaña.
+- **Límite conocido**: lo que GPUI dibuja encima del hueco, como un menú o un
+  popover del panel derecho, queda debajo de la vista nativa. Pasa igual con el
+  vídeo y los artefactos HTML.
 
 ### Riesgos
 

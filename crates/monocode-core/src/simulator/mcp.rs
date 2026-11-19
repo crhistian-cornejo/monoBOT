@@ -178,7 +178,43 @@ fn destination(input: &Value) -> Result<String, String> {
     Ok(format!("platform=iOS Simulator,id={}", device.udid))
 }
 
+thread_local! {
+    /// The device the last action on this thread ran on, for its history.
+    static ACTED_ON: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+fn acted_on(device: &Device) {
+    ACTED_ON.with(|cell| *cell.borrow_mut() = Some(device.udid.clone()));
+}
+
+/// A tool call from an agent: done, then kept in the device's history
+/// (`history`), which the app's Simulator pane shows.
 fn call(name: &str, input: &Value) -> Result<Value, String> {
+    ACTED_ON.with(|cell| cell.borrow_mut().take());
+    let answer = perform(name, input)?;
+    if let Some(udid) = ACTED_ON.with(|cell| cell.borrow_mut().take()) {
+        let mut recorded = input.clone();
+        if name == "launch" {
+            if let (Some(object), Some(bundle)) = (
+                recorded.as_object_mut(),
+                answer["content"][0]["text"]
+                    .as_str()
+                    .and_then(|text| serde_json::from_str::<Value>(text).ok())
+                    .and_then(|said| said["bundle_id"].as_str().map(str::to_owned)),
+            ) {
+                // Again relaunches the installed app instead of reinstalling.
+                object.remove("app_path");
+                object.insert("bundle_id".into(), bundle.into());
+            }
+        }
+        super::history::record(&udid, name, &recorded);
+    }
+    Ok(answer)
+}
+
+/// Runs one tool call without recording it: what `call` and the history's
+/// replay share.
+pub(crate) fn perform(name: &str, input: &Value) -> Result<Value, String> {
     let device = device_arg(input);
     let string = |key: &str| -> Result<&str, String> {
         input[key]
@@ -212,7 +248,10 @@ fn call(name: &str, input: &Value) -> Result<Value, String> {
                 .map(text)
         }
         "launch" => super::launch(device, input["app_path"].as_str(), input["bundle_id"].as_str())
-            .inspect(|launched| remember_app(&launched.device.udid, &launched.bundle_id))
+            .inspect(|launched| {
+                remember_app(&launched.device.udid, &launched.bundle_id);
+                acted_on(&launched.device);
+            })
             .map(|launched| text(json!({
                 "device": device_json(&launched.device),
                 "bundle_id": launched.bundle_id,
@@ -244,8 +283,8 @@ fn call(name: &str, input: &Value) -> Result<Value, String> {
             input["debug"].as_bool().unwrap_or(false),
         )
         .map(|log| json!({"content":[{"type":"text","text": if log.trim().is_empty() { "(no log lines)".to_owned() } else { log }}],"isError":false})),
-        "open_url" => super::open_url(device, string("url")?).map(|d| text(json!({"opened": true, "device": device_json(&d)}))),
-        "appearance" => super::appearance(device, string("mode")?).map(|d| text(json!({"appearance": input["mode"], "device": device_json(&d)}))),
+        "open_url" => super::open_url(device, string("url")?).inspect(acted_on).map(|d| text(json!({"opened": true, "device": device_json(&d)}))),
+        "appearance" => super::appearance(device, string("mode")?).inspect(acted_on).map(|d| text(json!({"appearance": input["mode"], "device": device_json(&d)}))),
         "describe_ui" => runner(device, "describe", input, &["max_lines"], true)
             .map(|(_, result)| json!({"content":[{"type":"text","text": result["text"].as_str().unwrap_or("(nothing on screen)")}],"isError":false})),
         "tap" => {
@@ -280,13 +319,18 @@ fn runner(
     keys: &[&str],
     addressed: bool,
 ) -> Result<(Device, Value), String> {
-    super::act(device, action, |device| {
+    let result = super::act(device, action, |device| {
         runner_body(
             input,
             keys,
             addressed.then(|| last_app(&device.udid)).flatten(),
         )
-    })
+    })?;
+    // Reading the interface changes nothing worth a history step.
+    if action != "describe" {
+        acted_on(&result.0);
+    }
+    Ok(result)
 }
 
 fn done(device: &Device, result: Value) -> Value {
