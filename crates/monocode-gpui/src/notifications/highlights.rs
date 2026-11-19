@@ -147,9 +147,18 @@ const V0_0_10: [Highlight; 5] = [
     },
 ];
 
+const V0_0_11: [Highlight; 1] = [Highlight {
+    tag: Tag::Improved,
+    title: "Antigravity's usage in the footer",
+    body: "The footer shows Antigravity's five-hour and weekly limits, for the group your chat's model draws from: Gemini, Claude and GPT, or Argon.",
+    icon: "sparkles",
+    image: None,
+}];
+
 /// The highlights of `version`, newest release first in the source.
 pub(crate) fn of(version: &str) -> &'static [Highlight] {
     match version.trim().trim_start_matches('v') {
+        "0.0.11" => &V0_0_11,
         "0.0.10" => &V0_0_10,
         "0.0.9" => &V0_0_9,
         "0.0.8" => &V0_0_8,
@@ -164,7 +173,12 @@ mod tests {
 
     #[test]
     fn each_release_names_its_highlights_with_icons_that_exist() {
-        for highlight in of("v0.0.8").iter().chain(of("0.0.9")).chain(of("0.0.10")) {
+        for highlight in of("v0.0.8")
+            .iter()
+            .chain(of("0.0.9"))
+            .chain(of("0.0.10"))
+            .chain(of("0.0.11"))
+        {
             assert!(!highlight.title.is_empty() && !highlight.body.is_empty());
             assert!(
                 crate::assets::Assets

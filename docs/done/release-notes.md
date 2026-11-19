@@ -1,39 +1,11 @@
-# monoBOT 0.0.10
-
-## New
-
-- **The iOS Simulator, live in monoBOT.** The simulator runs as a native view
-  beside the chat, with the device's buttons and their shortcuts (Home, rotate,
-  appearance, keyboard, screenshot, record, fit and actual size). You also get
-  the history of what the agent did on the device, with "Again", a drawer with
-  the device's logs, and an inspector: pick an element on screen and add it
-  to the chat.
-- **Gemini 4 Neon in Antigravity.** Google's new model is in the picker, first
-  and as Antigravity's default. Antigravity lists one model per effort; they
-  now fold into one model per family (Neon, Argon, Hydrogen, 3.8 Flash), and
-  the effort slider picks the variant.
-- **Give a task to one of your monos from any session.** A coding chat on any
-  provider knows your code monos by name and specialty, and can give one a
-  task. The mono works on it in its own chat and memory, where you can follow
-  it, and its answer comes back to the session.
-- **Groups under Captains.** Group chats, with their calls, have their own
-  section under the Captains, and the New Captain dialog can make a group
-  instead.
-- **The Principal leads the whole app.** It reaches every project open in
-  monoBOT: it can read code, see how sessions are going, start work, and give
-  parts to other Captains or to your monos.
+# monoBOT 0.0.11
 
 ## Changed
 
-- Monos are yours: only you create them, in the sidebar. Chief and swarms work
-  with your monos when one fits, and otherwise run the task as an agent for
-  that run only; they no longer make monos of their own.
-- Code monos save to their memory what you or another agent tells them about
-  their projects, without being asked.
-- A mono's page says what it is ("View mono", a code mono's line), not
-  "View Captain".
-- The right panel (Files, History…) stops at 420 px, or 35% of the window.
-- What's new lists all changes as bullets, in order.
+- **Antigravity's usage in the footer.** The footer shows Antigravity's
+  five-hour and weekly limits, for the group your chat's model draws from:
+  Gemini, Claude and GPT, or Argon.
+- Writing a mail reply no longer checks the usage of providers it doesn't use.
 
 ## Updates
 
