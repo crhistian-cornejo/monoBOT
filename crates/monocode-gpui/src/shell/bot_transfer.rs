@@ -56,6 +56,11 @@ impl Shell {
             .and_then(|db| monocode_core::connectors::save_enabled(&db, id, on));
         if let Err(error) = saved {
             eprintln!("Could not save the {id} connector: {error}");
+        } else if id == monocode_core::simulator::mcp::SERVER
+            && let Some(panel) = &self.right_panel
+        {
+            panel.update(cx, |panel, cx| panel.set_simulator_tab(on, cx));
+            cx.notify();
         }
         self.sync_settings(cx);
     }

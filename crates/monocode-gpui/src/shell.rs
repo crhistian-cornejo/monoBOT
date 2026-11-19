@@ -5624,12 +5624,9 @@ impl Shell {
     /// Explorer and History, and Terminal when it lives in the panel. Changes
     /// opens from the diff stat instead.
     fn right_tab_count(&self, cx: &App) -> usize {
-        2 + usize::from(self.terminal_in_panel(cx))
-            + usize::from(
-                self.right_panel
-                    .as_ref()
-                    .is_some_and(|p| p.read(cx).swarm_tab()),
-            )
+        self.right_panel
+            .as_ref()
+            .map_or(2, |panel| panel.read(cx).tabs().len())
     }
     /// The toggle's room at the end of the strip: `pl-1.5`, the button, `pr-3`.
     fn toggle_room(&self, cx: &App) -> f32 {

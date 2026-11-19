@@ -583,39 +583,19 @@ impl Shell {
         let panel_off = self.app_view_open();
         let changes = !panel_off && self.git.read(cx).has_changes();
         let open = self.corner_tabs_shown();
-        let current = self
-            .right_panel
-            .as_ref()
-            .map_or(self.workspace.right_panel_tab, |p| p.read(cx).tab());
+        let panel = self.right_panel.as_ref().map(|panel| panel.read(cx));
+        let current = panel.map_or(self.workspace.right_panel_tab, RightPanel::tab);
         // How far the open tab's label has unfolded, and the old one folded.
         let progress = self
             .corner_reveal
             .as_ref()
             .and_then(|reveal| reveal.progress(current, window, cx));
-        let mut tabs = vec![
-            (
-                "right-panel-explorer",
-                "Explorer",
-                "file-script",
-                RightTab::Files,
-            ),
-            ("right-panel-history", "History", "clock", RightTab::Graph),
-        ];
-        if self.terminal_in_panel(cx) {
-            tabs.insert(
-                1,
-                (
-                    "right-panel-terminal",
-                    "Terminal",
-                    "terminal",
-                    RightTab::Terminal,
-                ),
-            );
-        }
-        let count = tabs.len();
         row.pl_1p5()
             .pr(px(12. + self.window_controls))
-            .when(open, |d| {
+            .when_some(panel.filter(|_| open), |d, panel| {
+                let tabs = panel.tabs();
+                let label_width =
+                    crate::right_panel::tab_label_width(self.project_tabs_width(cx), tabs.len());
                 // Follow the panel's leading edge, reserving enough room for
                 // the controls while the panel is still sliding open.
                 d.w(px(self.right_drawn.max(self.corner_room(cx))))
@@ -629,7 +609,14 @@ impl Shell {
                             .items_center()
                             .gap(px(2.))
                             .mr(px(6.))
-                            .children(tabs.into_iter().map(|(id, label, path, tab)| {
+                            .children(tabs.into_iter().map(|tab| {
+                                let (id, label, path) = panel.tab_button_parts(tab, cx);
+                                let id = match tab {
+                                    RightTab::Files => "right-panel-explorer",
+                                    RightTab::Graph => "right-panel-history",
+                                    RightTab::Terminal => "right-panel-terminal",
+                                    _ => id,
+                                };
                                 let selected = tab == current;
                                 let unfolded = match progress {
                                     Some((_, p)) if selected => p,
@@ -639,12 +626,8 @@ impl Shell {
                                 };
                                 tab_button(
                                     id,
-                                    crate::project_tabs::TabLabel::from(label).max_width(
-                                        crate::right_panel::tab_label_width(
-                                            self.project_tabs_width(cx),
-                                            count,
-                                        ),
-                                    ),
+                                    crate::project_tabs::TabLabel::from(label)
+                                        .max_width(label_width),
                                     path,
                                     selected,
                                     false,
@@ -652,7 +635,7 @@ impl Shell {
                                     window,
                                 )
                                 .on_click(cx.listener(
-                                    move |this, _, _, cx| {
+                                    move |this, _, window, cx| {
                                         let Some(panel) = this.right_panel.clone() else {
                                             return;
                                         };
@@ -661,7 +644,10 @@ impl Shell {
                                             return;
                                         }
                                         this.corner_reveal = Some(TabReveal::new(tab, closing));
-                                        panel.update(cx, |p, cx| p.select(tab, cx));
+                                        panel.update(cx, |p, cx| {
+                                            p.select(tab, cx);
+                                            p.focus_pane(window, cx);
+                                        });
                                         this.invalidate_chrome(cx);
                                         cx.notify();
                                     },
@@ -966,6 +952,49 @@ mod tests {
             .unwrap();
         cx.run_until_parked();
         (window, manager, id, session)
+    }
+
+    #[gpui::test]
+    #[cfg(target_os = "macos")]
+    fn the_default_project_panel_opens_the_simulator_when_enabled(cx: &mut TestAppContext) {
+        cx.update(|cx| cx.set_reduce_motion(true));
+        let (window, _, _) = window(cx);
+        let panel = window
+            .update(cx, |shell, w, cx| {
+                assert!(shell.workspace.boxy_layout());
+                shell.set_right_panel_open(true, w, cx);
+                shell.workspace.right_panel_width = crate::right_panel::WIDTH_MIN;
+                shell.right_panel.clone().unwrap()
+            })
+            .unwrap();
+        let visual = &mut gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("right-panel-tab-Simulator").is_none());
+
+        window
+            .update(visual, |_, _, cx| {
+                panel.update(cx, |panel, cx| panel.set_simulator_tab(true, cx));
+                cx.notify();
+            })
+            .unwrap();
+        visual.refresh().unwrap();
+        let tab = visual.debug_bounds("right-panel-tab-Simulator").unwrap();
+        let search = visual.debug_bounds("titlebar-file-search").unwrap();
+        assert!(tab.right() <= search.left());
+        visual.simulate_click(tab.center(), Default::default());
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("simulator-header").is_some());
+        window
+            .update(visual, |_, _, cx| {
+                assert_eq!(panel.read(cx).tab(), RightTab::Simulator);
+                panel.update(cx, |panel, cx| panel.set_simulator_tab(false, cx));
+                assert_eq!(panel.read(cx).tab(), RightTab::Files);
+                cx.notify();
+            })
+            .unwrap();
+        visual.refresh().unwrap();
+        assert!(visual.debug_bounds("right-panel-tab-Simulator").is_none());
+        assert!(visual.debug_bounds("simulator-header").is_none());
     }
 
     #[gpui::test]

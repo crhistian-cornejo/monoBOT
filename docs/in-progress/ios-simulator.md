@@ -243,6 +243,11 @@ y `crates/monocode-gpui/src/simulator_pane.rs` (+ `simulator_pane/`).
 
 ### Vista nativa sobre un hueco medido
 
+Con **iOS Simulator** activado en Ajustes › MCP, abre el panel derecho de
+un proyecto Git en la vista **Focused** (⌘⇧B). La pestaña **Simulator** tiene
+un icono de teléfono. Si no hay un dispositivo arrancado, pulsa
+**Boot a simulator**.
+
 - **Core** (`simulator/native.rs`): carga `CoreSimulator` y `SimulatorKit` del
   Xcode activo con `dlopen`, busca el `SimDevice` por UDID, recorre sus
   `ioPorts` y se queda con el puerto `SimScreen` que tiene

@@ -322,6 +322,7 @@ pub(crate) struct RightPanel {
     swarm_tab: bool,
     /// Whether the Agents tab follows it: the chat in view has agents.
     agents_tab: bool,
+    simulator_tab: bool,
     /// Classic reserves the title bar's height; rounded content starts at
     /// the card's top edge, below the window-wide title bar.
     top_inset: f32,
@@ -379,6 +380,7 @@ impl RightPanel {
             panel: panel.downgrade(),
             _subscription: cx.observe(&panel, |_, _, cx| cx.notify()),
         });
+        let simulator_tab = simulator_tab();
         Self {
             tabs,
             focus: cx.focus_handle(),
@@ -390,9 +392,12 @@ impl RightPanel {
             agents,
             swarm_tab: false,
             agents_tab: false,
+            simulator_tab,
             // The board or agents that were in view may be gone; Explorer
             // stands in.
-            tab: if matches!(tab, RightTab::Swarm | RightTab::Agents) {
+            tab: if matches!(tab, RightTab::Swarm | RightTab::Agents)
+                || (tab == RightTab::Simulator && !simulator_tab)
+            {
                 RightTab::Files
             } else {
                 tab
@@ -426,10 +431,42 @@ impl RightPanel {
         if self.agents_tab {
             tabs.push(RightTab::Agents);
         }
-        if simulator_tab() {
+        if self.simulator_tab {
             tabs.push(RightTab::Simulator);
         }
         tabs
+    }
+    pub(crate) fn tab_button_parts(
+        &self,
+        tab: RightTab,
+        cx: &App,
+    ) -> (&'static str, &'static str, &'static str) {
+        let (id, path) = match tab {
+            RightTab::Files => ("right-panel-tab-Explorer", "file-script"),
+            RightTab::Changes => ("right-panel-tab-Changes", "git-branch"),
+            RightTab::Graph => ("right-panel-tab-History", "clock"),
+            RightTab::Terminal => ("right-panel-tab-Terminal", "terminal"),
+            RightTab::Swarm => ("right-panel-tab-Swarm", "users"),
+            RightTab::Simulator => ("right-panel-tab-Simulator", "smart-phone"),
+            RightTab::Agents => ("right-panel-tab-Agents", "bot"),
+        };
+        let label = match tab {
+            // A Chief run's members are the user's monos.
+            RightTab::Swarm if self.swarm.read(cx).is_crew() => "Crew",
+            _ => tab.label(),
+        };
+        (id, label, path)
+    }
+    pub(crate) fn set_simulator_tab(&mut self, enabled: bool, cx: &mut Context<Self>) {
+        let enabled = enabled && cfg!(target_os = "macos");
+        if self.simulator_tab != enabled {
+            self.simulator_tab = enabled;
+            if !enabled && self.tab == RightTab::Simulator {
+                self.select(RightTab::Files, cx);
+            } else {
+                cx.notify();
+            }
+        }
     }
     pub(crate) fn swarm_tab(&self) -> bool {
         self.swarm_tab
@@ -529,7 +566,7 @@ impl RightPanel {
         });
         self.swarm
             .update(cx, |s, cx| s.set_shown(shown && tab == RightTab::Swarm, cx));
-        let simulator = shown && tab == RightTab::Simulator && simulator_tab();
+        let simulator = shown && tab == RightTab::Simulator && self.simulator_tab;
         self.simulator
             .update(cx, |s, cx| s.set_shown(simulator, cx));
         self.agents.update(cx, |a, cx| {
@@ -643,23 +680,14 @@ impl RightPanel {
             .as_ref()
             .filter(|d| d.active)
             .map(|d| (d.tab, d.offset));
-        let count = self.tabs().len();
-        let crew = self.swarm.read(cx).is_crew();
-        let tabs: Vec<AnyElement> = self
-            .tabs()
+        let tabs = self.tabs();
+        let count = tabs.len();
+        let tabs: Vec<AnyElement> = tabs
             .into_iter()
             .enumerate()
             .map(|(ix, tab)| {
                 let active = self.tab == tab;
-                let (id, path) = match tab {
-                    RightTab::Files => ("right-panel-tab-Explorer", "file-script"),
-                    RightTab::Changes => ("right-panel-tab-Changes", "git-branch"),
-                    RightTab::Graph => ("right-panel-tab-History", "clock"),
-                    RightTab::Terminal => ("right-panel-tab-Terminal", "terminal"),
-                    RightTab::Swarm => ("right-panel-tab-Swarm", "users"),
-                    RightTab::Simulator => ("right-panel-tab-Simulator", "smart-phone"),
-                    RightTab::Agents => ("right-panel-tab-Agents", "bot"),
-                };
+                let (id, label, path) = self.tab_button_parts(tab, cx);
                 let unfolded = match progress {
                     Some((_, p)) if active => p,
                     Some((closing, p)) if tab == closing => 1. - p,
@@ -678,12 +706,7 @@ impl RightPanel {
                     .child(
                         tab_button(
                             id,
-                            TabLabel::from(match tab {
-                                // A Chief run's members are the user's monos.
-                                RightTab::Swarm if crew => "Crew",
-                                _ => tab.label(),
-                            })
-                            .max_width(tab_label_width(self.tab_width, count)),
+                            TabLabel::from(label).max_width(tab_label_width(self.tab_width, count)),
                             path,
                             active,
                             false,
@@ -765,7 +788,7 @@ impl Render for RightPanel {
                 .cached(StyleRefinement::default().flex_1().min_h_0().w_full())
                 .into_any_element(),
             RightTab::Agents => self.agents.clone().into_any_element(),
-            RightTab::Simulator if simulator_tab() => self.simulator.clone().into_any_element(),
+            RightTab::Simulator if self.simulator_tab => self.simulator.clone().into_any_element(),
             // The connector was switched off while its tab was open.
             RightTab::Simulator => self
                 .explorer
