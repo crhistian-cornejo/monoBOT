@@ -109,7 +109,14 @@ const V0_0_9: [Highlight; 3] = [
     },
 ];
 
-const V0_0_10: [Highlight; 4] = [
+const V0_0_10: [Highlight; 5] = [
+    Highlight {
+        tag: Tag::New,
+        title: "The iOS Simulator, live",
+        body: "The simulator runs as a native view beside the chat, with the device's buttons and shortcuts, the history of what the agent did on it, its logs, and an inspector that adds any element on screen to the chat.",
+        icon: "smart-phone",
+        image: None,
+    },
     Highlight {
         tag: Tag::New,
         title: "Gemini 4 Neon",

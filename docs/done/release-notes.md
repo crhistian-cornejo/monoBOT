@@ -2,6 +2,12 @@
 
 ## New
 
+- **The iOS Simulator, live in monoBOT.** The simulator runs as a native view
+  beside the chat, with the device's buttons and their shortcuts (Home, rotate,
+  appearance, keyboard, screenshot, record, fit and actual size). You also get
+  the history of what the agent did on the device, with "Again", a drawer with
+  the device's logs, and an inspector: pick an element on screen and add it
+  to the chat.
 - **Gemini 4 Neon in Antigravity.** Google's new model is in the picker, first
   and as Antigravity's default. Antigravity lists one model per effort; they
   now fold into one model per family (Neon, Argon, Hydrogen, 3.8 Flash), and
