@@ -1,11 +1,12 @@
-# monoBOT 0.0.11
+# monoBOT 0.0.12
 
-## Changed
+## Fixed
 
-- **Antigravity's usage in the footer.** The footer shows Antigravity's
-  five-hour and weekly limits, for the group your chat's model draws from:
-  Gemini, Claude and GPT, or Argon.
-- Writing a mail reply no longer checks the usage of providers it doesn't use.
+- **iOS Simulator in the right panel.** The Simulator tab now appears in
+  the default layout on macOS when **iOS Simulator** is enabled in
+  **Settings → MCP**. If no device is running, choose one and boot it without
+  leaving monoBOT. If the boot fails, retry it or refresh the device list
+  from the same tab.
 
 ## Updates
 

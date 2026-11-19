@@ -64,6 +64,58 @@ fn click(visual: &mut VisualTestContext, selector: &'static str) {
     visual.refresh().unwrap();
 }
 
+#[gpui::test]
+fn a_selected_simulator_can_be_retried_after_a_boot_failure(cx: &mut TestAppContext) {
+    const OTHER: &str = "00000000-0000-0000-0000-00000000F00E";
+    let (window, mut visual, _) = pane(cx);
+    window
+        .update(&mut visual, |pane, _, cx| {
+            pane.frame = None;
+            pane.device = None;
+            pane.status = Status::NoDevice;
+            pane.available_devices = [
+                Device::booted_named(UDID, "iPhone 18 Pro", "iOS 27.0"),
+                Device::booted_named(OTHER, "iPhone 17", "iOS 26.0"),
+            ]
+            .into_iter()
+            .map(|mut device| {
+                device.state = "Shutdown".into();
+                device
+            })
+            .collect();
+            pane.boot_simulator = |target, open| {
+                assert_eq!(target, Some(OTHER));
+                assert!(!open);
+                Err("Could not boot the device.".into())
+            };
+            cx.notify();
+        })
+        .unwrap();
+    click(&mut visual, "simulator-device-1");
+    click(&mut visual, "simulator-boot");
+    window
+        .update(&mut visual, |pane, _, _| {
+            assert_eq!(pane.boot_target(), Some(OTHER));
+            assert_eq!(
+                pane.status,
+                Status::BootFailed("Could not boot the device.".into())
+            );
+            pane.boot_simulator = |target, open| {
+                assert_eq!(target, Some(OTHER));
+                assert!(!open);
+                Ok(Device::booted_named(OTHER, "iPhone 17", "iOS 26.0"))
+            };
+        })
+        .unwrap();
+    click(&mut visual, "simulator-boot");
+    window
+        .update(&mut visual, |pane, _, _| {
+            assert_eq!(pane.status, Status::Looking);
+            assert_eq!(pane.preferred_device.as_deref(), Some(OTHER));
+        })
+        .unwrap();
+}
+
 /// Where the device point `at` is drawn.
 fn on_screen(
     window: WindowHandle<SimulatorPane>,

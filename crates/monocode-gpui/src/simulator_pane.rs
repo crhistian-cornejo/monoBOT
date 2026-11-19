@@ -24,7 +24,7 @@ use crate::{
     input::{self as text_input},
     popover::AnchorSlot,
     right_panel::{icon_action, pane_header, spinner},
-    settings::widgets::{secondary_button, segmented},
+    settings::widgets::{primary_button, secondary_button, segmented},
     theme::*,
 };
 use geometry::Zoom;
@@ -106,6 +106,7 @@ enum Status {
     Looking,
     NoDevice,
     Booting,
+    BootFailed(String),
     /// The first frame of a session builds and starts the runner.
     Starting,
     Live,
@@ -230,6 +231,10 @@ pub(crate) struct SimulatorPane {
     focus: FocusHandle,
     shown: bool,
     device: Option<Device>,
+    available_devices: Vec<Device>,
+    selected_device: Option<String>,
+    preferred_device: Option<String>,
+    boot_simulator: fn(Option<&str>, bool) -> Result<Device, String>,
     /// The fallback's newest frame.
     frame: Option<Arc<RenderImage>>,
     /// The screen's size in points, portrait.
@@ -332,6 +337,10 @@ impl SimulatorPane {
             focus: cx.focus_handle(),
             shown: false,
             device: None,
+            available_devices: Vec::new(),
+            selected_device: None,
+            preferred_device: None,
+            boot_simulator: simulator::boot,
             frame: None,
             points: (0., 0.),
             status: Status::Looking,
@@ -373,7 +382,9 @@ impl SimulatorPane {
         }
         self.shown = shown;
         if shown {
-            self.start(cx);
+            if !matches!(self.status, Status::Booting | Status::BootFailed(_)) {
+                self.start(cx);
+            }
         } else {
             self.stop_feed(cx);
             self.frames = None;
@@ -419,6 +430,7 @@ impl SimulatorPane {
     fn start(&mut self, cx: &mut Context<Self>) {
         self.status = Status::Looking;
         self.stop_feed(cx);
+        let preferred = self.preferred_device.clone();
         #[cfg(target_os = "macos")]
         let handler = Arc::new(self.native.handler());
         self.frames = Some(cx.spawn(async move |this, cx| {
@@ -428,33 +440,39 @@ impl SimulatorPane {
                     .spawn(async {
                         match simulator::xcode_problem() {
                             Some(problem) => Err(problem),
-                            None => simulator::booted_device(),
+                            None => simulator::devices(),
                         }
                     })
                     .await;
-                let device = match found {
-                    Ok(Some(device)) => device,
-                    Ok(None) | Err(_) => {
-                        let status = match found {
-                            Err(problem) => Status::Failed(problem),
-                            _ => Status::NoDevice,
-                        };
-                        if this
-                            .update(cx, |this, cx| {
-                                if this.status != Status::Booting {
-                                    this.status = status;
-                                }
-                                this.device = None;
-                                this.source = Source::None;
+                let device = found.as_ref().ok().and_then(|devices| {
+                    devices.iter().find(|device| {
+                        device.booted() && preferred.as_deref().is_none_or(|id| device.udid == id)
+                    })
+                });
+                let Some(device) = device.cloned() else {
+                    let (status, devices) = match found {
+                        Ok(devices) => (Status::NoDevice, devices),
+                        Err(problem) => (Status::Failed(problem), Vec::new()),
+                    };
+                    if this
+                        .update(cx, |this, cx| {
+                            if let Some(frame) = this.frame.take() {
+                                cx.drop_image(frame, None);
+                            }
+                            if this.status != status || this.available_devices != devices {
+                                this.status = status;
+                                this.available_devices = devices;
                                 cx.notify();
-                            })
-                            .is_err()
-                        {
-                            return;
-                        }
-                        cx.background_executor().timer(LOOK_AGAIN).await;
-                        continue;
+                            }
+                            this.device = None;
+                            this.source = Source::None;
+                        })
+                        .is_err()
+                    {
+                        return;
                     }
+                    cx.background_executor().timer(LOOK_AGAIN).await;
+                    continue;
                 };
                 let udid = device.udid.clone();
                 if this
@@ -501,11 +519,16 @@ impl SimulatorPane {
                             // Live until the device shuts down or changes.
                             loop {
                                 cx.background_executor().timer(LOOK_AGAIN).await;
+                                let udid = udid.clone();
                                 let still = cx
                                     .background_executor()
-                                    .spawn(async { simulator::booted_device() })
+                                    .spawn(async move {
+                                        simulator::devices().is_ok_and(|devices| {
+                                            devices.iter().any(|d| d.udid == udid && d.booted())
+                                        })
+                                    })
                                     .await;
-                                if !matches!(&still, Ok(Some(d)) if d.udid == udid) {
+                                if !still {
                                     break;
                                 }
                             }
@@ -593,19 +616,45 @@ impl SimulatorPane {
         }
     }
 
+    fn boot_target(&self) -> Option<&str> {
+        self.selected_device
+            .as_deref()
+            .filter(|id| {
+                self.available_devices
+                    .iter()
+                    .any(|device| device.udid == *id)
+            })
+            .or_else(|| {
+                self.available_devices
+                    .first()
+                    .map(|device| device.udid.as_str())
+            })
+    }
+
     fn boot(&mut self, cx: &mut Context<Self>) {
+        let Some(target) = self.boot_target().map(str::to_owned) else {
+            return;
+        };
+        self.frames = None;
         self.status = Status::Booting;
         cx.notify();
+        let boot = self.boot_simulator;
         let work = cx
             .background_executor()
-            .spawn(async { simulator::boot(None, false) });
+            .spawn(async move { boot(Some(&target), false) });
         cx.spawn(async move |this, cx| {
             let result = work.await;
             let _ = this.update(cx, |this, cx| {
-                this.status = match result {
-                    Ok(_) => Status::Looking,
-                    Err(error) => Status::Failed(error),
-                };
+                match result {
+                    Ok(device) => {
+                        this.preferred_device = Some(device.udid);
+                        this.status = Status::Looking;
+                        if this.shown {
+                            this.start(cx);
+                        }
+                    }
+                    Err(error) => this.status = Status::BootFailed(error),
+                }
                 cx.notify();
             });
         })
@@ -1158,6 +1207,7 @@ impl SimulatorPane {
                 "Starting monoBOT's test runner on the device. The first time builds it, which takes about a minute.",
             ),
             Status::NoDevice => Some(("No iOS simulator is running.".into(), false)),
+            Status::BootFailed(error) => Some((error.clone().into(), false)),
             Status::Failed(error) if self.frame.is_none() && self.source != Source::Native => {
                 Some((error.clone().into(), false))
             }
@@ -1931,7 +1981,10 @@ impl SimulatorPane {
 
     fn placeholder(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let (text, busy) = self.message()?;
-        let empty = self.status == Status::NoDevice;
+        let empty = matches!(self.status, Status::NoDevice);
+        let boot_failed = matches!(self.status, Status::BootFailed(_));
+        let target = self.boot_target();
+        let can_boot = (empty || boot_failed) && target.is_some();
         Some(
             div()
                 .flex_1()
@@ -1947,24 +2000,78 @@ impl SimulatorPane {
                 .when(busy, |d| {
                     d.child(spinner("simulator-spinner", "loader", 16.))
                 })
-                .child(div().text_center().child(text))
-                .when(empty, |d| {
-                    let (fill, ink) = primary_action(true).unwrap_or((content(0.1), content(1.)));
+                .child(div().w_full().text_center().child(text))
+                .when(empty && target.is_none(), |d| {
+                    d.child("Install an iOS runtime in Xcode → Settings → Components.")
+                })
+                .when(can_boot, |d| {
                     d.child(
                         div()
-                            .id("simulator-boot")
-                            .role(Role::Button)
-                            .aria_label("Boot a simulator")
-                            .px_3()
-                            .py_1()
-                            .rounded(px(6.))
-                            .bg(fill)
-                            .text_color(ink)
-                            .cursor_pointer()
-                            .child("Boot a simulator")
-                            .on_click(cx.listener(|this, _, _, cx| this.boot(cx))),
+                            .id("simulator-devices")
+                            .w_full()
+                            .min_h_0()
+                            .max_h(px(156.))
+                            .overflow_y_scroll()
+                            .children(self.available_devices.iter().enumerate().map(
+                                |(index, device)| {
+                                    let id = device.udid.clone();
+                                    let selected = target == Some(id.as_str());
+                                    let label = format!("{} · {}", device.name, device.runtime);
+                                    div()
+                                        .id(("simulator-device", index))
+                                        .debug_selector(move || format!("simulator-device-{index}"))
+                                        .aria_label(label.clone())
+                                        .aria_selected(selected)
+                                        .role(Role::Button)
+                                        .tooltip(chrome_tip(label.clone(), None))
+                                        .px_2()
+                                        .py_1()
+                                        .flex()
+                                        .items_center()
+                                        .gap_2()
+                                        .rounded_md()
+                                        .cursor_pointer()
+                                        .when(selected, |d| {
+                                            d.bg(content(0.1)).text_color(content(1.))
+                                        })
+                                        .hover(|s| s.bg(content(0.08)))
+                                        .child(div().flex_1().min_w_0().truncate().child(label))
+                                        .when(selected, |d| d.child(icon("check", 12.)))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.selected_device = Some(id.clone());
+                                            cx.notify();
+                                        }))
+                                },
+                            )),
+                    )
+                    .child(
+                        primary_button(
+                            "simulator-boot",
+                            if boot_failed {
+                                "Retry boot"
+                            } else {
+                                "Boot simulator"
+                            },
+                            false,
+                        )
+                        .debug_selector(|| "simulator-boot".into())
+                        .on_click(cx.listener(|this, _, _, cx| this.boot(cx))),
                     )
                 })
+                .when(
+                    boot_failed || matches!(self.status, Status::Failed(_)),
+                    |d| {
+                        d.child(
+                            secondary_button(
+                                "simulator-refresh-devices",
+                                "Refresh devices",
+                                false,
+                                false,
+                            )
+                            .on_click(cx.listener(|this, _, _, cx| this.start(cx))),
+                        )
+                    },
+                )
                 .into_any_element(),
         )
     }

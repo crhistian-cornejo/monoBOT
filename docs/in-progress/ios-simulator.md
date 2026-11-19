@@ -245,8 +245,9 @@ y `crates/monocode-gpui/src/simulator_pane.rs` (+ `simulator_pane/`).
 
 Con **iOS Simulator** activado en Ajustes › MCP, abre el panel derecho de
 un proyecto Git en la vista **Focused** (⌘⇧B). La pestaña **Simulator** tiene
-un icono de teléfono. Si no hay un dispositivo arrancado, pulsa
-**Boot a simulator**.
+un icono de teléfono. Si no hay un dispositivo arrancado, elige uno de la
+lista y pulsa **Boot simulator**. Si el arranque falla, puedes reintentarlo o
+actualizar la lista sin cerrar la pestaña.
 
 - **Core** (`simulator/native.rs`): carga `CoreSimulator` y `SimulatorKit` del
   Xcode activo con `dlopen`, busca el `SimDevice` por UDID, recorre sus
