@@ -36,13 +36,13 @@ monoBOT is one interface for the agent CLIs you already pay for: **Claude Code, 
 
 <!-- downloads:start -->
 
-Installers come from monoBOT's update service on Cloudflare. **Latest: 0.0.12**
+Installers come from monoBOT's update service on Cloudflare. **Latest: 0.0.13**
 
 | Platform | Installer |
 | --- | --- |
-| Windows 10/11 (x64) | [MonoBOT_0.0.12_x64-setup.exe](https://monobot-updates.getecho.workers.dev/download/windows) |
-| macOS (Apple silicon) | [MonoBOT_0.0.12_aarch64.dmg](https://monobot-updates.getecho.workers.dev/download/macos-arm64) |
-| macOS (Intel) | [MonoBOT_0.0.12_x64.dmg](https://monobot-updates.getecho.workers.dev/download/macos-x64) |
+| Windows 10/11 (x64) | [MonoBOT_0.0.13_x64-setup.exe](https://monobot-updates.getecho.workers.dev/download/windows) |
+| macOS (Apple silicon) | [MonoBOT_0.0.13_aarch64.dmg](https://monobot-updates.getecho.workers.dev/download/macos-arm64) |
+| macOS (Intel) | [MonoBOT_0.0.13_x64.dmg](https://monobot-updates.getecho.workers.dev/download/macos-x64) |
 | Linux | Coming soon: build from source in the meantime |
 
 The latest version and its files: [`downloads.json`](https://monobot-updates.getecho.workers.dev/downloads.json).
